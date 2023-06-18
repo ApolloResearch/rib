@@ -1,4 +1,5 @@
 import torch
+import os
 
 
 class MLP(torch.nn.Module):
@@ -11,6 +12,7 @@ class MLP(torch.nn.Module):
 
 
 if __name__ == "__main__":
+    path = os.path.dirname(os.path.abspath(__file__))
     model = MLP()
     print(model)
     print(model(torch.zeros(10)))

@@ -2,11 +2,11 @@ import torch
 
 
 class MLP(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super(MLP, self).__init__()
         self.linear = torch.nn.Linear(10, 10)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(x)
 
 

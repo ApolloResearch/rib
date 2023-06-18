@@ -1,8 +1,9 @@
-import torch
-import numpy
 import os
+
 import graphviz
 import matplotlib.pyplot as plt
+import numpy
+import torch
 
 
 # Define an MLP

@@ -1,26 +1,23 @@
+import os
+from typing import Callable
+
 import torch
 
+TTC = Callable[[torch.Tensor], torch.Tensor]
 
-# Define an MLP
+
 class MLP(torch.nn.Module):
-    def __init__(self, input_size: int, hidden_size: int, output_size):
+    def __init__(self) -> None:
         super().__init__()
-        self.fc1 = torch.nn.Linear(input_size, hidden_size)
-        self.fc2 = torch.nn.Linear(hidden_size, output_size)
+        self.linear: TTC = torch.nn.Linear(10, 1)
 
-    def forward(self, x):
-        x = torch.nn.functional.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.linear(x)
 
 
 if __name__ == "__main__":
-    # Create an MLP
-    mlp = MLP(10, 20, 1)
-    # Save the model
-    torch.save(mlp.state_dict(), "mlp.pt")
-    # Load the model
-    mlp = MLP(10, 20, 1)
-    mlp.load_state_dict(torch.load("mlp.pt"))
-    # Print the model
-    print(mlp)
+    path = os.path.dirname(os.path.abspath(__file__))
+    model = MLP()
+    print(model)
+    print(model(torch.zeros(10)))
+    print("Success!")

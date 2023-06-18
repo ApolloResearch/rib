@@ -12,4 +12,14 @@ pip install -e .
 
 ## Development
 
+To install the development dependencies, run
+
+```bash
+pip install -e ".[dev]"
+```
+
 Suggested extensions and settings for VSCode are provided in `.vscode/`.
+
+### Pre-commit hooks
+
+To use the suggestion precommit hook copy the file `pre-commit` to `.git/hooks/` and make it executable (`chmod +x .git/hooks/pre-commit`).

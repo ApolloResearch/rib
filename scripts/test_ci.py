@@ -1,11 +1,14 @@
-import torch
 import os
+from typing import Callable
+
+import torch
 
 
 class MLP(torch.nn.Module):
     def __init__(self) -> None:
         super(MLP, self).__init__()
-        self.linear = torch.nn.Linear(10, 10)
+        # Cast linear as a function from torch.Tensor to torch.Tensor
+        self.linear: Callable[[torch.Tensor], torch.Tensor] = torch.nn.Linear(10, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(x)

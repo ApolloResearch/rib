@@ -17,6 +17,7 @@ setup(
     url="https://github.com/ApolloResearch/rib",
     packages=find_packages(where=["rib"]),
     install_requires=requirements,
+    extras_require={"dev": ["black", "isort", "mypy"]},
     classifiers=[
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",

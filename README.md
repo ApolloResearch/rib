@@ -15,7 +15,7 @@ pip install -e .
 To install the development dependencies, run
 
 ```bash
-pip install -e .[dev]
+pip install -e ".[dev]"
 ```
 
 Suggested extensions and settings for VSCode are provided in `.vscode/`.

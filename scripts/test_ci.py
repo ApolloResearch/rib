@@ -13,6 +13,7 @@ class MLP(torch.nn.Module):
         x = self.fc2(x)
         return x
 
+
 if __name__ == "__main__":
     # Create an MLP
     mlp = MLP(10, 20, 1)

@@ -3,12 +3,13 @@ from typing import Callable
 
 import torch
 
+TTC = Callable[[torch.Tensor], torch.Tensor]
+
 
 class MLP(torch.nn.Module):
     def __init__(self) -> None:
-        super(MLP, self).__init__()
-        # Cast linear as a function from torch.Tensor to torch.Tensor
-        self.linear: Callable[[torch.Tensor], torch.Tensor] = torch.nn.Linear(10, 1)
+        super().__init__()
+        self.linear: TTC = torch.nn.Linear(10, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.linear(x)

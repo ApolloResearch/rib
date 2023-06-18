@@ -15,7 +15,7 @@ setup(
     author="Dan Braun",
     author_email="dan@apolloresearch.ai",
     url="https://github.com/ApolloResearch/rib",
-    packages=find_packages(where=["rib"]),
+    packages=find_packages(where="rib"),
     install_requires=requirements,
     extras_require={"dev": ["black", "isort", "mypy"]},
     classifiers=[

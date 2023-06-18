@@ -14,3 +14,4 @@ if __name__ == "__main__":
     model = MLP()
     print(model)
     print(model(torch.zeros(10)))
+    print("Success!")

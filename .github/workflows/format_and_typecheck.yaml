@@ -19,10 +19,10 @@ jobs:
         pip install black isort mypy
     - name: Check with Black
       run: |
-        black --check --line-length 100 .
+        black --check --line-length 100 rib scripts
     - name: Check with isort
       run: |
-        isort --check --profile black .
+        isort --check --profile black rib scripts
     - name: Check with mypy
       run: |
-        mypy --strict rib
+        mypy --strict rib scripts

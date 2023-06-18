@@ -4,6 +4,7 @@ import os
 import graphviz
 import matplotlib.pyplot as plt
 
+
 # Define an MLP
 class MLP(torch.nn.Module):
     def __init__(self, input_size: int, hidden_size: int, output_size):

@@ -1,0 +1,13 @@
+seed: 0
+log_filename: "train_mnist.log"
+model:
+  input_size: 784
+  hidden_size: 100
+  output_size: 10
+training:
+  learning_rate: 0.001
+  batch_size: 64
+  epochs: 10
+wandb:
+  project: "mlp-mnist"
+  entity: "dbra"

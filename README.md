@@ -10,6 +10,14 @@ From the root of the repository, run
 pip install -e .
 ```
 
+## Usage
+### MNIST
+To train an MLP on MNIST, define a config file (see `rib/configs/mnist.yaml` for an example) and run
+
+```bash
+python scripts/train_mnist.py --config <path_to_config_file>
+```
+
 ## Development
 
 To install the development dependencies, run

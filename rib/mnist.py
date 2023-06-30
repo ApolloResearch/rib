@@ -118,6 +118,7 @@ def train(config: Config) -> None:
     if config.wandb:
         run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}"
         wandb.init(
+            dir=Path(__file__).parent.parent / ".wandb",
             name=run_name,
             project=config.wandb.project,
             entity=config.wandb.entity,

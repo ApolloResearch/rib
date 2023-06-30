@@ -13,7 +13,11 @@
     ],
     "isort.args": [
         "--profile",
-        "black"
+        "black",
+        "--project",
+        "rib",
+        "--thirdparty",
+        "wandb",
     ],
     "editor.codeActionsOnSave": {
         "source.organizeImports": true

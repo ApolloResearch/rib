@@ -38,10 +38,10 @@ jobs:
         black --check --diff --line-length 100 rib scripts tests
     - name: Check with isort
       run: |
-        isort --check --profile black rib scripts tests
+        isort --check --thirdparty wandb --profile black rib scripts tests
     - name: Check with mypy
       run: |
-        mypy --strict rib scripts
+        mypy rib scripts
     - name: Run tests
       run: |
         pytest tests

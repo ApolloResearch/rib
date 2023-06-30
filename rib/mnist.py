@@ -76,7 +76,18 @@ class MLP(nn.Module):
     def make_layers(
         input_size: int, hidden_sizes: Optional[List[int]], output_size: int
     ) -> nn.Sequential:
-        """Create layers for MLP."""
+        """Create layers for MLP.
+
+        The total number of layers is len(hidden_sizes) + 1. A ReLU layer is added after each Linear layer except the last one.
+
+        Args:
+            input_size: The size of the input.
+            hidden_sizes: A list of hidden layer sizes. If None, no hidden layers are added.
+            output_size: The size of the output.
+
+        Returns:
+            A nn.Sequential containing the Linear and ReLU layers.
+        """
         if hidden_sizes is None:
             hidden_sizes = []
 
@@ -96,6 +107,10 @@ class MLP(nn.Module):
 
 
 def train(config: Config) -> None:
+    """Train the MLP on MNIST.
+
+    If config.wandb is not None, log the results to Weights & Biases.
+    """
     torch.manual_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)

@@ -1,1 +1,6 @@
 torch
+torchvision
+pydantic
+wandb
+fire
+tqdm

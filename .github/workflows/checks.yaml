@@ -42,3 +42,6 @@ jobs:
     - name: Check with mypy
       run: |
         mypy --strict rib scripts
+    - name: Run tests
+      run: |
+        pytest tests

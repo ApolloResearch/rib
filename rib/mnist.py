@@ -70,6 +70,13 @@ class MLP(nn.Module):
     ):
         super().__init__()
 
+        self.layers = self.make_layers(input_size, hidden_sizes, output_size)
+
+    @staticmethod
+    def make_layers(
+        input_size: int, hidden_sizes: Optional[List[int]], output_size: int
+    ) -> nn.Sequential:
+        """Create layers for MLP."""
         if hidden_sizes is None:
             hidden_sizes = []
 
@@ -80,8 +87,7 @@ class MLP(nn.Module):
             # Don't add ReLU to the last layer
             if i < len(sizes) - 2:
                 layers.append(nn.ReLU())
-
-        self.layers = nn.Sequential(*layers)
+        return nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.view(x.size(0), -1)

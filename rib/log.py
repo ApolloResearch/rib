@@ -4,18 +4,20 @@ from logging import Logger
 
 
 def setup_logger() -> Logger:
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
+    _logger = logging.getLogger(__name__)
+    _logger.setLevel(logging.INFO)
 
     handler = logging.StreamHandler()
     handler.setLevel(logging.INFO)
 
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
 
     handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    _logger.addHandler(handler)
 
-    return logger
+    return _logger
 
 
 logger = setup_logger()

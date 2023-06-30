@@ -15,9 +15,11 @@ setup(
     author="Dan Braun",
     author_email="dan@apolloresearch.ai",
     url="https://github.com/ApolloResearch/rib",
-    packages=find_packages(where="rib"),
+    packages=find_packages(),
     install_requires=requirements,
-    extras_require={"dev": ["black", "isort", "mypy"]},
+    extras_require={
+        "dev": ["black", "isort", "mypy", "pylint", "pytest", "types-PyYAML", "types-tqdm"]
+    },
     classifiers=[
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",

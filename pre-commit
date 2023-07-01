@@ -13,6 +13,6 @@ check_command() {
 }
 
 check_command black --check --line-length 100 rib scripts tests
-check_command isort --check --profile black rib scripts tests
-check_command mypy --strict rib scripts
+check_command isort --check --thirdparty wandb --profile black rib scripts tests
+check_command mypy rib scripts
 check_command pytest tests

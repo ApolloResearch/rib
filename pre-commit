@@ -12,6 +12,7 @@ check_command() {
     return $status
 }
 
+echo "Running pre-commit hooks..."
 check_command black --check --line-length 100 rib scripts tests
 check_command isort --check --thirdparty wandb --profile black rib scripts tests
 check_command mypy rib scripts

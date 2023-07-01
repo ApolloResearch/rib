@@ -3,7 +3,7 @@ from typing import List, Tuple
 import pytest
 from torch import nn
 
-from rib.mnist import MLP
+from rib.models import MLP
 
 
 @pytest.mark.parametrize(

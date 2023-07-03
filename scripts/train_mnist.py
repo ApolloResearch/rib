@@ -26,6 +26,8 @@ from rib.utils import save_model
 class ModelConfig(BaseModel):
     hidden_sizes: Optional[List[int]]
     activation_fn: str = "relu"
+    bias: bool = True
+    fold_bias: bool = True
 
 
 class TrainConfig(BaseModel):
@@ -78,7 +80,14 @@ def train(config: Config) -> None:
     train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=True)
 
     # Initialize the MLP model
-    model = MLP(config.model.hidden_sizes, input_size=784, output_size=10)
+    model = MLP(
+        config.model.hidden_sizes,
+        input_size=784,
+        output_size=10,
+        activation_fn=config.model.activation_fn,
+        bias=config.model.bias,
+        fold_bias=config.model.fold_bias,
+    )
     model = model.to(device)
 
     # Define the loss and optimizer
@@ -123,7 +132,7 @@ def train(config: Config) -> None:
                 )
 
                 if config.wandb:
-                    wandb.log({"train/loss": loss.item(), "train/samples": samples})
+                    wandb.log({"train/loss": loss.item(), "train/samples": samples}, step=samples)
 
         if config.train.save_every_n_epochs and (epoch + 1) % config.train.save_every_n_epochs == 0:
             save_model(json.loads(config.model_dump_json()), save_dir, model, epoch)

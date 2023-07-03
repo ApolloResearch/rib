@@ -1,13 +1,14 @@
 """
 Defines a generic MLP to be used for rib.
 """
+from collections import OrderedDict
 from typing import List, Optional, Type, Union
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-from rib.models.utils import ACTIVATION, ACTIVATION_MAP
+from rib.models.utils import ACTIVATION_MAP
 
 
 class LinearFoldedBias(nn.Linear):
@@ -50,7 +51,7 @@ class MLP(nn.Module):
 
     @staticmethod
     def make_layers(
-        linear_module: Type[nn.Linear],
+        linear_module: Union[Type[nn.Linear], Type[LinearFoldedBias]],
         input_size: int,
         hidden_sizes: List[int],
         output_size: int,
@@ -77,13 +78,13 @@ class MLP(nn.Module):
 
         activation_module = ACTIVATION_MAP[activation_fn]
 
-        layers: List[Union[nn.Linear, ACTIVATION]] = []
+        layers: OrderedDict[str, nn.Module] = OrderedDict()
         for i in range(len(sizes) - 1):
-            layers.append(linear_module(sizes[i], sizes[i + 1], bias=bias))
-            # Don't add ReLU to the last layer
+            layers[f"linear_{i}"] = linear_module(sizes[i], sizes[i + 1], bias=bias)
+            # Don't add activation function to the last layer
             if i < len(sizes) - 2:
-                layers.append(activation_module())
-        return nn.Sequential(*layers)
+                layers[f"activation_{i}"] = activation_module()
+        return nn.Sequential(layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.view(x.size(0), -1)

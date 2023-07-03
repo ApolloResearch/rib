@@ -1,23 +1,58 @@
-"""Setup logging that can be used by all modules in the package."""
 import logging
-from logging import Logger
+from logging.config import dictConfig
+from pathlib import Path
+
+DEFAULT_LOGFILE = Path(__file__).resolve().parent.parent / "logs" / "logs.log"
 
 
-def setup_logger() -> Logger:
-    _logger = logging.getLogger(__name__)
-    _logger.setLevel(logging.INFO)
+def setup_logger(logfile: Path = DEFAULT_LOGFILE) -> logging.Logger:
+    """Setup a logger to be used in all modules in the library.
 
-    handler = logging.StreamHandler()
-    handler.setLevel(logging.INFO)
+    Sets up logging configuration with a console handler and a file handler.
+    Console handler logs messages with INFO level, file handler logs WARNING level.
+    The root logger is configured to use both handlers.
 
-    formatter = logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-    )
+    Returns:
+        logging.Logger: A configured logger object.
 
-    handler.setFormatter(formatter)
-    _logger.addHandler(handler)
+    Example:
+        >>> logger = setup_logger()
+        >>> logger.debug('Debug message')
+        >>> logger.info('Info message')
+        >>> logger.warning('Warning message')
+    """
+    if not logfile.parent.exists():
+        logfile.mkdir(parents=True, exist_ok=True)
 
-    return _logger
+    logging_config = {
+        "version": 1,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s - %(levelname)s - %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S",
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+                "level": "INFO",
+            },
+            "file": {
+                "class": "logging.FileHandler",
+                "filename": str(logfile),
+                "formatter": "default",
+                "level": "WARNING",
+            },
+        },
+        "root": {
+            "handlers": ["console", "file"],
+            "level": "INFO",
+        },
+    }
+
+    dictConfig(logging_config)
+    return logging.getLogger()
 
 
 logger = setup_logger()

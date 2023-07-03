@@ -31,7 +31,7 @@ class TrainConfig(BaseModel):
     learning_rate: float
     batch_size: int
     epochs: int
-    save_dir: Path
+    save_dir: Optional[Path]
     save_every_n_epochs: Optional[int]
 
 
@@ -67,6 +67,9 @@ def train(config: Config) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
 
+    if not config.train.save_dir:
+        config.train.save_dir = Path(__file__).parent.parent / ".checkpoints" / "mnist"
+
     # Load the MNIST dataset
     transform = transforms.ToTensor()
     train_data = datasets.MNIST(
@@ -88,7 +91,7 @@ def train(config: Config) -> None:
             name=run_name,
             project=config.wandb.project,
             entity=config.wandb.entity,
-            config=config.dict(),
+            config=config.model_dump(),
         )
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -123,10 +126,10 @@ def train(config: Config) -> None:
                     wandb.log({"train/loss": loss.item(), "train/samples": samples})
 
         if config.train.save_every_n_epochs and (epoch + 1) % config.train.save_every_n_epochs == 0:
-            save_model(json.loads(config.json()), save_dir, model, epoch)
+            save_model(json.loads(config.model_dump_json()), save_dir, model, epoch)
 
     if not (save_dir / f"model_epoch_{epoch + 1}.pt").exists():
-        save_model(json.loads(config.json()), save_dir, model, epoch)
+        save_model(json.loads(config.model_dump_json()), save_dir, model, epoch)
 
 
 def main(config_path_str: str) -> None:

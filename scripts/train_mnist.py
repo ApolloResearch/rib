@@ -25,6 +25,7 @@ from rib.utils import save_model
 
 class ModelConfig(BaseModel):
     hidden_sizes: Optional[List[int]]
+    activation_fn: str = "relu"
 
 
 class TrainConfig(BaseModel):

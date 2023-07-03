@@ -3,6 +3,7 @@ log_filename: train_mnist.log
 model:
   hidden_sizes:
     - 100
+  activation_fn: relu
 train:
   learning_rate: 0.001
   batch_size: 64

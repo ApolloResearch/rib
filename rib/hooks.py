@@ -27,7 +27,18 @@ class HookedModel:
         return output
 
     def add_forward_hooks(self, hook_points: List[str], hook_fn: Callable) -> None:
-        """Add a hook to the model at each of the specified hook points."""
+        """Add a hook to the model at each of the specified hook points.
+
+        Args:
+            hook_points: Attributes of the model to add hooks to. Nested attributes are specified
+                with a period, e.g. "encoder.linear_0".
+            hook_fn: Function to run at each hook point.
+
+        Example:
+            >>> model = nn.Sequential(OrderedDict([("linear_0", nn.Linear(3, 5)), ("relu_0", nn.ReLU())]))
+            >>> hooked_model = HookedModel(model)
+            >>> hooked_model.add_forward_hooks(["linear_0", "relu_0"], hook_fn)
+        """
         for hook_point in hook_points:
             hook_module = get_model_attr(self.model, hook_point)
             hook_fn_partial = partial(hook_fn, hook_data=self.hook_data, hook_point=hook_point)

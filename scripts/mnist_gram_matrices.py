@@ -19,7 +19,7 @@ def run_dataset_through_model(
         hooked_model(data, hooks=hooks)
 
 
-def main(config_dict: dict, model_path: Path, hook_points: List[str]) -> None:
+def load_mlp(config_dict: dict, model_path: Path) -> MLP:
     mlp = MLP(
         hidden_sizes=config_dict["model"]["hidden_sizes"],
         input_size=784,
@@ -30,6 +30,20 @@ def main(config_dict: dict, model_path: Path, hook_points: List[str]) -> None:
     )
     mlp.load_state_dict(torch.load(model_path))
     mlp.eval()
+    return mlp
+
+
+def load_dataloader(train: bool = False) -> DataLoader:
+    transform = transforms.ToTensor()
+    test_data = datasets.MNIST(
+        root=Path(__file__).parent.parent / ".data", train=train, download=True, transform=transform
+    )
+    test_loader = DataLoader(test_data, batch_size=64, shuffle=True)
+    return test_loader
+
+
+def main(config_dict: dict, model_path: Path, hook_points: List[str]) -> None:
+    mlp = load_mlp(config_dict, model_path)
 
     hooked_mlp = HookedModel(mlp)
     hooks = [
@@ -37,12 +51,7 @@ def main(config_dict: dict, model_path: Path, hook_points: List[str]) -> None:
         for hook_point in hook_points
     ]
 
-    # Load the MNIST dataset
-    transform = transforms.ToTensor()
-    test_data = datasets.MNIST(
-        root=Path(__file__).parent.parent / ".data", train=False, download=True, transform=transform
-    )
-    test_loader = DataLoader(test_data, batch_size=64, shuffle=True)
+    test_loader = load_dataloader(train=False)
 
     run_dataset_through_model(hooked_mlp, test_loader, hooks)
 

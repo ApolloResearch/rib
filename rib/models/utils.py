@@ -1,5 +1,3 @@
-from typing import Union
-
 import torch
 
 ACTIVATION_MAP = {

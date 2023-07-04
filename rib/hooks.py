@@ -14,10 +14,10 @@ class Hook:
     """Defines a hook object that can be added to a model.
 
     Attributes:
-        name: Name of the hook. This is used as the key in the hooked_data dictionary in HookedModel.
+        name: Name of the hook. This is used as the key in the hooked_data dict in HookedModel.
         fn: Function to run at the hook point.
-        hook_point: String representing the attribute of the model to add the hook to. Nested attributes are specified
-            with a period, e.g. "encoder.linear_0".
+        hook_point: String representing the attribute of the model to add the hook to.
+            Nested attributes are specified with a period, e.g. "encoder.linear_0".
     """
 
     name: str

@@ -79,6 +79,7 @@ class HookedModel(torch.nn.Module):
             handle.remove()
 
 
+@torch.inference_mode()
 def gram_matrix_hook_fn(
     module: torch.nn.Module,
     inputs: Float[Tensor, "batch d_hidden"],

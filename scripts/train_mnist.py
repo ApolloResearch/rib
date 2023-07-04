@@ -6,7 +6,7 @@ Usage:
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 import fire
 import torch
@@ -24,7 +24,7 @@ from rib.utils import save_model
 
 
 class ModelConfig(BaseModel):
-    hidden_sizes: Optional[List[int]]
+    hidden_sizes: Optional[list[int]]
     activation_fn: str = "relu"
     bias: bool = True
     fold_bias: bool = True

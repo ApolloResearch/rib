@@ -83,7 +83,7 @@ class MLP(nn.Module):
             layers[f"linear_{i}"] = linear_module(sizes[i], sizes[i + 1], bias=bias)
             # Don't add activation function to the last layer
             if i < len(sizes) - 2:
-                layers[f"activation_{i}"] = activation_module()
+                layers[f"act_{i}"] = activation_module()
         return nn.Sequential(layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

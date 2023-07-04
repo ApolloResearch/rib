@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List
 
 import torch
 import yaml
@@ -12,7 +11,7 @@ from rib.models import MLP
 
 @torch.inference_mode()
 def run_dataset_through_model(
-    hooked_model: HookedModel, dataloader: DataLoader, hooks: List[Hook]
+    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook]
 ) -> None:
     for batch in dataloader:
         data, _ = batch
@@ -42,7 +41,7 @@ def load_dataloader(train: bool = False) -> DataLoader:
     return test_loader
 
 
-def main(config_dict: dict, model_path: Path, hook_points: List[str]) -> None:
+def main(config_dict: dict, model_path: Path, hook_points: list[str]) -> None:
     mlp = load_mlp(config_dict, model_path)
 
     hooked_mlp = HookedModel(mlp)

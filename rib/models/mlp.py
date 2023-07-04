@@ -2,7 +2,7 @@
 Defines a generic MLP to be used for rib.
 """
 from collections import OrderedDict
-from typing import List, Optional, Type, Union
+from typing import Optional, Type, Union
 
 import torch
 from torch import nn
@@ -31,7 +31,7 @@ class LinearFoldedBias(nn.Linear):
 class MLP(nn.Module):
     def __init__(
         self,
-        hidden_sizes: Optional[List[int]],
+        hidden_sizes: Optional[list[int]],
         input_size: int,
         output_size: int,
         activation_fn: str = "relu",
@@ -53,7 +53,7 @@ class MLP(nn.Module):
     def make_layers(
         linear_module: Union[Type[nn.Linear], Type[LinearFoldedBias]],
         input_size: int,
-        hidden_sizes: List[int],
+        hidden_sizes: list[int],
         output_size: int,
         activation_fn: str = "relu",
         bias: bool = True,

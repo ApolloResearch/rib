@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 import torch
 from jaxtyping import Float
@@ -44,13 +44,13 @@ class HookedModel(torch.nn.Module):
     def __init__(self, model: torch.nn.Module) -> None:
         super().__init__()
         self.model = model
-        self.hook_handles: List[torch.utils.hooks.RemovableHandle] = []
-        self.hooked_data: Dict[str, Any] = {}
+        self.hook_handles: list[torch.utils.hooks.RemovableHandle] = []
+        self.hooked_data: dict[str, Any] = {}
 
-    def __call__(self, *args, hooks: Optional[List[Hook]] = None, **kwargs) -> Any:
+    def __call__(self, *args, hooks: Optional[list[Hook]] = None, **kwargs) -> Any:
         return self.forward(*args, hooks=hooks, **kwargs)
 
-    def forward(self, *args, hooks: Optional[List[Hook]] = None, **kwargs) -> Any:
+    def forward(self, *args, hooks: Optional[list[Hook]] = None, **kwargs) -> Any:
         """Run the forward pass of the model and remove all hooks."""
         if hooks is not None:
             self.add_forward_hooks(hooks)
@@ -60,7 +60,7 @@ class HookedModel(torch.nn.Module):
             self.remove_hooks()
         return output
 
-    def add_forward_hooks(self, hooks: List[Hook]) -> None:
+    def add_forward_hooks(self, hooks: list[Hook]) -> None:
         """Add a hook to the model at each of the specified hook points."""
         for hook in hooks:
             hook_module = get_model_attr(self.model, hook.hook_point)
@@ -83,7 +83,7 @@ def gram_matrix_hook_fn(
     module: torch.nn.Module,
     inputs: Float[Tensor, "batch d_hidden"],
     outputs: Float[Tensor, "batch d_hidden"],
-    hooked_data: Dict[str, Any],
+    hooked_data: dict[str, Any],
     hook_point: str,
     hook_name: str,
 ) -> None:

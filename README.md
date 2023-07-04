@@ -34,4 +34,4 @@ Suggested extensions and settings for VSCode are provided in `.vscode/`.
 
 ### Pre-commit hooks
 
-To use the suggestion precommit hook copy the file `pre-commit` to `.git/hooks/` and make it executable (`chmod +x .git/hooks/pre-commit`).
+This repository uses [pre-commit](https://pre-commit.com/) to run a series of checks on the code before committing. These are installed with the development dependencies above.

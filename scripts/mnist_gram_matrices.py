@@ -6,7 +6,7 @@ import yaml
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from rib.hooks import HookedModel, collect_hook_data, gram_matrix_hook_fn
+from rib.hooks import Hook, HookedModel, gram_matrix_hook_fn
 from rib.models import MLP
 
 
@@ -22,8 +22,11 @@ def main(config_dict: dict, model_path: Path, hook_points: List[str]) -> None:
     mlp.load_state_dict(torch.load(model_path))
     mlp.eval()
 
+    hooks = [
+        Hook(name="gram", fn=gram_matrix_hook_fn, hook_point=hook_point)
+        for hook_point in hook_points
+    ]
     hooked_mlp = HookedModel(mlp)
-    hooked_mlp.add_forward_hooks(hook_points, gram_matrix_hook_fn)
 
     # Load the MNIST dataset
     transform = transforms.ToTensor()
@@ -32,10 +35,14 @@ def main(config_dict: dict, model_path: Path, hook_points: List[str]) -> None:
     )
     test_loader = DataLoader(test_data, batch_size=64, shuffle=True)
 
-    collect_hook_data(hooked_mlp, test_loader)
+    # Run the dataset through the model
+    with torch.inference_mode():
+        for batch in test_loader:
+            data, _ = batch
+            _ = hooked_mlp(data, hooks=hooks)
 
     for hook_point in hook_points:
-        gram_matrix = hooked_mlp.hook_data[hook_point]
+        gram_matrix = hooked_mlp.hooked_data[hook_point]["gram"]
         print(f"Gram matrix for {hook_point}:")
         print(f"Shape: {gram_matrix.shape}")
 

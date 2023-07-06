@@ -45,7 +45,7 @@ def load_dataloader(train: bool = False) -> DataLoader:
 
 def calc_eigen_matrices(
     hooked_mlp: HookedModel, hook_points: list[str]
-) -> list[str, list[str, Tensor]]:
+) -> dict[str, dict[str, Tensor]]:
     """Calculate eigenvalues and eigenvectors of the gram matrices for each hook point.
 
     Args:

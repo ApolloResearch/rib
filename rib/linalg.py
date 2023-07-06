@@ -74,7 +74,9 @@ def calc_eigen_info(
         gram_matrix = hooked_mlp.hooked_data[hook_point][matrix_key]
         eigenvalues, eigenvectors = eigendecompose(gram_matrix, descending=True)
         zero_vals = (
-            torch.sum(eigenvalues < zero_threshold).item() if zero_threshold is not None else None
+            int(torch.sum(eigenvalues < zero_threshold).item())
+            if zero_threshold is not None
+            else None
         )
         eigens[hook_point] = EigenInfo(vals=eigenvalues, vecs=eigenvectors, zero_vals=zero_vals)
 

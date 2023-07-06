@@ -19,10 +19,10 @@ repos:
         files: ^rib/
         entry: mypy rib/
         pass_filenames: false
-        additional_dependencies: [types-PyYAML, types-tqdm]
+        additional_dependencies: [types-PyYAML, types-tqdm, jaxtyping]
     -   id: mypy
         name: mypy-scripts
         files: ^scripts/
         entry: mypy scripts/
         pass_filenames: false
-        additional_dependencies: [types-PyYAML, types-tqdm, wandb]  # Needed to avoid attribute errors
+        additional_dependencies: [types-PyYAML, types-tqdm, jaxtyping, wandb]  # Needed to avoid attribute errors

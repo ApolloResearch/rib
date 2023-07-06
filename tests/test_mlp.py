@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import pytest
 from torch import nn
@@ -26,11 +26,11 @@ from rib.models.utils import ACTIVATION_MAP
     ],
 )
 def test_make_layers(
-    hidden_sizes: List[int],
+    hidden_sizes: list[int],
     activation_fn: Optional[str],
     fold_bias: bool,
     bias: bool,
-    expected_layer_sizes: List[Tuple[int, int]],
+    expected_layer_sizes: list[Tuple[int, int]],
 ):
     """Test the make_layers method of MLP class for fixed input and output sizes.
 

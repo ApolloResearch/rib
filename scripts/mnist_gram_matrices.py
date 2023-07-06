@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Dict, List
 
 import torch
 import yaml
@@ -14,7 +13,7 @@ from rib.models import MLP
 
 @torch.inference_mode()
 def run_dataset_through_model(
-    hooked_model: HookedModel, dataloader: DataLoader, hooks: List[Hook]
+    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook]
 ) -> None:
     for batch in dataloader:
         data, _ = batch
@@ -45,8 +44,8 @@ def load_dataloader(train: bool = False) -> DataLoader:
 
 
 def calc_eigen_matrices(
-    hooked_mlp: HookedModel, hook_points: List[str]
-) -> Dict[str, Dict[str, Tensor]]:
+    hooked_mlp: HookedModel, hook_points: list[str]
+) -> list[str, list[str, Tensor]]:
     """Calculate eigenvalues and eigenvectors of the gram matrices for each hook point.
 
     Args:
@@ -65,7 +64,7 @@ def calc_eigen_matrices(
     return eigen_matrices
 
 
-def main(config_dict: dict, model_path: Path, hook_points: List[str]) -> None:
+def main(config_dict: dict, model_path: Path, hook_points: list[str]) -> None:
     mlp = load_mlp(config_dict, model_path)
 
     hooked_mlp = HookedModel(mlp)

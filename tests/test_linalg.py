@@ -3,7 +3,7 @@ from unittest import mock
 import pytest
 import torch
 
-from rib.linalg import EigenInfo, calc_eigen_info, eigendecompose
+from rib.linalg import EigenInfo, calc_eigen_info, calc_rotation_matrix, eigendecompose
 
 
 @pytest.mark.parametrize("descending", [True, False])
@@ -19,7 +19,7 @@ def test_eigendecompose(descending: bool):
     # Generate a random symmetric matrix
     d_hidden = 20
     x = torch.randn(d_hidden, d_hidden)
-    x = x @ x.T  # Ensure x is symmetric
+    x = x @ x.T / x.shape[0]  # Ensure x is symmetric
 
     # Calculate eigenvalues and eigenvectors using eigendecompose
     eigenvalues, eigenvectors = eigendecompose(x, descending=descending)
@@ -43,42 +43,89 @@ def test_eigendecompose(descending: bool):
         assert torch.all(eigenvalues[:-1] <= eigenvalues[1:])
 
 
-@pytest.mark.parametrize("zero_threshold", [None, 1e-1])
-def test_calc_eigen_matrices(zero_threshold):
-    """Test the calc_eigen_matrices function.
+@pytest.mark.parametrize("n_zero_vals,n_ablated_vecs", [(0, 0), (2, 0), (0, 2)])
+def test_calc_rotation_matrix(n_zero_vals, n_ablated_vecs):
+    """Test the calc_rotation_matrix function.
 
-    Checks if the EigenInfo objects for each hook point are correctly computed.
+    Checks if the rotation matrix has the correct dimensions and properties.
+
+    We can validate whether the rotation is done correctly by checking that the transformed
+    eigenvectors (except the ones set to zero) stay the same after the rotation, because a rotation
+    matrix applied to its corresponding eigenvectors should return the eigenvectors themselves.
 
     Args:
-        zero_threshold: The threshold below which eigenvalues are considered to be zero.
+        n_zero_vals: Number of zero eigenvalues.
+        n_ablated_vecs: Number of eigenvectors to ablate.
     """
-    # Define mock data
-    d_hidden = 20
-    gram_matrix = torch.randn(d_hidden, d_hidden)
-    gram_matrix = gram_matrix @ gram_matrix.T  # Ensure gram_matrix is symmetric
+    n_elements = 2
+    d_hidden = 10
+    acts = torch.randn(n_elements, d_hidden).double()
+    gram = acts.T @ acts / n_elements
+    _, vecs = eigendecompose(gram)
 
-    hooked_data = {"hook_point_1": {"gram": gram_matrix}, "hook_point_2": {"gram": gram_matrix}}
+    rotation_matrix = calc_rotation_matrix(
+        vecs, n_zero_vals=n_zero_vals, n_ablated_vecs=n_ablated_vecs
+    )
 
-    # Create mock hooked model
+    # Check the dimensions of the rotation matrix
+    assert rotation_matrix.shape == (d_hidden, d_hidden)
+
+    # Check that the matrix is symmetric (a property of rotation matrices)
+    assert torch.allclose(rotation_matrix, rotation_matrix.T, atol=1e-2)
+
+    # Transform eigenvectors with the rotation matrix
+    rotated_vecs = vecs @ rotation_matrix
+
+    # Exclude the last n_ignore vectors
+    n_ignore = n_ablated_vecs if n_ablated_vecs > 0 else n_zero_vals
+    if n_ignore > 0:
+        rotated_vecs = rotated_vecs[:-n_ignore]
+        vecs = vecs[:-n_ignore]
+
+    # Check if rotated vectors (except the ones set to zero) stay the same after the rotation
+    assert torch.allclose(rotated_vecs, vecs, atol=1e-8)
+
+
+@pytest.mark.parametrize("zero_threshold,n_ablated_vecs", [(None, 10), (1e-13, 0), (1e-6, 5)])
+def test_calc_eigen_info(zero_threshold, n_ablated_vecs):
+    """Test the calc_eigen_info function.
+
+    Checks if the function correctly calculates and returns EigenInfo objects for all given hook
+    points.
+    """
+    # Mock the hooked model
     hooked_mlp = mock.Mock()
-    hooked_mlp.hooked_data = hooked_data
+    hooked_mlp.hooked_data = {
+        "hook1": {"gram": torch.randn(10, 10)},
+        "hook2": {"gram": torch.randn(10, 10)},
+    }
 
-    hook_points = list(hooked_data.keys())
-    result = calc_eigen_info(hooked_mlp, hook_points, zero_threshold=zero_threshold)
+    # Define hook points for calc_eigen_info
+    hook_points = ["hook1", "hook2"]
 
-    # Check if keys in the result match hook_points
-    assert set(result.keys()) == set(hook_points)
+    if zero_threshold is not None and n_ablated_vecs > 0:
+        with pytest.raises(AssertionError):
+            calc_eigen_info(
+                hooked_mlp,
+                hook_points,
+                zero_threshold=zero_threshold,
+                n_ablated_vecs=n_ablated_vecs,
+            )
+        return
+    # Calculate eigen information
+    eigen_infos = calc_eigen_info(
+        hooked_mlp, hook_points, zero_threshold=zero_threshold, n_ablated_vecs=n_ablated_vecs
+    )
 
     # Check the results
+    assert len(eigen_infos) == len(hook_points)
     for hook_point in hook_points:
-        eigen_info = result[hook_point]
+        eigen_info = eigen_infos[hook_point]
 
+        # Assert instance of EigenInfo
         assert isinstance(eigen_info, EigenInfo)
-        assert eigen_info.vals.dtype == torch.float64
-        assert eigen_info.vecs.dtype == torch.float64
 
-        # If zero_threshold is provided, zero_vals should be computed
-        if zero_threshold is not None:
-            assert eigen_info.zero_vals == torch.sum(eigen_info.vals < zero_threshold).item()
-        else:
-            assert eigen_info.zero_vals is None
+        # Check dimensions of EigenInfo values
+        assert eigen_info.vals.shape == (10,)
+        assert eigen_info.vecs.shape == (10, 10)
+        assert eigen_info.rotation_matrix.shape == (10, 10)

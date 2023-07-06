@@ -63,7 +63,8 @@ def main(config_dict: dict, model_path: Path, hook_points: list[str]) -> None:
 
     run_dataset_through_model(hooked_mlp, test_loader, hooks)
 
-    scale_gram_matrices(hooked_mlp, hook_points, len(test_loader.dataset))
+    len_dataset = len(test_loader.dataset)  # type: ignore
+    scale_gram_matrices(hooked_mlp, hook_points, len_dataset)
 
     eigens = calc_eigen_info(
         hooked_mlp=hooked_mlp,

@@ -42,6 +42,14 @@ def load_dataloader(train: bool = False) -> DataLoader:
     return test_loader
 
 
+def scale_gram_matrices(hooked_mlp: HookedModel, hook_points: list[str], num_samples: int) -> None:
+    """Scale the gram matrices by the number of samples."""
+    for hook_point in hook_points:
+        hooked_mlp.hooked_data[hook_point]["gram"] = (
+            hooked_mlp.hooked_data[hook_point]["gram"] / num_samples
+        )
+
+
 def main(config_dict: dict, model_path: Path, hook_points: list[str]) -> None:
     mlp = load_mlp(config_dict, model_path)
 
@@ -55,8 +63,14 @@ def main(config_dict: dict, model_path: Path, hook_points: list[str]) -> None:
 
     run_dataset_through_model(hooked_mlp, test_loader, hooks)
 
+    scale_gram_matrices(hooked_mlp, hook_points, len(test_loader.dataset))
+
     eigens = calc_eigen_info(
-        hooked_mlp=hooked_mlp, hook_points=hook_points, matrix_key="gram", zero_threshold=1e-13
+        hooked_mlp=hooked_mlp,
+        hook_points=hook_points,
+        matrix_key="gram",
+        zero_threshold=None,  # e.g. [None, 1e-13]
+        n_ablated_vecs=10,
     )
 
     for hook_point in hook_points:
@@ -65,7 +79,7 @@ def main(config_dict: dict, model_path: Path, hook_points: list[str]) -> None:
         print(f"Shape: {gram_matrix.shape}")
         print(f"Eigenvalues: {eigens[hook_point].vals[:3]}")
         print(f"Eigenvectors: {eigens[hook_point].vecs[:3, :3]}")
-        print(f"Number of zero eigenvalues: {eigens[hook_point].zero_vals}")
+        print(f"rotation matrix: {eigens[hook_point].rotation_matrix[:3, :3]}")
 
 
 if __name__ == "__main__":

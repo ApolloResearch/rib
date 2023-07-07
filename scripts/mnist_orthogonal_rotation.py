@@ -1,12 +1,16 @@
-"""
-Run an mlp with and without rotating to a (truncated) orthogonal basis.
+"""Run an mlp on MNIST while rotating to and from a (truncated) orthogonal basis.
 
 The process is as follows:
-1. Load an MLP trained on MNIST and a test set of MNIST images.
-2. Calculate gram matrices at the given hook points.
-3. Calculate a rotation matrix at each hook point representing the operation of rotating to and from the partial eigenbasis of the gram matrix. The partial eigenbasis is equal to the entire eigenbasis with the zeroed out eigenvectors corresponding to the n smallest eigenvalues, where we let n range from 0 to the total number of eigenvalues (i.e. the dimension of the gram matrix).
-4. Run the test set through the MLP, applying the rotations at each hook point, and calculate the resulting accuracy.
-5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies.
+    1. Load an MLP trained on MNIST and a test set of MNIST images.
+    2. Calculate gram matrices at the given hook points.
+    3. Calculate a rotation matrix at each hook point representing the operation of rotating to and
+       from the partial eigenbasis of the gram matrix. The partial eigenbasis is equal to the entire
+       eigenbasis with the zeroed out eigenvectors corresponding to the n smallest eigenvalues,
+       where we let n range from 0 to the total number of eigenvalues (i.e. the dimension of the
+       gram matrix).
+    4. Run the test set through the MLP, applying the rotations at each hook point, and calculate
+       the resulting accuracy.
+    5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies.
 
 """
 
@@ -100,7 +104,6 @@ def plot_accuracies(
         filename = f"{mlp_name}_accuracy_vs_orthogonal_ablation_{layer_name.replace('.', '-')}.png"
         plt.savefig(plot_dir / filename)
 
-        # Clear the figure after saving to prevent overlap of plots
         plt.clf()
 
 

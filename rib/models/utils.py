@@ -29,15 +29,16 @@ def save_model(config_dict: dict[str, Any], save_dir: Path, model: nn.Module, ep
 def get_model_attr(model: torch.nn.Module, attr_path: str) -> torch.nn.Module:
     """Retrieve a nested attribute of a PyTorch module by a string of attribute names.
 
-    Navigates through the model's structure following the provided attribute path.
-    Each attribute name in the path is separated by a period ('.').
+    Navigates through the model's structure following the provided attribute path. Each attribute
+    name in the path is separated by a period ('.').
 
     Args:
         model (torch.nn.Module): The PyTorch model.
         attr_path (str): A string representing the path to the attribute.
 
     Returns:
-        torch.nn.Module: The attribute (which may be a module or other object) at the specified path in the model.
+        torch.nn.Module: The attribute (which may be a module or other object) at the specified path
+            in the model.
 
     Example:
         >>> mlp = MLP(...)

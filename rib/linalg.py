@@ -41,7 +41,7 @@ def calc_rotation_matrix(
     n_zero_vals: int = 0,
     n_ablated_vecs: int = 0,
 ) -> Float[Tensor, "d_hidden d_hidden"]:
-    """Calculate the matrix that rotates into and out of the orthogonal basis with optional ablations.
+    """Calculate the matrix to rotates into and out of the orthogonal basis with optional ablations.
 
     The formula for the rotation matrix is given by:
 

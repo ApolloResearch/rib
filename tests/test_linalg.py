@@ -10,8 +10,8 @@ from rib.linalg import EigenInfo, calc_eigen_info, calc_rotation_matrix, eigende
 def test_eigendecompose(descending: bool):
     """Test the eigendecompose function.
 
-    Compares the output of eigendecompose with the Singular Value Decomposition (SVD).
-    Also verifies the order of the eigenvalues and eigenvectors depending on the 'descending' flag.
+    Compares the output of eigendecompose with the Singular Value Decomposition (SVD). Also verifies
+    the order of the eigenvalues and eigenvectors depending on the 'descending' flag.
 
     Args:
         descending: If True, eigenvalues and eigenvectors should be sorted in descending order.

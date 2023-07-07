@@ -8,8 +8,8 @@ from rib.models.utils import get_model_attr
 def test_get_model_attr():
     """Test the get_model_attr function to retrieve model layers.
 
-    Creates a custom Sequential model with nested sub-layers, then uses get_model_attr to retrieve
-    a specific layer.
+    Creates a custom Sequential model with nested sub-layers, then uses get_model_attr to retrieve a
+    specific layer.
     """
 
     # Define a nested Sequential model

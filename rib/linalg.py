@@ -41,7 +41,7 @@ def calc_rotation_matrix(
     n_zero_vals: int = 0,
     n_ablated_vecs: int = 0,
 ) -> Float[Tensor, "d_hidden d_hidden"]:
-    """Calculate the matrix for rotating onto the orthogonal basis.
+    """Calculate the matrix that rotates into and out of the orthogonal basis with optional ablations.
 
     The formula for the rotation matrix is given by:
 
@@ -96,6 +96,7 @@ class EigenInfo:
     rotation_matrix: Float[Tensor, "d_hidden d_hidden"]
 
 
+@torch.inference_mode()
 def calc_eigen_info(
     hooked_mlp: HookedModel,
     hook_points: list[str],

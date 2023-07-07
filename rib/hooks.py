@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Callable, Optional
 
@@ -6,7 +6,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from rib.utils import get_model_attr
+from rib.models.utils import get_model_attr
 
 
 @dataclass
@@ -18,11 +18,13 @@ class Hook:
         fn: Function to run at the hook point.
         hook_point: String representing the attribute of the model to add the hook to.
             Nested attributes are specified with a period, e.g. "encoder.linear_0".
+        kwargs: Additional keyword arguments to pass to the hook function.
     """
 
     name: str
     fn: Callable
     hook_point: str
+    hook_kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 class HookedModel(torch.nn.Module):
@@ -69,6 +71,7 @@ class HookedModel(torch.nn.Module):
                 hooked_data=self.hooked_data,
                 hook_point=hook.hook_point,
                 hook_name=hook.name,
+                **hook.hook_kwargs,
             )
             handle = hook_module.register_forward_hook(hook_fn_partial)
             self.hook_handles.append(handle)
@@ -87,6 +90,7 @@ def gram_matrix_hook_fn(
     hooked_data: dict[str, Any],
     hook_point: str,
     hook_name: str,
+    **_: Any,
 ) -> None:
     """Hook function for calculating gram matrix.
 
@@ -100,6 +104,7 @@ def gram_matrix_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_point: Model attribute that the hook is attached to. Used as a first-level key in `hooked_data`.
         hook_name: Name of the hook, used as a second-level key in `hooked_data`.
+        **_: Additional keyword arguments (not used).
     """
     gram_matrix = outputs.T @ outputs
 
@@ -107,3 +112,27 @@ def gram_matrix_hook_fn(
     hooked_data.setdefault(hook_point, {}).setdefault(hook_name, torch.zeros_like(gram_matrix))
     # Add gram matrix to data
     hooked_data[hook_point][hook_name] += gram_matrix
+
+
+def rotate_and_ablate_hook_fn(
+    module: torch.nn.Module,
+    inputs: Float[Tensor, "batch d_hidden"],
+    outputs: Float[Tensor, "batch d_hidden"],
+    rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
+    **_: Any,
+) -> Float[Tensor, "batch d_hidden"]:
+    """Hook function for rotating activations.
+
+    The output activations are rotated by the specified rotation matrix.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module (not used).
+        outputs: Outputs of the module.
+        rotation_matrix: Rotation matrix to apply to the activations.
+        **_: Additional keyword arguments (not used).
+
+    Returns:
+        Rotated activations.
+    """
+    return outputs @ rotation_matrix.T.float()

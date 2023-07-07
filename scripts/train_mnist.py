@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 from rib.log import logger
 from rib.models import MLP
-from rib.utils import save_model
+from rib.models.utils import save_model
 
 
 class ModelConfig(BaseModel):

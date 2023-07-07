@@ -1,45 +1,48 @@
-from pathlib import Path
-from typing import Any
-
 import torch
-import yaml
-from torch import nn
+from jaxtyping import Float
+from torch import Tensor
+from torch.utils.data import DataLoader
 
-from rib.log import logger
-
-
-def save_model(config_dict: dict[str, Any], save_dir: Path, model: nn.Module, epoch: int) -> None:
-    # If the save_dir doesn't exist, create it and save the config
-    if not save_dir.exists():
-        save_dir.mkdir(parents=True)
-        logger.info("Saving config to %s", save_dir)
-        with open(save_dir / "config.yaml", "w") as f:
-            yaml.dump(config_dict, f)
-    logger.info("Saving model to %s", save_dir)
-    torch.save(model.state_dict(), save_dir / f"model_epoch_{epoch + 1}.pt")
+from rib.hooks import Hook, HookedModel
 
 
-def get_model_attr(model: torch.nn.Module, attr_path: str) -> torch.nn.Module:
-    """Retrieve a nested attribute of a PyTorch module by a string of attribute names.
+@torch.inference_mode()
+def run_dataset_through_model(
+    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook]
+) -> None:
+    """Simply pass all batches through a hooked model."""
+    assert len(hooks) > 0, "Hooks have not been applied to this model."
+    for batch in dataloader:
+        data, _ = batch
+        hooked_model(data, hooks=hooks)
 
-    Navigates through the model's structure following the provided attribute path.
-    Each attribute name in the path is separated by a period ('.').
+
+@torch.inference_mode()
+def calc_model_accuracy(
+    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook]
+) -> float:
+    """Run the model on the dataset and return the accuracy.
 
     Args:
-        model (torch.nn.Module): The PyTorch model.
-        attr_path (str): A string representing the path to the attribute.
+        hooked_model: The model to evaluate.
+        dataloader: The dataloader for the dataset.
+        hooks: The hooks to use.
 
     Returns:
-        torch.nn.Module: The attribute (which may be a module or other object) at the specified path in the model.
-
-    Example:
-        >>> mlp = MLP(...)
-        >>> linear_layer = get_model_attr(mlp, "layers.linear_1")
-        >>> print(linear_layer)
-        Linear(in_features=100, out_features=10, bias=False)
+        The accuracy of the model on the dataset.
     """
-    attr_names = attr_path.split(".")
-    attr = model
-    for name in attr_names:
-        attr = getattr(attr, name)
-    return attr
+
+    correct_predictions: int = 0
+    total_predictions: int = 0
+
+    for batch in dataloader:
+        data, labels = batch
+        output: Float[Tensor, "batch d_vocab"] = hooked_model(data, hooks=hooks)
+
+        # Assuming output is raw logits and labels are class indices.
+        predicted_labels: Float[Tensor, "batch"] = output.argmax(dim=1)
+        correct_predictions += (predicted_labels == labels).sum().item()
+        total_predictions += labels.shape[0]
+
+    accuracy: float = correct_predictions / total_predictions
+    return accuracy

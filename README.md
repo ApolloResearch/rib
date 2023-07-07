@@ -14,13 +14,19 @@ pip install -e .
 
 ### MNIST
 
-To train an MLP on MNIST, define a config file (see `configs/mnist.yaml` for an example) and run
+To train an MLP on MNIST, define/select a config file (see `configs/mnist/train_mnist_*.yaml` for examples) and run
 
 ```bash
-python scripts/train_mnist.py --config <path_to_config_file>
+python scripts/train_mnist.py <path_to_config_file>
 ```
 
 You may be asked to enter your wandb API key, which you can find it in your [wandb account settings](https://wandb.ai/settings). Alternatively, you can set the environment variable `WANDB_API_KEY` to your API key.
+
+To evaluate the impact of ablating eigenvectors from the orthogonal basis, define/select a config (see `configs/mnist/mnist_orthogonal_ablation_*.yaml` for examples) and run
+
+```bash
+python scripts/mnist_orthogonal_rotation.py <path_to_config_file>
+```
 
 ## Development
 

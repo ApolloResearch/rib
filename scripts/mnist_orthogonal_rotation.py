@@ -12,6 +12,10 @@ The process is as follows:
        the resulting accuracy.
     5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies.
 
+Usage:
+    python mnist_orthogonal_rotation.py <path_to_config>
+
+This script will take 4 minutes to run on cpu for 2-layer 100-hidden-unit MLPs with two hook points.
 """
 
 from pathlib import Path
@@ -123,9 +127,8 @@ def ablate_and_test(
     """
     accuracies: list[float] = []
     # Iterate through possible number of ablated vectors.
-    # We use every second value as this is a slow process.
     for n_ablated_vecs in tqdm(
-        range(0, layer_size + 1, 2), total=layer_size // 2 + 1, desc=f"Ablating {hook_point}"
+        range(layer_size + 1), total=len(range(layer_size + 1)), desc=f"Ablating {hook_point}"
     ):
         eigens = calc_eigen_info(
             hooked_mlp=hooked_mlp,

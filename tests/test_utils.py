@@ -2,7 +2,7 @@ from collections import OrderedDict
 
 from torch import nn
 
-from rib.utils import get_model_attr
+from rib.models.utils import get_model_attr
 
 
 def test_get_model_attr():

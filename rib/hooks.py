@@ -16,8 +16,8 @@ class Hook:
     Attributes:
         name: Name of the hook. This is used as the key in the hooked_data dict in HookedModel.
         fn: Function to run at the hook point.
-        hook_point: String representing the attribute of the
-        model to add the hook to. Nested attributes are split by periods (e.g. "layers.linear_0")
+        hook_point: String representing the attribute of the model to add the hook to.
+            Nested attributes are split by periods (e.g. "layers.linear_0").
         kwargs: Additional keyword arguments to pass to the hook function.
     """
 

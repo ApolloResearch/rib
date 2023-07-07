@@ -1,3 +1,4 @@
+plots/
 wandb/
 .data/
 .checkpoints/

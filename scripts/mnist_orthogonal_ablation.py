@@ -13,7 +13,7 @@ The process is as follows:
     5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies.
 
 Usage:
-    python mnist_orthogonal_rotation.py <path_to_config>
+    python mnist_orthogonal_ablation.py <path_to_config>
 
 This script will take 4 minutes to run on cpu or gpu for 2-layer 100-hidden-unit MLPs with two hook
 points.
@@ -25,13 +25,15 @@ import fire
 import matplotlib.pyplot as plt
 import torch
 import yaml
+from jaxtyping import Float
 from pydantic import BaseModel
+from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
 
 from rib.hooks import Hook, HookedModel, gram_matrix_hook_fn, rotate_and_ablate_hook_fn
-from rib.linalg import calc_eigen_info
+from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.models import MLP
 from rib.models.utils import get_model_attr
 from rib.utils import calc_model_accuracy, run_dataset_through_model
@@ -85,7 +87,10 @@ def scale_gram_matrices(hooked_mlp: HookedModel, hook_points: list[str], num_sam
 
 
 def plot_accuracies(
-    hook_points: list[str], results: dict[str, list[float]], plot_dir: Path, mlp_name: str
+    hook_points: list[str],
+    results: dict[str, list[float]],
+    plot_dir: Path,
+    mlp_name: str,
 ) -> None:
     """Plot accuracies for all hook points.
 
@@ -93,27 +98,40 @@ def plot_accuracies(
         hook_points: The hook points.
         results: A dictionary mapping hook points to accuracy results.
         plot_dir: The directory where the plots should be saved.
+        mlp_name: The name of the mlp
     """
     plot_dir.mkdir(parents=True, exist_ok=True)
+    n_plots = len(hook_points)
+    _, ax = plt.subplots(n_plots, 1, figsize=(15, 4 * n_plots), dpi=140)
 
-    for hook_point in hook_points:
-        # hook_point is typically "layers.linear_0"
+    for i, hook_point in enumerate(hook_points):
+        # hook_point is of the format "layers.linear_0"
         layer_name = hook_point.split(".", 1)[1]
-        plt.plot(range(len(results[hook_point])), results[hook_point])
-        plt.title(f"{mlp_name}-MLP MNIST acc vs n_ablated_vecs for layer: {layer_name}")
-        plt.xlabel("Number of ablated vectors")
-        plt.ylabel("Accuracy")
-        plt.ylim(0, 1)
-        plt.grid(True)
 
-        filename = f"{mlp_name}_accuracy_vs_orthogonal_ablation_{layer_name.replace('.', '-')}.png"
-        plt.savefig(plot_dir / filename)
+        x_values = [len(results[hook_point]) - i for i in range(len(results[hook_point]))]
+        ax[i].plot(x_values, results[hook_point], label="MNIST test")
 
-        plt.clf()
+        ax[i].set_title(
+            f"{mlp_name}-MLP MNIST acc vs n_remaining_eigenvalues for layer: {layer_name}"
+        )
+        ax[i].set_xlabel("Number of remaining eigenvalues")
+        ax[i].set_ylabel("Accuracy")
+        ax[i].set_ylim(0, 1)
+        ax[i].grid(True)
+        ax[i].legend()
+
+    filename = f"{mlp_name}_accuracy_vs_orthogonal_ablation.png"
+    plt.savefig(plot_dir / filename)
+
+    plt.clf()
 
 
 def ablate_and_test(
-    hooked_mlp: HookedModel, hook_point: str, test_loader: DataLoader, layer_size: int, device: str
+    hooked_mlp: HookedModel,
+    hook_point: str,
+    test_loader: DataLoader,
+    eigenvecs: Float[Tensor, "d_hidden d_hidden"],
+    device: str,
 ) -> list[float]:
     """Ablate eigenvectors and test the model accuracy.
 
@@ -121,30 +139,29 @@ def ablate_and_test(
         hooked_mlp: The hooked model.
         hook_point: The hook point in which to apply the rotations.
         test_loader: The DataLoader for the test data.
-        layer_size: The size of the layer at the hook point.
+        eigenvecs: A matrix whose columns are the eigenvectors of the gram matrix.
         device: The device to run the model on.
 
     Returns:
         A list of accuracies for each number of ablated vectors.
     """
     accuracies: list[float] = []
+
+    # TODO: Find more principled way to get layer size.
+    hook_layer: str = hook_point.split("_")[-1]
+    layer_size = get_model_attr(hooked_mlp.model, f"layers.linear_{hook_layer}").weight.size(
+        0
+    )  # type: ignore
     # Iterate through possible number of ablated vectors.
     for n_ablated_vecs in tqdm(
         range(layer_size + 1), total=len(range(layer_size + 1)), desc=f"Ablating {hook_point}"
     ):
-        eigens = calc_eigen_info(
-            hooked_mlp=hooked_mlp,
-            hook_points=[hook_point],
-            matrix_key="gram",
-            zero_threshold=None,  # e.g. [None, 1e-13]
-            n_ablated_vecs=n_ablated_vecs,
-        )
-
+        rotation_matrix = calc_rotation_matrix(eigenvecs, n_ablated_vecs=n_ablated_vecs)
         rotation_hook = Hook(
             name="rotation",
             fn=rotate_and_ablate_hook_fn,
             hook_point=hook_point,
-            hook_kwargs={"rotation_matrix": eigens[hook_point].rotation_matrix},
+            hook_kwargs={"rotation_matrix": rotation_matrix},
         )
 
         accuracy_ablated = calc_model_accuracy(
@@ -189,12 +206,9 @@ def run_ablations(
         hooked_mlp.hooked_data[hook_point]["gram"] = (
             hooked_mlp.hooked_data[hook_point]["gram"] / len_dataset
         )
-        # TODO: Find more principled way to get layer size.
-        hook_layer: str = hook_point.split("_")[-1]
-        layer_size = get_model_attr(hooked_mlp.model, f"layers.linear_{hook_layer}").weight.size(0)  # type: ignore
-
+        _, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_point]["gram"])
         accuracies: list[float] = ablate_and_test(
-            hooked_mlp, hook_point, test_loader, layer_size, device=device
+            hooked_mlp, hook_point, test_loader, eigenvecs, device=device
         )
         results[hook_point] = accuracies
 

@@ -102,23 +102,26 @@ def plot_accuracies(
     """
     plot_dir.mkdir(parents=True, exist_ok=True)
     n_plots = len(hook_points)
-    _, ax = plt.subplots(n_plots, 1, figsize=(15, 4 * n_plots), dpi=140)
+    _, axs = plt.subplots(n_plots, 1, figsize=(15, 4 * n_plots), dpi=140)
+
+    if n_plots == 1:
+        axs = [axs]
 
     for i, hook_point in enumerate(hook_points):
         # hook_point is of the format "layers.linear_0"
         layer_name = hook_point.split(".", 1)[1]
 
         x_values = [len(results[hook_point]) - i for i in range(len(results[hook_point]))]
-        ax[i].plot(x_values, results[hook_point], label="MNIST test")
+        axs[i].plot(x_values, results[hook_point], label="MNIST test")
 
-        ax[i].set_title(
+        axs[i].set_title(
             f"{mlp_name}-MLP MNIST acc vs n_remaining_eigenvalues for layer: {layer_name}"
         )
-        ax[i].set_xlabel("Number of remaining eigenvalues")
-        ax[i].set_ylabel("Accuracy")
-        ax[i].set_ylim(0, 1)
-        ax[i].grid(True)
-        ax[i].legend()
+        axs[i].set_xlabel("Number of remaining eigenvalues")
+        axs[i].set_ylabel("Accuracy")
+        axs[i].set_ylim(0, 1)
+        axs[i].grid(True)
+        axs[i].legend()
 
     filename = f"{mlp_name}_accuracy_vs_orthogonal_ablation.png"
     plt.savefig(plot_dir / filename)

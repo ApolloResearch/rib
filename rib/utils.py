@@ -8,18 +8,19 @@ from rib.hooks import Hook, HookedModel
 
 @torch.inference_mode()
 def run_dataset_through_model(
-    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook]
+    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook], device: str = "cuda"
 ) -> None:
     """Simply pass all batches through a hooked model."""
     assert len(hooks) > 0, "Hooks have not been applied to this model."
     for batch in dataloader:
         data, _ = batch
+        data = data.to(device)
         hooked_model(data, hooks=hooks)
 
 
 @torch.inference_mode()
 def calc_model_accuracy(
-    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook]
+    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook], device: str = "cuda"
 ) -> float:
     """Run the model on the dataset and return the accuracy.
 
@@ -27,6 +28,7 @@ def calc_model_accuracy(
         hooked_model: The model to evaluate.
         dataloader: The dataloader for the dataset.
         hooks: The hooks to use.
+        device: The device to run the model on.
 
     Returns:
         The accuracy of the model on the dataset.
@@ -37,6 +39,7 @@ def calc_model_accuracy(
 
     for batch in dataloader:
         data, labels = batch
+        data, labels = data.to(device), labels.to(device)
         output: Float[Tensor, "batch d_vocab"] = hooked_model(data, hooks=hooks)
 
         # Assuming output is raw logits and labels are class indices.

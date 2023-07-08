@@ -97,6 +97,8 @@ def gram_matrix_hook_fn(
     We add the gram matrix to previously stored data for this hook point.
     This is equivalent to taking the gram matrix of activations concatenated over batches.
 
+    Note that the gram matrix will be stored on the same device as the outputs.
+
     Args:
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module (not used).

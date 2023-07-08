@@ -11,13 +11,5 @@ then
     black --check --diff --line-length 100 $CHANGED_PYTHON_FILES
     isort --check --thirdparty wandb --profile black $CHANGED_PYTHON_FILES
     mypy --ignore-missing-imports $CHANGED_PYTHON_FILES
-
-    # Find all changed python files in the 'tests' directory for this commit
-    CHANGED_TEST_FILES=$(echo "$CHANGED_PYTHON_FILES" | grep '^tests/' || true)
-
-    # If there are any test files, run pytest on them.
-    if [[ -n "$CHANGED_TEST_FILES" ]]
-    then
-        pytest $CHANGED_TEST_FILES
-    fi
+    pytest
 fi

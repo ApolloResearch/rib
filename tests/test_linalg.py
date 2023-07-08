@@ -16,6 +16,7 @@ def test_eigendecompose(descending: bool):
     Args:
         descending: If True, eigenvalues and eigenvectors should be sorted in descending order.
     """
+    torch.manual_seed(0)
     # Generate a random symmetric matrix
     d_hidden = 20
     x = torch.randn(d_hidden, d_hidden)
@@ -49,18 +50,20 @@ def test_calc_rotation_matrix(n_zero_vals, n_ablated_vecs):
 
     Checks if the rotation matrix has the correct dimensions and properties.
 
-    We can validate whether the rotation is done correctly by checking that the transformed
-    eigenvectors (except the ones set to zero) stay the same after the rotation, because a rotation
-    matrix applied to its corresponding eigenvectors should return the eigenvectors themselves.
+    We check that applying the rotation matrix is the same as:
+        1. Rotating some activations acts into the eigenspace
+        2. Zeroing out the last n dimensions of the activations in the eigenspace
+        3. Rotating back into the original space
 
     Args:
         n_zero_vals: Number of zero eigenvalues.
         n_ablated_vecs: Number of eigenvectors to ablate.
     """
+    torch.manual_seed(0)
     n_elements = 2
     d_hidden = 10
-    acts = torch.randn(n_elements, d_hidden).double()
-    gram = acts.T @ acts / n_elements
+    dataset = torch.randn(n_elements, d_hidden).double()
+    gram = dataset.T @ dataset / n_elements
     _, vecs = eigendecompose(gram)
 
     rotation_matrix = calc_rotation_matrix(
@@ -71,19 +74,22 @@ def test_calc_rotation_matrix(n_zero_vals, n_ablated_vecs):
     assert rotation_matrix.shape == (d_hidden, d_hidden)
 
     # Check that the matrix is symmetric (a property of rotation matrices)
-    assert torch.allclose(rotation_matrix, rotation_matrix.T, atol=1e-2)
+    assert torch.allclose(rotation_matrix, rotation_matrix.T, atol=1e-6)
+
+    # Get a new set of activations
+    acts = torch.randn(n_elements, d_hidden).double()
 
     # Transform eigenvectors with the rotation matrix
-    rotated_vecs = vecs @ rotation_matrix
+    rotated_vecs = acts @ rotation_matrix
 
-    # Exclude the last n_ignore vectors
+    # See how this compares with rotating into the eigenspace, zeroing out the last n dimensions,
+    # and rotating back
+    acts_eigenspace = acts @ vecs
     n_ignore = n_ablated_vecs if n_ablated_vecs > 0 else n_zero_vals
     if n_ignore > 0:
-        rotated_vecs = rotated_vecs[:-n_ignore]
-        vecs = vecs[:-n_ignore]
-
-    # Check if rotated vectors (except the ones set to zero) stay the same after the rotation
-    assert torch.allclose(rotated_vecs, vecs, atol=1e-8)
+        acts_eigenspace[:, -n_ignore:] = 0
+    rotated_vecs_2 = acts_eigenspace @ vecs.T
+    assert torch.allclose(rotated_vecs, rotated_vecs_2, atol=1e-6)
 
 
 @pytest.mark.parametrize("zero_threshold,n_ablated_vecs", [(None, 10), (1e-13, 0), (1e-6, 5)])
@@ -93,6 +99,7 @@ def test_calc_eigen_info(zero_threshold, n_ablated_vecs):
     Checks if the function correctly calculates and returns EigenInfo objects for all given hook
     points.
     """
+    torch.manual_seed(0)
     # Mock the hooked model
     hooked_mlp = mock.Mock()
     hooked_mlp.hooked_data = {

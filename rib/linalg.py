@@ -23,8 +23,8 @@ def eigendecompose(
         dtype: The precision in which to perform the eigendecomposition.
             Values below torch.float64 tend to be very unstable.
     Returns:
-        eigenvalues: Eigenvalues of x.
-        eigenvectors: Eigenvectors of x.
+        eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
+        eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
     # We hardcode the dtype to torch.float64 because lower dtypes tend to be very unstable.
     dtype = torch.float64
@@ -57,7 +57,7 @@ def calc_rotation_matrix(
     eigenvalues (as given by `n_zero_vals`).
 
     Args:
-        vecs: Eigenvectors of a matrix.
+        vecs: Matrix whose columns are the eigenvectors of the gram matrix.
         n_zero_vals: Number of zero eigenvalues. If > 0 and n_ablated_vecs == 0, we ignore the
             smallest n_zero_vals eigenvectors.
         n_ablated_vecs: Number of eigenvectors to ablate. If > 0, we ignore the smallest
@@ -77,17 +77,17 @@ def calc_rotation_matrix(
     basis = torch.eye(vecs.shape[0], dtype=vecs.dtype, device=vecs.device)
     basis[vecs.shape[0] - n_ignore :] = 0
 
-    rotation_matrix = vecs.T @ basis @ vecs
+    rotation_matrix = vecs @ basis @ vecs.T
     return rotation_matrix
 
 
 @dataclass
 class EigenInfo:
-    """Eigenvalues, eigenvectors, and number of zero eigenvalues of a matrix.
+    """Eigenvalues, eigenvectors, and number of zero eigenvalues of a gram matrix.
 
     Attributes:
-        vals: Eigenvalues of a matrix.
-        vecs: Eigenvectors of a matrix.
+        vals: Diagonal matrix whose diagonal entries are the eigenvalues of a gram matrix.
+        vecs: Matrix whose columns are the eigenvectors of a gram matrix.
         rotation_matrix: The matrix for rotating onto the orthogonal basis.
     """
 

@@ -15,7 +15,8 @@ The process is as follows:
 Usage:
     python mnist_orthogonal_rotation.py <path_to_config>
 
-This script will take 4 minutes to run on cpu for 2-layer 100-hidden-unit MLPs with two hook points.
+This script will take 4 minutes to run on cpu or gpu for 2-layer 100-hidden-unit MLPs with two hook
+points.
 """
 
 from pathlib import Path
@@ -112,7 +113,7 @@ def plot_accuracies(
 
 
 def ablate_and_test(
-    hooked_mlp: HookedModel, hook_point: str, test_loader: DataLoader, layer_size: int
+    hooked_mlp: HookedModel, hook_point: str, test_loader: DataLoader, layer_size: int, device: str
 ) -> list[float]:
     """Ablate eigenvectors and test the model accuracy.
 
@@ -121,6 +122,7 @@ def ablate_and_test(
         hook_point: The hook point in which to apply the rotations.
         test_loader: The DataLoader for the test data.
         layer_size: The size of the layer at the hook point.
+        device: The device to run the model on.
 
     Returns:
         A list of accuracies for each number of ablated vectors.
@@ -145,7 +147,9 @@ def ablate_and_test(
             hook_kwargs={"rotation_matrix": eigens[hook_point].rotation_matrix},
         )
 
-        accuracy_ablated = calc_model_accuracy(hooked_mlp, test_loader, [rotation_hook])
+        accuracy_ablated = calc_model_accuracy(
+            hooked_mlp, test_loader, hooks=[rotation_hook], device=device
+        )
         accuracies.append(accuracy_ablated)
 
     return accuracies
@@ -160,13 +164,13 @@ def run_ablations(
         model_config_dict: The config dictionary used for training the mlp.
         mlp_path: The path to the saved mlp.
         hook_points: The hook points in which to apply the rotations.
-        plot_dir: The directory to save plots to.
-        mlp_name: The name of the mlp (for plotting).
 
     Returns:
         A dictionary mapping hook points to accuracy results.
     """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, mlp_path)
+    mlp.to(device)
     hooked_mlp = HookedModel(mlp)
 
     gram_hooks = [
@@ -177,7 +181,7 @@ def run_ablations(
         train=False, batch_size=model_config_dict["train"]["batch_size"]
     )
 
-    run_dataset_through_model(hooked_mlp, test_loader, gram_hooks)
+    run_dataset_through_model(hooked_mlp, test_loader, gram_hooks, device=device)
     len_dataset = len(test_loader.dataset)  # type: ignore
 
     results: dict[str, list[float]] = {}
@@ -189,7 +193,9 @@ def run_ablations(
         hook_layer: str = hook_point.split("_")[-1]
         layer_size = get_model_attr(hooked_mlp.model, f"layers.linear_{hook_layer}").weight.size(0)  # type: ignore
 
-        accuracies: list[float] = ablate_and_test(hooked_mlp, hook_point, test_loader, layer_size)
+        accuracies: list[float] = ablate_and_test(
+            hooked_mlp, hook_point, test_loader, layer_size, device=device
+        )
         results[hook_point] = accuracies
 
     return results

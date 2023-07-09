@@ -19,7 +19,7 @@ def run_dataset_through_model(
 
 
 @torch.inference_mode()
-def calc_model_accuracy(
+def eval_model_accuracy(
     hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook], device: str = "cuda"
 ) -> float:
     """Run the model on the dataset and return the accuracy.

@@ -36,7 +36,7 @@ from rib.hooks import Hook, HookedModel, gram_matrix_hook_fn, rotate_and_ablate_
 from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.models import MLP
 from rib.models.utils import get_model_attr
-from rib.utils import calc_model_accuracy, run_dataset_through_model
+from rib.utils import eval_model_accuracy, run_dataset_through_model
 
 
 class Config(BaseModel):
@@ -167,7 +167,7 @@ def ablate_and_test(
             hook_kwargs={"rotation_matrix": rotation_matrix},
         )
 
-        accuracy_ablated = calc_model_accuracy(
+        accuracy_ablated = eval_model_accuracy(
             hooked_mlp, test_loader, hooks=[rotation_hook], device=device
         )
         accuracies.append(accuracy_ablated)

@@ -25,7 +25,7 @@ You may be asked to enter your wandb API key, which you can find it in your [wan
 To evaluate the impact of ablating eigenvectors from the orthogonal basis, define/select a config (see `configs/mnist/mnist_orthogonal_ablation_*.yaml` for examples) and run
 
 ```bash
-python scripts/mnist_orthogonal_rotation.py <path_to_config_file>
+python scripts/mnist_orthogonal_ablation.py <path_to_config_file>
 ```
 
 ## Development

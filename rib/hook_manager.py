@@ -17,27 +17,26 @@ class Hook:
 
 
     Attributes:
-        name: Name of the hook. This is used as the key in the hooked_data dict in HookedModel.
-        hook_fn_name: Name of the hook function to run at the hook point.
-        hook_point: String representing the attribute of the model to add the hook to.
+        data_key: The key used to store data in HookedModel.hookd_data.
+        fn_name: Name of the hook function to run at the hook point.
+        module_name: String representing the attribute of the model to add the hook to.
             Nested attributes are split by periods (e.g. "layers.linear_0").
         kwargs: Additional keyword arguments to pass to the hook function.
     """
 
-    name: str
-    hook_fn_name: str
-    hook_point: str
-    hook_kwargs: dict[str, Any] = field(default_factory=dict)
+    data_key: str
+    fn_name: str
+    module_name: str
+    fn_kwargs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        self.validate_hook_fn_name()
-        self.fn, self.hook_type = HOOK_REGISTRY[self.hook_fn_name]
+        self.validate_fn_name()
+        self.fn, self.hook_type = HOOK_REGISTRY[self.fn_name]
 
-    def validate_hook_fn_name(self):
-        if self.hook_fn_name not in HOOK_REGISTRY:
+    def validate_fn_name(self):
+        if self.fn_name not in HOOK_REGISTRY:
             raise ValueError(
-                f"hook_fn_name must be one of {list(HOOK_REGISTRY.keys())}, "
-                f"but got '{self.hook_fn_name}'"
+                f"fn_name must be one of {list(HOOK_REGISTRY.keys())}, " f"but got '{self.fn_name}'"
             )
 
 
@@ -48,7 +47,7 @@ class HookedModel(torch.nn.Module):
         >>> model = torch.nn.Sequential()
         >>> model.add_module("linear_0", torch.nn.Linear(3, 2))
         >>> hooked_model = HookedModel(model)
-        >>> hook = Hook(name="gram", hook_fn_name="gram_forward_hook_fn", hook_point="linear_0")
+        >>> hook = Hook(data_key="gram", fn_name="gram_forward_hook_fn", module_name="linear_0")
         >>> hooked_model(torch.randn(6, 3), hooks=[hook])
         >>> hooked_model.hooked_data["linear_0"]["gram"]
         tensor([[ 1.2023, -0.0311],
@@ -77,13 +76,13 @@ class HookedModel(torch.nn.Module):
     def add_hooks(self, hooks: list[Hook]) -> None:
         """Add a hook to the model at each of the specified hook points."""
         for hook in hooks:
-            hook_module = get_model_attr(self.model, hook.hook_point)
+            hook_module = get_model_attr(self.model, hook.module_name)
             hook_fn_partial = partial(
                 hook.fn,
                 hooked_data=self.hooked_data,
-                hook_point=hook.hook_point,
-                hook_name=hook.name,
-                **hook.hook_kwargs,
+                module_name=hook.module_name,
+                data_key=hook.data_key,
+                **hook.fn_kwargs,
             )
             if hook.hook_type == "forward":
                 handle = hook_module.register_forward_hook(hook_fn_partial)

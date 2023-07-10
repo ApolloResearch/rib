@@ -21,7 +21,7 @@ class Hook:
         fn_name: Name of the hook function to run at the hook point.
         module_name: String representing the attribute of the model to add the hook to.
             Nested attributes are split by periods (e.g. "layers.linear_0").
-        kwargs: Additional keyword arguments to pass to the hook function.
+        fn_kwargs: Additional keyword arguments to pass to the hook function.
     """
 
     data_key: str

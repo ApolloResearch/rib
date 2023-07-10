@@ -85,14 +85,6 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def scale_gram_matrices(hooked_mlp: HookedModel, module_names: list[str], num_samples: int) -> None:
-    """Divide the gram matrices by the number of samples."""
-    for module_name in module_names:
-        hooked_mlp.hooked_data[module_name]["gram"] = (
-            hooked_mlp.hooked_data[module_name]["gram"] / num_samples
-        )
-
-
 def plot_accuracies(
     hook_names: list[str],
     results: dict[str, list[float]],
@@ -212,6 +204,7 @@ def run_ablations(
 
     results: dict[str, list[float]] = {}
     for hook_config in hook_configs:
+        # Scale the gram matrix by the number of samples in the dataset.
         hooked_mlp.hooked_data[hook_config.module_name]["gram"] = (
             hooked_mlp.hooked_data[hook_config.module_name]["gram"] / len_dataset
         )

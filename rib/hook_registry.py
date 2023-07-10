@@ -5,7 +5,7 @@ from jaxtyping import Float
 from torch import Tensor
 
 
-def update_hooked_data(
+def update_gram_data(
     hooked_data: dict[str, Any],
     module_name: str,
     data_key: str,
@@ -52,7 +52,7 @@ def gram_forward_hook_fn(
     """
     gram_matrix = output.T @ output
 
-    update_hooked_data(hooked_data, module_name, data_key, gram_matrix)
+    update_gram_data(hooked_data, module_name, data_key, gram_matrix)
 
 
 def gram_pre_forward_hook_fn(
@@ -75,7 +75,7 @@ def gram_pre_forward_hook_fn(
     """
     gram_matrix = inputs[0].T @ inputs[0]
 
-    update_hooked_data(hooked_data, module_name, data_key, gram_matrix)
+    update_gram_data(hooked_data, module_name, data_key, gram_matrix)
 
 
 def rotate_forward_hook_fn(

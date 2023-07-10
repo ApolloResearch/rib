@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import torch
 from jaxtyping import Float
 from torch import Tensor
@@ -8,7 +6,7 @@ from torch import Tensor
 def eigendecompose(
     x: Float[Tensor, "d_hidden d_hidden"],
     descending: bool = True,
-) -> Tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
+) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """Calculate eigenvalues and eigenvectors of a real symmetric matrix.
 
     Note that we hardcode the dtype to torch.float64 because lower dtypes tend to be very unstable.

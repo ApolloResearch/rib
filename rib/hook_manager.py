@@ -1,11 +1,10 @@
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
-from jaxtyping import Float
-from torch import Tensor
 
+from rib.hook_registry import HOOK_REGISTRY
 from rib.models.utils import get_model_attr
 
 
@@ -13,18 +12,31 @@ from rib.models.utils import get_model_attr
 class Hook:
     """Defines a hook object that can be added to a model.
 
+    After initialization, the hook function is stored in the fn attribute.
+
     Attributes:
         name: Name of the hook. This is used as the key in the hooked_data dict in HookedModel.
-        fn: Function to run at the hook point.
+        hook_fn_name: Name of the hook function to run at the hook point.
         hook_point: String representing the attribute of the model to add the hook to.
             Nested attributes are split by periods (e.g. "layers.linear_0").
         kwargs: Additional keyword arguments to pass to the hook function.
     """
 
     name: str
-    fn: Callable
+    hook_fn_name: str
     hook_point: str
     hook_kwargs: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.validate_hook_fn_name()
+        self.fn = HOOK_REGISTRY[self.hook_fn_name]
+
+    def validate_hook_fn_name(self):
+        if self.hook_fn_name not in HOOK_REGISTRY:
+            raise ValueError(
+                f"hook_fn_name must be one of {list(HOOK_REGISTRY.keys())}, "
+                f"but got '{self.hook_fn_name}'"
+            )
 
 
 class HookedModel(torch.nn.Module):
@@ -80,62 +92,3 @@ class HookedModel(torch.nn.Module):
         """Remove all hooks from the model."""
         for handle in self.hook_handles:
             handle.remove()
-
-
-@torch.inference_mode()
-def gram_matrix_hook_fn(
-    module: torch.nn.Module,
-    inputs: Float[Tensor, "batch d_hidden"],
-    outputs: Float[Tensor, "batch d_hidden"],
-    hooked_data: dict[str, Any],
-    hook_point: str,
-    hook_name: str,
-    **_: Any,
-) -> None:
-    """Hook function for calculating gram matrix.
-
-    We add the gram matrix to previously stored data for this hook point.
-    This is equivalent to taking the gram matrix of activations concatenated over batches.
-
-    Note that the gram matrix will be stored on the same device as the outputs.
-
-    Args:
-        module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module (not used).
-        outputs: Outputs of the module.
-        hooked_data: Dictionary of hook data.
-        hook_point: Model attribute that the hook is attached to. Used as a first-level key in
-            `hooked_data`.
-        hook_name: Name of the hook, used as a second-level key in `hooked_data`.
-        **_: Additional keyword arguments (not used).
-    """
-    gram_matrix = outputs.T @ outputs
-
-    # If no data exists, initialize with zeros
-    hooked_data.setdefault(hook_point, {}).setdefault(hook_name, torch.zeros_like(gram_matrix))
-    # Add gram matrix to data
-    hooked_data[hook_point][hook_name] += gram_matrix
-
-
-def rotate_and_ablate_hook_fn(
-    module: torch.nn.Module,
-    inputs: Float[Tensor, "batch d_hidden"],
-    outputs: Float[Tensor, "batch d_hidden"],
-    rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
-    **_: Any,
-) -> Float[Tensor, "batch d_hidden"]:
-    """Hook function for rotating activations.
-
-    The output activations are rotated by the specified rotation matrix.
-
-    Args:
-        module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module (not used).
-        outputs: Outputs of the module.
-        rotation_matrix: Rotation matrix to apply to the activations.
-        **_: Additional keyword arguments (not used).
-
-    Returns:
-        Rotated activations.
-    """
-    return outputs @ rotation_matrix.T.float()

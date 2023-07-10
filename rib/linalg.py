@@ -1,11 +1,8 @@
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 import torch
 from jaxtyping import Float
 from torch import Tensor
-
-from rib.hooks import HookedModel
 
 
 def eigendecompose(

@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
 
-from rib.hooks import Hook, HookedModel, gram_matrix_hook_fn, rotate_and_ablate_hook_fn
+from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.models import MLP
 from rib.models.utils import get_model_attr
@@ -162,7 +162,7 @@ def ablate_and_test(
         rotation_matrix = calc_rotation_matrix(eigenvecs, n_ablated_vecs=n_ablated_vecs)
         rotation_hook = Hook(
             name="rotation",
-            fn=rotate_and_ablate_hook_fn,
+            hook_fn_name="rotate_and_ablate_hook_fn",
             hook_point=hook_point,
             hook_kwargs={"rotation_matrix": rotation_matrix},
         )
@@ -194,7 +194,7 @@ def run_ablations(
     hooked_mlp = HookedModel(mlp)
 
     gram_hooks = [
-        Hook(name="gram", fn=gram_matrix_hook_fn, hook_point=hook_point)
+        Hook(name="gram", hook_fn_name="gram_matrix_hook_fn", hook_point=hook_point)
         for hook_point in hook_points
     ]
     test_loader = load_mnist_dataloader(

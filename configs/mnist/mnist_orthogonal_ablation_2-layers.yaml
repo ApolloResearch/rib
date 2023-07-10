@@ -1,5 +1,11 @@
 mlp_name: 2-layers
 mlp_path: "/mnt/ssd-apollo/checkpoints/MNIST/lr-0.001_bs-64_2023-07-07_17-14-56/model_epoch_12.pt"
-hook_points:
-  - layers.act_0
-  - layers.act_1
+hook_configs:
+  - hook_name: act_layer_0
+    module_name: layers.act_0
+    hook_type: forward
+    layer_size: 100
+  - hook_name: act_layer_1
+    module_name: layers.act_1
+    hook_type: forward
+    layer_size: 100

@@ -31,18 +31,25 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
+from typing_extensions import Literal
 
-from rib.hooks import Hook, HookedModel, gram_matrix_hook_fn, rotate_and_ablate_hook_fn
+from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.models import MLP
-from rib.models.utils import get_model_attr
 from rib.utils import eval_model_accuracy, run_dataset_through_model
+
+
+class HookConfig(BaseModel):
+    hook_name: str
+    module_name: str  # The module to hook into
+    hook_type: Literal["forward", "pre_forward"]
+    layer_size: int  # The size of the data at the hook point
 
 
 class Config(BaseModel):
     mlp_name: str
     mlp_path: Path
-    hook_points: list[str]
+    hook_configs: list[HookConfig]
 
 
 def load_config(config_path: Path) -> Config:
@@ -78,16 +85,8 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def scale_gram_matrices(hooked_mlp: HookedModel, hook_points: list[str], num_samples: int) -> None:
-    """Divide the gram matrices by the number of samples."""
-    for hook_point in hook_points:
-        hooked_mlp.hooked_data[hook_point]["gram"] = (
-            hooked_mlp.hooked_data[hook_point]["gram"] / num_samples
-        )
-
-
 def plot_accuracies(
-    hook_points: list[str],
+    hook_names: list[str],
     results: dict[str, list[float]],
     plot_dir: Path,
     mlp_name: str,
@@ -95,28 +94,23 @@ def plot_accuracies(
     """Plot accuracies for all hook points.
 
     Args:
-        hook_points: The hook points.
+        hook_names: The names of the hook points.
         results: A dictionary mapping hook points to accuracy results.
         plot_dir: The directory where the plots should be saved.
         mlp_name: The name of the mlp
     """
     plot_dir.mkdir(parents=True, exist_ok=True)
-    n_plots = len(hook_points)
+    n_plots = len(hook_names)
     _, axs = plt.subplots(n_plots, 1, figsize=(15, 4 * n_plots), dpi=140)
 
     if n_plots == 1:
         axs = [axs]
 
-    for i, hook_point in enumerate(hook_points):
-        # hook_point is of the format "layers.linear_0"
-        layer_name = hook_point.split(".", 1)[1]
+    for i, hook_name in enumerate(hook_names):
+        x_values = [len(results[hook_name]) - i for i in range(len(results[hook_name]))]
+        axs[i].plot(x_values, results[hook_name], label="MNIST test")
 
-        x_values = [len(results[hook_point]) - i for i in range(len(results[hook_point]))]
-        axs[i].plot(x_values, results[hook_point], label="MNIST test")
-
-        axs[i].set_title(
-            f"{mlp_name}-MLP MNIST acc vs n_remaining_eigenvalues for layer: {layer_name}"
-        )
+        axs[i].set_title(f"{mlp_name}-MLP MNIST acc vs n_remaining_eigenvalues for: {hook_name}")
         axs[i].set_xlabel("Number of remaining eigenvalues")
         axs[i].set_ylabel("Accuracy")
         axs[i].set_ylim(0, 1)
@@ -131,7 +125,7 @@ def plot_accuracies(
 
 def ablate_and_test(
     hooked_mlp: HookedModel,
-    hook_point: str,
+    hook_config: HookConfig,
     test_loader: DataLoader,
     eigenvecs: Float[Tensor, "d_hidden d_hidden"],
     device: str,
@@ -140,7 +134,7 @@ def ablate_and_test(
 
     Args:
         hooked_mlp: The hooked model.
-        hook_point: The hook point in which to apply the rotations.
+        hook_config: The config for the hook point.
         test_loader: The DataLoader for the test data.
         eigenvecs: A matrix whose columns are the eigenvectors of the gram matrix.
         device: The device to run the model on.
@@ -148,23 +142,23 @@ def ablate_and_test(
     Returns:
         A list of accuracies for each number of ablated vectors.
     """
+    assert hook_config.hook_type in ["forward", "pre_forward"]
+    rotate_hook_fn_name = "rotate_" + hook_config.hook_type + "_hook_fn"
+
     accuracies: list[float] = []
 
-    # TODO: Find more principled way to get layer size.
-    hook_layer: str = hook_point.split("_")[-1]
-    layer_size = get_model_attr(hooked_mlp.model, f"layers.linear_{hook_layer}").weight.size(
-        0
-    )  # type: ignore
     # Iterate through possible number of ablated vectors.
     for n_ablated_vecs in tqdm(
-        range(layer_size + 1), total=len(range(layer_size + 1)), desc=f"Ablating {hook_point}"
+        range(hook_config.layer_size + 1),
+        total=len(range(hook_config.layer_size + 1)),
+        desc=f"Ablating {hook_config.module_name}",
     ):
         rotation_matrix = calc_rotation_matrix(eigenvecs, n_ablated_vecs=n_ablated_vecs)
         rotation_hook = Hook(
-            name="rotation",
-            fn=rotate_and_ablate_hook_fn,
-            hook_point=hook_point,
-            hook_kwargs={"rotation_matrix": rotation_matrix},
+            data_key="rotation",
+            fn_name=rotate_hook_fn_name,
+            module_name=hook_config.module_name,
+            fn_kwargs={"rotation_matrix": rotation_matrix},
         )
 
         accuracy_ablated = eval_model_accuracy(
@@ -176,14 +170,14 @@ def ablate_and_test(
 
 
 def run_ablations(
-    model_config_dict: dict, mlp_path: Path, hook_points: list[str]
+    model_config_dict: dict, mlp_path: Path, hook_configs: list[HookConfig]
 ) -> dict[str, list[float]]:
     """Rotate to and from orthogonal basis and compare accuracies with and without ablation.
 
     Args:
         model_config_dict: The config dictionary used for training the mlp.
         mlp_path: The path to the saved mlp.
-        hook_points: The hook points in which to apply the rotations.
+        hook_configs: Information about the hook points.
 
     Returns:
         A dictionary mapping hook points to accuracy results.
@@ -193,10 +187,14 @@ def run_ablations(
     mlp.to(device)
     hooked_mlp = HookedModel(mlp)
 
-    gram_hooks = [
-        Hook(name="gram", fn=gram_matrix_hook_fn, hook_point=hook_point)
-        for hook_point in hook_points
-    ]
+    gram_hooks: list[Hook] = []
+    for hook_config in hook_configs:
+        assert hook_config.hook_type in ["forward", "pre_forward"]
+        gram_hook_fn_name = f"gram_{hook_config.hook_type}_hook_fn"
+        gram_hooks.append(
+            Hook(data_key="gram", fn_name=gram_hook_fn_name, module_name=hook_config.module_name)
+        )
+
     test_loader = load_mnist_dataloader(
         train=False, batch_size=model_config_dict["train"]["batch_size"]
     )
@@ -205,15 +203,20 @@ def run_ablations(
     len_dataset = len(test_loader.dataset)  # type: ignore
 
     results: dict[str, list[float]] = {}
-    for hook_point in hook_points:
-        hooked_mlp.hooked_data[hook_point]["gram"] = (
-            hooked_mlp.hooked_data[hook_point]["gram"] / len_dataset
+    for hook_config in hook_configs:
+        # Scale the gram matrix by the number of samples in the dataset.
+        hooked_mlp.hooked_data[hook_config.module_name]["gram"] = (
+            hooked_mlp.hooked_data[hook_config.module_name]["gram"] / len_dataset
         )
-        _, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_point]["gram"])
+        _, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_config.module_name]["gram"])
         accuracies: list[float] = ablate_and_test(
-            hooked_mlp, hook_point, test_loader, eigenvecs, device=device
+            hooked_mlp=hooked_mlp,
+            hook_config=hook_config,
+            test_loader=test_loader,
+            eigenvecs=eigenvecs,
+            device=device,
         )
-        results[hook_point] = accuracies
+        results[hook_config.hook_name] = accuracies
 
     return results
 
@@ -230,10 +233,13 @@ def main(config_path_str: str) -> None:
     results = run_ablations(
         model_config_dict=model_config_dict,
         mlp_path=config.mlp_path,
-        hook_points=config.hook_points,
+        hook_configs=config.hook_configs,
     )
     plot_accuracies(
-        hook_points=config.hook_points, results=results, plot_dir=plot_dir, mlp_name=config.mlp_name
+        hook_names=[cfg.hook_name for cfg in config.hook_configs],
+        results=results,
+        plot_dir=plot_dir,
+        mlp_name=config.mlp_name,
     )
 
 

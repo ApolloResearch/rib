@@ -3,7 +3,7 @@ from jaxtyping import Float
 from torch import Tensor
 from torch.utils.data import DataLoader
 
-from rib.hooks import Hook, HookedModel
+from rib.hook_manager import Hook, HookedModel
 
 
 @torch.inference_mode()

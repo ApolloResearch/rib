@@ -35,13 +35,13 @@ jobs:
         pip install ".[dev]"
     - name: Check with Black
       run: |
-        black --check --diff --line-length 100 rib scripts tests
+        black --check --diff --line-length 100 rib experiments tests
     - name: Check with isort
       run: |
-        isort --check --thirdparty wandb --profile black rib scripts tests
+        isort --check --thirdparty wandb --profile black rib experiments tests
     - name: Check with mypy
       run: |
-        mypy rib scripts
+        mypy rib experiments
     - name: Run tests
       run: |
-        pytest tests
+        pytest

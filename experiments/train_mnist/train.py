@@ -21,6 +21,7 @@ from tqdm import tqdm
 from rib.log import logger
 from rib.models import MLP
 from rib.models.utils import save_model
+from rib.utils import REPO_ROOT
 
 
 class ModelConfig(BaseModel):
@@ -70,12 +71,12 @@ def train(config: Config) -> None:
     logger.info("Using device: %s", device)
 
     if not config.train.save_dir:
-        config.train.save_dir = Path(__file__).parent.parent / ".checkpoints" / "mnist"
+        config.train.save_dir = Path(__file__).parent / ".checkpoints" / "mnist"
 
     # Load the MNIST dataset
     transform = transforms.ToTensor()
     train_data = datasets.MNIST(
-        root=Path(__file__).parent.parent / ".data", train=True, download=True, transform=transform
+        root=REPO_ROOT / ".data", train=True, download=True, transform=transform
     )
     train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=True)
 

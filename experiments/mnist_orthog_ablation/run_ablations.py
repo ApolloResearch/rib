@@ -13,16 +13,16 @@ The process is as follows:
     5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies.
 
 Usage:
-    python mnist_orthogonal_ablation.py <path_to_config>
+    python run_ablations.py <path/to/yaml_config_file>
 
 This script will take 4 minutes to run on cpu or gpu for 2-layer 100-hidden-unit MLPs with two hook
 points.
 """
 
+import json
 from pathlib import Path
 
 import fire
-import matplotlib.pyplot as plt
 import torch
 import yaml
 from jaxtyping import Float
@@ -35,8 +35,9 @@ from typing_extensions import Literal
 
 from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix, eigendecompose
+from rib.log import logger
 from rib.models import MLP
-from rib.utils import eval_model_accuracy, run_dataset_through_model
+from rib.utils import REPO_ROOT, eval_model_accuracy, run_dataset_through_model
 
 
 class HookConfig(BaseModel):
@@ -79,48 +80,10 @@ def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
 def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
     transform = transforms.ToTensor()
     test_data = datasets.MNIST(
-        root=Path(__file__).parent.parent / ".data", train=train, download=True, transform=transform
+        root=REPO_ROOT / ".data", train=train, download=True, transform=transform
     )
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
     return test_loader
-
-
-def plot_accuracies(
-    hook_names: list[str],
-    results: dict[str, list[float]],
-    plot_dir: Path,
-    mlp_name: str,
-) -> None:
-    """Plot accuracies for all hook points.
-
-    Args:
-        hook_names: The names of the hook points.
-        results: A dictionary mapping hook points to accuracy results.
-        plot_dir: The directory where the plots should be saved.
-        mlp_name: The name of the mlp
-    """
-    plot_dir.mkdir(parents=True, exist_ok=True)
-    n_plots = len(hook_names)
-    _, axs = plt.subplots(n_plots, 1, figsize=(15, 4 * n_plots), dpi=140)
-
-    if n_plots == 1:
-        axs = [axs]
-
-    for i, hook_name in enumerate(hook_names):
-        x_values = [len(results[hook_name]) - i for i in range(len(results[hook_name]))]
-        axs[i].plot(x_values, results[hook_name], label="MNIST test")
-
-        axs[i].set_title(f"{mlp_name}-MLP MNIST acc vs n_remaining_eigenvalues for: {hook_name}")
-        axs[i].set_xlabel("Number of remaining eigenvalues")
-        axs[i].set_ylabel("Accuracy")
-        axs[i].set_ylim(0, 1)
-        axs[i].grid(True)
-        axs[i].legend()
-
-    filename = f"{mlp_name}_accuracy_vs_orthogonal_ablation.png"
-    plt.savefig(plot_dir / filename)
-
-    plt.clf()
 
 
 def ablate_and_test(
@@ -155,6 +118,7 @@ def ablate_and_test(
     ):
         rotation_matrix = calc_rotation_matrix(eigenvecs, n_ablated_vecs=n_ablated_vecs)
         rotation_hook = Hook(
+            name=hook_config.hook_name,
             data_key="rotation",
             fn_name=rotate_hook_fn_name,
             module_name=hook_config.module_name,
@@ -192,7 +156,12 @@ def run_ablations(
         assert hook_config.hook_type in ["forward", "pre_forward"]
         gram_hook_fn_name = f"gram_{hook_config.hook_type}_hook_fn"
         gram_hooks.append(
-            Hook(data_key="gram", fn_name=gram_hook_fn_name, module_name=hook_config.module_name)
+            Hook(
+                name=hook_config.hook_name,
+                data_key="gram",
+                fn_name=gram_hook_fn_name,
+                module_name=hook_config.module_name,
+            )
         )
 
     test_loader = load_mnist_dataloader(
@@ -205,10 +174,10 @@ def run_ablations(
     results: dict[str, list[float]] = {}
     for hook_config in hook_configs:
         # Scale the gram matrix by the number of samples in the dataset.
-        hooked_mlp.hooked_data[hook_config.module_name]["gram"] = (
-            hooked_mlp.hooked_data[hook_config.module_name]["gram"] / len_dataset
+        hooked_mlp.hooked_data[hook_config.hook_name]["gram"] = (
+            hooked_mlp.hooked_data[hook_config.hook_name]["gram"] / len_dataset
         )
-        _, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_config.module_name]["gram"])
+        _, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_config.hook_name]["gram"])
         accuracies: list[float] = ablate_and_test(
             hooked_mlp=hooked_mlp,
             hook_config=hook_config,
@@ -228,19 +197,25 @@ def main(config_path_str: str) -> None:
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)
 
-    plot_dir = Path(__file__).parent.parent / "plots" / "mnist"
+    out_file = Path(__file__).parent / "out" / f"{config.mlp_name}_ablation_results.json"
+    if out_file.exists():
+        logger.error(f"Output file {out_file} already exists. Exiting.")
+        return
 
-    results = run_ablations(
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    accuracies: dict[str, list[float]] = run_ablations(
         model_config_dict=model_config_dict,
         mlp_path=config.mlp_path,
         hook_configs=config.hook_configs,
     )
-    plot_accuracies(
-        hook_names=[cfg.hook_name for cfg in config.hook_configs],
-        results=results,
-        plot_dir=plot_dir,
-        mlp_name=config.mlp_name,
-    )
+    results = {
+        "mlp_name": config.mlp_name,
+        "accuracies": accuracies,
+    }
+    with open(out_file, "w") as f:
+        json.dump(results, f)
+    logger.info(f"Saved results to {out_file}")
 
 
 if __name__ == "__main__":

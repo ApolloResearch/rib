@@ -7,7 +7,7 @@ from torch import Tensor
 
 def update_gram_data(
     hooked_data: dict[str, Any],
-    module_name: str,
+    hook_name: str,
     data_key: str,
     gram_matrix: Float[Tensor, "d_hidden d_hidden"],
 ) -> None:
@@ -20,13 +20,13 @@ def update_gram_data(
 
     Args:
         hooked_data: Dictionary of hook data that will be updated.
-        module_name: Module the hook is attached to. Used as a first-level key in `hooked_data`.
+        hook_name: Name of hook. Used as a first-level key in `hooked_data`.
         data_key: Name of the hook, used as a second-level key in `hooked_data`.
         gram_matrix: Gram matrix to add to the hooked data.
     """
     # If no data exists, initialize with zeros
-    hooked_data.setdefault(module_name, {}).setdefault(data_key, torch.zeros_like(gram_matrix))
-    hooked_data[module_name][data_key] += gram_matrix
+    hooked_data.setdefault(hook_name, {}).setdefault(data_key, torch.zeros_like(gram_matrix))
+    hooked_data[hook_name][data_key] += gram_matrix
 
 
 @torch.inference_mode()
@@ -35,7 +35,7 @@ def gram_forward_hook_fn(
     inputs: tuple[Float[Tensor, "batch d_hidden"]],
     output: Float[Tensor, "batch d_hidden"],
     hooked_data: dict[str, Any],
-    module_name: str,
+    hook_name: str,
     data_key: str,
     **_: Any,
 ) -> None:
@@ -46,20 +46,20 @@ def gram_forward_hook_fn(
         inputs: Inputs to the module (not used).
         output: output of the module.
         hooked_data: Dictionary of hook data.
-        module_name: Model attribute that the hook is attached to.
+        hook_name: Name of hook.
         data_key: Name of the hook.
         **_: Additional keyword arguments (not used).
     """
     gram_matrix = output.T @ output
 
-    update_gram_data(hooked_data, module_name, data_key, gram_matrix)
+    update_gram_data(hooked_data, hook_name, data_key, gram_matrix)
 
 
 def gram_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: tuple[Float[Tensor, "batch d_hidden"]],
     hooked_data: dict[str, Any],
-    module_name: str,
+    hook_name: str,
     data_key: str,
     **_: Any,
 ) -> None:
@@ -69,13 +69,13 @@ def gram_pre_forward_hook_fn(
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module.
         hooked_data: Dictionary of hook data.
-        module_name: Model attribute that the hook is attached to.
+        hook_name: Name of hook.
         data_key: Name of the hook.
         **_: Additional keyword arguments (not used).
     """
     gram_matrix = inputs[0].T @ inputs[0]
 
-    update_gram_data(hooked_data, module_name, data_key, gram_matrix)
+    update_gram_data(hooked_data, hook_name, data_key, gram_matrix)
 
 
 def rotate_forward_hook_fn(

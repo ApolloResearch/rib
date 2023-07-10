@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 
 
 def plot_accuracies(
-    hook_names: list[str],
     accuracies: dict[str, list[float]],
     plot_file: Path,
     mlp_name: str,
@@ -21,11 +20,11 @@ def plot_accuracies(
     """Plot accuracies for all hook points.
 
     Args:
-        hook_names: The names of the hook points.
         accuracies: A dictionary mapping hook names to accuracy results.
         plot_file: The file to save the plot to.
         mlp_name: The name of the mlp.
     """
+    hook_names = list(accuracies.keys())
     n_plots = len(hook_names)
     _, axs = plt.subplots(n_plots, 1, figsize=(15, 4 * n_plots), dpi=140)
 
@@ -64,7 +63,6 @@ def main(results_file: str) -> None:
         return
 
     plot_accuracies(
-        hook_names=results["hook_names"],
         accuracies=results["accuracies"],
         plot_file=plot_file,
         mlp_name=results["mlp_name"],

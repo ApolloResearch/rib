@@ -19,9 +19,7 @@ This script will take 4 minutes to run on cpu or gpu for 2-layer 100-hidden-unit
 points.
 """
 
-import dataclasses
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 import fire
@@ -53,13 +51,6 @@ class Config(BaseModel):
     mlp_name: str
     mlp_path: Path
     hook_configs: list[HookConfig]
-
-
-@dataclass
-class Results:
-    mlp_name: str
-    hook_names: list[str]
-    accuracies: dict[str, list[float]]  # module_name -> list of accuracies
 
 
 def load_config(config_path: Path) -> Config:
@@ -127,6 +118,7 @@ def ablate_and_test(
     ):
         rotation_matrix = calc_rotation_matrix(eigenvecs, n_ablated_vecs=n_ablated_vecs)
         rotation_hook = Hook(
+            name=hook_config.hook_name,
             data_key="rotation",
             fn_name=rotate_hook_fn_name,
             module_name=hook_config.module_name,
@@ -164,7 +156,12 @@ def run_ablations(
         assert hook_config.hook_type in ["forward", "pre_forward"]
         gram_hook_fn_name = f"gram_{hook_config.hook_type}_hook_fn"
         gram_hooks.append(
-            Hook(data_key="gram", fn_name=gram_hook_fn_name, module_name=hook_config.module_name)
+            Hook(
+                name=hook_config.hook_name,
+                data_key="gram",
+                fn_name=gram_hook_fn_name,
+                module_name=hook_config.module_name,
+            )
         )
 
     test_loader = load_mnist_dataloader(
@@ -177,10 +174,10 @@ def run_ablations(
     results: dict[str, list[float]] = {}
     for hook_config in hook_configs:
         # Scale the gram matrix by the number of samples in the dataset.
-        hooked_mlp.hooked_data[hook_config.module_name]["gram"] = (
-            hooked_mlp.hooked_data[hook_config.module_name]["gram"] / len_dataset
+        hooked_mlp.hooked_data[hook_config.hook_name]["gram"] = (
+            hooked_mlp.hooked_data[hook_config.hook_name]["gram"] / len_dataset
         )
-        _, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_config.module_name]["gram"])
+        _, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_config.hook_name]["gram"])
         accuracies: list[float] = ablate_and_test(
             hooked_mlp=hooked_mlp,
             hook_config=hook_config,
@@ -212,13 +209,13 @@ def main(config_path_str: str) -> None:
         mlp_path=config.mlp_path,
         hook_configs=config.hook_configs,
     )
-    results = Results(
-        mlp_name=config.mlp_name,
-        hook_names=[hook_config.hook_name for hook_config in config.hook_configs],
-        accuracies=accuracies,
-    )
+    results = {
+        "mlp_name": config.mlp_name,
+        "accuracies": accuracies,
+    }
     with open(out_file, "w") as f:
-        json.dump(dataclasses.asdict(results), f)
+        json.dump(results, f)
+    logger.info(f"Saved results to {out_file}")
 
 
 if __name__ == "__main__":

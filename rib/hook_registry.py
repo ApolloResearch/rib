@@ -61,7 +61,7 @@ def rotate_forward_hook_fn(
     Returns:
         Rotated activations.
     """
-    return outputs @ rotation_matrix.T.float()
+    return outputs @ rotation_matrix.float()
 
 
 HOOK_REGISTRY = {

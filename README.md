@@ -1,6 +1,6 @@
 # rib
 
-Library containing methods related to Rotation into the Interaction Basis.
+This repository contains the core functionality and experiments related to Rotation into the Interaction Basis.
 
 ## Installation
 
@@ -12,21 +12,33 @@ pip install -e .
 
 ## Usage
 
-### MNIST
-
-To train an MLP on MNIST, define/select a config file (see `configs/mnist/train_mnist_*.yaml` for examples) and run
-
-```bash
-python scripts/train_mnist.py <path_to_config_file>
-```
+The core functionality of RIB is contained in the `rib` package. Experiments that use RIB are
+contained in the experiments directory, with the directory encapsulating related files such as
+configs, scripts, and outputs.
 
 You may be asked to enter your wandb API key, which you can find it in your [wandb account settings](https://wandb.ai/settings). Alternatively, you can set the environment variable `WANDB_API_KEY` to your API key.
 
-To evaluate the impact of ablating eigenvectors from the orthogonal basis, define/select a config (see `configs/mnist/mnist_orthogonal_ablation_*.yaml` for examples) and run
+### MNIST
+
+To train an MLP on MNIST, define/select a config file (see `experiments/train_mnist/*.yaml` for examples) and run
 
 ```bash
-python scripts/mnist_orthogonal_ablation.py <path_to_config_file>
+python experiments/train_mnist/train.py <path_to_config_file>
 ```
+
+To evaluate the impact of ablating eigenvectors from the orthogonal basis, define/select a config (see `experiments/mnist_orthog_ablation/*yaml` for examples) and run
+
+```bash
+python experiments/mnist_orthog_ablation/run_ablations.py <path_to_config_file>
+```
+
+and then
+
+```bash
+python experiments/mnist_orthog_ablation/plot_ablations.py <path_to_results_file>
+```
+
+to plot the results.
 
 ## Development
 

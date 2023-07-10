@@ -17,6 +17,8 @@ class Hook:
 
 
     Attributes:
+        name: Name of the hook. This is useful for identifying hooks when two hooks have the
+            same module_name (e.g. a forward and pre_forward hook).
         data_key: The key used to store data in HookedModel.hookd_data.
         fn_name: Name of the hook function to run at the hook point.
         module_name: String representing the attribute of the model to add the hook to.
@@ -24,6 +26,7 @@ class Hook:
         fn_kwargs: Additional keyword arguments to pass to the hook function.
     """
 
+    name: str
     data_key: str
     fn_name: str
     module_name: str
@@ -36,7 +39,7 @@ class Hook:
     def validate_fn_name(self):
         if self.fn_name not in HOOK_REGISTRY:
             raise ValueError(
-                f"fn_name must be one of {list(HOOK_REGISTRY.keys())}, " f"but got '{self.fn_name}'"
+                f"fn_name must be one of {list(HOOK_REGISTRY.keys())}, got {self.fn_name}"
             )
 
 
@@ -47,7 +50,8 @@ class HookedModel(torch.nn.Module):
         >>> model = torch.nn.Sequential()
         >>> model.add_module("linear_0", torch.nn.Linear(3, 2))
         >>> hooked_model = HookedModel(model)
-        >>> hook = Hook(data_key="gram", fn_name="gram_forward_hook_fn", module_name="linear_0")
+        >>> hook = Hook(name="forward_linear_0", data_key="gram", fn_name="gram_forward_hook_fn",
+            module_name="linear_0")
         >>> hooked_model(torch.randn(6, 3), hooks=[hook])
         >>> hooked_model.hooked_data["linear_0"]["gram"]
         tensor([[ 1.2023, -0.0311],
@@ -80,7 +84,7 @@ class HookedModel(torch.nn.Module):
             hook_fn_partial = partial(
                 hook.fn,
                 hooked_data=self.hooked_data,
-                module_name=hook.module_name,
+                hook_name=hook.name,
                 data_key=hook.data_key,
                 **hook.fn_kwargs,
             )

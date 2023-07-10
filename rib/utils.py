@@ -1,9 +1,13 @@
+from pathlib import Path
+
 import torch
 from jaxtyping import Float
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.hook_manager import Hook, HookedModel
+
+REPO_ROOT = Path(__file__).parent.parent
 
 
 @torch.inference_mode()

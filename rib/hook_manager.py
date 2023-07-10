@@ -12,7 +12,9 @@ from rib.models.utils import get_model_attr
 class Hook:
     """Defines a hook object that can be added to a model.
 
-    After initialization, the hook function is stored in the fn attribute.
+    After initialization, the hook function and type are stored in the fn and hook_type attributes,
+    respectively.
+
 
     Attributes:
         name: Name of the hook. This is used as the key in the hooked_data dict in HookedModel.
@@ -29,7 +31,7 @@ class Hook:
 
     def __post_init__(self):
         self.validate_hook_fn_name()
-        self.fn = HOOK_REGISTRY[self.hook_fn_name]
+        self.fn, self.hook_type = HOOK_REGISTRY[self.hook_fn_name]
 
     def validate_hook_fn_name(self):
         if self.hook_fn_name not in HOOK_REGISTRY:
@@ -42,13 +44,11 @@ class Hook:
 class HookedModel(torch.nn.Module):
     """A wrapper around a PyTorch model that allows hooks to be added and removed.
 
-    TODO: Handle backward hooks.
-
     Example:
         >>> model = torch.nn.Sequential()
         >>> model.add_module("linear_0", torch.nn.Linear(3, 2))
         >>> hooked_model = HookedModel(model)
-        >>> hook = Hook(name="gram", fn=gram_matrix_hook_fn, hook_point="linear_0")
+        >>> hook = Hook(name="gram", hook_fn_name="gram_forward_hook_fn", hook_point="linear_0")
         >>> hooked_model(torch.randn(6, 3), hooks=[hook])
         >>> hooked_model.hooked_data["linear_0"]["gram"]
         tensor([[ 1.2023, -0.0311],
@@ -67,14 +67,14 @@ class HookedModel(torch.nn.Module):
     def forward(self, *args, hooks: Optional[list[Hook]] = None, **kwargs) -> Any:
         """Run the forward pass of the model and remove all hooks."""
         if hooks is not None:
-            self.add_forward_hooks(hooks)
+            self.add_hooks(hooks)
         try:
             output = self.model(*args, **kwargs)
         finally:
             self.remove_hooks()
         return output
 
-    def add_forward_hooks(self, hooks: list[Hook]) -> None:
+    def add_hooks(self, hooks: list[Hook]) -> None:
         """Add a hook to the model at each of the specified hook points."""
         for hook in hooks:
             hook_module = get_model_attr(self.model, hook.hook_point)
@@ -85,7 +85,10 @@ class HookedModel(torch.nn.Module):
                 hook_name=hook.name,
                 **hook.hook_kwargs,
             )
-            handle = hook_module.register_forward_hook(hook_fn_partial)
+            if hook.hook_type == "forward":
+                handle = hook_module.register_forward_hook(hook_fn_partial)
+            elif hook.hook_type == "pre_forward":
+                handle = hook_module.register_forward_pre_hook(hook_fn_partial)
             self.hook_handles.append(handle)
 
     def remove_hooks(self) -> None:

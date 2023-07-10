@@ -6,7 +6,7 @@ from torch import Tensor
 
 
 @torch.inference_mode()
-def gram_matrix_hook_fn(
+def gram_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Float[Tensor, "batch d_hidden"],
     outputs: Float[Tensor, "batch d_hidden"],
@@ -40,7 +40,7 @@ def gram_matrix_hook_fn(
     hooked_data[hook_point][hook_name] += gram_matrix
 
 
-def rotate_and_ablate_hook_fn(
+def rotate_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Float[Tensor, "batch d_hidden"],
     outputs: Float[Tensor, "batch d_hidden"],
@@ -65,6 +65,6 @@ def rotate_and_ablate_hook_fn(
 
 
 HOOK_REGISTRY = {
-    "gram_matrix_hook_fn": gram_matrix_hook_fn,
-    "rotate_and_ablate_hook_fn": rotate_and_ablate_hook_fn,
+    "gram_forward_hook_fn": (gram_forward_hook_fn, "forward"),
+    "rotate_forward_hook_fn": (rotate_forward_hook_fn, "forward"),
 }

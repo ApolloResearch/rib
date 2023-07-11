@@ -1,11 +1,16 @@
 from pathlib import Path
+from typing import Type, TypeVar
 
 import torch
+import yaml
 from jaxtyping import Float
+from pydantic import BaseModel
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.hook_manager import Hook, HookedModel
+
+T = TypeVar("T", bound=BaseModel)
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -53,3 +58,13 @@ def eval_model_accuracy(
 
     accuracy: float = correct_predictions / total_predictions
     return accuracy
+
+
+def load_config(config_path: Path, config_model: Type[T]) -> T:
+    """Load the config from a YAML file into a Pydantic model."""
+    assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."
+    assert Path(config_path).exists(), f"Config file {config_path} does not exist."
+    with open(config_path, "r") as f:
+        config_dict = yaml.safe_load(f)
+    config = config_model(**config_dict)
+    return config

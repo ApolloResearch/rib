@@ -37,7 +37,12 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.log import logger
 from rib.models import MLP
-from rib.utils import REPO_ROOT, eval_model_accuracy, run_dataset_through_model
+from rib.utils import (
+    REPO_ROOT,
+    eval_model_accuracy,
+    load_config,
+    run_dataset_through_model,
+)
 
 
 class HookConfig(BaseModel):
@@ -51,16 +56,6 @@ class Config(BaseModel):
     mlp_name: str
     mlp_path: Path
     hook_configs: list[HookConfig]
-
-
-def load_config(config_path: Path) -> Config:
-    """Load the config from a YAML file into a Pydantic model."""
-    assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."
-    assert Path(config_path).exists(), f"Config file {config_path} does not exist."
-    with open(config_path, "r") as f:
-        config_dict = yaml.safe_load(f)
-    config = Config(**config_dict)
-    return config
 
 
 def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
@@ -192,7 +187,7 @@ def run_ablations(
 
 def main(config_path_str: str) -> None:
     config_path = Path(config_path_str)
-    config = load_config(config_path)
+    config = load_config(config_path, config_model=Config)
 
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)

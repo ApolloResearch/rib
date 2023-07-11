@@ -11,7 +11,6 @@ from typing import Optional
 import fire
 import torch
 import wandb
-import yaml
 from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import DataLoader
@@ -21,7 +20,7 @@ from tqdm import tqdm
 from rib.log import logger
 from rib.models import MLP
 from rib.models.utils import save_model
-from rib.utils import REPO_ROOT
+from rib.utils import REPO_ROOT, load_config
 
 
 class ModelConfig(BaseModel):
@@ -49,16 +48,6 @@ class Config(BaseModel):
     model: ModelConfig
     train: TrainConfig
     wandb: Optional[WandbConfig]
-
-
-def load_config(config_path: Path) -> Config:
-    """Load the config from a YAML file into a Pydantic model."""
-    assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."
-    assert Path(config_path).exists(), f"Config file {config_path} does not exist."
-    with open(config_path, "r") as f:
-        config_dict = yaml.safe_load(f)
-    config = Config(**config_dict)
-    return config
 
 
 def train(config: Config) -> None:
@@ -144,7 +133,7 @@ def train(config: Config) -> None:
 
 def main(config_path_str: str) -> None:
     config_path = Path(config_path_str)
-    config = load_config(config_path)
+    config = load_config(config_path, config_model=Config)
     train(config)
 
 

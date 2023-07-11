@@ -1,11 +1,10 @@
-from collections import OrderedDict
 from unittest.mock import Mock
 
-import pytest
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from rib.models import MLP, Layer
 from rib.models.utils import get_model_attr
 from rib.utils import eval_model_accuracy
 
@@ -13,26 +12,35 @@ from rib.utils import eval_model_accuracy
 def test_get_model_attr():
     """Test the get_model_attr function to retrieve model layers.
 
-    Creates a custom Sequential model with nested sub-layers, then uses get_model_attr to retrieve a
+    Creates a custom MLP with nested sub-layers and module list, then uses get_model_attr to retrieve a
     specific layer.
     """
 
-    # Define a nested Sequential model
-    nested_layers = nn.Sequential(
-        OrderedDict([("linear_0", nn.Linear(in_features=3, out_features=5)), ("relu_0", nn.ReLU())])
-    )
-
-    # Define the parent Sequential model and add the nested_layers to it
-    model = nn.Sequential(OrderedDict([("layers", nested_layers)]))
+    # Define the parent MLP model
+    model = MLP(hidden_sizes=[5], input_size=2, output_size=3, fold_bias=False)
 
     # Test the function
-    nested_layers = get_model_attr(model, "layers")
-    assert isinstance(nested_layers, nn.Sequential)
+    layers = get_model_attr(model, "layers")
+    assert isinstance(layers, nn.ModuleList)
 
-    linear_0 = get_model_attr(model, "layers.linear_0")
-    assert isinstance(linear_0, nn.Linear)
-    assert linear_0.in_features == 3
-    assert linear_0.out_features == 5
+    layer_0 = get_model_attr(model, "layers.0")
+    assert isinstance(layer_0, Layer)
+
+    layer_0_linear = get_model_attr(model, "layers.0.linear")
+    assert isinstance(layer_0_linear, torch.nn.Linear)
+    assert layer_0_linear.in_features == 2
+    assert layer_0_linear.out_features == 5
+
+    if hasattr(layer_0, "activation"):
+        layer_0_activation = get_model_attr(model, "layers.0.activation")
+        assert isinstance(
+            layer_0_activation, nn.Module
+        )  # replace nn.Module with specific activation function if known
+
+    layer_1_linear = get_model_attr(model, "layers.1.linear")
+    assert isinstance(layer_1_linear, torch.nn.Linear)
+    assert layer_1_linear.in_features == 5
+    assert layer_1_linear.out_features == 3
 
 
 def test_eval_model_accuracy():

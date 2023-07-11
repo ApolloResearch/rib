@@ -1,7 +1,6 @@
 """
 Defines a generic MLP to be used for rib.
 """
-from collections import OrderedDict
 from typing import Optional, Type, Union
 
 import torch
@@ -28,7 +27,53 @@ class LinearFoldedBias(nn.Linear):
         return F.linear(input, self.weight, self.bias)  # self.bias is None
 
 
+class Layer(nn.Module):
+    """
+    Neural network layer consisting of a linear layer followed by an optional activation function.
+
+    Args:
+        in_features: The size of each input.
+        out_features: The size of each output.
+        linear_module: A type defining whether to use a folded bias layer or a regular linear layer.
+        activation_fn: The activation function to use. Default is "relu".
+        bias: Whether to add a bias term to the linear transformation. Default is True.
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        linear_module: Union[Type[nn.Linear], Type[LinearFoldedBias]],
+        activation_fn: Optional[str] = "relu",
+        bias: bool = True,
+    ):
+        super().__init__()
+        self.linear = linear_module(in_features, out_features, bias=bias)
+        if activation_fn is not None:
+            self.activation = ACTIVATION_MAP[activation_fn]()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear(x)
+        if hasattr(self, "activation"):
+            x = self.activation(x)
+        return x
+
+
 class MLP(nn.Module):
+    """
+    This class defines an MLP with a variable number of hidden layers.
+
+    Args:
+        hidden_sizes: A list of integers specifying the sizes of the hidden layers.
+        input_size: The size of each input sample.
+        output_size: The size of each output sample.
+        activation_fn: The activation function to use for all but the last layer. Default is "relu".
+        bias: Whether to add a bias term to the linear transformations. Default is True.
+        fold_bias: Whether to use the LinearFoldedBias class for linear layers. If true (and if
+            bias is True), the biases are folded into the weight matrices and the forward pass
+            is modified to add a vector of 1s to the input. Default is True.
+    """
+
     def __init__(
         self,
         hidden_sizes: Optional[list[int]],
@@ -36,7 +81,7 @@ class MLP(nn.Module):
         output_size: int,
         activation_fn: str = "relu",
         bias: bool = True,
-        fold_bias: bool = True,
+        fold_bias: bool = False,
     ):
         super().__init__()
 
@@ -45,48 +90,25 @@ class MLP(nn.Module):
 
         linear_module = LinearFoldedBias if bias and fold_bias else nn.Linear
 
-        self.layers = self.make_layers(
-            linear_module, input_size, hidden_sizes, output_size, activation_fn, bias
-        )
-
-    @staticmethod
-    def make_layers(
-        linear_module: Union[Type[nn.Linear], Type[LinearFoldedBias]],
-        input_size: int,
-        hidden_sizes: list[int],
-        output_size: int,
-        activation_fn: str = "relu",
-        bias: bool = True,
-    ) -> nn.Sequential:
-        """Create layers for MLP.
-
-        The total number of layers is len(hidden_sizes) + 1.
-        An activations layer is added after each Linear layer except the last one.
-
-        Args:
-            linear_module: The module to use for the Linear layers.
-            input_size: The size of the input.
-            hidden_sizes: A list of hidden layer sizes. If None, no hidden layers are added.
-            output_size: The size of the output.
-            activation_fn: The activation function to use.
-            bias: Whether to add a bias to the Linear layers.
-
-        Returns:
-            A nn.Sequential containing the Linear and activation layers.
-        """
+        # Size of each layer (including input and output)
         sizes = [input_size] + hidden_sizes + [output_size]
 
-        activation_module = ACTIVATION_MAP[activation_fn]
-
-        layers: OrderedDict[str, nn.Module] = OrderedDict()
+        self.layers = nn.ModuleList()
         for i in range(len(sizes) - 1):
-            layers[f"linear_{i}"] = linear_module(sizes[i], sizes[i + 1], bias=bias)
-            # Don't add activation function to the last layer
-            if i < len(sizes) - 2:
-                layers[f"act_{i}"] = activation_module()
-        return nn.Sequential(layers)
+            # No activation for final layer
+            layer_act = activation_fn if i < len(sizes) - 2 else None
+            self.layers.append(
+                Layer(
+                    in_features=sizes[i],
+                    out_features=sizes[i + 1],
+                    linear_module=linear_module,
+                    activation_fn=layer_act,
+                    bias=bias,
+                )
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.view(x.size(0), -1)
-        x = self.layers(x)
+        for layer in self.layers:
+            x = layer(x)
         return x

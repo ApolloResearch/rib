@@ -81,7 +81,7 @@ class HookedModel(torch.nn.Module):
         """Add a hook to the model at each of the specified hook points."""
         for hook in hooks:
             hook_module = get_model_attr(self.model, hook.module_name)
-            hook_fn_partial = partial(
+            hook_fn_partial: partial = partial(
                 hook.fn,
                 hooked_data=self.hooked_data,
                 hook_name=hook.name,
@@ -98,3 +98,4 @@ class HookedModel(torch.nn.Module):
         """Remove all hooks from the model."""
         for handle in self.hook_handles:
             handle.remove()
+        self.hook_handles = []

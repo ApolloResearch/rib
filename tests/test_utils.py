@@ -9,7 +9,7 @@ from rib.models.utils import get_model_attr
 from rib.utils import eval_model_accuracy
 
 
-def test_get_model_attr():
+def test_get_model_attr() -> None:
     """Test the get_model_attr function to retrieve model layers.
 
     Creates a custom MLP with nested sub-layers and module list, then uses get_model_attr to retrieve a
@@ -43,7 +43,7 @@ def test_get_model_attr():
     assert layer_1_linear.out_features == 3
 
 
-def test_eval_model_accuracy():
+def test_eval_model_accuracy() -> None:
     """Test the eval_model_accuracy function.
 
     Mocks a hooked model, hooks, dataloader and device, then checks if the function calculates
@@ -58,7 +58,7 @@ def test_eval_model_accuracy():
     # Create a simple DataLoader with hardcoded tensors
     data = torch.randn(3, 2)
     labels = torch.tensor([0, 1, 0])  # Assume binary classification
-    dataloader = DataLoader(list(zip(data, labels)), batch_size=1)
+    dataloader: DataLoader = DataLoader(list(zip(data, labels)), batch_size=1)
 
     # Define generator function for outputting one label at a time (since our batch_size=1)
     def model_output_generator(output_list):

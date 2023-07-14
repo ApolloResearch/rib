@@ -68,7 +68,6 @@ def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
         fold_bias=config_dict["model"]["fold_bias"],
     )
     mlp.load_state_dict(torch.load(mlp_path))
-    mlp.eval()
     return mlp
 
 
@@ -143,6 +142,7 @@ def run_ablations(
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, mlp_path)
+    mlp.eval()
     mlp.to(device)
     hooked_mlp = HookedModel(mlp)
 
@@ -159,9 +159,7 @@ def run_ablations(
             )
         )
 
-    test_loader = load_mnist_dataloader(
-        train=False, batch_size=model_config_dict["train"]["batch_size"]
-    )
+    test_loader = load_mnist_dataloader(train=False, batch_size=512)
 
     run_dataset_through_model(hooked_mlp, test_loader, gram_hooks, device=device)
     len_dataset = len(test_loader.dataset)  # type: ignore
@@ -194,7 +192,7 @@ def main(config_path_str: str) -> None:
 
     out_file = Path(__file__).parent / "out" / f"{config.mlp_name}_ablation_results.json"
     if out_file.exists():
-        logger.error(f"Output file {out_file} already exists. Exiting.")
+        logger.error("Output file %s already exists. Exiting.", out_file)
         return
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -210,7 +208,7 @@ def main(config_path_str: str) -> None:
     }
     with open(out_file, "w") as f:
         json.dump(results, f)
-    logger.info(f"Saved results to {out_file}")
+    logger.info("Wrote results to %s", out_file)
 
 
 if __name__ == "__main__":

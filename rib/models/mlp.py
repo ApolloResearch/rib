@@ -21,10 +21,17 @@ class LinearFoldedBias(nn.Linear):
         super().__init__(in_features + 1, out_features, bias=False, device=device, dtype=dtype)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        # Add an extra feature of ones to act as the bias
-        bias = torch.ones(input.size(0), 1, device=input.device)
-        input = torch.cat([input, bias], dim=1)
-        return F.linear(input, self.weight, self.bias)  # self.bias is None
+        """Add a feature of ones to the input and then perform a linear transformation.
+
+        Input may be batched or unbatched, and may or may not include a seq_len dimension.
+        We handle all cases by ensuring that the bias tensor has the same size as the input
+        except for the last dimension which should have size 1.
+        """
+        rank = len(input.shape)
+        bias_size = [input.shape[i] if i < rank - 1 else 1 for i in range(rank)]
+        bias = torch.ones(bias_size, device=input.device, dtype=input.dtype)
+        biased_input = torch.cat([input, bias], dim=rank - 1)
+        return F.linear(biased_input, self.weight, self.bias)  # self.bias is None
 
 
 class Layer(nn.Module):

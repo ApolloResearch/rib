@@ -49,6 +49,7 @@ class HookConfig(BaseModel):
 class Config(BaseModel):
     mlp_name: str
     mlp_path: Path
+    batch_size: int
     seed: int
     hook_configs: list[HookConfig]
 
@@ -234,7 +235,7 @@ def collect_gram_matrices(
 
 
 def run_interaction_algorithm(
-    model_config_dict: dict, mlp_path: Path, hook_configs: list[HookConfig]
+    model_config_dict: dict, mlp_path: Path, hook_configs: list[HookConfig], batch_size: int
 ) -> list[InteractionInfo]:
     """Calculate the interaction basis for each layer of an MLP trained on MNIST.
 
@@ -247,6 +248,7 @@ def run_interaction_algorithm(
         model_config_dict: The config dictionary used for training the mlp.
         mlp_path: The path to the saved mlp.
         hook_configs: Information about the hook points.
+        batch_size: The batch size to use for the data loader.
 
     Returns:
         A list of objects containing the interaction matrix for each hook point.
@@ -257,9 +259,7 @@ def run_interaction_algorithm(
     mlp.to(device)
     hooked_mlp = HookedModel(mlp)
 
-    test_loader = load_mnist_dataloader(
-        train=False, batch_size=model_config_dict["train"]["batch_size"]
-    )
+    test_loader = load_mnist_dataloader(train=False, batch_size=batch_size)
 
     collect_gram_matrices(hooked_mlp, hook_configs, test_loader, device)
 
@@ -299,6 +299,7 @@ def main(config_path_str: str) -> None:
         model_config_dict=model_config_dict,
         mlp_path=config.mlp_path,
         hook_configs=config.hook_configs,
+        batch_size=config.batch_size,
     )
     results = {
         "mlp_name": config.mlp_name,

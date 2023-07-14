@@ -31,7 +31,7 @@ def test_mlp_layers(
     fold_bias: bool,
     bias: bool,
     expected_layer_sizes: list[Tuple[int, int]],
-):
+) -> None:
     """Test the MLP constructor for fixed input and output sizes.
 
     Verifies the created layers' types, sizes and bias. Also checks whether the

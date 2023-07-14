@@ -15,7 +15,6 @@ T = TypeVar("T", bound=BaseModel)
 REPO_ROOT = Path(__file__).parent.parent
 
 
-@torch.inference_mode()
 def run_dataset_through_model(
     hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook], device: str = "cuda"
 ) -> None:

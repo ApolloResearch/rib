@@ -52,8 +52,8 @@ class Config(BaseModel):
 
 def train(config: Config) -> None:
     """Train the MLP on MNIST.
-    https://pylint.readthedocs.io/en/latest/user_guide/messages/warning/logging-fstring-interpolation.html
-        If config.wandb is not None, log the results to Weights & Biases.
+
+    If config.wandb is not None, log the results to Weights & Biases.
     """
     torch.manual_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"

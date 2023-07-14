@@ -1,3 +1,4 @@
+.vscode/launch.json
 # ignore all out folders in experiments
 experiments/**/out/
 wandb/

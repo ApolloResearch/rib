@@ -1,6 +1,10 @@
 # rib
 
-This repository contains the core functionality and experiments related to Rotation into the Interaction Basis.
+This repository contains the core functionality and experiments related to Rotation into the
+Interaction Basis.
+
+For a formal introduction to the method, see
+[this writeup](https://www.overleaf.com/project/6437d0bde0eaf2e8c7ac3649).
 
 ## Installation
 
@@ -16,29 +20,21 @@ The core functionality of RIB is contained in the `rib` package. Experiments tha
 contained in the experiments directory, with the directory encapsulating related files such as
 configs, scripts, and outputs.
 
-You may be asked to enter your wandb API key, which you can find it in your [wandb account settings](https://wandb.ai/settings). Alternatively, you can set the environment variable `WANDB_API_KEY` to your API key.
+Many scripts take in a yaml config file or a json data file as cli argument. These files reside in
+either the same directory as the script or a child directory. The docstrings of the
+scripts describe how to use them.
+
+You may be asked to enter your wandb API key, which you can find it in your
+[wandb account settings](https://wandb.ai/settings). Alternatively, you can set the environment
+variable `WANDB_API_KEY` to your API key.
 
 ### MNIST
 
-To train an MLP on MNIST, define/select a config file (see `experiments/train_mnist/*.yaml` for examples) and run
+Supported experiments:
 
-```bash
-python experiments/train_mnist/train.py <path_to_config_file>
-```
-
-To evaluate the impact of ablating eigenvectors from the orthogonal basis, define/select a config (see `experiments/mnist_orthog_ablation/*yaml` for examples) and run
-
-```bash
-python experiments/mnist_orthog_ablation/run_ablations.py <path_to_config_file>
-```
-
-and then
-
-```bash
-python experiments/mnist_orthog_ablation/plot_ablations.py <path_to_results_file>
-```
-
-to plot the results.
+- Training an MLP on MNIST: `experiments/train_mnist/`
+- Ablating eigenvectors from the orthogonal basis: `experiments/mnist_orthog_ablation/`
+- Calculating the interaction matrices: `experiments/mnist_interaction_matrices/`
 
 ## Development
 
@@ -52,4 +48,6 @@ Suggested extensions and settings for VSCode are provided in `.vscode/`.
 
 ### Pre-commit hooks
 
-A pre-commit hook is saved in the .pre-commit file. To use this hook, copy it to the .git/hooks/ folder and make it executable (i.e. `cp .pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`).
+A pre-commit hook is saved in the .pre-commit file. To use this hook, copy it to the `.git/hooks/`
+dir and make it executable
+(`cp .pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`).

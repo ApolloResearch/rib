@@ -1,11 +1,13 @@
 import pytest
 import torch
+from jaxtyping import Float
+from torch import Tensor
 
-from rib.linalg import calc_rotation_matrix, eigendecompose
+from rib.linalg import batched_jacobian, calc_rotation_matrix, eigendecompose
 
 
 @pytest.mark.parametrize("descending", [True, False])
-def test_eigendecompose(descending: bool):
+def test_eigendecompose(descending: bool) -> None:
     """Test the eigendecompose function.
 
     Compares the output of eigendecompose with the Singular Value Decomposition (SVD). Also verifies
@@ -43,7 +45,7 @@ def test_eigendecompose(descending: bool):
 
 
 @pytest.mark.parametrize("n_zero_vals,n_ablated_vecs", [(0, 0), (2, 0), (0, 2)])
-def test_calc_rotation_matrix(n_zero_vals, n_ablated_vecs):
+def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
     """Test the calc_rotation_matrix function.
 
     Checks if the rotation matrix has the correct dimensions and properties.
@@ -88,3 +90,24 @@ def test_calc_rotation_matrix(n_zero_vals, n_ablated_vecs):
         acts_eigenspace[:, -n_ignore:] = 0
     rotated_vecs_2 = acts_eigenspace @ vecs.T
     assert torch.allclose(rotated_vecs, rotated_vecs_2, atol=1e-6)
+
+
+def test_batched_jacobian() -> None:
+    """Test the batched_jacobian function.
+
+    Checks if the batched_jacobian function returns the same result as
+    torch.autograd.functional.jacobian after summing over the batch dimension and rearranging
+    """
+    torch.manual_seed(0)
+    batch_size = 2
+    d_hidden = 10
+    x = torch.randn(batch_size, d_hidden)
+
+    actual: Float[Tensor, "batch d_hidden d_hidden"] = batched_jacobian(torch.sin, x)
+
+    torch_jac_summed: Float[Tensor, "d_hidden batch d_hidden"] = torch.autograd.functional.jacobian(
+        torch.sin, x
+    ).sum(dim=0)
+    shuffled: Float[Tensor, "batch d_hidden d_hidden"] = torch_jac_summed.permute(1, 0, 2)
+
+    assert torch.allclose(actual, shuffled, atol=1e-6)

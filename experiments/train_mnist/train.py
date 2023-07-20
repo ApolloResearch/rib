@@ -1,7 +1,7 @@
 """Train a model on MNIST.
 
 Usage:
-    python scripts/train_mnist.py <path/to/config.yaml>
+    python train.py <path/to/config.yaml>
 """
 import json
 from datetime import datetime

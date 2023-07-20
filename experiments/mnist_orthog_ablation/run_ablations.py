@@ -161,6 +161,7 @@ def run_ablations(
 
     test_loader = load_mnist_dataloader(train=False, batch_size=512)
 
+    # Collect gram matrices
     run_dataset_through_model(hooked_mlp, test_loader, gram_hooks, device=device)
     len_dataset = len(test_loader.dataset)  # type: ignore
 

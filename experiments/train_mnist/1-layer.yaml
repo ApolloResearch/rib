@@ -9,7 +9,7 @@ train:
   learning_rate: 0.001
   batch_size: 64
   epochs: 12
-  save_dir: /mnt/ssd-apollo/checkpoints/MNIST
+  save_dir: /mnt/ssd-apollo/models/MNIST/checkpoints
   save_every_n_epochs: null
 wandb:
   project: mlp-mnist

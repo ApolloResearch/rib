@@ -19,7 +19,7 @@ class Hook:
     Attributes:
         name: Name of the hook. This is useful for identifying hooks when two hooks have the
             same module_name (e.g. a forward and pre_forward hook).
-        data_key: The key used to store data in HookedModel.hookd_data.
+        data_key: The key used to store data in HookedModel.hooked_data.
         fn_name: Name of the hook function to run at the hook point.
         module_name: String representing the attribute of the model to add the hook to.
             Nested attributes are split by periods (e.g. "layers.linear_0").

@@ -14,7 +14,7 @@ class LinearFoldedBias(nn.Linear):
     def __init__(
         self, in_features: int, out_features: int, bias: bool = True, device=None, dtype=None
     ) -> None:
-        """A Linear layer with an extra feature of ones to act as the bias.
+        """A Linear layer with an extra input feature to act as a folded bias.
 
         Ignore the bias parameter, it is always set to False.
         """

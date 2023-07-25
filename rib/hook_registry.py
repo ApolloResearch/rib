@@ -134,7 +134,7 @@ def interaction_forward_hook_fn(
     hook_name: str,
     data_key: str,
     input_eigen_info: EigenInfo,
-    output_interaction_matrix: Float[Tensor, "out_hidden out_hidden"],
+    output_rotation_matrix: Float[Tensor, "out_hidden out_hidden"],
     **_: Any,
 ) -> None:
     """Hook function for calculating the interaction matrix and adding it to the global matrix.
@@ -150,7 +150,7 @@ def interaction_forward_hook_fn(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
         input_eigen_info: Eigen information for the input.
-        output_interaction_matrix: Interaction matrix for the output.
+        output_rotation_matrix: Rotation matrix for the output.
         **_: Additional keyword arguments (not used).
     """
     # Remove the foward hook to avoid recursion
@@ -160,7 +160,7 @@ def interaction_forward_hook_fn(
     M = calc_interaction_matrix(
         module=module,
         in_acts=inputs[0],
-        out_interaction_matrix=output_interaction_matrix.float(),
+        out_rotation_matrix=output_rotation_matrix.float(),
         in_eigenvecs=input_eigen_info.eigenvecs.float(),
         in_eigenvals=input_eigen_info.eigenvals.float(),
         out_acts=output,

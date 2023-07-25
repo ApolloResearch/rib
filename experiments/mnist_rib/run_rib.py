@@ -55,11 +55,11 @@ class Config(BaseModel):
 
 
 @dataclass
-class InteractionInfo:
+class RotationMatrixInfo:
     """Information about the interaction matrix of a layer."""
 
     hook_name: str
-    interaction_matrix: Float[Tensor, "d_hidden d_hidden"]
+    rotation_matrix: Float[Tensor, "d_hidden d_hidden"]
 
 
 def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
@@ -89,7 +89,7 @@ def collect_layer_interaction_matrix(
     data_key: str,
     curr_layer_name: str,
     next_layer_module_name: str,
-    next_layer_interaction_matrix: Float[Tensor, "d_hidden d_hidden"],
+    next_layer_rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
     curr_layer_eigeninfo: EigenInfo,
     data_loader: DataLoader,
     device: str,
@@ -106,7 +106,7 @@ def collect_layer_interaction_matrix(
         data_key: The key to use to store the data in the hook.
         curr_layer_name: The name of the current layer.
         next_layer_module_name: The next layer module name we apply the forward hook to.
-        next_layer_interaction_matrix: The interaction matrix for the next layer.
+        next_layer_rotation_matrix: The rotation matrix for the next layer.
         curr_layer_eigeninfo: The eigen information for the current layer.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
@@ -118,25 +118,35 @@ def collect_layer_interaction_matrix(
         module_name=next_layer_module_name,
         fn_kwargs={
             "input_eigen_info": curr_layer_eigeninfo,
-            "output_interaction_matrix": next_layer_interaction_matrix,
+            "output_rotation_matrix": next_layer_rotation_matrix,
         },
     )
     run_dataset_through_model(hooked_mlp, data_loader, hooks=[interaction_hook], device=device)
 
 
-def collect_interaction_matrices(
+def collect_rotation_matrices(
     hooked_mlp: HookedModel,
     hook_configs: list[HookConfig],
     eigen_infos: list[EigenInfo],
     data_loader: DataLoader,
     device: str,
-) -> list[InteractionInfo]:
-    """Collect the interaction matrices for each layer specified in hook_configs.
+) -> list[RotationMatrixInfo]:
+    """Collect the rotation matrices for each layer specified in hook_configs.
 
+    These are the matrices that rotate activations into and out of the interaction basis.
+
+    To calculate the rotation matrices, we use the following algorithm:
+        1. The rotation matrix for the final layer is equal to the eigenvectors of the gram matrix.
+        2. We step through the layers in reverse order, calculating:
+            a. The interaction matrix (denoted M in the paper). This is calculated iteratively by
+            passing the whole dataset through the layer and updating the interaction matrix at each
+            batch.
+            b. cap_lambda (denoted \Lambda in the paper).
+            c. The rotation matrix (denoted C in the paper).
     Importantly, we assume that no computation happens between the hooked modules. I.e.
     the input to the 2nd layer is the output of the 1st layer, and so on. This assumption makes
-    it much easier to calculate the interaction matrix for each layer, and also allows for creating
-    connected graphs with all of the interaction bases.
+    it much easier to calculate the rotation matrix for each layer, and also allows for creating
+    connected graphs with all of the rotation bases.
 
     This means that the only hook which can be a pre_forward hook is the first hook. All other hooks
     must be forward hooks.
@@ -149,7 +159,7 @@ def collect_interaction_matrices(
         device: The device to run the model on.
 
     Returns:
-        A list of objects containing the interaction info (hook name and matrix) for each layer.
+        A list of objects containing the rotation info (hook name and matrix) for each layer.
     """
 
     assert all(
@@ -171,30 +181,30 @@ def collect_interaction_matrices(
     # Key for storing the data in the hook
     data_key = "interaction"
 
-    interaction_infos: list[InteractionInfo] = []
+    rotation_infos: list[RotationMatrixInfo] = []
     # Iterate through the configs in backwards order
     for i in range(len(hook_configs) - 1, -1, -1):
         if i == len(hook_configs) - 1:
-            # The interaction matrix for the final layer is equal to the eigenbasis.
-            interaction_matrix = eigen_infos[i].eigenvecs
+            # The rotation matrix for the final layer is equal to the eigenbasis.
+            rotation_matrix = eigen_infos[i].eigenvecs
         else:
             collect_layer_interaction_matrix(
                 hooked_mlp=hooked_mlp,
                 data_key=data_key,
                 curr_layer_name=hook_configs[i].hook_name,
                 next_layer_module_name=hook_configs[i + 1].module_name,
-                next_layer_interaction_matrix=interaction_infos[-1].interaction_matrix,
+                next_layer_rotation_matrix=rotation_infos[-1].rotation_matrix,
                 curr_layer_eigeninfo=eigen_infos[i],
                 data_loader=data_loader,
                 device=device,
             )
             interaction_matrix = hooked_mlp.hooked_data[hook_configs[i].hook_name][data_key]
-        interaction_infos.append(
-            InteractionInfo(
-                hook_name=hook_configs[i].hook_name, interaction_matrix=interaction_matrix
-            )
+            lambda_capital = interaction_matrix
+            rotation_matrix = lambda_capital
+        rotation_infos.append(
+            RotationMatrixInfo(hook_name=hook_configs[i].hook_name, rotation_matrix=rotation_matrix)
         )
-    return interaction_infos
+    return rotation_infos
 
 
 def collect_gram_matrices(
@@ -236,13 +246,12 @@ def collect_gram_matrices(
 
 def run_interaction_algorithm(
     model_config_dict: dict, mlp_path: Path, hook_configs: list[HookConfig], batch_size: int
-) -> list[InteractionInfo]:
-    """Calculate the interaction basis for each layer of an MLP trained on MNIST.
+) -> list[RotationMatrixInfo]:
+    """Run the algorithm for collecting all matrices for rotating to the interaction basis.
 
-    First, we collect and run an eigendecomposition algorithm on the gram matrices for each
-    layer specified in the hook_configs.
-    Then, we use this eigen information, along with raw activations, to calculate the interaction
-    matrix for each layer.
+    First, we collect and run an eigendecomposition on the gram matrices for each
+    layer specified in the hook_configs. We use these eigenvalues and eigenvectors to calculate the
+    rotation matrices for each layer.
 
     Args:
         model_config_dict: The config dictionary used for training the mlp.
@@ -251,7 +260,7 @@ def run_interaction_algorithm(
         batch_size: The batch size to use for the data loader.
 
     Returns:
-        A list of objects containing the interaction matrix for each hook point.
+        A list of objects containing the rotation matrix for each hook point.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, mlp_path)
@@ -270,14 +279,14 @@ def run_interaction_algorithm(
             EigenInfo(hook_name=hook_config.hook_name, eigenvals=eigenvals, eigenvecs=eigenvecs)
         )
 
-    interaction_info = collect_interaction_matrices(
+    rotation_info = collect_rotation_matrices(
         hooked_mlp=hooked_mlp,
         hook_configs=hook_configs,
         eigen_infos=eigen_infos,
         data_loader=test_loader,
         device=device,
     )
-    return interaction_info
+    return rotation_info
 
 
 def main(config_path_str: str) -> None:
@@ -295,7 +304,7 @@ def main(config_path_str: str) -> None:
         logger.error("Output file %s already exists. Exiting.", out_interaction_matrix_file)
         return
 
-    interaction_infos = run_interaction_algorithm(
+    rotation_infos = run_interaction_algorithm(
         model_config_dict=model_config_dict,
         mlp_path=config.mlp_path,
         hook_configs=config.hook_configs,
@@ -303,7 +312,7 @@ def main(config_path_str: str) -> None:
     )
     results = {
         "mlp_name": config.mlp_name,
-        "interaction_infos": [asdict(interaction_info) for interaction_info in interaction_infos],
+        "rotation_infos": [asdict(rotation_info) for rotation_info in rotation_infos],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": model_config_dict,
     }

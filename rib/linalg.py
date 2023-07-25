@@ -106,7 +106,7 @@ def batched_jacobian(
 def calc_interaction_matrix(
     module: torch.nn.Module,
     in_acts: Float[Tensor, "batch_size in_hidden"],
-    out_interaction_matrix: Float[Tensor, "out_hidden out_hidden"],
+    out_rotation_matrix: Float[Tensor, "out_hidden out_hidden"],
     in_eigenvecs: Float[Tensor, "in_hidden in_hidden"],
     in_eigenvals: Float[Tensor, "in_hidden"],
     out_acts: Float[Tensor, "batch_size out_hidden"],
@@ -119,7 +119,7 @@ def calc_interaction_matrix(
     the layer w.r.t the inputs transformed by:
         O'^l = C^{l+1} O^l U^l.T {D^l}^{0.5}
     where l represents the input layer and l+1 the output layer, and:
-        C^{l+1}: (out_hidden, out_hidden) the interaction matrix at the output
+        C^{l+1}: (out_hidden, out_hidden) the rotation matrix at the output
         O^l: (batch, out_hidden, in_hidden) the jacobian of the layer w.r.t the inputs
         U^l: (in_hidden, in_hidden) matrix with columns as the eigenvectors of the input
         D^l: (in_hidden) the eigenvalues of the input
@@ -131,7 +131,7 @@ def calc_interaction_matrix(
     Args:
         module: Module that the hook is attached to.
         in_acts: Input to the module.
-        out_interaction_matrix: Interaction matrix for the output layer.
+        out_rotation_matrix: Rotation matrix for the output layer.
         in_eigenvecs: Matrix whose columns are the eigenvectors of the gram matrix of the input.
         in_eigenvals: Diagonal matrix whose diagonal entries are the eigenvalues of the gram matrix
             of the input.
@@ -144,7 +144,7 @@ def calc_interaction_matrix(
     jac: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, in_acts)
     with torch.inference_mode():
         o_dash = torch.einsum(
-            "jJ,bji,iI,i->bJI", out_interaction_matrix, jac, in_eigenvecs, in_eigenvals.sqrt()
+            "jJ,bji,iI,i->bJI", out_rotation_matrix, jac, in_eigenvecs, in_eigenvals.sqrt()
         )
         out_o_dash = torch.einsum("bj,bji->bi", out_acts, o_dash)
         M = torch.einsum("bi,bj->ij", out_o_dash, out_o_dash)

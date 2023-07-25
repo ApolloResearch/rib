@@ -289,7 +289,7 @@ def main(config_path_str: str) -> None:
         model_config_dict = yaml.safe_load(f)
 
     out_dir = Path(__file__).parent / "out"
-    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     out_interaction_matrix_file = out_dir / f"{config.mlp_name}_interaction_matrix.pt"
     if out_interaction_matrix_file.exists():
         logger.error("Output file %s already exists. Exiting.", out_interaction_matrix_file)

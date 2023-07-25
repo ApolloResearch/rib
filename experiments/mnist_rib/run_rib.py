@@ -33,7 +33,12 @@ from torchvision import datasets, transforms
 from typing_extensions import Literal
 
 from rib.hook_manager import Hook, HookedModel
-from rib.linalg import EigenInfo, eigendecompose
+from rib.linalg import (
+    EigenInfo,
+    calc_cap_lambda,
+    calc_interaction_rotation_matrix,
+    eigendecompose,
+)
 from rib.log import logger
 from rib.models import MLP
 from rib.utils import REPO_ROOT, load_config, run_dataset_through_model
@@ -188,20 +193,34 @@ def collect_rotation_matrices(
             # The rotation matrix for the final layer is equal to the eigenbasis.
             rotation_matrix = gram_eigen_infos[i].eigenvecs
         else:
+            next_layer_rotation_matrix = rotation_infos[-1].rotation_matrix
             collect_layer_interaction_matrix(
                 hooked_mlp=hooked_mlp,
                 data_key=data_key,
                 curr_layer_name=hook_configs[i].hook_name,
                 next_layer_module_name=hook_configs[i + 1].module_name,
-                next_layer_rotation_matrix=rotation_infos[-1].rotation_matrix,
+                next_layer_rotation_matrix=next_layer_rotation_matrix,
                 curr_layer_gram_eigeninfo=gram_eigen_infos[i],
                 data_loader=data_loader,
                 device=device,
             )
             interaction_matrix = hooked_mlp.hooked_data[hook_configs[i].hook_name][data_key]
-            eigendecompose_interaction_matrix = eigendecompose(interaction_matrix)[1]
-            lambda_capital = eigendecompose_interaction_matrix
-            rotation_matrix = lambda_capital
+            interaction_eigenvecs = eigendecompose(interaction_matrix)[1]
+            edge_dim = interaction_eigenvecs.shape[0]
+            edge_weights = torch.randn(
+                edge_dim, edge_dim, edge_dim, edge_dim, device=device, dtype=torch.float64
+            )
+            cap_lambda = calc_cap_lambda(
+                next_layer_rotation_matrix=next_layer_rotation_matrix,
+                edge_weights=edge_weights,
+                curr_layer_gram_eigeninfo=gram_eigen_infos[i],
+                interaction_eigenvecs=interaction_eigenvecs,
+            )
+            rotation_matrix = calc_interaction_rotation_matrix(
+                cap_lambda=cap_lambda,
+                interaction_eigenvecs=interaction_eigenvecs,
+                curr_layer_gram_eigeninfo=gram_eigen_infos[i],
+            )
         rotation_infos.append(
             RotationMatrixInfo(hook_name=hook_configs[i].hook_name, rotation_matrix=rotation_matrix)
         )

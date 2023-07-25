@@ -143,9 +143,8 @@ def calc_interaction_matrix(
 
     jac: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, in_acts)
     with torch.inference_mode():
-        o_dash = torch.einsum(
-            "jJ,bji,iI,i->bJI", out_rotation_matrix, jac, in_eigenvecs, in_eigenvals.sqrt()
-        )
-        out_o_dash = torch.einsum("bj,bji->bi", out_acts, o_dash)
+        D: Float[Tensor, "in_hidden in_hidden"] = torch.diag(in_eigenvals.sqrt())
+        O_dash = torch.einsum("jJ,bji,iI,Ik->bJk", out_rotation_matrix, jac, in_eigenvecs, D)
+        out_o_dash = torch.einsum("bj,bjk->bk", out_acts, O_dash)
         M = torch.einsum("bi,bj->ij", out_o_dash, out_o_dash)
     return M

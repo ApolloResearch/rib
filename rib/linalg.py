@@ -107,8 +107,8 @@ def calc_interaction_matrix(
     module: torch.nn.Module,
     in_acts: Float[Tensor, "batch_size in_hidden"],
     out_rotation_matrix: Float[Tensor, "out_hidden out_hidden"],
-    in_eigenvecs: Float[Tensor, "in_hidden in_hidden"],
-    in_eigenvals: Float[Tensor, "in_hidden"],
+    in_gram_eigenvecs: Float[Tensor, "in_hidden in_hidden"],
+    in_gram_eigenvals: Float[Tensor, "in_hidden"],
     out_acts: Float[Tensor, "batch_size out_hidden"],
 ) -> Float[Tensor, "out_hidden out_hidden"]:
     """
@@ -121,7 +121,7 @@ def calc_interaction_matrix(
     where l represents the input layer and l+1 the output layer, and:
         C^{l+1}: (out_hidden, out_hidden) the rotation matrix at the output
         O^l: (batch, out_hidden, in_hidden) the jacobian of the layer w.r.t the inputs
-        U^l: (in_hidden, in_hidden) matrix with columns as the eigenvectors of the input
+        U^l: (in_hidden, in_hidden) matrix with columns as the eigenvectors of the input gram matrix
         D^l: (in_hidden) the eigenvalues of the input
 
 
@@ -132,9 +132,9 @@ def calc_interaction_matrix(
         module: Module that the hook is attached to.
         in_acts: Input to the module.
         out_rotation_matrix: Rotation matrix for the output layer.
-        in_eigenvecs: Matrix whose columns are the eigenvectors of the gram matrix of the input.
-        in_eigenvals: Diagonal matrix whose diagonal entries are the eigenvalues of the gram matrix
-            of the input.
+        in_gram_eigenvecs: Matrix whose columns are the eigenvecs of the input layer's gram matrix
+        in_gram_eigenvals: Diagonal matrix whose diagonal entries are the eigenvalues of the gram
+            matrix of the input layer's activations.
         out_acts: Output of the module.
 
     Returns:
@@ -143,8 +143,8 @@ def calc_interaction_matrix(
 
     jac: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, in_acts)
     with torch.inference_mode():
-        D: Float[Tensor, "in_hidden in_hidden"] = torch.diag(in_eigenvals.sqrt())
-        O_dash = torch.einsum("jJ,bji,iI,Ik->bJk", out_rotation_matrix, jac, in_eigenvecs, D)
+        D: Float[Tensor, "in_hidden in_hidden"] = torch.diag(in_gram_eigenvals.sqrt())
+        O_dash = torch.einsum("jJ,bji,iI,Ik->bJk", out_rotation_matrix, jac, in_gram_eigenvecs, D)
         out_o_dash = torch.einsum("bj,bjk->bk", out_acts, O_dash)
         M = torch.einsum("bi,bj->ij", out_o_dash, out_o_dash)
     return M

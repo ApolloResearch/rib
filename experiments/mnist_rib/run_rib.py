@@ -90,7 +90,7 @@ def collect_layer_interaction_matrix(
     curr_layer_name: str,
     next_layer_module_name: str,
     next_layer_rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
-    curr_layer_eigeninfo: EigenInfo,
+    curr_layer_gram_eigeninfo: EigenInfo,
     data_loader: DataLoader,
     device: str,
 ) -> None:
@@ -107,7 +107,7 @@ def collect_layer_interaction_matrix(
         curr_layer_name: The name of the current layer.
         next_layer_module_name: The next layer module name we apply the forward hook to.
         next_layer_rotation_matrix: The rotation matrix for the next layer.
-        curr_layer_eigeninfo: The eigen information for the current layer.
+        curr_layer_gram_eigeninfo: The eigen information for the current layer.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
     """
@@ -117,7 +117,7 @@ def collect_layer_interaction_matrix(
         fn_name="interaction_forward_hook_fn",
         module_name=next_layer_module_name,
         fn_kwargs={
-            "input_eigen_info": curr_layer_eigeninfo,
+            "input_gram_eigen_info": curr_layer_gram_eigeninfo,
             "output_rotation_matrix": next_layer_rotation_matrix,
         },
     )
@@ -127,7 +127,7 @@ def collect_layer_interaction_matrix(
 def collect_rotation_matrices(
     hooked_mlp: HookedModel,
     hook_configs: list[HookConfig],
-    eigen_infos: list[EigenInfo],
+    gram_eigen_infos: list[EigenInfo],
     data_loader: DataLoader,
     device: str,
 ) -> list[RotationMatrixInfo]:
@@ -154,7 +154,7 @@ def collect_rotation_matrices(
     Args:
         hooked_mlp: The hooked model.
         hook_configs: The configs for the hook points.
-        eigen_infos: The eigen information for each layer.
+        gram_eigen_infos: The eigen information for the gram matrix in each layer.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
 
@@ -186,7 +186,7 @@ def collect_rotation_matrices(
     for i in range(len(hook_configs) - 1, -1, -1):
         if i == len(hook_configs) - 1:
             # The rotation matrix for the final layer is equal to the eigenbasis.
-            rotation_matrix = eigen_infos[i].eigenvecs
+            rotation_matrix = gram_eigen_infos[i].eigenvecs
         else:
             collect_layer_interaction_matrix(
                 hooked_mlp=hooked_mlp,
@@ -194,12 +194,13 @@ def collect_rotation_matrices(
                 curr_layer_name=hook_configs[i].hook_name,
                 next_layer_module_name=hook_configs[i + 1].module_name,
                 next_layer_rotation_matrix=rotation_infos[-1].rotation_matrix,
-                curr_layer_eigeninfo=eigen_infos[i],
+                curr_layer_gram_eigeninfo=gram_eigen_infos[i],
                 data_loader=data_loader,
                 device=device,
             )
             interaction_matrix = hooked_mlp.hooked_data[hook_configs[i].hook_name][data_key]
-            lambda_capital = interaction_matrix
+            eigendecompose_interaction_matrix = eigendecompose(interaction_matrix)[1]
+            lambda_capital = eigendecompose_interaction_matrix
             rotation_matrix = lambda_capital
         rotation_infos.append(
             RotationMatrixInfo(hook_name=hook_configs[i].hook_name, rotation_matrix=rotation_matrix)
@@ -272,17 +273,17 @@ def run_interaction_algorithm(
 
     collect_gram_matrices(hooked_mlp, hook_configs, test_loader, device)
 
-    eigen_infos: list[EigenInfo] = []
+    gram_eigen_infos: list[EigenInfo] = []
     for hook_config in hook_configs:
         eigenvals, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_config.hook_name]["gram"])
-        eigen_infos.append(
+        gram_eigen_infos.append(
             EigenInfo(hook_name=hook_config.hook_name, eigenvals=eigenvals, eigenvecs=eigenvecs)
         )
 
     rotation_info = collect_rotation_matrices(
         hooked_mlp=hooked_mlp,
         hook_configs=hook_configs,
-        eigen_infos=eigen_infos,
+        gram_eigen_infos=gram_eigen_infos,
         data_loader=test_loader,
         device=device,
     )

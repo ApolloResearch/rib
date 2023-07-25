@@ -133,7 +133,7 @@ def interaction_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: str,
-    input_eigen_info: EigenInfo,
+    input_gram_eigen_info: EigenInfo,
     output_rotation_matrix: Float[Tensor, "out_hidden out_hidden"],
     **_: Any,
 ) -> None:
@@ -149,7 +149,7 @@ def interaction_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
-        input_eigen_info: Eigen information for the input.
+        input_gram_eigen_info: Eigen information for the input.
         output_rotation_matrix: Rotation matrix for the output.
         **_: Additional keyword arguments (not used).
     """
@@ -161,8 +161,8 @@ def interaction_forward_hook_fn(
         module=module,
         in_acts=inputs[0],
         out_rotation_matrix=output_rotation_matrix.float(),
-        in_eigenvecs=input_eigen_info.eigenvecs.float(),
-        in_eigenvals=input_eigen_info.eigenvals.float(),
+        in_gram_eigenvecs=input_gram_eigen_info.eigenvecs.float(),
+        in_gram_eigenvals=input_gram_eigen_info.eigenvals.float(),
         out_acts=output,
     )
     add_to_hooked_matrix(hooked_data, hook_name, data_key, M)

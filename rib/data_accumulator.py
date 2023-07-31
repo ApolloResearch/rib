@@ -31,6 +31,7 @@ def collect_gram_matrices(
         data_loader: The pytorch data loader.
         device: The device to run the model on.
     """
+    assert len(hook_configs) > 0, "No hook configs provided."
     gram_hooks: list[Hook] = []
     for hook_config in hook_configs:
         assert hook_config.hook_type in ["forward", "pre_forward"]

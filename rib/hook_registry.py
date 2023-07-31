@@ -100,7 +100,7 @@ def rotate_forward_hook_fn(
         Rotated activations.
     """
     out_copy = output.detach().clone()
-    return out_copy @ rotation_matrix.float()
+    return out_copy @ rotation_matrix
 
 
 def rotate_pre_forward_hook_fn(
@@ -123,7 +123,7 @@ def rotate_pre_forward_hook_fn(
         Rotated activations.
     """
     in_copy = inputs[0].detach().clone()
-    return (in_copy @ rotation_matrix.float(),)
+    return (in_copy @ rotation_matrix,)
 
 
 def interaction_forward_hook_fn(
@@ -160,9 +160,9 @@ def interaction_forward_hook_fn(
     M = calc_interaction_matrix(
         module=module,
         in_acts=inputs[0],
-        out_rotation_matrix=output_rotation_matrix.float(),
-        in_gram_eigenvecs=input_gram_eigen_info.eigenvecs.float(),
-        in_gram_eigenvals=input_gram_eigen_info.eigenvals.float(),
+        out_rotation_matrix=output_rotation_matrix,
+        in_gram_eigenvecs=input_gram_eigen_info.eigenvecs,
+        in_gram_eigenvals=input_gram_eigen_info.eigenvals,
         out_acts=output,
     )
     add_to_hooked_matrix(hooked_data, hook_name, data_key, M)

@@ -31,25 +31,13 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
-from typing_extensions import Literal
 
-from rib.hook_manager import Hook, HookedModel
+from rib.data_accumulator import collect_gram_matrices
+from rib.hook_manager import Hook, HookConfig, HookedModel
 from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.log import logger
 from rib.models import MLP
-from rib.utils import (
-    REPO_ROOT,
-    eval_model_accuracy,
-    load_config,
-    run_dataset_through_model,
-)
-
-
-class HookConfig(BaseModel):
-    hook_name: str
-    module_name: str  # The module to hook into
-    hook_type: Literal["forward", "pre_forward"]
-    layer_size: int  # The size of the data at the hook point
+from rib.utils import REPO_ROOT, eval_model_accuracy, load_config
 
 
 class Config(BaseModel):
@@ -146,31 +134,12 @@ def run_ablations(
     mlp.to(device)
     hooked_mlp = HookedModel(mlp)
 
-    gram_hooks: list[Hook] = []
-    for hook_config in hook_configs:
-        assert hook_config.hook_type in ["forward", "pre_forward"]
-        gram_hook_fn_name = f"gram_{hook_config.hook_type}_hook_fn"
-        gram_hooks.append(
-            Hook(
-                name=hook_config.hook_name,
-                data_key="gram",
-                fn_name=gram_hook_fn_name,
-                module_name=hook_config.module_name,
-            )
-        )
-
     test_loader = load_mnist_dataloader(train=False, batch_size=512)
 
-    # Collect gram matrices
-    run_dataset_through_model(hooked_mlp, test_loader, gram_hooks, device=device)
-    len_dataset = len(test_loader.dataset)  # type: ignore
+    collect_gram_matrices(hooked_mlp, hook_configs, test_loader, device=device)
 
     results: dict[str, list[float]] = {}
     for hook_config in hook_configs:
-        # Scale the gram matrix by the number of samples in the dataset.
-        hooked_mlp.hooked_data[hook_config.hook_name]["gram"] = (
-            hooked_mlp.hooked_data[hook_config.hook_name]["gram"] / len_dataset
-        )
         _, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_config.hook_name]["gram"])
         accuracies: list[float] = ablate_and_test(
             hooked_mlp=hooked_mlp,

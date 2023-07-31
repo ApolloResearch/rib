@@ -136,11 +136,11 @@ def run_ablations(
 
     test_loader = load_mnist_dataloader(train=False, batch_size=512)
 
-    collect_gram_matrices(hooked_mlp, hook_configs, test_loader, device=device)
+    gram_matrices = collect_gram_matrices(hooked_mlp, hook_configs, test_loader, device=device)
 
     results: dict[str, list[float]] = {}
     for hook_config in hook_configs:
-        _, eigenvecs = eigendecompose(hooked_mlp.hooked_data[hook_config.hook_name]["gram"])
+        _, eigenvecs = eigendecompose(gram_matrices[hook_config.hook_name])
         accuracies: list[float] = ablate_and_test(
             hooked_mlp=hooked_mlp,
             hook_config=hook_config,

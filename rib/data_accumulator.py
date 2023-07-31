@@ -1,6 +1,8 @@
 """Functions used to accumulate certain data when passing batches through a model."""
 
 
+from jaxtyping import Float
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.hook_manager import Hook, HookConfig, HookedModel
@@ -22,14 +24,17 @@ def collect_gram_matrices(
     hook_configs: list[HookConfig],
     data_loader: DataLoader,
     device: str,
-) -> None:
-    """Calculate gram matrices for each hook config and store it in `hooked_mlp.hooked_data`.
+) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
+    """Collect gram matrices for each hook config.
 
     Args:
         hooked_mlp: The hooked model.
         hook_configs: The configs for the hook points.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
+
+    Returns:
+        A dictionary of gram matrices, where the keys are the hook names.
     """
     assert len(hook_configs) > 0, "No hook configs provided."
     gram_hooks: list[Hook] = []
@@ -46,10 +51,16 @@ def collect_gram_matrices(
         )
 
     run_dataset_through_model(hooked_mlp, data_loader, gram_hooks, device=device)
+
+    gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
+        hook_name: hooked_mlp.hooked_data[hook_name]["gram"] for hook_name in hooked_mlp.hooked_data
+    }
+    hooked_mlp.clear_hooked_data()
+
     len_dataset = len(data_loader.dataset)  # type: ignore
 
-    for hook_config in hook_configs:
-        # Scale the gram matrix by the number of samples in the dataset.
-        hooked_mlp.hooked_data[hook_config.hook_name]["gram"] = (
-            hooked_mlp.hooked_data[hook_config.hook_name]["gram"] / len_dataset
-        )
+    # Scale the gram matrix by the number of samples in the dataset.
+    for hook_name in gram_matrices:
+        gram_matrices[hook_name] = gram_matrices[hook_name] / len_dataset
+
+    return gram_matrices

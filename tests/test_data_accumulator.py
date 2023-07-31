@@ -43,14 +43,13 @@ def test_collect_gram_matrices():
     device = "cpu"
 
     # Run collect_gram_matrices
-    collect_gram_matrices(hooked_mlp, hook_configs, data_loader, device)
+    gram_matrices = collect_gram_matrices(hooked_mlp, hook_configs, data_loader, device)
+
+    # Ensure hooked_mlp.hooked_data got removed after collect_gram_matrices
+    assert not hooked_mlp.hooked_data
 
     for config in hook_configs:
-        # Ensure hooked_data contains gram matrices for each hook_config
-        assert config.hook_name in hooked_mlp.hooked_data
-        assert "gram" in hooked_mlp.hooked_data[config.hook_name]
-
         # Ensure gram matrices are of correct size
-        assert hooked_mlp.hooked_data[config.hook_name]["gram"].size() == torch.Size(
+        assert gram_matrices[config.hook_name].size() == torch.Size(
             [config.layer_size, config.layer_size]
         )

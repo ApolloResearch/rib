@@ -107,3 +107,7 @@ class HookedModel(torch.nn.Module):
         for handle in self.hook_handles:
             handle.remove()
         self.hook_handles = []
+
+    def clear_hooked_data(self) -> None:
+        """Clear all data stored in the hooked_data attribute."""
+        self.hooked_data = {}

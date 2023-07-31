@@ -13,7 +13,7 @@ class EigenInfo:
 
     hook_name: str
     eigenvals: Float[Tensor, "d_hidden"]
-    eigenvecs: Float[Tensor, "d_hidden d_hidden"]  # Columns are eigenvectors
+    eigenvecs: Float[Tensor, "d_hidden d_hidden"]  # Rows are eigenvectors
 
 
 def eigendecompose(
@@ -22,6 +22,8 @@ def eigendecompose(
     dtype: torch.dtype = torch.float64,
 ) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """Calculate eigenvalues and eigenvectors of a real symmetric matrix.
+
+    IMPORTANT: we return eigenvectors as rows, not columns (as is standard in numpy and pytorch)
 
     Note that we hardcode the dtype of the eigendecomposition calculation to torch.float64 because
     lower dtypes tend to be very unstable. We switch back to the original dtype after the operation.
@@ -38,16 +40,16 @@ def eigendecompose(
             Values below torch.float64 tend to be very unstable.
     Returns:
         eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
-        eigenvectors: Matrix whose columns are the eigenvectors of x.
+        eigenvectors: Matrix whose rows are the eigenvectors of x.
     """
     eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=dtype, device="cpu"))
 
     eigenvalues = eigenvalues.to(dtype=x.dtype, device=x.device)
-    eigenvectors = eigenvectors.to(dtype=x.dtype, device=x.device)
+    eigenvectors = eigenvectors.to(dtype=x.dtype, device=x.device).T
     if descending:
         idx = torch.argsort(eigenvalues, descending=True)
         eigenvalues = eigenvalues[idx]
-        eigenvectors = eigenvectors[:, idx]
+        eigenvectors = eigenvectors[idx, :]
     return eigenvalues, eigenvectors
 
 
@@ -60,7 +62,7 @@ def calc_rotation_matrix(
 
     The formula for the rotation matrix is given by:
 
-        rotation_matrix = vecs.T @ basis @ vecs
+        rotation_matrix = vecs @ basis @ vecs.T
 
     where basis is the standard basis of size d_hidden with the final n_zero_vals or n_ablated_vecs
     rows/columns set to 0.
@@ -72,27 +74,27 @@ def calc_rotation_matrix(
     eigenvalues (as given by `n_zero_vals`).
 
     Args:
-        vecs: Matrix whose columns are the eigenvectors of the gram matrix.
+        vecs: Matrix whose rows are the eigenvectors of the gram matrix.
         n_zero_vals: Number of zero eigenvalues. If > 0 and n_ablated_vecs == 0, we ignore the
             smallest n_zero_vals eigenvectors.
         n_ablated_vecs: Number of eigenvectors to ablate. If > 0, we ignore the smallest
             n_ablated_vecs eigenvectors.
 
     Returns:
-        The rotation matrix with which to right multiply incoming activations to rotate them
-        into the orthogonal basis.
+        The rotation matrix with which to multiply on the left by incoming activations to rotate
+        them into the orthogonal basis.
     """
     assert not (
         n_zero_vals > 0 and n_ablated_vecs > 0
     ), "Cannot also ignore zero eigenvalues when ablating eigenvectors."
     assert (
-        n_ablated_vecs <= vecs.shape[0] and n_zero_vals <= vecs.shape[0]
+        n_ablated_vecs <= vecs.shape[1] and n_zero_vals <= vecs.shape[1]
     ), "Cannot ablate more eigenvectors than there are."
     n_ignore = n_ablated_vecs if n_ablated_vecs > 0 else n_zero_vals
-    basis = torch.eye(vecs.shape[0], dtype=vecs.dtype, device=vecs.device)
-    basis[vecs.shape[0] - n_ignore :] = 0
+    basis = torch.eye(vecs.shape[1], dtype=vecs.dtype, device=vecs.device)
+    basis[vecs.shape[1] - n_ignore :] = 0
 
-    rotation_matrix = vecs @ basis @ vecs.T
+    rotation_matrix = vecs.T @ basis @ vecs
     return rotation_matrix
 
 

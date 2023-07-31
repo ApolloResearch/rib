@@ -37,7 +37,7 @@ def test_eigendecompose(descending: bool) -> None:
     # Compare with the results of eigendecompose
     order = s.abs().sort(descending=descending)[1]
     assert torch.allclose(s[order], eigenvalues.abs(), atol=1e-4)
-    assert torch.allclose(u[:, order].abs(), eigenvectors.abs(), atol=1e-4)
+    assert torch.allclose(u[:, order].abs(), eigenvectors.T.abs(), atol=1e-4)
 
     # Check sorting
     if descending:
@@ -86,11 +86,11 @@ def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
 
     # See how this compares with rotating into the eigenspace, zeroing out the last n dimensions,
     # and rotating back
-    acts_eigenspace = acts @ vecs
+    acts_eigenspace = acts @ vecs.T
     n_ignore = n_ablated_vecs if n_ablated_vecs > 0 else n_zero_vals
     if n_ignore > 0:
         acts_eigenspace[:, -n_ignore:] = 0
-    rotated_vecs_2 = acts_eigenspace @ vecs.T
+    rotated_vecs_2 = acts_eigenspace @ vecs
     assert torch.allclose(rotated_vecs, rotated_vecs_2, atol=1e-6)
 
 

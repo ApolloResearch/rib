@@ -19,10 +19,16 @@ class EigenInfo:
 def eigendecompose(
     x: Float[Tensor, "d_hidden d_hidden"],
     descending: bool = True,
+    dtype: torch.dtype = torch.float64,
 ) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """Calculate eigenvalues and eigenvectors of a real symmetric matrix.
 
-    Note that we hardcode the dtype to torch.float64 because lower dtypes tend to be very unstable.
+    Note that we hardcode the dtype of the eigendecomposition calculation to torch.float64 because
+    lower dtypes tend to be very unstable. We switch back to the original dtype after the operation.
+
+    Eigendecomposition seems to be faster on the cpu. See
+    https://discuss.pytorch.org/t/torch-linalg-eigh-is-significantly-slower-on-gpu/140818/12. We
+    therefore convert to and from the cpu when performing the eigendecomposition.
 
     Args:
         x: A real symmetric matrix (e.g. the result of X^T @ X)
@@ -34,9 +40,10 @@ def eigendecompose(
         eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
         eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
-    # We hardcode the dtype to torch.float64 because lower dtypes tend to be very unstable.
-    dtype = torch.float64
-    eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=dtype))
+    eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=dtype, device="cpu"))
+
+    eigenvalues = eigenvalues.to(dtype=x.dtype, device=x.device)
+    eigenvectors = eigenvectors.to(dtype=x.dtype, device=x.device)
     if descending:
         idx = torch.argsort(eigenvalues, descending=True)
         eigenvalues = eigenvalues[idx]

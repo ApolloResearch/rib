@@ -25,12 +25,14 @@ def test_eigendecompose(descending: bool) -> None:
     # Calculate eigenvalues and eigenvectors using eigendecompose
     eigenvalues, eigenvectors = eigendecompose(x, descending=descending)
 
-    # Check the dtypes of output match the hardcoded dtype in the function
-    assert eigenvalues.dtype == torch.float64
-    assert eigenvectors.dtype == torch.float64
+    # Check the dtype of output matches the dtype of the input (the internal computation is done
+    # in float64 to avoid numerical issues)
+    assert eigenvalues.dtype == x.dtype
 
     # Compute SVD, u will be the eigenvectors, s the absolute values of eigenvalues
     u, s, _ = torch.linalg.svd(x.to(dtype=torch.float64))
+    u = u.to(dtype=x.dtype)
+    s = s.to(dtype=x.dtype)
 
     # Compare with the results of eigendecompose
     order = s.abs().sort(descending=descending)[1]
@@ -62,7 +64,7 @@ def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
     torch.manual_seed(0)
     n_elements = 2
     d_hidden = 10
-    dataset = torch.randn(n_elements, d_hidden).double()
+    dataset = torch.randn(n_elements, d_hidden)
     gram = dataset.T @ dataset / n_elements
     _, vecs = eigendecompose(gram)
 
@@ -77,7 +79,7 @@ def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
     assert torch.allclose(rotation_matrix, rotation_matrix.T, atol=1e-6)
 
     # Get a new set of activations
-    acts = torch.randn(n_elements, d_hidden).double()
+    acts = torch.randn(n_elements, d_hidden)
 
     # Transform eigenvectors with the rotation matrix
     rotated_vecs = acts @ rotation_matrix

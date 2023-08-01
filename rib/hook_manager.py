@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 import torch
 from pydantic import BaseModel
@@ -10,6 +10,8 @@ from rib.models.utils import get_model_attr
 
 
 class HookConfig(BaseModel):
+    """Specifies the locations of hooks to add to a model."""
+
     hook_name: str
     module_name: str  # The module to hook into
     hook_type: Literal["forward", "pre_forward"]
@@ -27,7 +29,7 @@ class Hook:
     Attributes:
         name: Name of the hook. This is useful for identifying hooks when two hooks have the
             same module_name (e.g. a forward and pre_forward hook).
-        data_key: The key used to store data in HookedModel.hooked_data.
+        data_key: The key or keys to index the data in HookedModel.hooked_data.
         fn_name: Name of the hook function to run at the hook point.
         module_name: String representing the attribute of the model to add the hook to.
             Nested attributes are split by periods (e.g. "layers.linear_0").
@@ -35,7 +37,7 @@ class Hook:
     """
 
     name: str
-    data_key: str
+    data_key: Union[str, list[str]]
     fn_name: str
     module_name: str
     fn_kwargs: dict[str, Any] = field(default_factory=dict)

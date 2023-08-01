@@ -23,6 +23,8 @@ def eigendecompose(
 ) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """Calculate eigenvalues and eigenvectors of a real symmetric matrix.
 
+    Eigenvectors are returned as columns of a matrix, sorted in descending order of eigenvalues.
+
     Note that we hardcode the dtype of the eigendecomposition calculation to torch.float64 because
     lower dtypes tend to be very unstable. We switch back to the original dtype after the operation.
 
@@ -223,3 +225,24 @@ def calc_interaction_rotation_matrix(
         curr_layer_gram_eigeninfo.eigenvecs,
     )
     return interaction_rotation_matrix
+
+
+def pinv_truncated_diag(x: Float[Tensor, "a b"]) -> Float[Tensor, "a b"]:
+    """Calculate the pseudo-inverse of a truncated diagonal matrix.
+
+    A truncated diagonal matrix is a diagonal matrix that isn't necessarily square. The
+    pseudo-inverse of a truncated diagonal matrix is the same matrix with the diagonal elements
+    replaced by their reciprocal.
+
+    Args:
+        x: A truncated diagonal matrix.
+
+    Returns:
+        Pseudo-inverse of x.
+    """
+    # Check that all non-diagonal entries are 0. Use a shortcut of comparing the sum of the
+    # diagonal entries to the sum of all entries.
+    assert x.sum() == x.diagonal().sum(), "It appears there are non-zero off-diagonal entries."
+    res: Float[Tensor, "a b"] = torch.zeros_like(x)
+    res.diagonal()[:] = x.diagonal().reciprocal()
+    return res

@@ -3,7 +3,12 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from rib.linalg import batched_jacobian, calc_rotation_matrix, eigendecompose
+from rib.linalg import (
+    batched_jacobian,
+    calc_rotation_matrix,
+    eigendecompose,
+    pinv_truncated_diag,
+)
 
 
 @pytest.mark.parametrize("descending", [True, False])
@@ -113,3 +118,36 @@ def test_batched_jacobian() -> None:
     shuffled: Float[Tensor, "batch d_hidden d_hidden"] = torch_jac_summed.permute(1, 0, 2)
 
     assert torch.allclose(actual, shuffled, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "x, expected",
+    [
+        (
+            torch.diag(torch.tensor([1.0, 2.0, 3.0])),
+            torch.diag(torch.tensor([1.0, 0.5, 1.0 / 3.0])),
+        ),
+        (
+            torch.diag(torch.tensor([4.0, 5.0, 6.0]))[:2],
+            torch.tensor([[0.25, 0.0, 0.0], [0.0, 0.2, 0.0]]),
+        ),
+        (
+            torch.diag(torch.tensor([1.0, 0.0, 3.0])),
+            torch.diag(torch.tensor([1.0, float("inf"), 1.0 / 3.0])),
+        ),
+    ],
+)
+def test_pinv_truncated_diag(x, expected):
+    y = pinv_truncated_diag(x)
+    assert torch.allclose(y, expected)
+
+
+@pytest.mark.parametrize(
+    "x",
+    [
+        (torch.tensor([[1.0, 0.5], [0.0, 2.0]])),
+    ],
+)
+def test_pinv_truncated_diag_failure(x):
+    with pytest.raises(AssertionError):
+        y = pinv_truncated_diag(x)

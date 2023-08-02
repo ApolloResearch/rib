@@ -8,7 +8,7 @@ from rib.hook_registry import HOOK_REGISTRY
 
 
 @pytest.fixture
-def test_model():
+def model():
     class TestModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -20,11 +20,11 @@ def test_model():
     return TestModel()
 
 
-def test_hooked_model_add_and_remove_hooks(test_model):
+def test_hooked_model_add_and_remove_hooks(model):
     """Test adding and removing hooks in the HookedModel"""
     torch.manual_seed(0)
     data = torch.randn((1, 3))
-    hooked_model = HookedModel(test_model)
+    hooked_model = HookedModel(model)
     mock_fn = Mock(return_value=None)
 
     with pytest.raises(ValueError):
@@ -49,14 +49,14 @@ def test_hooked_model_add_and_remove_hooks(test_model):
     assert not hooked_model.hook_handles
 
     # Ensure output matches expected output from base model (gram hook does not modify output)
-    assert torch.allclose(result, test_model(data))
+    assert torch.allclose(result, model(data))
 
 
-def test_gram_forward_hook_fn_accumulates_over_forward_passes(test_model):
+def test_gram_forward_hook_fn_accumulates_over_forward_passes(model):
     """Test the gram_forward_hook_fn accumulates the gram matrix over multiple forward passes"""
     torch.manual_seed(0)
     data = torch.randn((1, 3))
-    hooked_model = HookedModel(test_model)
+    hooked_model = HookedModel(model)
 
     # Register hook function
     hooks = [
@@ -74,8 +74,8 @@ def test_gram_forward_hook_fn_accumulates_over_forward_passes(test_model):
     hooked_model(data_2, hooks=hooks)
 
     # Compute the expected Gram matrix
-    output_1 = test_model.linear(data)
-    output_2 = test_model.linear(data_2)
+    output_1 = model.linear(data)
+    output_2 = model.linear(data_2)
     expected_gram = output_1.T @ output_1 + output_2.T @ output_2
 
     # Compare hooked_data with the expected gram matrix

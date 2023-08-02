@@ -1,21 +1,11 @@
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Literal, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
-from pydantic import BaseModel
 
 from rib.hook_registry import HOOK_REGISTRY
 from rib.models.utils import get_model_attr
-
-
-class HookConfig(BaseModel):
-    """Specifies the locations of hooks to add to a model."""
-
-    hook_name: str
-    module_name: str  # The module to hook into
-    hook_type: Literal["forward", "pre_forward"]
-    layer_size: int  # The size of the data at the hook point
 
 
 @dataclass

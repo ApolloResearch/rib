@@ -4,7 +4,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from rib.linalg import batched_jacobian, calc_interaction_matrix
+from rib.linalg import batched_jacobian
 
 
 def add_to_hooked_matrix(
@@ -80,32 +80,7 @@ def gram_pre_forward_hook_fn(
     add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
-def rotate_forward_hook_fn(
-    module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch d_hidden"]],
-    output: Float[Tensor, "batch d_hidden"],
-    rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
-    **_: Any,
-) -> Float[Tensor, "batch d_hidden"]:
-    """Hook function for rotating activations.
-
-    The output activations are rotated by the specified rotation matrix.
-
-    Args:
-        module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module (not used).
-        output: output of the module.
-        rotation_matrix: Rotation matrix to apply to the activations.
-        **_: Additional keyword arguments (not used).
-
-    Returns:
-        Rotated activations.
-    """
-    out_copy = output.detach().clone()
-    return out_copy @ rotation_matrix
-
-
-def rotate_pre_forward_hook_fn(
+def rotate_orthog_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: tuple[Float[Tensor, "batch d_hidden"]],
     rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
@@ -117,7 +92,7 @@ def rotate_pre_forward_hook_fn(
 
     Args:
         module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module (not used).
+        inputs: Inputs to the module that we rotate.
         rotation_matrix: Rotation matrix to apply to the activations.
         **_: Additional keyword arguments (not used).
 
@@ -181,7 +156,6 @@ HookRegistryType = dict[str, tuple[Callable[..., Any], str]]
 HOOK_REGISTRY: HookRegistryType = {
     "gram_forward_hook_fn": (gram_forward_hook_fn, "forward"),
     "gram_pre_forward_hook_fn": (gram_pre_forward_hook_fn, "pre_forward"),
-    "rotate_forward_hook_fn": (rotate_forward_hook_fn, "forward"),
-    "rotate_pre_forward_hook_fn": (rotate_pre_forward_hook_fn, "pre_forward"),
+    "rotate_orthog_pre_forward_hook_fn": (rotate_orthog_pre_forward_hook_fn, "pre_forward"),
     "M_dash_and_Lambda_dash_forward_hook_fn": (M_dash_and_Lambda_dash_forward_hook_fn, "forward"),
 }

@@ -15,17 +15,6 @@ T = TypeVar("T", bound=BaseModel)
 REPO_ROOT = Path(__file__).parent.parent
 
 
-def run_dataset_through_model(
-    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook], device: str = "cuda"
-) -> None:
-    """Simply pass all batches through a hooked model."""
-    assert len(hooks) > 0, "Hooks have not been applied to this model."
-    for batch in dataloader:
-        data, _ = batch
-        data = data.to(device)
-        hooked_model(data, hooks=hooks)
-
-
 @torch.inference_mode()
 def eval_model_accuracy(
     hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook], device: str = "cuda"

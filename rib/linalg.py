@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Callable
 
 import torch
@@ -7,22 +6,21 @@ from torch import Tensor
 from torch.func import jacrev, vmap
 
 
-@dataclass
-class EigenInfo:
-    """Information about the eigendecomposition of a gram matrix."""
-
-    hook_name: str
-    eigenvals: Float[Tensor, "d_hidden"]
-    eigenvecs: Float[Tensor, "d_hidden d_hidden"]  # Columns are eigenvectors
-
-
 def eigendecompose(
     x: Float[Tensor, "d_hidden d_hidden"],
     descending: bool = True,
+    dtype: torch.dtype = torch.float64,
 ) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """Calculate eigenvalues and eigenvectors of a real symmetric matrix.
 
-    Note that we hardcode the dtype to torch.float64 because lower dtypes tend to be very unstable.
+    Eigenvectors are returned as columns of a matrix, sorted in descending order of eigenvalues.
+
+    Note that we hardcode the dtype of the eigendecomposition calculation to torch.float64 because
+    lower dtypes tend to be very unstable. We switch back to the original dtype after the operation.
+
+    Eigendecomposition seems to be faster on the cpu. See
+    https://discuss.pytorch.org/t/torch-linalg-eigh-is-significantly-slower-on-gpu/140818/12. We
+    therefore convert to and from the cpu when performing the eigendecomposition.
 
     Args:
         x: A real symmetric matrix (e.g. the result of X^T @ X)
@@ -34,9 +32,10 @@ def eigendecompose(
         eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
         eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
-    # We hardcode the dtype to torch.float64 because lower dtypes tend to be very unstable.
-    dtype = torch.float64
-    eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=dtype))
+    eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=dtype, device="cpu"))
+
+    eigenvalues = eigenvalues.to(dtype=x.dtype, device=x.device)
+    eigenvectors = eigenvectors.to(dtype=x.dtype, device=x.device)
     if descending:
         idx = torch.argsort(eigenvalues, descending=True)
         eigenvalues = eigenvalues[idx]
@@ -103,49 +102,24 @@ def batched_jacobian(
     return vmap(jacrev(fn))(x)
 
 
-def calc_interaction_matrix(
-    module: torch.nn.Module,
-    in_acts: Float[Tensor, "batch_size in_hidden"],
-    out_interaction_matrix: Float[Tensor, "out_hidden out_hidden"],
-    in_eigenvecs: Float[Tensor, "in_hidden in_hidden"],
-    in_eigenvals: Float[Tensor, "in_hidden"],
-    out_acts: Float[Tensor, "batch_size out_hidden"],
-) -> Float[Tensor, "out_hidden out_hidden"]:
-    """
-    The interaction matrix for the input layer is calculated as:
+def pinv_truncated_diag(x: Float[Tensor, "a b"]) -> Float[Tensor, "a b"]:
+    """Calculate the pseudo-inverse of a truncated diagonal matrix.
 
-        M = inner_product(sum_i(f_i^{l+1} O'_{i,j}^l), sum_{i'}(f_{i'}^{l+1} O'_{i',j'}^l))
-    with f_i^{l+1} representing this module's outputs, and O'_{i,j}^l representing the jacobian of
-    the layer w.r.t the inputs transformed by:
-        O'^l = C^{l+1} O^l U^l.T {D^l}^{0.5}
-    where l represents the input layer and l+1 the output layer, and:
-        C^{l+1}: (out_hidden, out_hidden) the interaction matrix at the output
-        O^l: (batch, out_hidden, in_hidden) the jacobian of the layer w.r.t the inputs
-        U^l: (in_hidden, in_hidden) matrix with columns as the eigenvectors of the input
-        D^l: (in_hidden) the eigenvalues of the input
-
-
-    Note that the batch_jacobian must be calculated outside of inference_mode (otherwise it
-    will be zero).
+    A truncated diagonal matrix is a diagonal matrix that isn't necessarily square. The
+    pseudo-inverse of a truncated diagonal matrix is the same matrix with the diagonal elements
+    replaced by their reciprocal.
 
     Args:
-        module: Module that the hook is attached to.
-        in_acts: Input to the module.
-        out_interaction_matrix: Interaction matrix for the output layer.
-        in_eigenvecs: Matrix whose columns are the eigenvectors of the gram matrix of the input.
-        in_eigenvals: Diagonal matrix whose diagonal entries are the eigenvalues of the gram matrix
-            of the input.
-        out_acts: Output of the module.
+        x: A truncated diagonal matrix.
 
     Returns:
-        The interaction matrix for the input layer.
+        Pseudo-inverse of x.
     """
-
-    jac: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, in_acts)
-    with torch.inference_mode():
-        o_dash = torch.einsum(
-            "jJ,bji,iI,i->bJI", out_interaction_matrix, jac, in_eigenvecs, in_eigenvals.sqrt()
-        )
-        out_o_dash = torch.einsum("bj,bji->bi", out_acts, o_dash)
-        M = torch.einsum("bi,bj->ij", out_o_dash, out_o_dash)
-    return M
+    # Check that all non-diagonal entries are 0. Use a shortcut of comparing the sum of the
+    # diagonal entries to the sum of all entries. They should be close
+    assert torch.allclose(
+        x.sum(), x.diagonal().sum()
+    ), "It appears there are non-zero off-diagonal entries."
+    res: Float[Tensor, "a b"] = torch.zeros_like(x)
+    res.diagonal()[:] = x.diagonal().reciprocal()
+    return res

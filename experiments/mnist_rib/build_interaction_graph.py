@@ -125,7 +125,7 @@ def calculate_interaction_rotations(
             module_name=module_name,
             device=device,
         )
-        # Create a matrix from the eigenvalues, removing cols with vals < truncation_threshold
+        # Create sqaure matrix from eigenvalues then remove cols with vals < truncation_threshold
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
         D: Float[Tensor, "d_hidden d_hidden_trunc"] = (
             torch.diag(D_dash)[:, :-n_small_eigenvals]
@@ -137,13 +137,13 @@ def calculate_interaction_rotations(
             "kj,jJ,JK->kK", U_sqrt_D.T, M_dash, U_sqrt_D
         )
         _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
-        # Right multiply U_sqrt_D with V, corresponding to $U D^{1/2} V$ in the paper.
+        # Multiply U_sqrt_D with V, corresponding to $U D^{1/2} V$ in the paper.
         U_sqrt_D_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_sqrt_D @ V
         Lambda = torch.einsum("kj,jJ,JK->kK", U_sqrt_D_V.T, Lambda_dash, U_sqrt_D_V)
         # Take the pseudoinverse of the sqrt of D. Can simply take the elementwise inverse
         # of the diagonal elements, since D is diagonal.
         D_sqrt_inv: Float[Tensor, "d_hidden d_hidden_trunc"] = pinv_truncated_diag(D.sqrt())
-        C = (module_name, torch.einsum("jJ,Jm,Mn,nk->jk", U, D_sqrt_inv, V, Lambda.abs().sqrt()))
+        C = (module_name, torch.einsum("jJ,Jm,mn,nk->jk", U, D_sqrt_inv, V, Lambda.abs().sqrt()))
         Cs.append(C)
 
     Cs.reverse()

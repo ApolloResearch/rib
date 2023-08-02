@@ -88,7 +88,7 @@ def calculate_interaction_rotations(
     data_loader: DataLoader,
     device: str,
     truncation_threshold: float = 1e-5,
-) -> list[tuple[str, Float[Tensor, "d_hidden d_hidden"]]]:
+) -> dict[str, Float[Tensor, "d_hidden d_hidden_trunc"]]:
     """Calculate the interaction rotation matrices (denoted C in the paper) for each node layer.
 
     Recall that we have one more node layer than module layer, as we have a node layer for the
@@ -105,12 +105,12 @@ def calculate_interaction_rotations(
         device: The device to use for the calculations.
 
     Returns:
-        A list of (node_layer, rotation_matrix) tuples, one for each node layer in the graph.
+        A dictionary of interaction rotation matrices, keyed by node layer name (i.e. module
+        name or `output`)
     """
     assert "output" in gram_matrices, "Gram matrices must include an `output` key."
 
-    # We start appending Cs from the output layer and work our way backwards (we reverse the list
-    # at the end)
+    # We start appending Cs from the output layer and work our way backwards
     Cs: list[tuple[str, Float[Tensor, "d_hidden d_hidden_trunc"]]] = []
     _, U_output = eigendecompose(gram_matrices["output"])
     Cs.append(("output", U_output))
@@ -143,11 +143,12 @@ def calculate_interaction_rotations(
         # Take the pseudoinverse of the sqrt of D. Can simply take the elementwise inverse
         # of the diagonal elements, since D is diagonal.
         D_sqrt_inv: Float[Tensor, "d_hidden d_hidden_trunc"] = pinv_truncated_diag(D.sqrt())
-        C = (module_name, torch.einsum("jJ,Jm,mn,nk->jk", U, D_sqrt_inv, V, Lambda.abs().sqrt()))
-        Cs.append(C)
+        C_mat: Float[Tensor, "d_hidden d_hidden_trunc"] = torch.einsum(
+            "jJ,Jm,mn,nk->jk", U, D_sqrt_inv, V, Lambda.abs().sqrt()
+        )
+        Cs.append((module_name, C_mat))
 
-    Cs.reverse()
-    return Cs
+    return dict(reversed(Cs))
 
 
 def main(config_path_str: str) -> None:

@@ -142,7 +142,7 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
         # This corresponds to the left half of the inner products in the M' and Lambda' equations
         # In latex: $\sum_i \hat{f}^{l+1}(X) {C^{l+1}}^T O^l$
         f_hat_next_layer_C_O: Float[Tensor, "batch in_hidden"] = torch.einsum(
-            "bi,Ii,bIj->bj", out_acts, next_layer_C, O
+            "bi,iI,Ii,bij->bj", out_acts, next_layer_C, next_layer_C.T, O
         )
         M_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_next_layer_C_O.T @ f_hat_next_layer_C_O
         Lambda_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_next_layer_C_O.T @ in_acts

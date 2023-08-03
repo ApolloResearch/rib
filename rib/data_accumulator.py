@@ -1,4 +1,4 @@
-"""Functions that apply hooks and accumulate certain data when passing batches through a model."""
+"""Functions that apply hooks and accumulate data when passing batches through a model."""
 
 from typing import TYPE_CHECKING
 

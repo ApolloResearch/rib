@@ -9,22 +9,6 @@ The process is as follows:
         as at the output of the final module.
     4. Calculate the edges of the interaction graph between each node layer.
 
-We often use variable names from the paper in this script. For example, we refer to the interaction
-rotation matrix as C, the gram matrix as G, and the edge weights as E.
-
-This algorithm makes use of pytorch hooks to extract the relevant data from the modules during
-forward passes. The hooks are all forward hooks. When setting a hook to a module, the inputs to
-that module will correspond to $f^l(X)$ in the paper, and the outputs $f^{l+1}(X)$. This means that
-we must treat the output layer differently, as there is no module we can set a hook point to which
-will have inputs corresponding to the model output. To cater for this, we add an extra hook to the
-final `module_name` and collect the gram matrices from that module's output, as opposed to its
-inputs as is done for the other modules.
-
-Beware, when calculating the jacobian, if torch.inference_mode() is set, the jacobian will output
-zeros. This is because torch.inference_mode() disables autograd, which is required for calculating
-the jacobian. Setting requires_grad=True on the inputs and outputs of the jacobian calculation
-DOES NOT fix this issue.
-
 Usage:
     python build_interaction_graph.py <path/to/yaml_config_file>
 

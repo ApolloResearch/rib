@@ -1,33 +1,4 @@
-"""Calculate the interaction graph of an MLP trained on MNIST.
-
-The full algorithm is Algorithm 1 of https://www.overleaf.com/project/6437d0bde0eaf2e8c8ac3649
-The process is as follows:
-    1. Load an MLP trained on MNIST and a test set of MNIST images.
-    2. Collect gram matrices at each node layer.
-    3. Calculate the interaction rotation matrices (labelled C in the paper) for each node layer. A
-        node layer is positioned at the input of each module_name specified in the config, as well
-        as at the output of the final module.
-    4. Calculate the edges of the interaction graph between each node layer.
-
-We often use variable names from the paper in this script. For example, we refer to the interaction
-rotation matrix as C, the gram matrix as G, and the edge weights as E.
-
-This algorithm makes use of pytorch hooks to extract the relevant data from the modules during
-forward passes. The hooks are all forward hooks. When setting a hook to a module, the inputs to
-that module will correspond to $f^l(X)$ in the paper, and the outputs $f^{l+1}(X)$. This means that
-we must treat the output layer differently, as there is no module we can set a hook point to which
-will have inputs corresponding to the model output. To cater for this, we add an extra hook to the
-final `module_name` and collect the gram matrices from that module's output, as opposed to its
-inputs as is done for the other modules.
-
-Beware, when calculating the jacobian, if torch.inference_mode() is set, the jacobian will output
-zeros. This is because torch.inference_mode() disables autograd, which is required for calculating
-the jacobian. Setting requires_grad=True on the inputs and outputs of the jacobian calculation
-DOES NOT fix this issue.
-
-Usage:
-    python build_interaction_graph.py <path/to/yaml_config_file>
-
+"""This module contains algorithms related to interaction rotations
 """
 
 from dataclasses import dataclass
@@ -63,10 +34,11 @@ def calculate_interaction_rotations(
 ) -> list[InteractionRotation]:
     """Calculate the interaction rotation matrices (denoted C) and their inverses.
 
+    This function implements Algorithm 1 of the paper. We name the variables as they are named in
+    the paper.
+
     Recall that we have one more node layer than module layer, as we have a node layer for the
     output of the final module.
-
-    Note that the variable names refer to the notation used in Algorithm 1 in the paper.
 
     We collect the interaction rotation matrices from the output layer backwards, as we need the
     next layer's rotation to compute the current layer's rotation. We reverse the list at the end.

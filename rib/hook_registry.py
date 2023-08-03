@@ -51,8 +51,8 @@ def gram_forward_hook_fn(
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
-    out_copy = output.detach().clone()
-    gram_matrix = out_copy.T @ out_copy
+    out_acts = output.detach().clone()
+    gram_matrix = out_acts.T @ out_acts
     add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
@@ -75,8 +75,8 @@ def gram_pre_forward_hook_fn(
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
-    in_copy = inputs[0].detach().clone()
-    gram_matrix = in_copy.T @ in_copy
+    in_acts = inputs[0].detach().clone()
+    gram_matrix = in_acts.T @ in_acts
     add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
@@ -99,8 +99,8 @@ def rotate_orthog_pre_forward_hook_fn(
     Returns:
         Rotated activations.
     """
-    in_copy = inputs[0].detach().clone()
-    return (in_copy @ rotation_matrix,)
+    in_acts = inputs[0].detach().clone()
+    return (in_acts @ rotation_matrix,)
 
 
 def M_dash_and_Lambda_dash_forward_hook_fn(
@@ -110,7 +110,7 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    next_layer_C: Float[Tensor, "out_hidden out_hidden"],
+    C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
     **_: Any,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
@@ -125,7 +125,7 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
-        next_layer_C: The C matrix for the next layer (C^{l+1} in the paper).
+        C_out: The C matrix for the next layer (C^{l+1} in the paper).
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
@@ -141,14 +141,66 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
     with torch.inference_mode():
         # This corresponds to the left half of the inner products in the M' and Lambda' equations
         # In latex: $\sum_i \hat{f}^{l+1}(X) {C^{l+1}}^T O^l$
-        f_hat_next_layer_C_O: Float[Tensor, "batch in_hidden"] = torch.einsum(
-            "bi,iI,Ii,bij->bj", out_acts, next_layer_C, next_layer_C.T, O
+        f_hat_C_out_O: Float[Tensor, "batch in_hidden"] = torch.einsum(
+            "bi,iI,Ii,bij->bj", out_acts, C_out, C_out.T, O
         )
-        M_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_next_layer_C_O.T @ f_hat_next_layer_C_O
-        Lambda_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_next_layer_C_O.T @ in_acts
+        M_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_C_out_O.T @ f_hat_C_out_O
+        Lambda_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_C_out_O.T @ in_acts
 
         add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
+
+
+def interaction_edge_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: tuple[Float[Tensor, "batch in_hidden"]],
+    output: Float[Tensor, "batch out_hidden"],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    C_in: Float[Tensor, "in_hidden in_hidden_trunc"],
+    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
+    C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
+    **_: Any,
+) -> None:
+    """Hook function for accumulating the edges (denoted \hat{E}) of the interaction graph.
+
+    For calculating the Jacobian, we need to run the inputs through the module. Unfortunately,
+    this causes an infinite recursion because the module has a hook which runs this function. To
+    avoid this, we (hackily) remove the hook before running the module and then add it back after.
+
+    Args:
+        module: Module that the hook is attached to.
+        inputs: Inputs to the module.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of 2nd-level keys to store in `hooked_data`.
+        C_in_pinv: The pseudoinverse of the C matrix for the current layer (C^l in the paper).
+        C_out: The C matrix for the next layer (C^{l+1} in the paper).
+        **_: Additional keyword arguments (not used).
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+
+    # Remove the foward hook to avoid recursion when calculating the jacobian
+    module._forward_hooks.popitem()
+    assert not module._forward_hooks, "Module has multiple forward hooks"
+
+    in_acts: Float[Tensor, "batch in_hidden"] = inputs[0].detach().clone()
+    out_acts: Float[Tensor, "batch out_hidden"] = output.detach().clone()
+    O: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, in_acts)
+
+    with torch.inference_mode():
+        # LHS of Hadamard product
+        f_hat_out_T_f_hat_in: Float[Tensor, "out_hidden_trunc in_hidden_trunc"] = torch.einsum(
+            "bi,ik,bj,jm->km", out_acts, C_out, in_acts, C_in
+        )
+        # RHS of Hadamard product
+        C_out_O_C_in_pinv_T: Float[Tensor, "out_hidden_trunc in_hidden_trunc"] = torch.einsum(
+            "ik,bij,jm->km", C_out, O, C_in_pinv.T
+        )
+        E = f_hat_out_T_f_hat_in * C_out_O_C_in_pinv_T
+
+        add_to_hooked_matrix(hooked_data, hook_name, data_key, E)
 
 
 HookRegistryType = dict[str, tuple[Callable[..., Any], str]]
@@ -158,4 +210,5 @@ HOOK_REGISTRY: HookRegistryType = {
     "gram_pre_forward_hook_fn": (gram_pre_forward_hook_fn, "pre_forward"),
     "rotate_orthog_pre_forward_hook_fn": (rotate_orthog_pre_forward_hook_fn, "pre_forward"),
     "M_dash_and_Lambda_dash_forward_hook_fn": (M_dash_and_Lambda_dash_forward_hook_fn, "forward"),
+    "interaction_edge_forward_hook_fn": (interaction_edge_forward_hook_fn, "forward"),
 }

@@ -1,11 +1,15 @@
-"""Functions used to accumulate certain data when passing batches through a model."""
+"""Functions that apply hooks and accumulate certain data when passing batches through a model."""
 
+from typing import TYPE_CHECKING
 
 from jaxtyping import Float
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.hook_manager import Hook, HookedModel
+
+if TYPE_CHECKING:
+    from rib.interaction_algos import InteractionRotation
 
 
 def run_dataset_through_model(
@@ -88,7 +92,7 @@ def collect_gram_matrices(
 
 
 def collect_M_dash_and_Lambda_dash(
-    next_layer_C: Float[Tensor, "out_hidden out_hidden"],
+    C_out: Float[Tensor, "out_hidden out_hidden"],
     hooked_model: HookedModel,
     data_loader: DataLoader,
     module_name: str,
@@ -100,7 +104,7 @@ def collect_M_dash_and_Lambda_dash(
     a hook to the provided module. This hook will accumulate both matrices over the batches.
 
     Args:
-        next_layer_C: The rotation matrix for the next layer.
+        C_out: The rotation matrix for the next layer.
         hooked_model: The hooked model.
         data_loader: The data loader.
         module_name: The name of the module whose inputs are the node layer we collect the matrices
@@ -116,7 +120,7 @@ def collect_M_dash_and_Lambda_dash(
         fn_name=f"M_dash_and_Lambda_dash_forward_hook_fn",
         module_name=module_name,
         fn_kwargs={
-            "next_layer_C": next_layer_C,
+            "C_out": C_out,
         },
     )
 
@@ -132,3 +136,61 @@ def collect_M_dash_and_Lambda_dash(
     Lambda_dash = Lambda_dash / len_dataset
 
     return M_dash, Lambda_dash
+
+
+def collect_interaction_edges(
+    Cs: list["InteractionRotation"],
+    hooked_model: HookedModel,
+    data_loader: DataLoader,
+    device: str,
+) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
+    """Collect interaction edges between each node layer in Cs.
+
+    Recall that the node layers correspond to the positions at the input to each module specified in
+    module_names, as well as the output of the final module.
+
+    Args:
+        Cs: The interaction rotation matrix and its pseudoinverse, order by node layer.
+        hooked_model: The hooked model.
+        data_loader: The pytorch data loader.
+        device: The device to run the model on.
+
+    Returns:
+        A dictionary of interaction edge matrices, keyed by the module name which the edge passes
+        through.
+    """
+
+    assert Cs[-1].node_layer_name == "output", "The last node layer name must be 'output'."
+    edge_hooks: list[Hook] = []
+    for idx, C_info in enumerate(Cs[:-1]):
+        edge_hooks.append(
+            Hook(
+                name=C_info.node_layer_name,
+                data_key="edge",
+                fn_name="interaction_edge_forward_hook_fn",
+                module_name=C_info.node_layer_name,
+                fn_kwargs={
+                    "C_in": C_info.C,  # C from the current node layer
+                    "C_in_pinv": C_info.C_pinv,  # C_pinv from the current node layer
+                    "C_out": Cs[idx + 1].C,  # C from the next node layer
+                },
+            )
+        )
+
+    run_dataset_through_model(hooked_model, data_loader, edge_hooks, device=device)
+
+    edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {
+        node_layer_name: hooked_model.hooked_data[node_layer_name]["edge"]
+        for node_layer_name in hooked_model.hooked_data
+    }
+    hooked_model.clear_hooked_data()
+
+    # Scale the edges by the number of samples in the dataset
+    for node_layer_name in edges:
+        edges[node_layer_name] = edges[node_layer_name] / len(data_loader.dataset)  # type: ignore
+
+    # Ensure that the keys of the edges dict are the same as the node layer names without `output`
+    assert set(edges.keys()) == set(
+        [C.node_layer_name for C in Cs[:-1]]
+    ), f"Edge keys not the same as node layer names. "
+    return edges

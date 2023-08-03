@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 from rib.hook_manager import Hook, HookedModel
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
 
 

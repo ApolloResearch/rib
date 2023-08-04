@@ -5,11 +5,13 @@ from jaxtyping import Float
 from torch import Tensor
 from torch.func import jacrev, vmap
 
+from rib.types import TORCH_DTYPES
+
 
 def eigendecompose(
     x: Float[Tensor, "d_hidden d_hidden"],
     descending: bool = True,
-    dtype: torch.dtype = torch.float64,
+    dtype: str = "float64",
 ) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """Calculate eigenvalues and eigenvectors of a real symmetric matrix.
 
@@ -32,7 +34,7 @@ def eigendecompose(
         eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
         eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
-    eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=dtype, device="cpu"))
+    eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=TORCH_DTYPES[dtype], device="cpu"))
 
     eigenvalues = eigenvalues.to(dtype=x.dtype, device=x.device)
     eigenvectors = eigenvectors.to(dtype=x.dtype, device=x.device)

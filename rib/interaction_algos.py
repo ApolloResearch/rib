@@ -30,7 +30,9 @@ def calculate_interaction_rotations(
     hooked_model: HookedModel,
     data_loader: DataLoader,
     device: str,
+    dtype: str = "float32",
     truncation_threshold: float = 1e-5,
+    rotate_output: bool = True,
 ) -> list[InteractionRotation]:
     """Calculate the interaction rotation matrices (denoted C) and their inverses.
 
@@ -49,7 +51,11 @@ def calculate_interaction_rotations(
         module_names: The names of the modules to build the graph from, in order of appearance.
         hooked_model: The hooked model.
         data_loader: The data loader.
-        device: The device to use for the calculations.
+        device: The device to run the model on.
+        dtype: The data type to run the model on.
+        truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
+        rotate_output: Whether to rotate the output layer to its eigenbasis (which is equivalent
+            to its interaction basis).
 
     Returns:
         A list of objects contain interaction rotation matrices and their pseudoinverses, ordered
@@ -59,9 +65,16 @@ def calculate_interaction_rotations(
 
     # We start appending Cs from the output layer and work our way backwards
     Cs: list[InteractionRotation] = []
-    # Cs: list[tuple[str, Float[Tensor, "d_hidden d_hidden_trunc"]]] = []
-    _, U_output = eigendecompose(gram_matrices["output"])
-    Cs.append(InteractionRotation(node_layer_name="output", C=U_output))
+    if rotate_output:
+        _, U_output = eigendecompose(gram_matrices["output"])
+        C_output: Float[Tensor, "d_hidden d_hidden"] = U_output
+    else:
+        C_output = torch.eye(
+            gram_matrices["output"].shape[0],
+            device=gram_matrices["output"].device,
+            dtype=gram_matrices["output"].dtype,
+        )
+    Cs.append(InteractionRotation(node_layer_name="output", C=C_output))
 
     for module_name in module_names[::-1]:
         D_dash, U = eigendecompose(gram_matrices[module_name])
@@ -72,6 +85,7 @@ def calculate_interaction_rotations(
             data_loader=data_loader,
             module_name=module_name,
             device=device,
+            dtype=dtype,
         )
         # Create sqaure matrix from eigenvalues then remove cols with vals < truncation_threshold
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())

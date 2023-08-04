@@ -175,7 +175,8 @@ def interaction_edge_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
-        C_in_pinv: The pseudoinverse of the C matrix for the current layer (C^l in the paper).
+        C_in: The C matrix for the current layer (C^l in the paper).
+        C_in_pinv: The pseudoinverse of the C matrix for the current layer ((C^l)^+ in the paper).
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         **_: Additional keyword arguments (not used).
     """

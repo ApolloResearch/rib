@@ -21,7 +21,7 @@ from pathlib import Path
 import fire
 import torch
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -30,6 +30,7 @@ from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
 from rib.models import MLP
+from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, load_config
 
 
@@ -38,8 +39,15 @@ class Config(BaseModel):
     mlp_path: Path
     batch_size: int
     seed: int
-    truncation_threshold: float
+    truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
+    rotate_output: bool  # Whether to rotate the output layer to its eigenbasis.
+    dtype: str  # Data type of all tensors (except those overriden in certain functions).
     module_names: list[str]
+
+    @field_validator("dtype")
+    def dtype_validator(cls, v):
+        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
+        return v
 
 
 def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
@@ -93,6 +101,7 @@ def main(config_path_str: str) -> None:
         module_names=config.module_names,
         data_loader=test_loader,
         device=device,
+        dtype=config.dtype,
         collect_output_gram=True,
     )
 
@@ -102,7 +111,9 @@ def main(config_path_str: str) -> None:
         hooked_model=hooked_mlp,
         data_loader=test_loader,
         device=device,
+        dtype=config.dtype,
         truncation_threshold=config.truncation_threshold,
+        rotate_output=config.rotate_output,
     )
 
     E_hats = collect_interaction_edges(

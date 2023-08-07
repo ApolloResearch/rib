@@ -91,7 +91,7 @@ def main(config_path_str: str) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, config.mlp_path)
     mlp.eval()
-    mlp.to(device)
+    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
 
     test_loader = load_mnist_dataloader(train=False, batch_size=config.batch_size)
@@ -121,6 +121,7 @@ def main(config_path_str: str) -> None:
         hooked_model=hooked_mlp,
         data_loader=test_loader,
         device=device,
+        dtype=config.dtype,
     )
 
     results = {

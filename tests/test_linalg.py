@@ -69,12 +69,12 @@ def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
     torch.manual_seed(0)
     n_elements = 2
     d_hidden = 10
-    dataset = torch.randn(n_elements, d_hidden)
+    dataset = torch.randn(n_elements, d_hidden, dtype=torch.float64)
     gram = dataset.T @ dataset / n_elements
     _, vecs = eigendecompose(gram)
 
     rotation_matrix = calc_rotation_matrix(
-        vecs, n_zero_vals=n_zero_vals, n_ablated_vecs=n_ablated_vecs
+        vecs=vecs, vecs_pinv=vecs.T, n_zero_vals=n_zero_vals, n_ablated_vecs=n_ablated_vecs
     )
 
     # Check the dimensions of the rotation matrix
@@ -84,7 +84,7 @@ def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
     assert torch.allclose(rotation_matrix, rotation_matrix.T, atol=1e-6)
 
     # Get a new set of activations
-    acts = torch.randn(n_elements, d_hidden)
+    acts = torch.randn(n_elements, d_hidden, dtype=torch.float64)
 
     # Transform eigenvectors with the rotation matrix
     rotated_vecs = acts @ rotation_matrix

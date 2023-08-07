@@ -46,48 +46,51 @@ def eigendecompose(
 
 
 def calc_rotation_matrix(
-    vecs: Float[Tensor, "d_hidden d_hidden"],
+    vecs: Float[Tensor, "d_hidden d_hidden_trunc"],
+    vecs_pinv: Float[Tensor, "d_hidden_trunc d_hidden"],
     n_zero_vals: int = 0,
     n_ablated_vecs: int = 0,
 ) -> Float[Tensor, "d_hidden d_hidden"]:
-    """Calculate the matrix to rotates into and out of the orthogonal basis with optional ablations.
+    """Calculate the matrix to rotates into and out of a new basis with optional ablations.
+
+    This can be used for rotating to and from an eigenbasis or interaction basis (or any other
+    basis). The basis vectors are given in the columns of the `vecs` matrix.
 
     The formula for the rotation matrix is given by:
 
-        rotation_matrix = vecs.T @ basis @ vecs
+        rotation_matrix = vecs_ablated @ vecs_pinv
 
-    where basis is the standard basis of size d_hidden with the final n_zero_vals or n_ablated_vecs
-    rows/columns set to 0.
+    where vecs_ablated is the matrix with the final n_ablated_vecs or n_zero_vals columns set to 0
 
-    If n_ablated_vecs > 0, we ignore the smallest n_ablated_vecs eigenvectors (regardless of
-    the number of zero eigenvalues).
+    If n_ablated_vecs > 0, we ignore the smallest n_ablated_vecs vectors. Cannot have both
+    n_ablated_vecs > 0 and n_zero_vals > 0.
 
-    If n_ablated_vecs == 0 and n_zero_vals > 0, we ignore the eigenvectors which correspond to zero
-    eigenvalues (as given by `n_zero_vals`).
+    If n_ablated_vecs == 0 and n_zero_vals > 0, we ignore the last n_zero_vals vectors.
 
     Args:
-        vecs: Matrix whose columns are the eigenvectors of the gram matrix.
-        n_zero_vals: Number of zero eigenvalues. If > 0 and n_ablated_vecs == 0, we ignore the
-            smallest n_zero_vals eigenvectors.
-        n_ablated_vecs: Number of eigenvectors to ablate. If > 0, we ignore the smallest
-            n_ablated_vecs eigenvectors.
+        vecs: Matrix whose columns are the basis vectors.
+        vecs_pinv: Pseudo-inverse of vecs. This will be the transpose if vecs is orthonormal.
+        n_zero_vals: Number of vectors to zero out, starting from the last column. If > 0 and
+        n_ablated_vecs == 0, we ignore the smallest n_zero_vals basis vectors.
+        n_ablated_vecs: Number of vectors to ablate, starting from the last column. If > 0, we
+        ignore the smallest n_ablated_vecs eigenvectors.
 
     Returns:
         The rotation matrix with which to right multiply incoming activations to rotate them
-        into the orthogonal basis.
+        into the new basis.
     """
     assert not (
         n_zero_vals > 0 and n_ablated_vecs > 0
-    ), "Cannot also ignore zero eigenvalues when ablating eigenvectors."
+    ), "Cannot also ignore a given n_zero_vals when ablating basis vectors."
     assert (
-        n_ablated_vecs <= vecs.shape[0] and n_zero_vals <= vecs.shape[0]
-    ), "Cannot ablate more eigenvectors than there are."
+        n_ablated_vecs <= vecs.shape[1] and n_zero_vals <= vecs.shape[1]
+    ), "Cannot ablate more basis vectors than there are."
     n_ignore = n_ablated_vecs if n_ablated_vecs > 0 else n_zero_vals
-    basis = torch.eye(vecs.shape[0], dtype=vecs.dtype, device=vecs.device)
-    basis[vecs.shape[0] - n_ignore :] = 0
-
-    rotation_matrix = vecs @ basis @ vecs.T
-    return rotation_matrix
+    vecs_ablated = vecs.clone().detach()
+    # Zero out the final n_ignore vectors
+    if n_ignore > 0:
+        vecs_ablated[:, -n_ignore:] = 0
+    return vecs_ablated @ vecs_pinv
 
 
 def batched_jacobian(

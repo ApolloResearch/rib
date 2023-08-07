@@ -18,7 +18,7 @@ is not useful.
 
 
 Usage:
-    python run_ablations.py <path/to/yaml_config_file>
+    python run_orthog_ablations.py <path/to/yaml_config_file>
 
 This script will take 4 minutes to run on cpu or gpu for 2-layer 100-hidden-unit MLPs with two hook
 points.
@@ -102,7 +102,9 @@ def ablate_and_test(
         total=len(range(len(eigenvecs) + 1)),
         desc=f"Ablating {module_name}",
     ):
-        rotation_matrix = calc_rotation_matrix(eigenvecs, n_ablated_vecs=n_ablated_vecs)
+        rotation_matrix = calc_rotation_matrix(
+            vecs=eigenvecs, vecs_pinv=eigenvecs.T, n_ablated_vecs=n_ablated_vecs
+        )
         rotation_hook = Hook(
             name=module_name,
             data_key="rotation",

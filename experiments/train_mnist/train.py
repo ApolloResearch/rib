@@ -16,6 +16,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from rib.log import logger
 from rib.models import MLP
@@ -50,6 +51,7 @@ class Config(BaseModel):
     wandb: Optional[WandbConfig]
 
 
+@logging_redirect_tqdm()
 def train(config: Config) -> None:
     """Train the MLP on MNIST.
 

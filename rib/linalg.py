@@ -108,8 +108,8 @@ def pinv_truncated_diag(x: Float[Tensor, "a b"]) -> Float[Tensor, "a b"]:
     """Calculate the pseudo-inverse of a truncated diagonal matrix.
 
     A truncated diagonal matrix is a diagonal matrix that isn't necessarily square. The
-    pseudo-inverse of a truncated diagonal matrix is the same matrix with the diagonal elements
-    replaced by their reciprocal.
+    pseudo-inverse of a truncated diagonal matrix is the transposed matrix with the diagonal
+    elements replaced by their reciprocal.
 
     Args:
         x: A truncated diagonal matrix.
@@ -122,6 +122,6 @@ def pinv_truncated_diag(x: Float[Tensor, "a b"]) -> Float[Tensor, "a b"]:
     assert torch.allclose(
         x.sum(), x.diagonal().sum()
     ), "It appears there are non-zero off-diagonal entries."
-    res: Float[Tensor, "a b"] = torch.zeros_like(x)
+    res: Float[Tensor, "b a"] = torch.zeros_like(x.T)
     res.diagonal()[:] = x.diagonal().reciprocal()
     return res

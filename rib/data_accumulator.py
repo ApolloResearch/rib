@@ -25,6 +25,7 @@ def run_dataset_through_model(
     for batch in dataloader:
         data, _ = batch
         data = data.to(device=device, dtype=TORCH_DTYPES[dtype])
+
         hooked_model(data, hooks=hooks)
 
 

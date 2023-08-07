@@ -1,7 +1,8 @@
-"""Plot the results of the mnist_orthog_ablation experiment.
+"""Plot the results of the mnist_rib_ablation experiment.
 
+TODO: Combine with `experiments/mnist_orthog_ablation/plot_orthog_ablations.py` and move to library.
 Usage:
-    python plot_ablations.py <path/to/results_json_file>
+    python plot_rib_ablations.py <path/to/results_json_file>
 
     The results_json_file should be the output of the run_ablations.py script.
 """
@@ -36,9 +37,9 @@ def plot_accuracies(
         axs[i].plot(x_values, accuracies[module_name], label="MNIST test")
 
         axs[i].set_title(
-            f"{exp_name}-MLP MNIST acc vs n_remaining_eigenvalues for input to {module_name}"
+            f"{exp_name}-MLP MNIST acc vs n_remaining_basis_vecs for input to {module_name}"
         )
-        axs[i].set_xlabel("Number of remaining eigenvalues")
+        axs[i].set_xlabel("Number of remaining interaction basis vectors")
         axs[i].set_ylabel("Accuracy")
         axs[i].set_ylim(0, 1)
         axs[i].grid(True)
@@ -57,7 +58,7 @@ def main(results_file: str) -> None:
         results = json.load(f)
 
     out_dir = Path(__file__).parent / "out"
-    plot_file = out_dir / f"{results['exp_name']}_accuracy_vs_orthogonal_ablation.png"
+    plot_file = out_dir / f"{results['exp_name']}_accuracy_vs_interaction_ablation.png"
 
     # If the file exists, warn the user and kill the program
     if plot_file.exists():

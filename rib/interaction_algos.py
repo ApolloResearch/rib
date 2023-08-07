@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
 
@@ -94,27 +94,36 @@ def calculate_interaction_rotations(
             if n_small_eigenvals > 0
             else torch.diag(D_dash)
         )
-        U_sqrt_D: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
-        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.einsum(
-            "kj,jJ,JK->kK", U_sqrt_D.T, M_dash, U_sqrt_D
-        )
+        U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
+        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
         _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
-        # Multiply U_sqrt_D with V, corresponding to $U D^{1/2} V$ in the paper.
-        U_sqrt_D_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_sqrt_D @ V
-        Lambda_raw: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.einsum(
-            "kj,jJ,JK->kK", U_sqrt_D_V.T, Lambda_dash, U_sqrt_D_V
+
+        # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
+        U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
+        Lambda_raw: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
+            U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_V
         )
-        # Zero out non-diagonal elements of Lambda_raw
-        Lambda = torch.diag(Lambda_raw.diag())
+        # We only care about the sqrt of the absolute value of diagonal elements of Lambda_raw
+        Lambda_diag_abs_sqrt: Float[Tensor, "d_hidden_trunc"] = Lambda_raw.diag().abs().sqrt()
+        # Get the sort indices in descending order
+        Lambda_indices: Int[Tensor, "d_hidden_trunc"] = torch.argsort(
+            Lambda_diag_abs_sqrt, descending=True
+        )
+        # Create a matrix from Lambda_diag_abs_sqrt with the columns sorted in descending order
+        # of their values
+        Lambda_abs_sqrt: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(
+            Lambda_diag_abs_sqrt
+        )[:, Lambda_indices]
+        # We also need the pseudoinverse of this matrix
+        Lambda_abs_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(
+            Lambda_diag_abs_sqrt.reciprocal()
+        )[:, Lambda_indices]
         # Take the pseudoinverse of the sqrt of D. Can simply take the elementwise inverse
         # of the diagonal elements, since D is diagonal.
-        D_sqrt_inv: Float[Tensor, "d_hidden d_hidden_trunc"] = pinv_truncated_diag(D.sqrt())
-        U_D_sqrt_inv_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_inv @ V
-        Lambda_abs_sqrt = Lambda.abs().sqrt()
-        C: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt_inv_V @ Lambda_abs_sqrt
-        C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = (
-            pinv_truncated_diag(Lambda_abs_sqrt) @ U_D_sqrt_inv_V.T
-        )
+        D_sqrt_inv: Float[Tensor, "d_hidden_trunc d_hidden"] = pinv_truncated_diag(D.sqrt())
+
+        C: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_inv.T @ V @ Lambda_abs_sqrt
+        C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = Lambda_abs_sqrt_pinv @ U_D_sqrt_V.T
         Cs.append(InteractionRotation(node_layer_name=module_name, C=C, C_pinv=C_pinv))
 
     return Cs[::-1]

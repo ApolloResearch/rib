@@ -129,7 +129,7 @@ def test_batched_jacobian() -> None:
         ),
         (
             torch.diag(torch.tensor([4.0, 5.0, 6.0]))[:2],
-            torch.tensor([[0.25, 0.0, 0.0], [0.0, 0.2, 0.0]]),
+            torch.tensor([[0.25, 0.0], [0.0, 0.2], [0.0, 0.0]]),
         ),
         (
             torch.diag(torch.tensor([1.0, 0.0, 3.0])),

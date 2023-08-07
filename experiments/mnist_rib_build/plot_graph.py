@@ -5,6 +5,7 @@ Usage:
 
     The results_pt_file should be the output of the build_interaction_graph.py script.
 """
+import sys
 from pathlib import Path
 from typing import Union
 
@@ -144,10 +145,14 @@ def main(results_file: str) -> None:
     out_dir = Path(__file__).parent / "out"
     plot_file = out_dir / f"{results['exp_name']}_interaction_graph.png"
 
-    # If the file exists, warn the user and kill the program
     if plot_file.exists():
-        print(f"Plot file {plot_file} already exists. Exiting.")
-        return
+        # Ask user if they want to overwrite the output.
+        response = input(f"Output file {plot_file} already exists. Overwrite? (y/n) ")
+        if response.lower() != "y":
+            print("Exiting.")
+            sys.exit(0)
+        else:
+            print("Will overwrite output file %s", plot_file)
 
     plot_interaction_graph(
         edges=edges,

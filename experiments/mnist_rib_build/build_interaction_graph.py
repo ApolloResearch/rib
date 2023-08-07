@@ -15,6 +15,7 @@ Usage:
 """
 
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -85,13 +86,19 @@ def main(config_path_str: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
     if out_interaction_graph_file.exists():
-        logger.error("Output file %s already exists. Exiting.", out_interaction_graph_file)
-        return
+        response = input(
+            f"Output file {out_interaction_graph_file} already exists. Overwrite? (y/n) "
+        )
+        if response.lower() != "y":
+            logger.info("Exiting.")
+            sys.exit(0)
+        else:
+            logger.info("Will overwrite output file %s", out_interaction_graph_file)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, config.mlp_path)
     mlp.eval()
-    mlp.to(device)
+    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
 
     test_loader = load_mnist_dataloader(train=False, batch_size=config.batch_size)
@@ -121,6 +128,7 @@ def main(config_path_str: str) -> None:
         hooked_model=hooked_mlp,
         data_loader=test_loader,
         device=device,
+        dtype=config.dtype,
     )
 
     results = {

@@ -43,11 +43,16 @@ def build_sorted_lambda_matrices(
     idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(lambda_vals, descending=True)
     # Create a matrix from lambda_vals with the columns sorted in descending order
     # of their values
-    lambda_matrix: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(lambda_vals)[:idxs]
+    lambda_matrix: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(lambda_vals)[:, idxs]
     # We also need the pseudoinverse of this matrix
     lambda_matrix_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(
         lambda_vals.reciprocal()
-    )[:, idxs]
+    )[idxs, :]
+
+    assert torch.allclose(
+        lambda_matrix @ lambda_matrix_pinv,
+        torch.eye(lambda_matrix.shape[0], dtype=lambda_vals.dtype),
+    ), "Lambda matrix and its pseudoinverse are not inverses of each other."
 
     return lambda_matrix, lambda_matrix_pinv
 
@@ -102,7 +107,7 @@ def calculate_interaction_rotations(
             device=gram_matrices["output"].device,
             dtype=gram_matrices["output"].dtype,
         )
-    Cs.append(InteractionRotation(node_layer_name="output", C=C_output))
+    Cs.append(InteractionRotation(node_layer_name="output", C=C_output.clone().detach()))
 
     for module_name in module_names[::-1]:
         D_dash, U = eigendecompose(gram_matrices[module_name])
@@ -141,6 +146,10 @@ def calculate_interaction_rotations(
 
         C: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_inv.T @ V @ Lambda_abs_sqrt
         C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = Lambda_abs_sqrt_pinv @ U_D_sqrt_V.T
-        Cs.append(InteractionRotation(node_layer_name=module_name, C=C, C_pinv=C_pinv))
+        Cs.append(
+            InteractionRotation(
+                node_layer_name=module_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()
+            )
+        )
 
     return Cs[::-1]

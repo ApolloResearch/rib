@@ -129,23 +129,17 @@ def calculate_interaction_rotations(
         )
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
-        _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
-
-        # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
+        Lambda2, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
+        Lambda2_sqrt = Lambda2.sqrt()
+        # Fill nans with 0
+        Lambda2_sqrt[torch.isnan(Lambda2_sqrt)] = 0.0
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
-        Lambda_raw: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_V
-        )
-        # We only care about the sqrt of the absolute value of diagonal elements of Lambda_raw
-        Lambda_diag_abs_sqrt: Float[Tensor, "d_hidden_trunc"] = Lambda_raw.diag().abs().sqrt()
+        Lambda2_sqrt_mat = torch.diag(Lambda2_sqrt)
+        Lambda2_sqrt_mat_pinv = torch.diag(Lambda2_sqrt.reciprocal())
+        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = pinv_truncated_diag(D.sqrt())
+        C: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv.T @ V @ Lambda2_sqrt_mat
+        C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = Lambda2_sqrt_mat_pinv @ U_D_sqrt_V.T
 
-        Lambda_abs_sqrt, Lambda_abs_sqrt_pinv = build_sorted_lambda_matrices(Lambda_diag_abs_sqrt)
-        # Take the pseudoinverse of the sqrt of D. Can simply take the elementwise inverse
-        # of the diagonal elements, since D is diagonal.
-        D_sqrt_inv: Float[Tensor, "d_hidden_trunc d_hidden"] = pinv_truncated_diag(D.sqrt())
-
-        C: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_inv.T @ V @ Lambda_abs_sqrt
-        C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = Lambda_abs_sqrt_pinv @ U_D_sqrt_V.T
         Cs.append(
             InteractionRotation(
                 node_layer_name=module_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()

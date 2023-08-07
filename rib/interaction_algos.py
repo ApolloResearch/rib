@@ -24,6 +24,34 @@ class InteractionRotation:
     C_pinv: Optional[Float[Tensor, "d_hidden_trunc d_hidden"]] = None
 
 
+def build_sorted_lambda_matrices(
+    lambda_vals: Float[Tensor, "d_hidden_trunc"],
+) -> tuple[
+    Float[Tensor, "d_hidden_trunc d_hidden_trunc"], Float[Tensor, "d_hidden_trunc d_hidden_trunc"]
+]:
+    """Build the sorted Lambda matrix and its pseudoinverse.
+
+    Args:
+        lambda_vals: The vectors of lambda values
+
+    Returns:
+        - The sorted Lambda matrix
+        - The pseudoinverse of the sorted Lambda matrix
+
+    """
+    # Get the sort indices in descending order
+    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(lambda_vals, descending=True)
+    # Create a matrix from lambda_vals with the columns sorted in descending order
+    # of their values
+    lambda_matrix: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(lambda_vals)[:idxs]
+    # We also need the pseudoinverse of this matrix
+    lambda_matrix_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(
+        lambda_vals.reciprocal()
+    )[:, idxs]
+
+    return lambda_matrix, lambda_matrix_pinv
+
+
 def calculate_interaction_rotations(
     gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]],
     module_names: list[str],
@@ -105,19 +133,8 @@ def calculate_interaction_rotations(
         )
         # We only care about the sqrt of the absolute value of diagonal elements of Lambda_raw
         Lambda_diag_abs_sqrt: Float[Tensor, "d_hidden_trunc"] = Lambda_raw.diag().abs().sqrt()
-        # Get the sort indices in descending order
-        Lambda_indices: Int[Tensor, "d_hidden_trunc"] = torch.argsort(
-            Lambda_diag_abs_sqrt, descending=True
-        )
-        # Create a matrix from Lambda_diag_abs_sqrt with the columns sorted in descending order
-        # of their values
-        Lambda_abs_sqrt: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(
-            Lambda_diag_abs_sqrt
-        )[:, Lambda_indices]
-        # We also need the pseudoinverse of this matrix
-        Lambda_abs_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(
-            Lambda_diag_abs_sqrt.reciprocal()
-        )[:, Lambda_indices]
+
+        Lambda_abs_sqrt, Lambda_abs_sqrt_pinv = build_sorted_lambda_matrices(Lambda_diag_abs_sqrt)
         # Take the pseudoinverse of the sqrt of D. Can simply take the elementwise inverse
         # of the diagonal elements, since D is diagonal.
         D_sqrt_inv: Float[Tensor, "d_hidden_trunc d_hidden"] = pinv_truncated_diag(D.sqrt())

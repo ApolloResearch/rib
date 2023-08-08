@@ -107,7 +107,7 @@ def batched_jacobian(
     return vmap(jacrev(fn))(x)
 
 
-def pinv_truncated_diag(x: Float[Tensor, "a b"]) -> Float[Tensor, "a b"]:
+def pinv_truncated_diag(x: Float[Tensor, "a b"]) -> Float[Tensor, "b a"]:
     """Calculate the pseudo-inverse of a truncated diagonal matrix.
 
     A truncated diagonal matrix is a diagonal matrix that isn't necessarily square. The

@@ -127,14 +127,18 @@ def calculate_interaction_rotations(
             if n_small_eigenvals > 0
             else torch.diag(D_dash)
         )
+
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
         _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
 
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
+        U_D_sqrt_pinv_T_V: Float[Tensor, "d_hidden d_hidden_trunc"] = (
+            U @ pinv_truncated_diag(D.sqrt()).T @ V
+        )
         Lambda_raw: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_V
+            U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_T_V
         )
         # We only care about the sqrt of the absolute value of diagonal elements of Lambda_raw
         Lambda_diag_abs_sqrt: Float[Tensor, "d_hidden_trunc"] = Lambda_raw.diag().abs().sqrt()
@@ -146,6 +150,9 @@ def calculate_interaction_rotations(
 
         C: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_inv.T @ V @ Lambda_abs_sqrt
         C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = Lambda_abs_sqrt_pinv @ U_D_sqrt_V.T
+        assert torch.allclose(
+            C @ C_pinv, torch.eye(C.shape[0], dtype=C.dtype, device=C.device)
+        ), "C and its pseudoinverse are not inverses of each other."
         Cs.append(
             InteractionRotation(
                 node_layer_name=module_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()

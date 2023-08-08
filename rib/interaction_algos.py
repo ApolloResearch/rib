@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import eigendecompose, pinv_truncated_diag
+from rib.linalg import eigendecompose, pinv_diag
 
 
 @dataclass
@@ -110,7 +110,19 @@ def calculate_interaction_rotations(
     Cs.append(InteractionRotation(node_layer_name="output", C=C_output.clone().detach()))
 
     for module_name in module_names[::-1]:
-        D_dash, U = eigendecompose(gram_matrices[module_name])
+        D_dash, U_dash = eigendecompose(gram_matrices[module_name])
+
+        n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
+        # Truncate the D matrix to remove small eigenvalues
+        D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
+            torch.diag(D_dash)[:-n_small_eigenvals, :-n_small_eigenvals]
+            if n_small_eigenvals > 0
+            else torch.diag(D_dash)
+        )
+        # Truncate the columns of U to remove small eigenvalues
+        U: Float[Tensor, "d_hidden d_hidden_trunc"] = (
+            U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
+        )
 
         M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
             C_out=Cs[-1].C,  # most recently stored interaction matrix
@@ -120,13 +132,6 @@ def calculate_interaction_rotations(
             device=device,
             dtype=dtype,
         )
-        # Create sqaure matrix from eigenvalues then remove cols with vals < truncation_threshold
-        n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
-        D: Float[Tensor, "d_hidden d_hidden_trunc"] = (
-            torch.diag(D_dash)[:, :-n_small_eigenvals]
-            if n_small_eigenvals > 0
-            else torch.diag(D_dash)
-        )
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
@@ -134,9 +139,8 @@ def calculate_interaction_rotations(
 
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
-        U_D_sqrt_pinv_T_V: Float[Tensor, "d_hidden d_hidden_trunc"] = (
-            U @ pinv_truncated_diag(D.sqrt()).T @ V
-        )
+        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
+        U_D_sqrt_pinv_T_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv.T @ V
         Lambda_raw: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
             U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_T_V
         )
@@ -144,11 +148,8 @@ def calculate_interaction_rotations(
         Lambda_diag_abs_sqrt: Float[Tensor, "d_hidden_trunc"] = Lambda_raw.diag().abs().sqrt()
 
         Lambda_abs_sqrt, Lambda_abs_sqrt_pinv = build_sorted_lambda_matrices(Lambda_diag_abs_sqrt)
-        # Take the pseudoinverse of the sqrt of D. Can simply take the elementwise inverse
-        # of the diagonal elements, since D is diagonal.
-        D_sqrt_inv: Float[Tensor, "d_hidden_trunc d_hidden"] = pinv_truncated_diag(D.sqrt())
 
-        C: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_inv.T @ V @ Lambda_abs_sqrt
+        C: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt_pinv_T_V @ Lambda_abs_sqrt
         C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = Lambda_abs_sqrt_pinv @ U_D_sqrt_V.T
         Cs.append(
             InteractionRotation(

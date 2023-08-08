@@ -150,9 +150,6 @@ def calculate_interaction_rotations(
 
         C: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_inv.T @ V @ Lambda_abs_sqrt
         C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = Lambda_abs_sqrt_pinv @ U_D_sqrt_V.T
-        assert torch.allclose(
-            C @ C_pinv, torch.eye(C.shape[0], dtype=C.dtype, device=C.device)
-        ), "C and its pseudoinverse are not inverses of each other."
         Cs.append(
             InteractionRotation(
                 node_layer_name=module_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()

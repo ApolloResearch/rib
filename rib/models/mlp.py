@@ -1,7 +1,7 @@
 """
 Defines a generic MLP to be used for rib.
 """
-from typing import Optional, Type, Union
+from typing import Any, Optional, Type, Union
 
 import torch
 from torch import nn
@@ -12,26 +12,30 @@ from rib.models.utils import ACTIVATION_MAP
 
 class LinearFoldedBias(nn.Linear):
     def __init__(
-        self, in_features: int, out_features: int, bias: bool = True, device=None, dtype=None
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        device: Optional[Union[str, torch.device]] = None,
+        dtype: Optional[torch.dtype] = None,
+        concat_bias_to_output: bool = True,
     ) -> None:
         """A Linear layer with an extra input feature to act as a folded bias.
 
         Ignore the bias parameter, it is always set to False.
         """
+        self.concat_bias_to_output = concat_bias_to_output
         super().__init__(in_features + 1, out_features, bias=False, device=device, dtype=dtype)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        """Add a feature of ones to the input and then perform a linear transformation.
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Run a standard linear transformation and concatenate a vector of 1s to the output.
 
-        Input may be batched or unbatched, and may or may not include a seq_len dimension.
-        We handle all cases by ensuring that the bias tensor has the same size as the input
-        except for the last dimension which should have size 1.
+        If self.concat_bias_to_output is True, we concatenate a vector of 1s to the output.
         """
-        rank = len(input.shape)
-        bias_size = [input.shape[i] if i < rank - 1 else 1 for i in range(rank)]
-        bias = torch.ones(bias_size, device=input.device, dtype=input.dtype)
-        biased_input = torch.cat([input, bias], dim=rank - 1)
-        return F.linear(biased_input, self.weight, self.bias)  # self.bias is None
+        x = F.linear(x, self.weight, self.bias)
+        if self.concat_bias_to_output:
+            x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
+        return x
 
 
 class Layer(nn.Module):
@@ -44,6 +48,7 @@ class Layer(nn.Module):
         linear_module: A type defining whether to use a folded bias layer or a regular linear layer.
         activation_fn: The activation function to use. Default is "relu".
         bias: Whether to add a bias term to the linear transformation. Default is True.
+        concat_bias_to_output: Whether to concatenate a vector of 1s to the output. Default is False.
     """
 
     def __init__(
@@ -53,9 +58,14 @@ class Layer(nn.Module):
         linear_module: Union[Type[nn.Linear], Type[LinearFoldedBias]],
         activation_fn: Optional[str] = "relu",
         bias: bool = True,
+        concat_bias_to_output: bool = False,
     ):
         super().__init__()
-        self.linear = linear_module(in_features, out_features, bias=bias)
+        kwargs: dict[str, Any] = {"bias": bias}
+        if linear_module is LinearFoldedBias:
+            kwargs["concat_bias_to_output"] = concat_bias_to_output
+
+        self.linear = linear_module(in_features, out_features, **kwargs)
         if activation_fn is not None:
             self.activation = ACTIVATION_MAP[activation_fn]()
 
@@ -78,7 +88,9 @@ class MLP(nn.Module):
         bias: Whether to add a bias term to the linear transformations. Default is True.
         fold_bias: Whether to use the LinearFoldedBias class for linear layers. If true (and if
             bias is True), the biases are folded into the weight matrices and the forward pass
-            is modified to add a vector of 1s to the input. Default is True.
+            is modified to add a vector of 1s to the output of each layer, except the last layer.
+            Default is True.
+
     """
 
     def __init__(
@@ -92,6 +104,7 @@ class MLP(nn.Module):
     ):
         super().__init__()
 
+        self.fold_bias = fold_bias
         if hidden_sizes is None:
             hidden_sizes = []
 
@@ -102,8 +115,10 @@ class MLP(nn.Module):
 
         self.layers = nn.ModuleList()
         for i in range(len(sizes) - 1):
+            final_layer = i == len(sizes) - 2
             # No activation for final layer
-            layer_act = activation_fn if i < len(sizes) - 2 else None
+            layer_act = activation_fn if not final_layer else None
+            concat_bias_to_output = not final_layer and fold_bias
             self.layers.append(
                 Layer(
                     in_features=sizes[i],
@@ -111,11 +126,26 @@ class MLP(nn.Module):
                     linear_module=linear_module,
                     activation_fn=layer_act,
                     bias=bias,
+                    concat_bias_to_output=concat_bias_to_output,
                 )
             )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Run the MLP on the input.
+
+        We first flatten the input to a single feature dimension.
+
+        If self.fold_bias is True, each layer will need to ensure that a vector of 1s is
+        concatenated to each layer's input. This is done automatically in the output of each
+        LinearFoldedBias layer except the final layer. Therefore, we just need to add a vector
+        of 1s to the input of the first layer.
+        """
+        # Flatten input
         x = x.view(x.size(0), -1)
+        if self.fold_bias:
+            # Concatenate a vector of 1s to the input
+            x = torch.cat([x, torch.ones(x.shape[0], 1, device=x.device, dtype=x.dtype)], dim=-1)
+
         for layer in self.layers:
             x = layer(x)
         return x

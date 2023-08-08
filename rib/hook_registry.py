@@ -193,13 +193,13 @@ def interaction_edge_forward_hook_fn(
     with torch.inference_mode():
         # LHS of Hadamard product
         f_hat_out_T_f_hat_in: Float[Tensor, "out_hidden_trunc in_hidden_trunc"] = torch.einsum(
-            "bi,ik,bj,jm->km", out_acts, C_out, in_acts, C_in
+            "bi,ik,bj,jm->bkm", out_acts, C_out, in_acts, C_in
         )
         # RHS of Hadamard product
         C_out_O_C_in_pinv_T: Float[Tensor, "out_hidden_trunc in_hidden_trunc"] = torch.einsum(
-            "ik,bij,jm->km", C_out, O, C_in_pinv.T
+            "ik,bij,jm->bkm", C_out, O, C_in_pinv.T
         )
-        E = f_hat_out_T_f_hat_in * C_out_O_C_in_pinv_T
+        E = (f_hat_out_T_f_hat_in * C_out_O_C_in_pinv_T).sum(dim=0)
 
         add_to_hooked_matrix(hooked_data, hook_name, data_key, E)
 

@@ -3,12 +3,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from rib.linalg import (
-    batched_jacobian,
-    calc_rotation_matrix,
-    eigendecompose,
-    pinv_truncated_diag,
-)
+from rib.linalg import batched_jacobian, calc_rotation_matrix, eigendecompose, pinv_diag
 
 
 @pytest.mark.parametrize("descending", [True, False])
@@ -128,17 +123,13 @@ def test_batched_jacobian() -> None:
             torch.diag(torch.tensor([1.0, 0.5, 1.0 / 3.0])),
         ),
         (
-            torch.diag(torch.tensor([4.0, 5.0, 6.0]))[:2],
-            torch.tensor([[0.25, 0.0], [0.0, 0.2], [0.0, 0.0]]),
-        ),
-        (
             torch.diag(torch.tensor([1.0, 0.0, 3.0])),
             torch.diag(torch.tensor([1.0, float("inf"), 1.0 / 3.0])),
         ),
     ],
 )
-def test_pinv_truncated_diag(x, expected):
-    y = pinv_truncated_diag(x)
+def test_pinv_diag(x, expected):
+    y = pinv_diag(x)
     assert torch.allclose(y, expected)
 
 
@@ -148,6 +139,6 @@ def test_pinv_truncated_diag(x, expected):
         (torch.tensor([[1.0, 0.5], [0.0, 2.0]])),
     ],
 )
-def test_pinv_truncated_diag_failure(x):
+def test_pinv_diag_failure(x):
     with pytest.raises(AssertionError):
-        y = pinv_truncated_diag(x)
+        y = pinv_diag(x)

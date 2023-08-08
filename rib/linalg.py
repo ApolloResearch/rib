@@ -36,7 +36,7 @@ def eigendecompose(
     """
     eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=TORCH_DTYPES[dtype], device="cpu"))
 
-    eigenvalues = eigenvalues.to(dtype=x.dtype, device=x.device)
+    eigenvalues = eigenvalues.to(dtype=x.dtype, device=x.device).abs()
     eigenvectors = eigenvectors.to(dtype=x.dtype, device=x.device)
     if descending:
         idx = torch.argsort(eigenvalues, descending=True)
@@ -107,12 +107,13 @@ def batched_jacobian(
     return vmap(jacrev(fn))(x)
 
 
-def pinv_truncated_diag(x: Float[Tensor, "a b"]) -> Float[Tensor, "b a"]:
-    """Calculate the pseudo-inverse of a truncated diagonal matrix.
+def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
+    """Calculate the pseudo-inverse of a diagonal matrix.
 
-    A truncated diagonal matrix is a diagonal matrix that isn't necessarily square. The
-    pseudo-inverse of a truncated diagonal matrix is the transposed matrix with the diagonal
-    elements replaced by their reciprocal.
+    Simply take the reciprocal of the diagonal entries.
+
+    We check that all non-diagonal entries are 0 using a shortcut of comparing the sum of the
+    absolute values of the diagonal entries to the sum of the absolute values of all entries.
 
     Args:
         x: A truncated diagonal matrix.
@@ -123,8 +124,7 @@ def pinv_truncated_diag(x: Float[Tensor, "a b"]) -> Float[Tensor, "b a"]:
     # Check that all non-diagonal entries are 0. Use a shortcut of comparing the sum of the
     # diagonal entries to the sum of all entries. They should be close
     assert torch.allclose(
-        x.sum(), x.diagonal().sum()
+        x.abs().sum(), x.diagonal().abs().sum()
     ), "It appears there are non-zero off-diagonal entries."
-    res: Float[Tensor, "b a"] = torch.zeros_like(x.T)
-    res.diagonal()[:] = x.diagonal().reciprocal()
+    res = torch.diag(x.diagonal().reciprocal())
     return res

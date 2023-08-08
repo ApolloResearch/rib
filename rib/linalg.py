@@ -124,7 +124,7 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
     # Check that all non-diagonal entries are 0. Use a shortcut of comparing the sum of the
     # diagonal entries to the sum of all entries. They should be close
     assert torch.allclose(
-        x.abs().sum(), x.diagonal().abs().sum()
-    ), "It appears there are non-zero off-diagonal entries."
-    res = torch.diag(x.diagonal().reciprocal())
+        x, torch.diag(x.diag())
+    ), "It appears there are non-zero off-diagonal entries. "
+    res = torch.diag(x.diag().reciprocal())
     return res

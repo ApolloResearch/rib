@@ -42,7 +42,7 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.log import logger
 from rib.models import MLP
-from rib.utils import REPO_ROOT, eval_model_accuracy, load_config
+from rib.utils import REPO_ROOT, eval_model_accuracy, load_config, overwrite_output
 
 
 class Config(BaseModel):
@@ -170,8 +170,8 @@ def main(config_path_str: str) -> None:
         model_config_dict = yaml.safe_load(f)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if out_file.exists():
-        logger.error("Output file %s already exists. Exiting.", out_file)
+    if out_file.exists() and not overwrite_output(out_file):
+        print("Exiting.")
         return
 
     out_file.parent.mkdir(parents=True, exist_ok=True)

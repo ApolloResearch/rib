@@ -56,3 +56,9 @@ def load_config(config_path: Path, config_model: Type[T]) -> T:
         config_dict = yaml.safe_load(f)
     config = config_model(**config_dict)
     return config
+
+
+def overwrite_output(out_file: Path) -> bool:
+    """Check if the user wants to overwrite the output file."""
+    response = input(f"Output file {out_file} already exists. Overwrite? (y/n) ")
+    return response.lower() == "y"

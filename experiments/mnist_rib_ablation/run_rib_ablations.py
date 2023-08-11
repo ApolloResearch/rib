@@ -35,7 +35,7 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix
 from rib.log import logger
 from rib.models import MLP
-from rib.utils import REPO_ROOT, eval_model_accuracy, load_config
+from rib.utils import REPO_ROOT, eval_model_accuracy, load_config, overwrite_output
 
 
 class Config(BaseModel):
@@ -186,14 +186,9 @@ def main(config_path_str: str) -> None:
     ), f"Could not find all modules in the interaction graph config. "
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if out_file.exists():
-        # Ask user if they want to overwrite the output.
-        response = input(f"Output file {out_file} already exists. Overwrite? (y/n) ")
-        if response.lower() != "y":
-            print("Exiting.")
-            return
-        else:
-            print("Will overwrite output file %s", out_file)
+    if out_file.exists() and not overwrite_output(out_file):
+        print("Exiting.")
+        return
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
 

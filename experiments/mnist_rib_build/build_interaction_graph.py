@@ -32,7 +32,7 @@ from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
-from rib.utils import REPO_ROOT, load_config
+from rib.utils import REPO_ROOT, load_config, overwrite_output
 
 
 class Config(BaseModel):
@@ -85,15 +85,9 @@ def main(config_path_str: str) -> None:
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
-    if out_interaction_graph_file.exists():
-        response = input(
-            f"Output file {out_interaction_graph_file} already exists. Overwrite? (y/n) "
-        )
-        if response.lower() != "y":
-            logger.info("Exiting.")
-            sys.exit(0)
-        else:
-            logger.info("Will overwrite output file %s", out_interaction_graph_file)
+    if out_interaction_graph_file.exists() and not overwrite_output(out_interaction_graph_file):
+        print("Exiting.")
+        return
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, config.mlp_path)

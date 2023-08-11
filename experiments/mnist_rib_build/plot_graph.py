@@ -5,7 +5,6 @@ Usage:
 
     The results_pt_file should be the output of the build_interaction_graph.py script.
 """
-import sys
 from pathlib import Path
 from typing import Union
 
@@ -14,6 +13,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
+
+from rib.utils import overwrite_output
 
 
 def create_node_layers(edges: list[tuple[str, torch.Tensor]]) -> list[np.ndarray]:
@@ -145,14 +146,9 @@ def main(results_file: str) -> None:
     out_dir = Path(__file__).parent / "out"
     plot_file = out_dir / f"{results['exp_name']}_interaction_graph.png"
 
-    if plot_file.exists():
-        # Ask user if they want to overwrite the output.
-        response = input(f"Output file {plot_file} already exists. Overwrite? (y/n) ")
-        if response.lower() != "y":
-            print("Exiting.")
-            sys.exit(0)
-        else:
-            print("Will overwrite output file %s", plot_file)
+    if plot_file.exists() and not overwrite_output(plot_file):
+        print("Exiting.")
+        return
 
     plot_interaction_graph(
         edges=edges,

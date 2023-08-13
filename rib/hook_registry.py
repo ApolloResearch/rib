@@ -163,7 +163,7 @@ def interaction_edge_forward_hook_fn(
     C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
     **_: Any,
 ) -> None:
-    """Hook function for accumulating the edges (denoted \hat{E}) of the interaction graph.
+    """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
     For calculating the Jacobian, we need to run the inputs through the module. Unfortunately,
     this causes an infinite recursion because the module has a hook which runs this function. To

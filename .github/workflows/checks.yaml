@@ -44,4 +44,4 @@ jobs:
         mypy rib experiments
     - name: Run tests
       run: |
-        pytest
+        pytest --runslow

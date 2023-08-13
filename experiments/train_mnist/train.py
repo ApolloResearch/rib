@@ -70,6 +70,7 @@ def train_model(
         Trained MLP model.
     """
 
+    model.train()
     # Define the loss and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)

@@ -52,51 +52,31 @@ class Config(BaseModel):
 
 
 @logging_redirect_tqdm()
-def train(config: Config) -> None:
+def train_model(
+    config: Config, model: MLP, train_loader: DataLoader, device: str, run_name: str
+) -> MLP:
     """Train the MLP on MNIST.
 
     If config.wandb is not None, log the results to Weights & Biases.
+
+    Args:
+        config: Config for the experiment.
+        model: MLP model.
+        train_loader: DataLoader for the training set.
+        device: Device to use for training.
+        run_name: Name of the run.
+
+    Returns:
+        Trained MLP model.
     """
-    torch.manual_seed(config.seed)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info("Using device: %s", device)
 
-    if not config.train.save_dir:
-        config.train.save_dir = Path(__file__).parent / ".checkpoints" / "mnist"
-
-    # Load the MNIST dataset
-    transform = transforms.ToTensor()
-    train_data = datasets.MNIST(
-        root=REPO_ROOT / ".data", train=True, download=True, transform=transform
-    )
-    train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=True)
-
-    # Initialize the MLP model
-    model = MLP(
-        config.model.hidden_sizes,
-        input_size=784,
-        output_size=10,
-        activation_fn=config.model.activation_fn,
-        bias=config.model.bias,
-        fold_bias=config.model.fold_bias,
-    )
-    model = model.to(device)
-
+    model.train()
     # Define the loss and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.train.learning_rate)
 
-    if config.wandb:
-        run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}"
-        wandb.init(
-            name=run_name,
-            project=config.wandb.project,
-            entity=config.wandb.entity,
-            config=config.model_dump(),
-        )
-
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    save_dir = config.train.save_dir / f"{run_name}_{timestamp}"
+    save_dir = config.train.save_dir / f"{run_name}_{timestamp}" if config.train.save_dir else None
 
     samples = 0
     # Training loop
@@ -126,17 +106,96 @@ def train(config: Config) -> None:
                 if config.wandb:
                     wandb.log({"train/loss": loss.item(), "train/samples": samples}, step=samples)
 
-        if config.train.save_every_n_epochs and (epoch + 1) % config.train.save_every_n_epochs == 0:
+        if (
+            save_dir
+            and config.train.save_every_n_epochs
+            and (epoch + 1) % config.train.save_every_n_epochs == 0
+        ):
             save_model(json.loads(config.model_dump_json()), save_dir, model, epoch)
 
-    if not (save_dir / f"model_epoch_{epoch + 1}.pt").exists():
+    if save_dir and not (save_dir / f"model_epoch_{epoch + 1}.pt").exists():
         save_model(json.loads(config.model_dump_json()), save_dir, model, epoch)
+
+    return model
+
+
+@torch.inference_mode()
+def evaluate_model(model: MLP, test_loader: DataLoader, device: str) -> float:
+    """Evaluate the MLP on MNIST.
+
+    Args:
+        model: MLP model.
+        test_loader: DataLoader for the test set.
+        device: Device to use for evaluation.
+
+    Returns:
+        Test accuracy.
+    """
+
+    # Test the model
+    model.eval()
+    correct = 0
+    total = 0
+    for images, labels in tqdm(test_loader, desc="Evaluating"):
+        images, labels = images.to(device), labels.to(device)
+        outputs = model(images)
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+    accuracy = 100 * correct / total
+    return accuracy
 
 
 def main(config_path_str: str) -> None:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
-    train(config)
+
+    torch.manual_seed(config.seed)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info("Using device: %s", device)
+
+    if not config.train.save_dir:
+        config.train.save_dir = Path(__file__).parent / ".checkpoints" / "mnist"
+
+    # Load the MNIST train dataset
+    transform = transforms.ToTensor()
+    train_data = datasets.MNIST(
+        root=REPO_ROOT / ".data", train=True, download=True, transform=transform
+    )
+    train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=True)
+
+    # Initialize the MLP model
+    model = MLP(
+        config.model.hidden_sizes,
+        input_size=784,
+        output_size=10,
+        activation_fn=config.model.activation_fn,
+        bias=config.model.bias,
+        fold_bias=config.model.fold_bias,
+    )
+    model = model.to(device)
+
+    run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}"
+    if config.wandb:
+        wandb.init(
+            name=run_name,
+            project=config.wandb.project,
+            entity=config.wandb.entity,
+            config=config.model_dump(),
+        )
+
+    trained_model = train_model(config, model, train_loader, device, run_name)
+
+    # Evaluate the model on the test set
+    test_data = datasets.MNIST(
+        root=REPO_ROOT / ".data", train=False, download=True, transform=transform
+    )
+    test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)
+    accuracy = evaluate_model(trained_model, test_loader, device)
+    logger.info("Accuracy of the network on the 10000 test images: %d %%", accuracy)
+    if config.wandb:
+        wandb.log({"test/accuracy": accuracy})
 
 
 if __name__ == "__main__":

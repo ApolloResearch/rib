@@ -1,5 +1,6 @@
 exp_name: 2-node-layers
 mlp_path: /mnt/ssd-apollo/models/MNIST/checkpoints/lr-0.001_bs-64_2023-07-20_13-53-09/model_epoch_12.pt
+ablate_every_vec_cutoff: 10
 module_names:
   - layers.1
   - layers.2

@@ -5,12 +5,17 @@ The process is as follows:
     2. Calculate gram matrices at each node layer.
     3. Calculate a rotation matrix at each node layer representing the operation of rotating to and
        from the partial eigenbasis of the gram matrix. The partial eigenbasis is equal to the entire
-       eigenbasis with the zeroed out eigenvectors corresponding to the n smallest eigenvalues,
-       where we let n range from 0 to the total number of eigenvalues (i.e. the dimension of the
-       gram matrix).
+       eigenbasis with the zeroed out eigenvectors corresponding to the n smallest eigenvalues. The
+       values of n follow the ablation schedule given below.
     4. Run the test set through the MLP, applying the rotations at each node layer, and calculate
        the resulting accuracy.
     5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies.
+
+Ablation Schedule:
+    Our ablation schedule is exponential with a base of 2, with the exception that we start
+    ablating every vector for the final vectors specified by `ablate_every_vec_cutoff` in the
+    config. The schedule also includes a run with no ablations. See
+    `rib.utils.calc_ablation_schedule` for more details.
 
 A node layer is positioned at the input of each module_name specified in the config. In this script,
 we don't create a node layer at the output of the final module, as ablating nodes in this layer
@@ -26,12 +31,13 @@ points.
 
 import json
 from pathlib import Path
+from typing import Optional
 
 import fire
 import torch
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
@@ -42,12 +48,22 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.log import logger
 from rib.models import MLP
-from rib.utils import REPO_ROOT, eval_model_accuracy, load_config, overwrite_output
+from rib.utils import (
+    REPO_ROOT,
+    calc_ablation_schedule,
+    eval_model_accuracy,
+    load_config,
+    overwrite_output,
+)
 
 
 class Config(BaseModel):
     exp_name: str
     mlp_path: Path
+    ablate_every_vec_cutoff: Optional[int] = Field(
+        None,
+        description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
+    )
     module_names: list[str]
 
 
@@ -79,7 +95,8 @@ def ablate_and_test(
     test_loader: DataLoader,
     eigenvecs: Float[Tensor, "d_hidden d_hidden"],
     device: str,
-) -> list[float]:
+    ablation_schedule: list[int],
+) -> dict[int, float]:
     """Ablate eigenvectors and test the model accuracy.
 
     Args:
@@ -89,17 +106,17 @@ def ablate_and_test(
         test_loader: The DataLoader for the test data.
         eigenvecs: A matrix whose columns are the eigenvectors of the gram matrix.
         device: The device to run the model on.
+        ablation_schedule: A list of the number of vectors to ablate at each step.
 
     Returns:
-        A list of accuracies for each number of ablated vectors.
+        Dictionary mapping the number of ablated vectors to the resulting accuracy.
     """
 
-    accuracies: list[float] = []
-
+    accuracies: dict[int, float] = {}
     # Iterate through possible number of ablated vectors.
     for n_ablated_vecs in tqdm(
-        range(len(eigenvecs) + 1),
-        total=len(range(len(eigenvecs) + 1)),
+        ablation_schedule,
+        total=len(ablation_schedule),
         desc=f"Ablating {module_name}",
     ):
         rotation_matrix = calc_rotation_matrix(
@@ -116,13 +133,16 @@ def ablate_and_test(
         accuracy_ablated = eval_model_accuracy(
             hooked_mlp, test_loader, hooks=[rotation_hook], device=device
         )
-        accuracies.append(accuracy_ablated)
+        accuracies[n_ablated_vecs] = accuracy_ablated
 
     return accuracies
 
 
 def run_ablations(
-    model_config_dict: dict, mlp_path: Path, module_names: list[str]
+    model_config_dict: dict,
+    mlp_path: Path,
+    module_names: list[str],
+    ablate_every_vec_cutoff: Optional[int],
 ) -> dict[str, list[float]]:
     """Rotate to and from orthogonal basis and compare accuracies with and without ablation.
 
@@ -130,6 +150,7 @@ def run_ablations(
         model_config_dict: The config dictionary used for training the mlp.
         mlp_path: The path to the saved mlp.
         module_names: The names of the modules we want to build the graph around.
+        ablate_every_vec_cutoff: The point in the ablation schedule to start ablating every vector.
 
 
     Returns:
@@ -147,17 +168,23 @@ def run_ablations(
         hooked_mlp, module_names, test_loader, device=device, collect_output_gram=False
     )
 
-    results: dict[str, list[float]] = {}
+    results: dict[str, dict[int, float]] = {}
     for module_name in module_names:
         _, eigenvecs = eigendecompose(gram_matrices[module_name])
-        accuracies: list[float] = ablate_and_test(
+
+        ablation_schedule = calc_ablation_schedule(
+            ablate_every_vec_cutoff=ablate_every_vec_cutoff,
+            n_vecs=len(eigenvecs),
+        )
+        module_accuracies: dict[int, float] = ablate_and_test(
             hooked_mlp=hooked_mlp,
             module_name=module_name,
             test_loader=test_loader,
             eigenvecs=eigenvecs,
             device=device,
+            ablation_schedule=ablation_schedule,
         )
-        results[module_name] = accuracies
+        results[module_name] = module_accuracies
 
     return results
 
@@ -176,10 +203,11 @@ def main(config_path_str: str) -> None:
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
-    accuracies: dict[str, list[float]] = run_ablations(
+    accuracies: dict[str, dict[int, float]] = run_ablations(
         model_config_dict=model_config_dict,
         mlp_path=config.mlp_path,
         module_names=config.module_names,
+        ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
     )
     results = {
         "exp_name": config.exp_name,

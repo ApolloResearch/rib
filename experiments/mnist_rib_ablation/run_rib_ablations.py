@@ -21,11 +21,12 @@ two modules.
 
 import json
 from pathlib import Path
+from typing import Optional
 
 import fire
 import torch
 from jaxtyping import Float
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
@@ -35,12 +36,22 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix
 from rib.log import logger
 from rib.models import MLP
-from rib.utils import REPO_ROOT, eval_model_accuracy, load_config, overwrite_output
+from rib.utils import (
+    REPO_ROOT,
+    calc_ablation_schedule,
+    eval_model_accuracy,
+    load_config,
+    overwrite_output,
+)
 
 
 class Config(BaseModel):
     exp_name: str
     interaction_graph_path: Path
+    ablate_every_vec_cutoff: Optional[int] = Field(
+        None,
+        description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
+    )
     module_names: list[str]
     batch_size: int
 
@@ -74,7 +85,8 @@ def ablate_and_test(
     interaction_rotation_pinv: Float[Tensor, "d_hidden_trunc d_hidden"],
     test_loader: DataLoader,
     device: str,
-) -> list[float]:
+    ablation_schedule: list[int],
+) -> dict[int, float]:
     """Ablate eigenvectors and test the model accuracy.
 
     Args:
@@ -85,18 +97,17 @@ def ablate_and_test(
         hook_config: The config for the hook point.
         test_loader: The DataLoader for the test data.
         device: The device to run the model on.
+        ablation_schedule: A list of the number of vectors to ablate at each step.
 
     Returns:
-        A list of accuracies for each number of ablated vectors.
+        Dictionary mapping the number of ablated vectors to the resulting accuracy.
     """
 
-    accuracies: list[float] = []
-
-    n_interaction_nodes = interaction_rotation.shape[1]
+    accuracies: dict[int, float] = {}
     # Iterate through possible number of ablated vectors.
     for n_ablated_vecs in tqdm(
-        range(n_interaction_nodes + 1),
-        total=n_interaction_nodes,
+        ablation_schedule,
+        total=len(ablation_schedule),
         desc=f"Ablating {module_name}",
     ):
         rotation_matrix = calc_rotation_matrix(
@@ -115,7 +126,7 @@ def ablate_and_test(
         accuracy_ablated = eval_model_accuracy(
             hooked_mlp, test_loader, hooks=[rotation_hook], device=device
         )
-        accuracies.append(accuracy_ablated)
+        accuracies[n_ablated_vecs] = accuracy_ablated
 
     return accuracies
 
@@ -127,8 +138,9 @@ def run_ablations(
     interaction_matrices: list[
         tuple[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden_trunc d_hidden"]]
     ],
+    ablate_every_vec_cutoff: Optional[int],
     batch_size: int = 512,
-) -> dict[str, list[float]]:
+) -> dict[str, dict[int, float]]:
     """Rotate to and from orthogonal basis and compare accuracies with and without ablation.
 
     Args:
@@ -136,6 +148,7 @@ def run_ablations(
         mlp_path: The path to the saved mlp.
         module_names: The names of the modules whos inputs we want to ablate.
         interaction_matrices: The interaction rotation matrix and its pseudoinverse.
+        ablate_every_vec_cutoff: The point in the ablation schedule to start ablating every vector.
         batch_size: The batch size to pass through the model.
 
 
@@ -150,17 +163,22 @@ def run_ablations(
 
     test_loader = load_mnist_dataloader(train=False, batch_size=batch_size)
 
-    results: dict[str, list[float]] = {}
+    results: dict[str, dict[int, float]] = {}
     for module_name, (C, C_pinv) in zip(module_names, interaction_matrices):
-        accuracies: list[float] = ablate_and_test(
+        ablation_schedule = calc_ablation_schedule(
+            ablate_every_vec_cutoff=ablate_every_vec_cutoff,
+            n_vecs=C.shape[1],
+        )
+        module_accuracies: dict[int, float] = ablate_and_test(
             hooked_mlp=hooked_mlp,
             module_name=module_name,
             interaction_rotation=C,
             interaction_rotation_pinv=C_pinv,
             test_loader=test_loader,
             device=device,
+            ablation_schedule=ablation_schedule,
         )
-        results[module_name] = accuracies
+        results[module_name] = module_accuracies
 
     return results
 
@@ -192,11 +210,12 @@ def main(config_path_str: str) -> None:
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
-    accuracies: dict[str, list[float]] = run_ablations(
+    accuracies: dict[str, dict[int, float]] = run_ablations(
         model_config_dict=interaction_graph_info["model_config_dict"],
         mlp_path=interaction_graph_info["config"]["mlp_path"],
         module_names=config.module_names,
         interaction_matrices=interaction_matrices,
+        ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
         batch_size=config.batch_size,
     )
     results = {

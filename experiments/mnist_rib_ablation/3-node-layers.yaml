@@ -1,5 +1,6 @@
 exp_name: 3-node-layers
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/mnist_rib_build/out/3-node-layers_interaction_graph.pt
+ablate_every_vec_cutoff: 10
 module_names:  # Rotate input to these modules
   - layers.0
   - layers.1

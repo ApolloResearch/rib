@@ -1,12 +1,14 @@
+from typing import Optional
 from unittest.mock import Mock
 
+import pytest
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
 from rib.models import MLP, Layer
 from rib.models.utils import get_model_attr
-from rib.utils import eval_model_accuracy
+from rib.utils import calc_ablation_schedule, eval_model_accuracy
 
 
 def test_get_model_attr() -> None:
@@ -76,3 +78,22 @@ def test_eval_model_accuracy() -> None:
     # Test case 3: No predictions are correct
     hooked_model.side_effect = model_output_generator([[-0.7, 1.2], [1.5, -2.1], [-3.0, 1.5]])
     assert eval_model_accuracy(hooked_model, dataloader, hooks, device) == 0.0
+
+
+@pytest.mark.parametrize(
+    "ablate_every_vec_cutoff, n_eigenvecs, expected",
+    [
+        (None, 12, [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]),
+        (0, 12, [12, 11, 9, 5, 0]),
+        (1, 12, [12, 11, 10, 8, 4, 0]),
+        (3, 12, [12, 11, 10, 9, 8, 6, 2, 0]),
+        (3, 24, [24, 23, 22, 21, 20, 18, 14, 6, 0]),
+    ],
+)
+def test_calc_ablation_schedule(
+    ablate_every_vec_cutoff: Optional[int],
+    n_eigenvecs: int,
+    expected: list[int],
+):
+    schedule = calc_ablation_schedule(ablate_every_vec_cutoff, n_eigenvecs)
+    assert schedule == expected

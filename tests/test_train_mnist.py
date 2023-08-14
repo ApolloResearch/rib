@@ -1,4 +1,5 @@
-"""Run the mnist train script with a mock config and check that accuracy is > 95%"""
+"""Run the mnist train script with a mock config and check that accuracy is > 95%.
+"""
 
 import sys
 import tempfile
@@ -15,16 +16,16 @@ from experiments.train_mnist.train import evaluate_model
 from experiments.train_mnist.train import main as train_main
 
 MOCK_CONFIG = """
-seed: 42
+seed: 0
 model:
-  hidden_sizes: [128, 64]
-  activation_fn: "relu"
-  bias: True
-  fold_bias: True
+  hidden_sizes: [100, 100]
+  activation_fn: relu
+  bias: true
+  fold_bias: true
 train:
   learning_rate: 0.001
-  batch_size: 32
-  epochs: 2
+  batch_size: 64
+  epochs: 3
   save_dir: null
   save_every_n_epochs: null
 wandb: null

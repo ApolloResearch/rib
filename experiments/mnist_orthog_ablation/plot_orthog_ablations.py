@@ -18,8 +18,11 @@ def main(results_file: str) -> None:
     with open(results_file, "r") as f:
         results = json.load(f)
 
-    out_dir = Path(__file__).parent / "out"
-    plot_file = out_dir / f"{results['exp_name']}_accuracy_vs_orthogonal_ablation.png"
+    plot_file = (
+        Path(__file__).parent
+        / "out"
+        / f"{results['config']['exp_name']}_accuracy_vs_orthogonal_ablation.png"
+    )
 
     if plot_file.exists() and not overwrite_output(plot_file):
         print("Exiting.")

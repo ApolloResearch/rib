@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 
 def plot_ablation_accuracies(
-    accuracies: dict[str, dict[int, float]],
+    accuracies: dict[str, dict[str, float]],
     plot_file: Path,
     exp_name: str,
     experiment_type: Literal["orthog", "rib"],

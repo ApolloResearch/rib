@@ -140,7 +140,7 @@ def run_ablations(
     ],
     ablate_every_vec_cutoff: Optional[int],
     batch_size: int = 512,
-) -> dict[str, list[float]]:
+) -> dict[str, dict[int, float]]:
     """Rotate to and from orthogonal basis and compare accuracies with and without ablation.
 
     Args:

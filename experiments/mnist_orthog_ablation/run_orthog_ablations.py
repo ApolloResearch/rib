@@ -143,7 +143,7 @@ def run_ablations(
     mlp_path: Path,
     module_names: list[str],
     ablate_every_vec_cutoff: Optional[int],
-) -> dict[str, list[float]]:
+) -> dict[str, dict[int, float]]:
     """Rotate to and from orthogonal basis and compare accuracies with and without ablation.
 
     Args:

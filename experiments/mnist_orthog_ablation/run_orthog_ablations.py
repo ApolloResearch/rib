@@ -58,7 +58,7 @@ from rib.utils import (
 
 
 class Config(BaseModel):
-    exp_name: str
+    exp_name: Optional[Path]  # If None, don't write out results
     mlp_path: Path
     ablate_every_vec_cutoff: Optional[int] = Field(
         None,
@@ -196,12 +196,12 @@ def main(config_path_str: str) -> None:
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)
 
-    out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if out_file.exists() and not overwrite_output(out_file):
-        print("Exiting.")
-        return
-
-    out_file.parent.mkdir(parents=True, exist_ok=True)
+    if config.exp_name is not None:
+        out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
+        if out_file.exists() and not overwrite_output(out_file):
+            print("Exiting.")
+            return
+        out_file.parent.mkdir(parents=True, exist_ok=True)
 
     accuracies: dict[str, dict[int, float]] = run_ablations(
         model_config_dict=model_config_dict,
@@ -210,12 +210,13 @@ def main(config_path_str: str) -> None:
         ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
     )
     results = {
-        "exp_name": config.exp_name,
+        "config": json.loads(config.model_dump_json()),
         "accuracies": accuracies,
     }
-    with open(out_file, "w") as f:
-        json.dump(results, f)
-    logger.info("Wrote results to %s", out_file)
+    if config.exp_name is not None:
+        with open(out_file, "w") as f:
+            json.dump(results, f)
+        logger.info("Wrote results to %s", out_file)
 
 
 if __name__ == "__main__":

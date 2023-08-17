@@ -1,4 +1,4 @@
-"""Train a model on MNIST.
+"""Train a model on Modular Arithmetic.
 
 Usage:
     python train.py <path/to/config.yaml>
@@ -55,7 +55,7 @@ class Config(BaseModel):
 def train_model(
     config: Config, model: Transformer, train_loader: DataLoader, device: str, run_name: str
 ) -> Transformer:
-    """Train the Transformer on Modular Addition.
+    """Train the Transformer on Modular Arithmetic.
 
     If config.wandb is not None, log the results to Weights & Biases.
 
@@ -121,7 +121,7 @@ def train_model(
 
 @torch.inference_mode()
 def evaluate_model(model: Transformer, test_loader: DataLoader, device: str) -> float:
-    """Evaluate the Transformer on Modular Addition.
+    """Evaluate the Transformer on Modular Arithmetic.
 
     Args:
         model: Transformer model.
@@ -156,11 +156,11 @@ def main(config_path_str: str) -> None:
     logger.info("Using device: %s", device)
 
     if not config.train.save_dir:
-        config.train.save_dir = Path(__file__).parent / ".checkpoints" / "modular_addition"
+        config.train.save_dir = Path(__file__).parent / ".checkpoints" / "modular_arithmetic"
 
     # Load the MNIST train dataset
     transform = transforms.ToTensor()
-    train_data = datasets.modular_addition(
+    train_data = datasets.modular_arithmetic(
         root=REPO_ROOT / ".data", train=True, download=True, transform=transform
     )
     train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=True)
@@ -188,7 +188,7 @@ def main(config_path_str: str) -> None:
     trained_model = train_model(config, model, train_loader, device, run_name)
 
     # Evaluate the model on the test set
-    test_data = datasets.modular_addition(
+    test_data = datasets.modular_arithmetic(
         root=REPO_ROOT / ".data", train=False, download=True, transform=transform
     )
     test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)

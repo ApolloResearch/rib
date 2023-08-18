@@ -199,16 +199,16 @@ def evaluate_model(model: TransformerLensHooked, test_loader: DataLoader, device
         Test accuracy.
     """
 
-    # Test the model TODO change for transformer
+    # Test the model
     model.eval()
     correct = 0
     total = 0
     for x, y in tqdm(test_loader, desc="Evaluating"):
         x, y = x.to(device), y.to(device)
         outputs = model(x)
-        _, predicted = torch.max(outputs.data, 1)
         total += y.size(0)
-        correct += (predicted == y).sum().item()
+        sm_argmax = nn.functional.softmax(outputs, dim=-1).argmax(dim=-1)[:, -1].detach()
+        correct += (y == sm_argmax.view(-1)).sum().item()
 
     accuracy = 100 * correct / total
     return accuracy

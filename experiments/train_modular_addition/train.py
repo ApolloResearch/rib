@@ -4,17 +4,17 @@ Usage:
     python train.py <path/to/config.yaml>
 """
 import json
+import random
 from datetime import datetime
 from pathlib import Path
-import random
 from typing import Optional
 
 import fire
 import torch
+import torch.optim as optim
 import wandb
 from pydantic import BaseModel
 from torch import nn
-import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -64,7 +64,15 @@ class Config(BaseModel):
 class ModularArithmeticDataset(Dataset):
     """Defines the dataset used for Neel Nanda's modular arithmetic task."""
 
-    def __init__(self, modulus: int, frac_train: float = 0.3, fn_name: str = "add", device: str = "cpu", seed: int = 0, train: bool = True):
+    def __init__(
+        self,
+        modulus: int,
+        frac_train: float = 0.3,
+        fn_name: str = "add",
+        device: str = "cpu",
+        seed: int = 0,
+        train: bool = True,
+    ):
         self.modulus = modulus
         self.frac_train = frac_train
         self.fn_name = fn_name
@@ -72,12 +80,20 @@ class ModularArithmeticDataset(Dataset):
         self.seed = seed
         self.train = train
 
-        self.fns_dict = {'add': lambda x, y: (x + y) % self.modulus, 'subtract': lambda x, y: (x - y) % self.modulus,
-                         'x2xyy2': lambda x, y: (x ** 2 + x * y + y ** 2) % self.modulus}
+        self.fns_dict = {
+            "add": lambda x, y: (x + y) % self.modulus,
+            "subtract": lambda x, y: (x - y) % self.modulus,
+            "x2xyy2": lambda x, y: (x**2 + x * y + y**2) % self.modulus,
+        }
         self.fn = self.fns_dict[fn_name]
 
         self.x, self.labels = self.construct_dataset()
-        self.train_x, self.train_labels, self.test_x, self.test_labels = self.split_dataset()
+        (
+            self.train_x,
+            self.train_labels,
+            self.test_x,
+            self.test_labels,
+        ) = self.split_dataset()
 
     def __getitem__(self, index):
         if self.train:
@@ -92,7 +108,9 @@ class ModularArithmeticDataset(Dataset):
             return len(self.test_x)
 
     def construct_dataset(self):
-        x = torch.tensor([(i, j, self.modulus) for i in range(self.modulus) for j in range(self.modulus)]).to(self.device)
+        x = torch.tensor(
+            [(i, j, self.modulus) for i in range(self.modulus) for j in range(self.modulus)]
+        ).to(self.device)
         y = torch.tensor([self.fn(i, j) for i, j, _ in x]).to(self.device)
         return x, y
 
@@ -108,9 +126,9 @@ class ModularArithmeticDataset(Dataset):
 
 
 def cross_entropy_high_precision(logits, labels):
-    #only look at predictions of last numbers
-    #print("logits: ", logits.size())
-    logits = logits[:,-1]
+    # only look at predictions of last numbers
+    # print("logits: ", logits.size())
+    logits = logits[:, -1]
     # compute individual and summed losses for final number
     logprobs = nn.functional.log_softmax(logits.to(torch.float64), dim=-1)
     prediction_logprobs = torch.gather(logprobs, index=labels.unsqueeze(1), dim=-1)
@@ -120,7 +138,12 @@ def cross_entropy_high_precision(logits, labels):
 
 @logging_redirect_tqdm()
 def train_model(
-    config: Config, model: TransformerLensHooked, train_loader: DataLoader, device: str, run_name: str, test_loader: DataLoader
+    config: Config,
+    model,
+    train_loader: DataLoader,
+    device: str,
+    run_name: str,
+    test_loader: DataLoader,
 ) -> TransformerLensHooked:
     """Train the Transformer on Modular Arithmetic.
 
@@ -140,7 +163,9 @@ def train_model(
     model.train()
     # Define the loss and optimizer
     criterion = cross_entropy_high_precision
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.train.learning_rate, weight_decay=1, betas=(0.9, 0.98))
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=config.train.learning_rate, weight_decay=1, betas=(0.9, 0.98)
+    )
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lambda step: min(step / 10, 1))
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -194,7 +219,7 @@ def train_model(
 
 
 @torch.inference_mode()
-def evaluate_model(model: TransformerLensHooked, test_loader: DataLoader, device: str) -> float:
+def evaluate_model(model, test_loader: DataLoader, device: str) -> float:
     """Evaluate the Transformer on Modular Arithmetic.
 
     Args:
@@ -233,8 +258,12 @@ def main(config_path_str: str) -> None:
         config.train.save_dir = Path(__file__).parent / ".checkpoints" / "modular_arithmetic"
 
     # Load the Modular Arithmetic train dataset
-    train_data = ModularArithmeticDataset(config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=True)
-    test_data = ModularArithmeticDataset(config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=False)
+    train_data = ModularArithmeticDataset(
+        config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=True
+    )
+    test_data = ModularArithmeticDataset(
+        config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=False
+    )
     train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=False)
     test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)
 
@@ -263,7 +292,10 @@ def main(config_path_str: str) -> None:
 
     # Evaluate the model on the test set
     accuracy = evaluate_model(trained_model, test_loader, device)
-    logger.info(f"Accuracy of the network on the {len(test_loader.dataset)} test samples: %d %%", accuracy)
+    logger.info(
+        f"Accuracy of the network on the test samples: %d %%",
+        accuracy,
+    )
     # if config.wandb:
     #     wandb.log({"test/accuracy": accuracy})
 

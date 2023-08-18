@@ -13,8 +13,7 @@ import torch
 import wandb
 from pydantic import BaseModel
 from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -58,6 +57,64 @@ class Config(BaseModel):
     model: ModelConfig
     train: TrainConfig
     wandb: Optional[WandbConfig]
+
+
+class ModularArithmeticDataset(Dataset):
+    """Defines the dataset used for Neel Nanda's modular arithmetic task."""
+
+    def __init__(self, modulus: int, frac_train: float = 0.3, fn_name: str = "add", device: str = "cpu", seed: int = 0, train: bool = True):
+        self.modulus = modulus
+        self.frac_train = frac_train
+        self.fn_name = fn_name
+        self.device = device
+        self.seed = seed
+        self.train = train
+
+        self.fns_dict = {'add': lambda x, y: (x + y) % self.modulus, 'subtract': lambda x, y: (x - y) % self.modulus,
+                         'x2xyy2': lambda x, y: (x ** 2 + x * y + y ** 2) % self.modulus}
+        self.fn = self.fns_dict[fn_name]
+
+        self.x, self.labels = self.construct_dataset()
+        self.train_x, self.train_labels, self.test_x, self.test_labels = self.split_dataset()
+
+    def __getitem__(self, index):
+        if self.train:
+            return self.train_x[index], self.train_labels[index]
+        else:
+            return self.test_x[index], self.test_labels[index]
+
+    def __len__(self):
+        if self.train:
+            return len(self.train_x)
+        else:
+            return len(self.test_x)
+
+    def construct_dataset(self):
+        x = torch.tensor([(i, j, self.modulus) for i in range(self.modulus) for j in range(self.modulus)]).to(self.device)
+        y = torch.tensor([self.fn(i, j) for i, j, _ in x]).to(self.device)
+        return x, y
+
+    def split_dataset(self):
+        random.seed(self.seed)
+        indices = list(range(len(self.x)))
+        random.shuffle(indices)
+        div = int(self.frac_train * len(indices))
+        train_indices, test_indices = indices[:div], indices[div:]
+        train_x, train_labels = self.x[train_indices], self.labels[train_indices]
+        test_x, test_labels = self.x[test_indices], self.labels[test_indices]
+        return train_x, train_labels, test_x, test_labels
+
+
+def cross_entropy_high_precision(logits, labels):
+    # Shapes: batch x vocab, batch
+    # Cast logits to float64 because log_softmax has a float32 underflow on overly
+    # confident data and can only return multiples of 1.2e-7 (the smallest float x
+    # such that 1+x is different from 1 in float32). This leads to loss spikes
+    # and dodgy gradients
+    logprobs = nn.functional.log_softmax(logits.to(torch.float64), dim=-1)
+    prediction_logprobs = torch.gather(logprobs, index=labels[:,None, None], dim=-1)
+    loss = -torch.mean(prediction_logprobs)
+    return loss
 
 
 @logging_redirect_tqdm()
@@ -167,12 +224,9 @@ def main(config_path_str: str) -> None:
     if not config.train.save_dir:
         config.train.save_dir = Path(__file__).parent / ".checkpoints" / "modular_arithmetic"
 
-    # Load the MNIST train dataset
-    transform = transforms.ToTensor()
-    train_data = datasets.modular_arithmetic(
-        root=REPO_ROOT / ".data", train=True, download=True, transform=transform
-    )
-    train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=True)
+    # Load the Modular Arithmetic train dataset
+    train_data = ModularArithmeticDataset(config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=True)
+    train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=False)
 
     # Initialize the Transformer model  TODO change for transformer
     model = Transformer(
@@ -197,9 +251,7 @@ def main(config_path_str: str) -> None:
     trained_model = train_model(config, model, train_loader, device, run_name)
 
     # Evaluate the model on the test set
-    test_data = datasets.modular_arithmetic(
-        root=REPO_ROOT / ".data", train=False, download=True, transform=transform
-    )
+    test_data = ModularArithmeticDataset(config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=False)
     test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)
     accuracy = evaluate_model(trained_model, test_loader, device)
     logger.info("Accuracy of the network on the x test samples: %d %%", accuracy)  # TODO fill in x

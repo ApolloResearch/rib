@@ -22,8 +22,6 @@ class TransformerLensHooked:
             n_layers: int = 1,
             d_model: int = 128,
             n_heads: int = 4,
-            d_head: int = 32,
-            d_mlp: int = 512,
             d_vocab: int = 113,
             n_ctx: int = 3,
             act_fn: str = "relu",

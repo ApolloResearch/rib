@@ -6,6 +6,7 @@ Usage:
 import json
 from datetime import datetime
 from pathlib import Path
+import random
 from typing import Optional
 
 import fire
@@ -138,7 +139,7 @@ def train_model(
 
     model.train()
     # Define the loss and optimizer
-    criterion = loss_of_final_number()  # TODO custom function that uses negative log likelihood
+    criterion = cross_entropy_high_precision
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.train.learning_rate)
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

@@ -4,6 +4,6 @@
 
 - Apollo
 - Jörn Stöhler
-- Github user dubiousalpaca
+- Avery Griffin
 
-See Apollo's disclosure levels [here](https://www.lesswrong.com/posts/Gs29k3beHiqWFZqnn/conjecture-internal-infohazard-policy)
+See Apollo's privacy levels [here](https://www.apolloresearch.ai/blog/security)

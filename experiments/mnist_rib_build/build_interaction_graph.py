@@ -86,7 +86,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
     if out_interaction_graph_file.exists() and not overwrite_output(out_interaction_graph_file):
-        print("Exiting.")
+        logger.info("Exiting.")
         return None
 
     device = "cuda" if torch.cuda.is_available() else "cpu"

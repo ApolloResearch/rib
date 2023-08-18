@@ -155,7 +155,6 @@ def train_model(
 
             outputs = model(x)
             loss = criterion(outputs, y)
-            print("Loss: ", loss.item())
 
             optimizer.zero_grad()
             loss.backward()
@@ -170,6 +169,8 @@ def train_model(
                     len(train_loader),
                     loss.item(),
                 )
+        if (epoch) % 1000 == 0:
+            print("Loss: ", loss.item())
 
                 # if config.wandb:
                 #     wandb.log({"train/loss": loss.item(), "train/samples": samples}, step=samples)

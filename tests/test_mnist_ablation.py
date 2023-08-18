@@ -1,9 +1,16 @@
-"""Run the mnist orthog ablation script and check the below properties:
+"""Run the mnist orthog and rib ablation scripts and check the below properties:
 
 1. There are accuracies for each layer in the config.
 2. There are accuracies listed for the expected number of ablated vectors (as per
    `ablate_every_vec_cutoff`)
 3. The accuracy of ablating 0 vectors is higher than ablating all vectors.
+
+This is currently very hacky. In particular, for the rib ablation script we need to mock
+torch.load to return an interaction graph with an updated MLP path. This is necessary because the
+interaction graph is saved with an absolute path to the MLP, and a github action will not have
+access to the same absolute path.
+
+
 """
 
 import sys
@@ -13,6 +20,7 @@ from typing import Callable
 from unittest.mock import patch
 
 import pytest
+import torch
 
 # Append the root directory to sys.path
 ROOT_DIR = Path(__file__).parent.parent.resolve()
@@ -65,6 +73,29 @@ def mock_run_ablations_rib(*args, **kwargs):
     return accuracies
 
 
+original_torch_load = torch.load
+
+
+def mock_torch_load(*args, **kwargs):
+    """Mock torch.load to return an interaction graph with an updated MLP path.
+
+    This is necessary because the interaction graph is saved with an absolute path to the MLP, and
+    a github action will not have access to the same absolute path.
+
+    This is especially hacky because torch load gets called multiple times, and we only update the
+    mlp_path on calls which return a dictionary with a config and mlp_path.
+    """
+    # Call the original function to get the real ablation results
+    interaction_graph_info = original_torch_load(*args, **kwargs)
+    # If the load outputs a dictionary with a config, set the mlp_path using a relative path
+    if "config" in interaction_graph_info and "mlp_path" in interaction_graph_info["config"]:
+        interaction_graph_info["config"]["mlp_path"] = (
+            Path(__file__).parent.parent
+            / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-08-13_16-23-59/model_epoch_3.pt"
+        )
+    return interaction_graph_info
+
+
 def ablation_mock_run(
     mock_config: str,
     run_ablations_path: str,
@@ -85,6 +116,9 @@ def ablation_mock_run(
         ), patch(
             load_config_path,
             side_effect=mock_load_config_fn,
+        ), patch(
+            "experiments.mnist_rib_ablation.run_rib_ablations.torch.load",
+            side_effect=mock_torch_load,
         ):
             # Call the main function
             mock_main_fn(temp_config.name)
@@ -144,6 +178,9 @@ def test_run_rib_ablations():
     This means that our ablation schedule will depend on the number of nodes remaining in the graph,
     and not the layer size. In this test, layers.1 has 100 nodes remaining and layers.2 has 94 nodes
     remaining.
+
+    We also need to modify the mlp_path that is a value in the dictionary in interaction_graph_path.
+    To do this, we mock torch.load and replace the mlp_path with a relative path to a checkpoint.
     """
     mock_rib_config = """
     exp_name: null  # Prevent saving output

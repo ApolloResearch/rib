@@ -26,12 +26,21 @@ from rib.utils import REPO_ROOT, load_config
 
 class ModelConfig(BaseModel):
     hidden_sizes: Optional[list[int]]
+    num_layers: int
+    residual_dim: int
+    num_heads: int
+    num_blocks: int
+    vocab_dim: int
+    token_len: int
     activation_fn: str = "relu"
     bias: bool = True
     fold_bias: bool = True
 
 
 class TrainConfig(BaseModel):
+    modulus: int
+    frac_train: float
+    fn_name: str
     learning_rate: float
     batch_size: int
     epochs: int

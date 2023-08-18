@@ -14,6 +14,7 @@ import torch
 import wandb
 from pydantic import BaseModel
 from torch import nn
+import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -139,7 +140,8 @@ def train_model(
     model.train()
     # Define the loss and optimizer
     criterion = cross_entropy_high_precision
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.train.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.train.learning_rate, weight_decay=1, betas=(0.9, 0.98))
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lambda step: min(step / 10, 1))
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     save_dir = config.train.save_dir / f"{run_name}_{timestamp}" if config.train.save_dir else None

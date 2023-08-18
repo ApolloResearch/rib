@@ -1,5 +1,6 @@
 seed: 0
 model:
+  num_layers: 1
   residual_dim: 128
   num_heads: 4
   num_blocks: 1
@@ -12,9 +13,11 @@ model:
   fold_bias: true
 train:
   modulus: 113  # 'p' in the paper and code
+  frac_train: .3
+  fn_name: add
   learning_rate: 0.001
-  batch_size: 64
-  epochs: 30000
+  batch_size: 10000
+  epochs: 3000
   save_dir: /mnt/ssd-apollo/models/modular_arithmetic/checkpoints
   save_every_n_epochs: null
 wandb:

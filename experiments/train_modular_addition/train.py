@@ -18,7 +18,7 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from rib.log import logger
-from rib.models import MLP
+from rib.models import TransformerLensHooked
 from rib.models.utils import save_model
 from rib.utils import REPO_ROOT, load_config
 
@@ -119,8 +119,8 @@ def cross_entropy_high_precision(logits, labels):
 
 @logging_redirect_tqdm()
 def train_model(
-    config: Config, model: Transformer, train_loader: DataLoader, device: str, run_name: str
-) -> Transformer:
+    config: Config, model: TransformerLensHooked, train_loader: DataLoader, device: str, run_name: str
+) -> TransformerLensHooked:
     """Train the Transformer on Modular Arithmetic.
 
     If config.wandb is not None, log the results to Weights & Biases.
@@ -186,7 +186,7 @@ def train_model(
 
 
 @torch.inference_mode()
-def evaluate_model(model: Transformer, test_loader: DataLoader, device: str) -> float:
+def evaluate_model(model: TransformerLensHooked, test_loader: DataLoader, device: str) -> float:
     """Evaluate the Transformer on Modular Arithmetic.
 
     Args:
@@ -228,15 +228,16 @@ def main(config_path_str: str) -> None:
     train_data = ModularArithmeticDataset(config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=True)
     train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=False)
 
-    # Initialize the Transformer model  TODO change for transformer
-    model = Transformer(
-        config.model.hidden_sizes,
-        input_size=784,
-        output_size=10,
-        activation_fn=config.model.activation_fn,
-        bias=config.model.bias,
-        fold_bias=config.model.fold_bias,
+    # Initialize the Transformer model
+    wrapped_model = TransformerLensHooked(
+        n_layers=config.model.num_layers,
+        d_model=config.model.residual_dim,
+        n_heads=config.model.num_heads,
+        d_mlp=512,
+        d_vocab=config.model.vocab_dim,
+        n_ctx=config.model.token_len,
     )
+    model = wrapped_model.hooked_transformer
     model = model.to(device)
 
     run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}"

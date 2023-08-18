@@ -154,12 +154,21 @@ def train_model(
 
             samples += x.shape[0]
 
+            optimizer.zero_grad()
             outputs = model(x)
             loss = criterion(outputs, y)
 
-            optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            scheduler.step()
+
+            if epoch % 1000 == 0:
+                train_accuracy = evaluate_model(model, train_loader, device)
+                test_accuracy = evaluate_model(model, test_loader, device)
+
+                print("\nLoss: ", loss.item())
+                print(f"Train Accuracy: {train_accuracy} %")
+                print(f"Test Accuracy: {test_accuracy} %")
 
             if (i + 1) % 100 == 0:
                 logger.info(
@@ -170,11 +179,6 @@ def train_model(
                     len(train_loader),
                     loss.item(),
                 )
-        if (epoch) % 1000 == 0:
-            print("Loss: ", loss.item())
-
-                # if config.wandb:
-                #     wandb.log({"train/loss": loss.item(), "train/samples": samples}, step=samples)
 
         if (
             save_dir

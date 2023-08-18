@@ -107,13 +107,12 @@ class ModularArithmeticDataset(Dataset):
 
 
 def cross_entropy_high_precision(logits, labels):
-    # Shapes: batch x vocab, batch
-    # Cast logits to float64 because log_softmax has a float32 underflow on overly
-    # confident data and can only return multiples of 1.2e-7 (the smallest float x
-    # such that 1+x is different from 1 in float32). This leads to loss spikes
-    # and dodgy gradients
+    #only look at predictions of last numbers
+    #print("logits: ", logits.size())
+    logits = logits[:,-1]
+    # compute individual and summed losses for final number
     logprobs = nn.functional.log_softmax(logits.to(torch.float64), dim=-1)
-    prediction_logprobs = torch.gather(logprobs, index=labels[:,None, None], dim=-1)
+    prediction_logprobs = torch.gather(logprobs, index=labels.unsqueeze(1), dim=-1)
     loss = -torch.mean(prediction_logprobs)
     return loss
 

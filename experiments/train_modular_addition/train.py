@@ -155,6 +155,7 @@ def train_model(
 
             outputs = model(x)
             loss = criterion(outputs, y)
+            print("Loss: ", loss.item())
 
             optimizer.zero_grad()
             loss.backward()
@@ -170,8 +171,8 @@ def train_model(
                     loss.item(),
                 )
 
-                if config.wandb:
-                    wandb.log({"train/loss": loss.item(), "train/samples": samples}, step=samples)
+                # if config.wandb:
+                #     wandb.log({"train/loss": loss.item(), "train/samples": samples}, step=samples)
 
         if (
             save_dir
@@ -242,13 +243,13 @@ def main(config_path_str: str) -> None:
     model = model.to(device)
 
     run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}"
-    if config.wandb:
-        wandb.init(
-            name=run_name,
-            project=config.wandb.project,
-            entity=config.wandb.entity,
-            config=config.model_dump(),
-        )
+    # if config.wandb:
+    #     wandb.init(
+    #         name=run_name,
+    #         project=config.wandb.project,
+    #         entity=config.wandb.entity,
+    #         config=config.model_dump(),
+    #     )
 
     trained_model = train_model(config, model, train_loader, device, run_name)
 
@@ -256,9 +257,9 @@ def main(config_path_str: str) -> None:
     test_data = ModularArithmeticDataset(config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=False)
     test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)
     accuracy = evaluate_model(trained_model, test_loader, device)
-    logger.info("Accuracy of the network on the x test samples: %d %%", accuracy)  # TODO fill in x
-    if config.wandb:
-        wandb.log({"test/accuracy": accuracy})
+    logger.info(f"Accuracy of the network on the {len(test_loader.dataset)} test samples: %d %%", accuracy)
+    # if config.wandb:
+    #     wandb.log({"test/accuracy": accuracy})
 
 
 if __name__ == "__main__":

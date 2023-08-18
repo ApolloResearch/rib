@@ -18,16 +18,16 @@ class TransformerLensHooked:
     """
 
     def __init__(
-            self,
-            d_mlp: int = 512,
-            n_layers: int = 1,
-            d_model: int = 128,
-            n_heads: int = 4,
-            d_vocab: int = 113,
-            n_ctx: int = 3,
-            act_fn: str = "relu",
-            normalization_type: str = None):
-
+        self,
+        d_mlp: int = 512,
+        n_layers: int = 1,
+        d_model: int = 128,
+        n_heads: int = 4,
+        d_vocab: int = 113,
+        n_ctx: int = 3,
+        act_fn: str = "relu",
+        normalization_type: str = "LN",
+    ):
         self.hooked_transformer_config = HookedTransformerConfig(
             n_layers=n_layers,
             d_model=d_model,
@@ -37,6 +37,6 @@ class TransformerLensHooked:
             d_vocab=d_vocab,
             n_ctx=n_ctx,
             act_fn=act_fn,
-            normalization_type=normalization_type
+            normalization_type=normalization_type,
         )
         self.hooked_transformer = HookedTransformer(self.hooked_transformer_config)

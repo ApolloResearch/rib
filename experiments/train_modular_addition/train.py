@@ -120,7 +120,7 @@ def cross_entropy_high_precision(logits, labels):
 
 @logging_redirect_tqdm()
 def train_model(
-    config: Config, model: TransformerLensHooked, train_loader: DataLoader, device: str, run_name: str
+    config: Config, model: TransformerLensHooked, train_loader: DataLoader, device: str, run_name: str, test_loader: DataLoader
 ) -> TransformerLensHooked:
     """Train the Transformer on Modular Arithmetic.
 
@@ -230,7 +230,9 @@ def main(config_path_str: str) -> None:
 
     # Load the Modular Arithmetic train dataset
     train_data = ModularArithmeticDataset(config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=True)
+    test_data = ModularArithmeticDataset(config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=False)
     train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=False)
+    test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)
 
     # Initialize the Transformer model
     wrapped_model = TransformerLensHooked(
@@ -253,11 +255,9 @@ def main(config_path_str: str) -> None:
     #         config=config.model_dump(),
     #     )
 
-    trained_model = train_model(config, model, train_loader, device, run_name)
+    trained_model = train_model(config, model, train_loader, device, run_name, test_loader)
 
     # Evaluate the model on the test set
-    test_data = ModularArithmeticDataset(config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=False)
-    test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)
     accuracy = evaluate_model(trained_model, test_loader, device)
     logger.info(f"Accuracy of the network on the {len(test_loader.dataset)} test samples: %d %%", accuracy)
     # if config.wandb:

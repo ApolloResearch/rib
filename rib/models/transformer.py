@@ -19,6 +19,7 @@ class TransformerLensHooked:
 
     def __init__(
             self,
+            d_mlp: int = 512,
             n_layers: int = 1,
             d_model: int = 128,
             n_heads: int = 4,
@@ -30,7 +31,7 @@ class TransformerLensHooked:
         self.hooked_transformer_config = HookedTransformerConfig(
             n_layers=n_layers,
             d_model=d_model,
-            d_head=d_head,
+            d_head=d_model // n_heads,
             n_heads=n_heads,
             d_mlp=d_mlp,
             d_vocab=d_vocab,

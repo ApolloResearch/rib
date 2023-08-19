@@ -123,7 +123,7 @@ def calc_ablation_schedule(
 
 
 def set_seed(seed: int = 0) -> None:
-    """Set the random seed for PyTorch and NumPy"""
+    """Set the random seed for random, PyTorch and NumPy"""
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)

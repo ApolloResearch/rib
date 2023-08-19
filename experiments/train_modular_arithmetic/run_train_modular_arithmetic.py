@@ -42,7 +42,7 @@ class TrainConfig(BaseModel):
     frac_train: float
     fn_name: str
     learning_rate: float
-    batch_size: int
+    batch_size: int  # Set to max(batch_size, <number of samples in dataset>)
     epochs: int
     save_dir: Optional[Path]
     save_every_n_epochs: Optional[int]

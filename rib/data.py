@@ -3,6 +3,8 @@
 import random
 
 import torch
+from jaxtyping import Int
+from torch import Tensor
 from torch.utils.data import Dataset
 
 
@@ -40,26 +42,36 @@ class ModularArithmeticDataset(Dataset):
             self.test_labels,
         ) = self.split_dataset()
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> tuple[Int[Tensor, "seq"], Int[Tensor, "1"]]:
         if self.train:
             return self.train_x[index], self.train_labels[index]
         else:
             return self.test_x[index], self.test_labels[index]
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self.train:
             return len(self.train_x)
         else:
             return len(self.test_x)
 
-    def construct_dataset(self):
+    def construct_dataset(
+        self,
+    ) -> tuple[Int[Tensor, "modulus_squared seq"], Int[Tensor, "modulus_squared"]]:
         x = torch.tensor(
-            [(i, j, self.modulus) for i in range(self.modulus) for j in range(self.modulus)]
-        ).to(self.device)
-        y = torch.tensor([self.fn(i, j) for i, j, _ in x]).to(self.device)
+            [(i, j, self.modulus) for i in range(self.modulus) for j in range(self.modulus)],
+            device=self.device,
+        )
+        y = torch.tensor([self.fn(i, j) for i, j, _ in x], device=self.device)
         return x, y
 
-    def split_dataset(self):
+    def split_dataset(
+        self,
+    ) -> tuple[
+        Int[Tensor, "modulus_squared_train seq"],
+        Int[Tensor, "modulus_squared_train"],
+        Int[Tensor, "modulus_squared_test seq"],
+        Int[Tensor, "modulus_squared_test"],
+    ]:
         random.seed(self.seed)
         indices = list(range(len(self.x)))
         random.shuffle(indices)

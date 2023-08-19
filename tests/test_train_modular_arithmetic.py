@@ -1,4 +1,4 @@
-"""Run the mnist train script with a mock config and check that accuracy is > 95%.
+"""Run the modular arithmetic train script with a mock config and check that train accuracy is 100%.
 """
 
 import os

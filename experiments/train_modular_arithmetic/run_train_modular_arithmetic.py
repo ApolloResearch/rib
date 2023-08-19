@@ -1,7 +1,9 @@
 """Train a model on Modular Arithmetic.
 
+Will take 10 minutes for 60000 epochs (groks by ~30000 epochs) on GPU.
+
 Usage:
-    python train.py <path/to/config.yaml>
+    python run_train_modular_arithmetic.py <path/to/config.yaml>
 """
 import json
 from datetime import datetime
@@ -65,9 +67,9 @@ def train_model(
     config: Config,
     model,
     train_loader: DataLoader,
+    test_loader: DataLoader,
     device: str,
     run_name: str,
-    test_loader: DataLoader,
 ) -> HookedTransformer:
     """Train the Transformer on Modular Arithmetic.
 
@@ -77,6 +79,7 @@ def train_model(
         config: Config for the experiment.
         model: Transformer model.
         train_loader: DataLoader for the training set.
+        test_loader: DataLoader for the test set.
         device: Device to use for training.
         run_name: Name of the run.
 
@@ -91,7 +94,9 @@ def train_model(
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lambda step: min(step / 10, 1))
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    save_dir = config.train.save_dir / f"{run_name}_{timestamp}" if config.train.save_dir else None
+    save_dir: Optional[Path] = (
+        config.train.save_dir / f"{run_name}_{timestamp}" if config.train.save_dir else None
+    )
 
     samples = 0
     # Training loop
@@ -211,7 +216,14 @@ def main(config_path_str: str) -> tuple[float, float]:
             config=config.model_dump(),
         )
 
-    trained_model = train_model(config, model, train_loader, device, run_name, test_loader)
+    trained_model = train_model(
+        config=config,
+        model=model,
+        train_loader=train_loader,
+        test_loader=test_loader,
+        device=device,
+        run_name=run_name,
+    )
 
     # Evaluate the model on the test set
     train_accuracy = evaluate_model(trained_model, train_loader, device)

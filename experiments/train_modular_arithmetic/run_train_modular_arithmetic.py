@@ -176,7 +176,7 @@ def evaluate_model(model, test_loader: DataLoader, device: str) -> float:
     return accuracy
 
 
-def main(config_path_str: str) -> None:
+def main(config_path_str: str) -> tuple[float, float]:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
 
@@ -214,13 +214,16 @@ def main(config_path_str: str) -> None:
     trained_model = train_model(config, model, train_loader, device, run_name, test_loader)
 
     # Evaluate the model on the test set
-    accuracy = evaluate_model(trained_model, test_loader, device)
+    train_accuracy = evaluate_model(trained_model, train_loader, device)
+    test_accuracy = evaluate_model(trained_model, test_loader, device)
     logger.info(
         f"Accuracy of the network on the test samples: %d %%",
-        accuracy,
+        test_accuracy,
     )
     if config.wandb:
-        wandb.log({"test/accuracy": accuracy})
+        wandb.log({"test/accuracy": test_accuracy})
+
+    return train_accuracy, test_accuracy
 
 
 if __name__ == "__main__":

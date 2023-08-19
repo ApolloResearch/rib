@@ -1,7 +1,6 @@
 """Run the mnist train script with a mock config and check that accuracy is > 95%.
 """
 
-import os
 import sys
 import tempfile
 from pathlib import Path

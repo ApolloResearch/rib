@@ -4,7 +4,6 @@ Usage:
     python train.py <path/to/config.yaml>
 """
 import json
-import random
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -15,15 +14,15 @@ import torch.optim as optim
 import wandb
 from pydantic import BaseModel
 from torch import nn
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.data import ModularArithmeticDataset
 from rib.log import logger
-from rib.models import TransformerLensHooked
 from rib.models.utils import save_model
-from rib.utils import REPO_ROOT, load_config
+from rib.utils import load_config
 
 
 class ModelConfig(BaseModel):

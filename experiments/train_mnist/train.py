@@ -196,6 +196,7 @@ def main(config_path_str: str) -> None:
     logger.info("Accuracy of the network on the 10000 test images: %d %%", accuracy)
     if config.wandb:
         wandb.log({"test/accuracy": accuracy})
+    return accuracy
 
 
 if __name__ == "__main__":

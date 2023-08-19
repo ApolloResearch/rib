@@ -27,16 +27,15 @@ from rib.utils import REPO_ROOT, load_config
 
 
 class ModelConfig(BaseModel):
-    hidden_sizes: Optional[list[int]]
-    num_layers: int
-    residual_dim: int
-    num_heads: int
-    num_blocks: int
-    vocab_dim: int
-    token_len: int
-    activation_fn: str = "relu"
-    bias: bool = True
-    fold_bias: bool = True
+    n_layers: int
+    d_model: int
+    d_head: int
+    n_heads: int
+    d_mlp: int
+    d_vocab: int
+    n_ctx: int
+    act_fn: str
+    normalization_type: str
 
 
 class TrainConfig(BaseModel):
@@ -52,7 +51,7 @@ class TrainConfig(BaseModel):
 
 class WandbConfig(BaseModel):
     project: str
-    entity: str
+    entity: Optional[str]
 
 
 class Config(BaseModel):
@@ -80,7 +79,7 @@ def train_model(
     device: str,
     run_name: str,
     test_loader: DataLoader,
-) -> TransformerLensHooked:
+) -> HookedTransformer:
     """Train the Transformer on Modular Arithmetic.
 
     If config.wandb is not None, log the results to Weights & Biases.
@@ -210,15 +209,8 @@ def main(config_path_str: str) -> None:
     test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)
 
     # Initialize the Transformer model
-    wrapped_model = TransformerLensHooked(
-        n_layers=config.model.num_layers,
-        d_model=config.model.residual_dim,
-        n_heads=config.model.num_heads,
-        d_mlp=512,
-        d_vocab=config.model.vocab_dim,
-        n_ctx=config.model.token_len,
-    )
-    model = wrapped_model.hooked_transformer
+    transformer_lens_config = HookedTransformerConfig(**config.model.model_dump())
+    model = HookedTransformer(transformer_lens_config)
     model = model.to(device)
 
     run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}"

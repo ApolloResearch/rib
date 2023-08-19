@@ -36,6 +36,7 @@ Supported experiments:
 - Ablating eigenvectors from the orthogonal basis: `experiments/mnist_orthog_ablation/`
 - Calculating the interaction graph: `experiments/mnist_rib_build/`
 - Ablating vectors from the interaction basis: `experiments/mnist_rib_ablation/`
+- Training a transformer_lens model on Modular Arithmetic: `experiments/train_modular_arithmetic/`
 
 ## Development
 

@@ -61,16 +61,6 @@ class Config(BaseModel):
     wandb: Optional[WandbConfig]
 
 
-def cross_entropy_high_precision(logits, labels):
-    # only look at predictions of last numbers
-    logits = logits[:, -1]
-    # compute individual and summed losses for final number
-    logprobs = nn.functional.log_softmax(logits.to(torch.float64), dim=-1)
-    prediction_logprobs = torch.gather(logprobs, index=labels.unsqueeze(1), dim=-1)
-    loss = -torch.mean(prediction_logprobs)
-    return loss
-
-
 @logging_redirect_tqdm()
 def train_model(
     config: Config,
@@ -96,8 +86,6 @@ def train_model(
     """
 
     model.train()
-    # Define the loss and optimizer
-    criterion = cross_entropy_high_precision
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.train.learning_rate, weight_decay=1, betas=(0.9, 0.98)
     )
@@ -116,7 +104,9 @@ def train_model(
 
             optimizer.zero_grad()
             outputs = model(x)
-            loss = criterion(outputs, y)
+
+            # Only need the logit for the last sequence element
+            loss = nn.functional.cross_entropy(outputs[:, -1], y)
 
             loss.backward()
             optimizer.step()

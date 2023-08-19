@@ -85,7 +85,7 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     test_data = datasets.MNIST(
         root=REPO_ROOT / ".data", train=train, download=True, transform=transform
     )
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
     return test_loader
 
 

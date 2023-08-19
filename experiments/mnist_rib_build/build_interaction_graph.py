@@ -15,9 +15,9 @@ Usage:
 """
 
 import json
-import sys
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any, Optional
 
 import fire
 import torch
@@ -32,7 +32,7 @@ from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
-from rib.utils import REPO_ROOT, load_config, overwrite_output
+from rib.utils import REPO_ROOT, load_config, overwrite_output, set_seed
 
 
 class Config(BaseModel):
@@ -73,11 +73,11 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def main(config_path_str: str) -> None:
+def main(config_path_str: str) -> Optional[dict[str, Any]]:
     """Implement the main algorithm and store the graph to disk."""
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
-    torch.manual_seed(config.seed)
+    set_seed(config.seed)
 
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)
@@ -86,8 +86,8 @@ def main(config_path_str: str) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
     if out_interaction_graph_file.exists() and not overwrite_output(out_interaction_graph_file):
-        print("Exiting.")
-        return
+        logger.info("Exiting.")
+        return None
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, config.mlp_path)
@@ -127,6 +127,7 @@ def main(config_path_str: str) -> None:
 
     results = {
         "exp_name": config.exp_name,
+        "gram_matrices": gram_matrices,
         "interaction_rotations": [asdict(C_info) for C_info in Cs],
         "edges": [(module, E_hats[module]) for module in config.module_names],
         "config": json.loads(config.model_dump_json()),
@@ -136,6 +137,7 @@ def main(config_path_str: str) -> None:
     # Save the results (which include torch tensors) to file
     torch.save(results, out_interaction_graph_file)
     logger.info("Saved results to %s", out_interaction_graph_file)
+    return results
 
 
 if __name__ == "__main__":

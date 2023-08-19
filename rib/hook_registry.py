@@ -24,6 +24,7 @@ def add_to_hooked_matrix(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
         hooked_matrix: Matrix to add to the hooked data.
+
     """
     # If no data exists, initialize with zeros
     hooked_data.setdefault(hook_name, {}).setdefault(data_key, torch.zeros_like(hooked_matrix))

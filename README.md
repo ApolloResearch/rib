@@ -35,6 +35,7 @@ Supported experiments:
 - Training an MLP on MNIST: `experiments/train_mnist/`
 - Ablating eigenvectors from the orthogonal basis: `experiments/mnist_orthog_ablation/`
 - Calculating the interaction graph: `experiments/mnist_rib_build/`
+- Ablating vectors from the interaction basis: `experiments/mnist_rib_ablation/`
 
 ## Development
 

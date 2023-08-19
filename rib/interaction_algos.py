@@ -67,7 +67,7 @@ def calculate_interaction_rotations(
     truncation_threshold: float = 1e-5,
     rotate_output: bool = True,
 ) -> list[InteractionRotation]:
-    """Calculate the interaction rotation matrices (denoted C) and their inverses.
+    """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
     This function implements Algorithm 1 of the paper. We name the variables as they are named in
     the paper.

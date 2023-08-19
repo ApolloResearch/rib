@@ -1,10 +1,10 @@
 """Run the mnist train script with a mock config and check that accuracy is > 95%.
 """
 
+import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -12,7 +12,6 @@ import pytest
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
-from experiments.train_mnist.run_train_mnist import evaluate_model
 from experiments.train_mnist.run_train_mnist import main as train_main
 
 MOCK_CONFIG = """
@@ -32,26 +31,18 @@ wandb: null
 """
 
 
-def mock_evaluate_model(*args, **kwargs):
-    # Call the original function to get the real accuracy
-    accuracy = evaluate_model(*args, **kwargs)
-    mock_evaluate_model.accuracy = accuracy  # Store the accuracy on the mock itself
-    return accuracy
-
-
 @pytest.mark.slow
 def test_main_accuracy():
+    """Test that the accuracy of the model is > 95%.
+
+    We don't use a context manager here because windows doesn't support opening temp files more than once.
+    """
     # Create a temporary file and write the mock config to it
-    with tempfile.NamedTemporaryFile(mode="w+", suffix=".yaml") as temp_config:
-        temp_config.write(MOCK_CONFIG)
-        temp_config.flush()
+    temp_config = tempfile.NamedTemporaryFile(mode="w+", suffix=".yaml", delete=False)
+    temp_config.write(MOCK_CONFIG)
+    temp_config.close()
 
-        with patch(
-            "experiments.train_mnist.run_train_mnist.evaluate_model",
-            side_effect=mock_evaluate_model,
-        ):
-            # Call the main function
-            train_main(temp_config.name)
+    accuracy = train_main(temp_config.name)
+    assert accuracy > 95.0
 
-            # Assert the accuracy from our mock function
-            assert mock_evaluate_model.accuracy > 95
+    Path(temp_config.name).unlink()

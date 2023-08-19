@@ -46,7 +46,7 @@ from rib.utils import (
 
 
 class Config(BaseModel):
-    exp_name: str
+    exp_name: Optional[str]
     interaction_graph_path: Path
     ablate_every_vec_cutoff: Optional[int] = Field(
         None,
@@ -74,7 +74,7 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     test_data = datasets.MNIST(
         root=REPO_ROOT / ".data", train=train, download=True, transform=transform
     )
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
     return test_loader
 
 
@@ -222,9 +222,10 @@ def main(config_path_str: str) -> None:
         "exp_name": config.exp_name,
         "accuracies": accuracies,
     }
-    with open(out_file, "w") as f:
-        json.dump(results, f)
-    logger.info("Wrote results to %s", out_file)
+    if config.exp_name is not None:
+        with open(out_file, "w") as f:
+            json.dump(results, f)
+        logger.info("Wrote results to %s", out_file)
 
 
 if __name__ == "__main__":

@@ -127,7 +127,6 @@ class ModularArithmeticDataset(Dataset):
 
 def cross_entropy_high_precision(logits, labels):
     # only look at predictions of last numbers
-    # print("logits: ", logits.size())
     logits = logits[:, -1]
     # compute individual and summed losses for final number
     logprobs = nn.functional.log_softmax(logits.to(torch.float64), dim=-1)

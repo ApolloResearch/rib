@@ -147,7 +147,7 @@ def evaluate_model(model: MLP, test_loader: DataLoader, device: str) -> float:
     return accuracy
 
 
-def main(config_path_str: str) -> None:
+def main(config_path_str: str) -> float:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
 

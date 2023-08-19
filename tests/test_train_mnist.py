@@ -12,8 +12,8 @@ import pytest
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
-from experiments.train_mnist.train import evaluate_model
-from experiments.train_mnist.train import main as train_main
+from experiments.train_mnist.run_train_mnist import evaluate_model
+from experiments.train_mnist.run_train_mnist import main as train_main
 
 MOCK_CONFIG = """
 seed: 0
@@ -46,7 +46,10 @@ def test_main_accuracy():
         temp_config.write(MOCK_CONFIG)
         temp_config.flush()
 
-        with patch("experiments.train_mnist.train.evaluate_model", side_effect=mock_evaluate_model):
+        with patch(
+            "experiments.train_mnist.run_train_mnist.evaluate_model",
+            side_effect=mock_evaluate_model,
+        ):
             # Call the main function
             train_main(temp_config.name)
 

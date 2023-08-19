@@ -41,7 +41,7 @@ class TrainConfig(BaseModel):
 
 class WandbConfig(BaseModel):
     project: str
-    entity: str
+    entity: Optional[str]
 
 
 class Config(BaseModel):

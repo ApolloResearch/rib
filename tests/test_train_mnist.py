@@ -4,7 +4,6 @@
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -12,7 +11,6 @@ import pytest
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
-from experiments.train_mnist.train import evaluate_model
 from experiments.train_mnist.train import main as train_main
 
 MOCK_CONFIG = """
@@ -32,13 +30,6 @@ wandb: null
 """
 
 
-def mock_evaluate_model(*args, **kwargs):
-    # Call the original function to get the real accuracy
-    accuracy = evaluate_model(*args, **kwargs)
-    mock_evaluate_model.accuracy = accuracy  # Store the accuracy on the mock itself
-    return accuracy
-
-
 @pytest.mark.slow
 def test_main_accuracy():
     # Create a temporary file and write the mock config to it
@@ -46,9 +37,5 @@ def test_main_accuracy():
         temp_config.write(MOCK_CONFIG)
         temp_config.flush()
 
-        with patch("experiments.train_mnist.train.evaluate_model", side_effect=mock_evaluate_model):
-            # Call the main function
-            train_main(temp_config.name)
-
-            # Assert the accuracy from our mock function
-            assert mock_evaluate_model.accuracy > 95
+        accuracy = train_main(temp_config.name)
+        assert accuracy > 95.0

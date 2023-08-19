@@ -14,6 +14,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import torch
 
 # Append the root directory to sys.path
@@ -49,7 +50,7 @@ def mock_load_config(*args, **kwargs):
     return config
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 def test_mnist_build_graph():
     # Store the lambdas in the order [layers.2, layers.1]
     Lambda_sqrts: list[torch.Tensor] = []

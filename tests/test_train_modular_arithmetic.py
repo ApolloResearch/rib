@@ -12,7 +12,9 @@ import pytest
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
-from experiments.train_modular_arithmetic.run_train_modular_arithmetic import main as train_main
+from experiments.train_modular_arithmetic.run_train_modular_arithmetic import (
+    main as train_main,
+)
 
 MOCK_CONFIG = """
 seed: 0

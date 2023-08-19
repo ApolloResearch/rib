@@ -32,7 +32,7 @@ from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
-from rib.utils import REPO_ROOT, load_config, overwrite_output
+from rib.utils import REPO_ROOT, load_config, overwrite_output, set_seed
 
 
 class Config(BaseModel):
@@ -77,7 +77,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     """Implement the main algorithm and store the graph to disk."""
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
-    torch.manual_seed(config.seed)
+    set_seed(config.seed)
 
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)

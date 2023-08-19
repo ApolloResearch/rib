@@ -1,19 +1,17 @@
 seed: 0
 model:
-  num_layers: 1
-  residual_dim: 128
-  num_heads: 4
-  num_blocks: 1
-  vocab_dim: 114  # modulus + 1
-  token_len: 3
-  hidden_sizes:
-    - 512  # default should be 1 hidden layer with size 4*residual_dim
-  activation_fn: relu
-  bias: true
-  fold_bias: true
+  n_layers: 1
+  d_model: 128
+  d_head: 32
+  n_heads: 4
+  d_mlp: 512
+  d_vocab: 114  # modulus + 1
+  n_ctx: 3
+  act_fn: relu
+  normalization_type: LN
 train:
   modulus: 113  # 'p' in the paper and code
-  frac_train: .3
+  frac_train: .25
   fn_name: add
   learning_rate: 0.001
   batch_size: 10000
@@ -22,4 +20,4 @@ train:
   save_every_n_epochs: null
 wandb:
   project: transformer-modular-arithmetic
-  entity: dbra
+  entity: null

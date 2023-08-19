@@ -14,4 +14,4 @@ train:
   save_every_n_epochs: null
 wandb:
   project: mlp-mnist
-  entity: dbra
+  entity: null

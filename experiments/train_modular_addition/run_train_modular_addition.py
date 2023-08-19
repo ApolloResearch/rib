@@ -216,13 +216,13 @@ def main(config_path_str: str) -> None:
     model = model.to(device)
 
     run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}"
-    # if config.wandb:
-    #     wandb.init(
-    #         name=run_name,
-    #         project=config.wandb.project,
-    #         entity=config.wandb.entity,
-    #         config=config.model_dump(),
-    #     )
+    if config.wandb:
+        wandb.init(
+            name=run_name,
+            project=config.wandb.project,
+            entity=config.wandb.entity,
+            config=config.model_dump(),
+        )
 
     trained_model = train_model(config, model, train_loader, device, run_name, test_loader)
 
@@ -232,8 +232,8 @@ def main(config_path_str: str) -> None:
         f"Accuracy of the network on the test samples: %d %%",
         accuracy,
     )
-    # if config.wandb:
-    #     wandb.log({"test/accuracy": accuracy})
+    if config.wandb:
+        wandb.log({"test/accuracy": accuracy})
 
 
 if __name__ == "__main__":

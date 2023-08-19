@@ -123,23 +123,29 @@ def train_model(
             optimizer.step()
             scheduler.step()
 
-            if epoch % 1000 == 0:
+            if epoch % 100 == 0:
                 train_accuracy = evaluate_model(model, train_loader, device)
                 test_accuracy = evaluate_model(model, test_loader, device)
 
-                print("\nLoss: ", loss.item())
-                print(f"Train Accuracy: {train_accuracy} %")
-                print(f"Test Accuracy: {test_accuracy} %")
-
-            if (i + 1) % 100 == 0:
                 logger.info(
-                    "Epoch [%d/%d], Step [%d/%d], Loss: %f",
+                    "Epoch [%d/%d], Step [%d/%d], Train Accuracy: %f, Test Accuracy: %f",
                     epoch + 1,
                     config.train.epochs,
                     i + 1,
                     len(train_loader),
-                    loss.item(),
+                    train_accuracy,
+                    test_accuracy,
                 )
+
+                if config.wandb:
+                    wandb.log(
+                        {
+                            "loss": loss.item(),
+                            "train_accuracy": train_accuracy,
+                            "test_accuracy": test_accuracy,
+                        },
+                        step=samples,
+                    )
 
         if (
             save_dir

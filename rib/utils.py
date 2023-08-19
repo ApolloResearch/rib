@@ -1,6 +1,8 @@
+import random
 from pathlib import Path
 from typing import Optional, Type, TypeVar
 
+import numpy as np
 import torch
 import yaml
 from jaxtyping import Float
@@ -118,3 +120,10 @@ def calc_ablation_schedule(
     assert schedule[0] == n_vecs, "The first element of the schedule must be n_vecs."
     assert schedule[-1] == 0, "The last element of the schedule must be 0."
     return schedule
+
+
+def set_seed(seed: int = 0) -> None:
+    """Set the random seed for random, PyTorch and NumPy"""
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)

@@ -21,7 +21,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from rib.log import logger
 from rib.models import MLP
 from rib.models.utils import save_model
-from rib.utils import REPO_ROOT, load_config
+from rib.utils import REPO_ROOT, load_config, set_seed
 
 
 class ModelConfig(BaseModel):
@@ -151,7 +151,7 @@ def main(config_path_str: str) -> float:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
 
-    torch.manual_seed(config.seed)
+    set_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
 

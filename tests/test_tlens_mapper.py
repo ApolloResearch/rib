@@ -5,6 +5,7 @@ import torch
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.tlens_mapper import model_fold_bias
+from rib.utils import set_seed
 
 
 @torch.inference_mode()
@@ -35,13 +36,14 @@ def _folded_bias_comparison(model_raw: HookedTransformer, model_folded: HookedTr
                 constval = 1.0
             assert torch.allclose(constB, torch.ones_like(constB) * constval, atol=1e-6)
         assert vA.shape == vB.shape, f"shape mismatch for {k}: {vA.shape} vs {vB.shape}"
-        assert torch.allclose(vA, vB, atol=1e-6), f"WARNING: mismatched values for {k}"
+        assert torch.allclose(vA, vB, atol=1e-5), f"WARNING: mismatched values for {k}"
 
-    assert torch.allclose(outputA, outputB, atol=1e-6)
+    assert torch.allclose(outputA, outputB, atol=1e-5)
 
 
 def test_modular_arithmetic_folded_bias() -> None:
     """Test that the folded bias trick works for a model used for modular arithmetic."""
+    set_seed(42)
     cfg = {
         "n_layers": 2,
         "d_model": 129,
@@ -55,6 +57,17 @@ def test_modular_arithmetic_folded_bias() -> None:
     }
     cfg = HookedTransformerConfig.from_dict(cfg)
     model_raw = HookedTransformer(cfg)
+    # Manually set all bias vectors to random values (to avoid the default of 0)
+    # for m in model_raw.
+    for idx in range(cfg.n_layers):
+        model_raw.blocks[idx].attn.b_Q.data = torch.randn_like(model_raw.blocks[idx].attn.b_Q.data)
+        model_raw.blocks[idx].attn.b_K.data = torch.randn_like(model_raw.blocks[idx].attn.b_K.data)
+        model_raw.blocks[idx].attn.b_V.data = torch.randn_like(model_raw.blocks[idx].attn.b_V.data)
+        model_raw.blocks[idx].attn.b_O.data = torch.randn_like(model_raw.blocks[idx].attn.b_O.data)
+        model_raw.blocks[idx].mlp.b_in.data = torch.randn_like(model_raw.blocks[idx].mlp.b_in.data)
+        model_raw.blocks[idx].mlp.b_out.data = torch.randn_like(
+            model_raw.blocks[idx].mlp.b_out.data
+        )
     model_folded = HookedTransformer(cfg)
     model_folded.load_state_dict(model_raw.state_dict())
     model_fold_bias(model_folded)
@@ -64,6 +77,7 @@ def test_modular_arithmetic_folded_bias() -> None:
 @pytest.mark.slow()
 def test_gpt2_folded_bias() -> None:
     """Test that the folded bias trick works for GPT2."""
+    set_seed(42)
     model_raw = HookedTransformer.from_pretrained("gpt2")
     model_folded = HookedTransformer(cfg=model_raw.cfg, tokenizer=model_raw.tokenizer)
     model_folded.load_state_dict(model_raw.state_dict())

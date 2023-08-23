@@ -5,10 +5,11 @@ import pytest
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+from transformer_lens.utils import gelu_new
 
 from rib.models import MLP, Layer
 from rib.models.utils import get_model_attr
-from rib.utils import calc_ablation_schedule, eval_model_accuracy
+from rib.utils import calc_ablation_schedule, eval_model_accuracy, find_root
 
 
 def test_get_model_attr() -> None:
@@ -97,3 +98,29 @@ def test_calc_ablation_schedule(
 ):
     schedule = calc_ablation_schedule(ablate_every_vec_cutoff, n_eigenvecs)
     assert schedule == expected
+
+
+class TestFindRoot:
+    def test_quadratic(self):
+        """Test find_root function for a quadratic function."""
+        func = lambda x: x**2 - 4
+        root = find_root(func, xmin=0, xmax=3)
+        assert root == pytest.approx(2.0, abs=1e-6)
+
+    def test_bad_bracketing(self):
+        """Test find_root with xmin and xmax that do not bracket the root."""
+        func = lambda x: x**2 - 4
+        with pytest.raises(AssertionError):
+            find_root(func, xmin=0, xmax=2)
+
+    def test_convergence_error(self):
+        """Test find_root with a function that is slow to converge."""
+        func = lambda x: torch.exp(-x) - 0.5
+        with pytest.raises(ValueError):
+            find_root(func, xmin=torch.tensor(0.0), xmax=torch.tensor(1.0), max_iter=10)
+
+    def test_gelu_new(self):
+        """Test the gelu_new function."""
+        func = lambda x: gelu_new(x) - 1.0
+        root = find_root(func, xmin=torch.tensor(-1.0), xmax=torch.tensor(4.0))
+        assert root == pytest.approx(1.1446, abs=1e-4)

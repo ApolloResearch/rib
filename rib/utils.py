@@ -1,6 +1,6 @@
 import random
 from pathlib import Path
-from typing import Optional, Type, TypeVar
+from typing import Callable, Optional, Type, TypeVar, Union
 
 import numpy as np
 import torch
@@ -127,3 +127,26 @@ def set_seed(seed: int = 0) -> None:
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
+
+
+def find_root(
+    func: Callable,
+    xmin: Union[Float[Tensor, "1"], float] = torch.tensor(-1.0),
+    xmax: Union[Float[Tensor, "1"], float] = torch.tensor(1.0),
+    tol: float = 1e-6,
+    max_iter: int = 100,
+):
+    """Find the root of a function using bisection."""
+
+    # check that func(xmin) and func(xmax) have opposite signs
+    assert func(xmin) * func(xmax) < 0, "func(xmin) and func(xmax) must have opposite signs"
+
+    for i in range(max_iter):
+        xmid = (xmin + xmax) / 2
+        if func(xmid) * func(xmin) < 0:
+            xmax = xmid
+        else:
+            xmin = xmid
+        if abs(func(xmid)) < tol:
+            return xmid
+    raise ValueError(f"Finding the root of {func} via bisection failed to converge")

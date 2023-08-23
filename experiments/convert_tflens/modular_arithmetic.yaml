@@ -1,0 +1,12 @@
+seed: 0
+tlens_pretrained: null
+model:
+  n_layers: 1
+  d_model: 128
+  d_head: 32
+  n_heads: 4
+  d_mlp: 512
+  d_vocab: 114  # modulus + 1
+  n_ctx: 3
+  act_fn: relu
+  normalization_type: LN

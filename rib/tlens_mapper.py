@@ -5,8 +5,6 @@ Credit to Jorn Stohler, whose code on folding in biases was basically copied to 
 from dataclasses import asdict
 
 import torch
-from jaxtyping import Float
-from torch import Tensor
 from transformer_lens import HookedTransformer
 from transformer_lens.components import MLP, Attention, LayerNormPre
 from transformer_lens.utils import gelu_new

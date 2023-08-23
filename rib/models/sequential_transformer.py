@@ -38,3 +38,93 @@ class Transformer:
 
     def forward(self, x):
         self.modules(x)
+
+
+class Embed:
+    def __init__(
+        self,
+    ):
+        pass
+
+    def forward(self, x):
+        return x
+
+
+class PosEmbed:
+    def __init__(
+        self,
+    ):
+        pass
+
+    def forward(self, x):
+        return x
+
+
+class Unembed:
+    def __init__(
+        self,
+    ):
+        pass
+
+    def forward(self, x):
+        return x
+
+
+class AddResidual:
+    def __init__(
+        self,
+    ):
+        pass
+
+    def forward(self, x):
+        return x
+
+
+class LayerNormPreFolded:
+    def __init__(
+        self,
+    ):
+        pass
+
+    def forward(self, x):
+        return x
+
+
+class Attention:
+    def __init__(
+        self,
+    ):
+        pass
+
+    def forward(self, x):
+        return x
+
+
+class MlpIN:
+    def __init__(
+        self,
+    ):
+        pass
+
+    def forward(self, x):
+        return x
+
+
+class MlpAct:
+    def __init__(
+        self,
+    ):
+        pass
+
+    def forward(self, x):
+        return x
+
+
+class MlpOut:
+    def __init__(
+        self,
+    ):
+        pass
+
+    def forward(self, x):
+        return x

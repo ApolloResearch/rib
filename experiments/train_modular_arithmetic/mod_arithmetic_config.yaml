@@ -1,4 +1,5 @@
 seed: 0
+tlens_pretrained: gpt2
 model:
   n_layers: 1
   d_model: 128
@@ -16,25 +17,8 @@ train:
   learning_rate: 0.001
   batch_size: 10000
   epochs: 60000
-  save_dir: C:/Users/avery/Projects/alignment/Apollo/data/saved_models/modular_arithmetic/checkpoints
+  save_dir: C:/Users/avery/Projects/alignment/Apollo/rib/models/checkpoints
   save_every_n_epochs: 5000
-interaction:
-  layer_types:
-    - Embed
-    - PosEmbed
-    - Attention
-    - MLP
-    - Unembed
-  jacobian_pairs:
-    - start: "embed"
-      end: "pos_embed"
-    - start: "pos_embed"
-      end: "attn"
-    - start: "attn"
-      end: "mlp"
-    - start: "mlp"
-      end: "unembed"
-  layers_of_interest: null
 wandb:
   project: transformer-modular-arithmetic
   entity: null

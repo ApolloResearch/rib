@@ -1,0 +1,5 @@
+seed: 0
+tlens_pretrained: gpt2
+tlens_model_path: null
+model: null
+node_layers: ["embed", "attn.0", "mlp_out.2"]

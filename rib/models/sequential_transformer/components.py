@@ -1,71 +1,17 @@
-"""
-Defines a Transformer based on the transformer lens but with a flattened, sequential structure.
-"""
-from typing import Any, Optional, Type, Union
+"""Defines components to be used in a sequential transformer architecture."""
+import typing
+from typing import Any, Optional, Union
 
 import einops
 import numpy as np
 import torch
 from fancy_einsum import einsum
 from jaxtyping import Float, Int
-from pydantic import BaseModel
-from torch import Tensor, nn
+from torch import nn
 from torch.nn import functional as F
 from transformer_lens.utils import gelu_new
 
-from rib.models.utils import ACTIVATION_MAP
-
-"""
-
-Embed
-Positional Encoding
-LayerNormPreFolded
-Attention
-ADD_RESIDUAL
-LayerNormPreFolded
-MLP_IN [linear]
-MLP_ACT [relu]
-MLP_OUT [linear]
-ADD_RESIDUAL [custom]
-UnEmbed
-
-"""
-
-
-class SequentialTransformerConfig(BaseModel):
-    n_layers: int
-    d_model: int
-    d_head: int
-    n_heads: int
-    d_mlp: int
-    d_vocab: int
-    n_ctx: int
-    act_fn: str
-    normalization_type: str
-
-
-class MultiSequential(nn.Sequential):
-    def forward(self, *inputs):
-        for module in self._modules.values():
-            if type(inputs) == tuple:
-                inputs = module(*inputs)
-            else:
-                inputs = module(inputs)
-        return inputs
-
-
-class Transformer:
-    def __init__(self, config):
-        module_list = self.build_modules(config)
-        self.modules = MultiSequential(**module_list)
-
-    def build_modules(self, config):
-        """Build the list of modules using the config file."""
-        module_list = []
-        return module_list
-
-    def forward(self, x):
-        self.modules(x)
+from rib.models import SequentialTransformerConfig
 
 
 class Embed(nn.Module):
@@ -422,3 +368,52 @@ class MLPOut(nn.Module):
             self.W_out,
         )
         return residual, out
+
+
+class SeqLayerNormPre_Folded(torch.nn.Module):
+    """Sequential version of rib.models.tlens_components.LayerNormPre_FOlded"""
+
+    def __init__(self, cfg: SequentialTransformerConfig):
+        """LayerNormPre - the 'center and normalise' part of LayerNorm. Length is
+        normally d_model, but is d_mlp for softmax. Not needed as a parameter. This
+        should only be used in inference mode after folding in LayerNorm weights
+
+        Folded: the last hidden dimension is the constant function 1, and does not participate in the layernorm
+        """
+        super().__init__()
+        self.cfg = cfg
+        self.eps = self.cfg.eps
+
+    def forward(
+        self,
+        residual: Float[torch.Tensor, "batch pos d_model"],
+        x: Union[
+            Float[torch.Tensor, "batch pos d_model"],
+            Float[torch.Tensor, "batch pos head_index d_model"],
+        ],
+    ) -> Union[
+        Float[torch.Tensor, "batch pos d_model"],
+        Float[torch.Tensor, "batch pos head_index d_model"],
+    ]:
+        x0 = x[..., :-1]  # [batch, pos, length-1]
+
+        x0 = x0 - x0.mean(-1, keepdim=True)  # [batch, pos, length-1]
+        scale: Float[torch.Tensor, "batch pos 1"] = self.hook_scale(
+            (x0.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
+        )
+        x0 = x0 / scale  # [batch, pos, length-1]
+        x = torch.cat([x0, x[..., -1:]], dim=-1)  # [batch, pos, length]
+        return residual, x
+
+
+SEQUENTIAL_COMPONENT_REGISTRY = {
+    "embed": Embed,
+    "pos_embed": PosEmbed,
+    "attn": AddResidual,
+    "add_resid1": AddResidual,
+    "mlp_in": MLPIn,
+    "mlp_act": MLPAct,
+    "mlp_out": MLPOut,
+    "add_resid2": AddResidual,
+    "unembed": Unembed,
+}

@@ -1,5 +1,6 @@
 seed: 0
 tlens_pretrained: null
+tlens_model_path: null
 model:
   n_layers: 1
   d_model: 128
@@ -10,3 +11,4 @@ model:
   n_ctx: 3
   act_fn: relu
   normalization_type: LN
+node_layers: ["embed", "attn.0", "mlp_out.0"]

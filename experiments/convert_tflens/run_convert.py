@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 import fire
+import torch
 from pydantic import BaseModel, Field, model_validator
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
@@ -58,6 +59,8 @@ def main(config_path_str: str) -> None:
 
     print(seq_cfg)
     seq_model = SequentialTransformer(seq_cfg, config.node_layers)
+    input_ids = torch.randint(0, seq_model.cfg.d_vocab, size=(2, seq_model.cfg.n_ctx))
+    output = seq_model(input_ids)
     print(seq_model)
 
 

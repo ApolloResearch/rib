@@ -1,5 +1,4 @@
 """Defines components to be used in a sequential transformer architecture."""
-import typing
 from typing import Any, Optional, Union
 
 import einops
@@ -7,7 +6,7 @@ import numpy as np
 import torch
 from fancy_einsum import einsum
 from jaxtyping import Float, Int
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import functional as F
 from transformer_lens.utils import gelu_new
 
@@ -18,16 +17,44 @@ class Embed(nn.Module):
     def __init__(self, cfg: SequentialTransformerConfig):
         super().__init__()
         self.cfg = cfg
-        self.W_E: Float[torch.Tensor, "d_vocab d_model"] = nn.Parameter(
+        self.W_E: Float[Tensor, "d_vocab d_model"] = nn.Parameter(
             torch.empty(self.cfg.d_vocab, self.cfg.d_model, dtype=cfg.dtype)
         )
 
     def forward(
-        self, tokens: Int[torch.Tensor, "batch pos"]
-    ) -> Float[torch.Tensor, "batch pos d_model"]:
+        self, tokens: Int[Tensor, "batch pos"]
+    ) -> tuple[Int[Tensor, "d_vocab d_model"], Float[Tensor, "batch pos d_model"]]:
         # If A has shape [a, b] and B has shape [c, d], then A[:, B] has shape [a, c, d]
         # B acts as a tensor of indices into the second dimension (so >=0 and <b)
-        return self.W_E[tokens, :]
+        return tokens, self.W_E[tokens, :]
+
+
+class PosEmbed(nn.Module):
+    def __init__(self, cfg: SequentialTransformerConfig):
+        super().__init__()
+        self.cfg = cfg
+        self.W_pos = nn.Parameter(torch.empty(self.cfg.n_ctx, self.cfg.d_model, dtype=cfg.dtype))
+
+    def forward(
+        self, tokens: Int[Tensor, "batch pos"], x: Float[Tensor, "batch pos d_model"]
+    ) -> tuple[Int[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]]:
+        """Add positional embeddings to the input.
+
+        Args:
+            tokens (Int[Tensor, "batch pos"]): The input tokens.
+            x (Float[Tensor, "batch pos d_model"]): Tokens after embedding.
+
+        Returns:
+            - Positional embeddings
+            - Token embeddings
+        """
+
+        tokens_length = tokens.size(-1)
+        pos_embed = self.W_pos[:tokens_length, :]  # [pos, d_model]
+        broadcast_pos_embed = einops.repeat(
+            pos_embed, "pos d_model -> batch pos d_model", batch=tokens.size(0)
+        )  # [batch, pos, d_model]
+        return broadcast_pos_embed.clone(), x
 
 
 class Unembed(nn.Module):
@@ -37,16 +64,16 @@ class Unembed(nn.Module):
         # Note that there's a separate variable for d_vocab_out and d_vocab
         # (the input vocab size). For language tasks these are always the same,
         # but for algorithmic tasks we may want them to be different.
-        self.W_U: Float[torch.Tensor, "d_model d_vocab_out"] = nn.Parameter(
+        self.W_U: Float[Tensor, "d_model d_vocab_out"] = nn.Parameter(
             torch.empty(self.cfg.d_model, self.cfg.d_vocab_out, dtype=cfg.dtype)
         )
-        self.b_U: Float[torch.Tensor, "d_vocab_out"] = nn.Parameter(
+        self.b_U: Float[Tensor, "d_vocab_out"] = nn.Parameter(
             torch.zeros(self.cfg.d_vocab_out, dtype=cfg.dtype)
         )
 
     def forward(
-        self, residual: Float[torch.Tensor, "batch pos d_model"]
-    ) -> Float[torch.Tensor, "batch pos d_vocab_out"]:
+        self, residual: Float[Tensor, "batch pos d_model"]
+    ) -> Float[Tensor, "batch pos d_vocab_out"]:
         return (
             einsum(
                 "batch pos d_model, d_model vocab -> batch pos vocab",
@@ -57,48 +84,15 @@ class Unembed(nn.Module):
         )
 
 
-class PosEmbed(nn.Module):
+class Add(nn.Module):
     def __init__(self, cfg: SequentialTransformerConfig):
         super().__init__()
         self.cfg = cfg
-        self.W_pos = nn.Parameter(torch.empty(self.cfg.n_ctx, self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(
-        self, tokens: Int[torch.Tensor, "batch pos"], past_kv_pos_offset: int = 0
-    ) -> Float[torch.Tensor, "batch pos d_model"]:
-        """Tokens have shape [batch, pos]
-        past_kv_pos_offset is the length of tokens in the past_kv_cache
-        (if used, defaults to zero if unused)
-        Output shape [pos, d_model] - will be broadcast along batch dim"""
-
-        tokens_length = tokens.size(-1)
-        pos_embed = self.W_pos[
-            past_kv_pos_offset : tokens_length + past_kv_pos_offset, :
-        ]  # [pos, d_model]
-        broadcast_pos_embed = einops.repeat(
-            pos_embed, "pos d_model -> batch pos d_model", batch=tokens.size(0)
-        )  # [batch, pos, d_model]
-        return broadcast_pos_embed.clone()
-
-
-class LayerNormPreFolded(nn.Module):
-    def __init__(
-        self,
-    ):
-        pass
-
-    def forward(self, x):
-        return x
-
-
-class AddResidual(nn.Module):
-    def __init__(
-        self,
-    ):
-        super().__init__()
-
-    def forward(self, residual, x):
-        return residual, x
+        self, x: Float[Tensor, "#dims"], y: Float[Tensor, "#dims"]
+    ) -> Float[Tensor, "#dims"]:
+        return x + y
 
 
 class Attention(nn.Module):
@@ -153,25 +147,27 @@ class Attention(nn.Module):
 
     def forward(
         self,
-        query_input: Union[
-            Float[torch.Tensor, "batch pos d_model"],
-            Float[torch.Tensor, "batch pos head_index d_model"],
-        ],
-        key_input: Union[
-            Float[torch.Tensor, "batch pos d_model"],
-            Float[torch.Tensor, "batch pos head_index d_model"],
-        ],
-        value_input: Union[
-            Float[torch.Tensor, "batch pos d_model"],
-            Float[torch.Tensor, "batch pos head_index d_model"],
-        ],
-        additive_attention_mask: Optional[Float[torch.Tensor, "batch 1 1 pos"]] = None,
-    ) -> Float[torch.Tensor, "batch pos d_model"]:
+        residual: Float[Tensor, "batch pos d_model"],
+        x: Float[Tensor, "batch pos d_model"],
+    ) -> Float[Tensor, "batch pos d_model"]:
+        """Forward through the entire attention block.
+
+        TODO: Split into multiple modules so we can create graphs at each layer.
         """
-        shortformer_pos_embed is only used if self.cfg.positional_embedding_type == "shortformer", else defaults to None and is irrelevant. See HookedTransformerConfig for more details
-        past_kv_cache_entry is an optional entry of past keys and values for this layer, only relevant if generating text. Defaults to None
-        additive_attention_mask is an optional mask to add to the attention weights. Defaults to None.
-        """
+
+        def add_head_dimension(tensor):
+            return einops.repeat(
+                tensor,
+                "batch pos d_model -> batch pos n_heads d_model",
+                n_heads=self.cfg.n_heads,
+            ).clone()
+
+        if self.cfg.use_split_qkv_input:
+            query_input: Float[Tensor, "batch pos head_index d_model"] = add_head_dimension(x)
+            key_input: Float[Tensor, "batch pos head_index d_model"] = add_head_dimension(x)
+            value_input: Float[Tensor, "batch pos head_index d_model"] = add_head_dimension(x)
+        else:
+            query_input, key_input, value_input = residual, residual, residual
 
         if self.cfg.use_split_qkv_input:
             qkv_einops_string = "batch pos head_index d_model"
@@ -224,13 +220,10 @@ class Attention(nn.Module):
             )
             / self.attn_scale
         )  # [batch, head_index, query_pos, key_pos]
-        if self.cfg.attention_dir == "causal":
-            # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
-            attn_scores = self.apply_causal_mask(
-                attn_scores
-            )  # [batch, head_index, query_pos, key_pos]
-        if additive_attention_mask is not None:
-            attn_scores += additive_attention_mask
+
+        # Only supports causal attention (not bidirectional)
+        # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
+        attn_scores = self.apply_causal_mask(attn_scores)  # [batch, head_index, query_pos, key_pos]
 
         pattern = F.softmax(attn_scores, dim=-1)  # [batch, head_index, query_pos, key_pos]
         pattern = pattern.to(self.cfg.dtype)
@@ -240,41 +233,26 @@ class Attention(nn.Module):
                 batch query_pos head_index d_head",
             v,
             pattern,
-        )
-        # [batch, pos, head_index, d_head]
-        if not self.cfg.use_attn_result:
-            out = (
-                (
-                    einsum(
-                        "batch pos head_index d_head, \
-                                head_index d_head d_model -> \
-                                batch pos d_model",
-                        z,
-                        self.W_O,
-                    )
+        )  # [batch, pos, head_index, d_head]
+
+        out = (
+            (
+                einsum(
+                    "batch pos head_index d_head, \
+                            head_index d_head d_model -> \
+                            batch pos d_model",
+                    z,
+                    self.W_O,
                 )
-                + self.b_O
-            )  # [batch, pos, d_model]
-        else:
-            # Explicitly calculate the attention result so it can be accessed by a hook
-            # This is off by default because it can easily eat through your GPU memory.
-            result = einsum(
-                "batch pos head_index d_head, \
-                        head_index d_head d_model -> \
-                        batch pos head_index d_model",
-                z,
-                self.W_O,
             )
-            # [batch, pos, head_index, d_model]
-            out = (
-                einops.reduce(result, "batch position index model->batch position model", "sum")
-                + self.b_O
-            )  # [batch, pos, d_model]
-        return out
+            + self.b_O
+        )  # [batch, pos, d_model]
+
+        return residual, out
 
     def apply_causal_mask(
         self,
-        attn_scores: Float[torch.Tensor, "batch head_index pos pos_plus_past_kv_pos_offset"],
+        attn_scores: Float[Tensor, "batch head_index pos pos_plus_past_kv_pos_offset"],
     ):
         query_ctx_length = attn_scores.size(-2)
         # The key context length is the number of positions in the past - this includes all positions in the cache
@@ -306,9 +284,9 @@ class MLPIn(nn.Module):
 
     def forward(
         self,
-        residual: Float[torch.Tensor, "batch pos d_model"],
-        x: Float[torch.Tensor, "batch pos d_model"],
-    ) -> (Float[torch.Tensor, "batch_size pos d_model"], Float[torch.Tensor, "batch pos d_model"]):
+        residual: Float[Tensor, "batch pos d_model"],
+        x: Float[Tensor, "batch pos d_model"],
+    ) -> (Float[Tensor, "batch_size pos d_model"], Float[Tensor, "batch pos d_model"]):
         # Technically, all these einsums could be done with a single matmul, but this is more readable.
         pre_act = einsum("batch pos d_model, d_model d_mlp -> batch pos d_mlp", x, self.W_in)
         # [batch, pos, d_mlp]
@@ -333,9 +311,9 @@ class MLPAct(nn.Module):
 
     def forward(
         self,
-        residual: Float[torch.Tensor, "batch pos d_model"],
-        pre_act: Float[torch.Tensor, "batch pos d_model"],
-    ) -> (Float[torch.Tensor, "batch_size pos d_model"], Float[torch.Tensor, "batch pos d_model"]):
+        residual: Float[Tensor, "batch pos d_model"],
+        pre_act: Float[Tensor, "batch pos d_model"],
+    ) -> (Float[Tensor, "batch_size pos d_model"], Float[Tensor, "batch pos d_model"]):
         # Technically, all these einsums could be done with a single matmul, but this is more readable.
         post_act = self.act_fn(pre_act)  # [batch, pos, d_mlp]
         return residual, post_act
@@ -359,9 +337,9 @@ class MLPOut(nn.Module):
 
     def forward(
         self,
-        residual: Float[torch.Tensor, "batch pos d_model"],
-        post_act: Float[torch.Tensor, "batch pos d_model"],
-    ) -> (Float[torch.Tensor, "batch pos d_model"], Float[torch.Tensor, "batch pos d_model"]):
+        residual: Float[Tensor, "batch pos d_model"],
+        post_act: Float[Tensor, "batch pos d_model"],
+    ) -> (Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]):
         out = einsum(
             "batch pos d_mlp, d_mlp d_model -> batch pos d_model",
             post_act,
@@ -386,34 +364,29 @@ class SeqLayerNormPre_Folded(torch.nn.Module):
 
     def forward(
         self,
-        residual: Float[torch.Tensor, "batch pos d_model"],
-        x: Union[
-            Float[torch.Tensor, "batch pos d_model"],
-            Float[torch.Tensor, "batch pos head_index d_model"],
+        residual: Union[
+            Float[Tensor, "batch pos d_model"],
+            Float[Tensor, "batch pos head_index d_model"],
         ],
-    ) -> Union[
-        Float[torch.Tensor, "batch pos d_model"],
-        Float[torch.Tensor, "batch pos head_index d_model"],
-    ]:
-        x0 = x[..., :-1]  # [batch, pos, length-1]
+    ) -> Union[Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos head_index d_model"],]:
+        x0 = residual[..., :-1]  # [batch, pos, length-1]
 
         x0 = x0 - x0.mean(-1, keepdim=True)  # [batch, pos, length-1]
-        scale: Float[torch.Tensor, "batch pos 1"] = self.hook_scale(
-            (x0.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
-        )
+        scale: Float[Tensor, "batch pos 1"] = (x0.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
         x0 = x0 / scale  # [batch, pos, length-1]
-        x = torch.cat([x0, x[..., -1:]], dim=-1)  # [batch, pos, length]
+        x = torch.cat([x0, residual[..., -1:]], dim=-1)  # [batch, pos, length]
         return residual, x
 
 
 SEQUENTIAL_COMPONENT_REGISTRY = {
     "embed": Embed,
     "pos_embed": PosEmbed,
-    "attn": AddResidual,
-    "add_resid1": AddResidual,
+    "add_embed": Add,
+    "attn": Attention,
+    "add_resid1": Add,
     "mlp_in": MLPIn,
     "mlp_act": MLPAct,
     "mlp_out": MLPOut,
-    "add_resid2": AddResidual,
+    "add_resid2": Add,
     "unembed": Unembed,
 }

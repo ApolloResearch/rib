@@ -1,6 +1,6 @@
 """
-Defines a Transformer based on the transformer lens but with a module heirachy that allows for
-easier building of a RIB graph.
+Defines a Transformer based on transformer lens but with a module hierarchy that allows for easier
+building of a RIB graph.
 """
 
 from jaxtyping import Int
@@ -14,16 +14,18 @@ from rib.models.sequential_transformer.config import SequentialTransformerConfig
 
 
 class MultiSequential(nn.Sequential):
+    """Sequential module where containing modules that may have multiple inputs and outputs."""
+
     def forward(self, *inputs):
-        for i, module in self._modules.items():
-            if type(inputs) == tuple:
-                inputs = module(*inputs)
-            else:
-                inputs = module(inputs)
+        for module in self._modules.values():
+            inputs = inputs if isinstance(inputs, tuple) else (inputs,)
+            inputs = module(*inputs)
         return inputs
 
 
 class SequentialTransformer(nn.Module):
+    """Transformer whose modules are organised into a hierarchy based on the desired RIB graph."""
+
     embed_module_names: list[str] = ["embed", "pos_embed", "add_embed"]
     block_module_names: list[str] = [
         "ln1",
@@ -57,6 +59,7 @@ class SequentialTransformer(nn.Module):
             module_group: list[nn.Module] = []
             for module_name in module_names:
                 module_type = module_name.split(".")[0]
+                module_class: nn.Module
                 if module_type in ["ln1", "ln2"]:
                     module_class = ln_class
                 else:
@@ -107,11 +110,14 @@ class SequentialTransformer(nn.Module):
     def forward(self, input_ids: Int[Tensor, "batch n_ctx"]) -> tuple[Tensor]:
         """Forward pass through the model.
 
-        Will return a tuple of tensors, the number of which depends on how many outputs the final
-        module in the graph has.
+        Args:
+            input_ids: The input token IDs.
+
+        Returns:
+            A tuple of tensors, the number of which depends on how many outputs the final module in
+            the graph gives.
         """
         xs = (input_ids,)
         for module in self.graph_sections:
-            # Handle layers have different number of inputs
             xs = module(*xs)
         return xs

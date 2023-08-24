@@ -1,5 +1,4 @@
 seed: 0
-tlens_pretrained: gpt2
 model:
   n_layers: 1
   d_model: 128

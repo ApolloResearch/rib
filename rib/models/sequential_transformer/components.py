@@ -1,5 +1,5 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 import einops
 import numpy as np
@@ -61,19 +61,16 @@ class Unembed(nn.Module):
     def __init__(self, cfg: SequentialTransformerConfig):
         super().__init__()
         self.cfg = cfg
-        # Note that there's a separate variable for d_vocab_out and d_vocab
-        # (the input vocab size). For language tasks these are always the same,
-        # but for algorithmic tasks we may want them to be different.
-        self.W_U: Float[Tensor, "d_model d_vocab_out"] = nn.Parameter(
-            torch.empty(self.cfg.d_model, self.cfg.d_vocab_out, dtype=cfg.dtype)
+        self.W_U: Float[Tensor, "d_model d_vocab"] = nn.Parameter(
+            torch.empty(self.cfg.d_model, self.cfg.d_vocab, dtype=cfg.dtype)
         )
-        self.b_U: Float[Tensor, "d_vocab_out"] = nn.Parameter(
-            torch.zeros(self.cfg.d_vocab_out, dtype=cfg.dtype)
+        self.b_U: Float[Tensor, "d_vocab"] = nn.Parameter(
+            torch.zeros(self.cfg.d_vocab, dtype=cfg.dtype)
         )
 
     def forward(
         self, residual: Float[Tensor, "batch pos d_model"]
-    ) -> Float[Tensor, "batch pos d_vocab_out"]:
+    ) -> Float[Tensor, "batch pos d_vocab"]:
         return (
             einsum(
                 "batch pos d_model, d_model vocab -> batch pos vocab",
@@ -254,7 +251,6 @@ class Attention(nn.Module):
         self,
         attn_scores: Float[Tensor, "batch head_index pos pos_plus_past_kv_pos_offset"],
     ):
-        query_ctx_length = attn_scores.size(-2)
         # The key context length is the number of positions in the past - this includes all positions in the cache
         # If not caching, query_ctx_length == key_ctx_length
         key_ctx_length = attn_scores.size(-1)
@@ -273,21 +269,11 @@ class MLPIn(nn.Module):
         self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
         self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
 
-        if self.cfg.act_fn == "relu":
-            self.act_fn = F.relu
-        elif self.cfg.act_fn == "gelu":
-            self.act_fn = F.gelu
-        elif self.cfg.act_fn == "gelu_new":
-            self.act_fn = gelu_new
-        else:
-            raise ValueError(f"Invalid activation function name: {self.cfg.act_fn}")
-
     def forward(
         self,
         residual: Float[Tensor, "batch pos d_model"],
         x: Float[Tensor, "batch pos d_model"],
     ) -> (Float[Tensor, "batch_size pos d_model"], Float[Tensor, "batch pos d_model"]):
-        # Technically, all these einsums could be done with a single matmul, but this is more readable.
         pre_act = einsum("batch pos d_model, d_model d_mlp -> batch pos d_mlp", x, self.W_in)
         # [batch, pos, d_mlp]
         return residual, pre_act
@@ -326,15 +312,6 @@ class MLPOut(nn.Module):
         self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
         self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
 
-        if self.cfg.act_fn == "relu":
-            self.act_fn = F.relu
-        elif self.cfg.act_fn == "gelu":
-            self.act_fn = F.gelu
-        elif self.cfg.act_fn == "gelu_new":
-            self.act_fn = gelu_new
-        else:
-            raise ValueError(f"Invalid activation function name: {self.cfg.act_fn}")
-
     def forward(
         self,
         residual: Float[Tensor, "batch pos d_model"],
@@ -349,15 +326,17 @@ class MLPOut(nn.Module):
 
 
 class SeqLayerNormPre_Folded(torch.nn.Module):
-    """Sequential version of rib.models.tlens_components.LayerNormPre_FOlded"""
+    """Sequential version of rib.models.tlens_components.LayerNormPre_Folded.
+
+    LayerNormPre - the 'center and normalise' part of LayerNorm. Length is
+    normally d_model, but is d_mlp for softmax. Not needed as a parameter. This
+    should only be used in inference mode after folding in LayerNorm weights
+
+    Folded: the last hidden dimension is the constant function 1, and does not participate in the layernorm
+
+    """
 
     def __init__(self, cfg: SequentialTransformerConfig):
-        """LayerNormPre - the 'center and normalise' part of LayerNorm. Length is
-        normally d_model, but is d_mlp for softmax. Not needed as a parameter. This
-        should only be used in inference mode after folding in LayerNorm weights
-
-        Folded: the last hidden dimension is the constant function 1, and does not participate in the layernorm
-        """
         super().__init__()
         self.cfg = cfg
         self.eps = self.cfg.eps

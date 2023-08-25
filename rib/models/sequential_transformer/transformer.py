@@ -3,6 +3,8 @@ Defines a Transformer based on transformer lens but with a module hierarchy that
 building of a RIB graph.
 """
 
+from typing import Type
+
 from jaxtyping import Int
 from torch import Tensor, nn
 
@@ -59,7 +61,7 @@ class SequentialTransformer(nn.Module):
             module_group: list[nn.Module] = []
             for module_name in module_names:
                 module_type = module_name.split(".")[0]
-                module_class: nn.Module
+                module_class: Type[nn.Module]
                 if module_type in ["ln1", "ln2"]:
                     module_class = ln_class
                 else:
@@ -67,7 +69,7 @@ class SequentialTransformer(nn.Module):
                 module = module_class(cfg)
                 module_group.append(module)
             graph_sections.append(MultiSequential(*module_group))
-        self.graph_sections: nn.ModuleList[MultiSequential] = nn.ModuleList(graph_sections)
+        self.graph_sections: nn.ModuleList = nn.ModuleList(graph_sections)
 
     @staticmethod
     def create_module_groups(n_layers: int, node_layers: list[str]) -> list[list[str]]:

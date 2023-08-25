@@ -1,11 +1,11 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import Optional, Union
+from typing import Callable, Optional, Union, cast
 
 import einops
 import numpy as np
 import torch
 from fancy_einsum import einsum
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float, Int
 from torch import Tensor, nn
 from torch.nn import functional as F
 from transformer_lens.utils import gelu_new
@@ -127,7 +127,9 @@ class Attention(nn.Module):
 
         # Create a max_ctx x max_ctx mask, with True iff that query position
         # can attend to that key position (query is first axis, key is second axis)
-        causal_mask = torch.tril(torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool())
+        causal_mask: Bool[Tensor, "pos pos"] = torch.tril(
+            torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool()
+        )
         self.register_buffer("mask", causal_mask)
 
         self.register_buffer("IGNORE", torch.tensor(-1e5))
@@ -146,7 +148,7 @@ class Attention(nn.Module):
         self,
         residual: Float[Tensor, "batch pos d_model"],
         x: Float[Tensor, "batch pos d_model"],
-    ) -> Float[Tensor, "batch pos d_model"]:
+    ) -> tuple[Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]]:
         """Forward through the entire attention block.
 
         TODO: Split into multiple modules so we can create graphs at each layer.
@@ -255,10 +257,11 @@ class Attention(nn.Module):
         # If not caching, query_ctx_length == key_ctx_length
         key_ctx_length = attn_scores.size(-1)
 
+        mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
         return torch.where(
-            self.mask[:key_ctx_length],
+            mask[:key_ctx_length],
             attn_scores,
-            self.IGNORE,
+            cast(Tensor, self.IGNORE),
         )
 
 
@@ -273,7 +276,7 @@ class MLPIn(nn.Module):
         self,
         residual: Float[Tensor, "batch pos d_model"],
         x: Float[Tensor, "batch pos d_model"],
-    ) -> (Float[Tensor, "batch_size pos d_model"], Float[Tensor, "batch pos d_model"]):
+    ) -> tuple[Float[Tensor, "batch_size pos d_model"], Float[Tensor, "batch pos d_model"]]:
         pre_act = einsum("batch pos d_model, d_model d_mlp -> batch pos d_mlp", x, self.W_in)
         # [batch, pos, d_mlp]
         return residual, pre_act
@@ -286,6 +289,7 @@ class MLPAct(nn.Module):
         self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
         self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
 
+        self.act_fn: Callable[[Float[Tensor, "... d_model"]], Tensor]
         if self.cfg.act_fn == "relu":
             self.act_fn = F.relu
         elif self.cfg.act_fn == "gelu":
@@ -299,7 +303,7 @@ class MLPAct(nn.Module):
         self,
         residual: Float[Tensor, "batch pos d_model"],
         pre_act: Float[Tensor, "batch pos d_model"],
-    ) -> (Float[Tensor, "batch_size pos d_model"], Float[Tensor, "batch pos d_model"]):
+    ) -> tuple[Float[Tensor, "batch_size pos d_model"], Float[Tensor, "batch pos d_model"]]:
         # Technically, all these einsums could be done with a single matmul, but this is more readable.
         post_act = self.act_fn(pre_act)  # [batch, pos, d_mlp]
         return residual, post_act
@@ -316,7 +320,7 @@ class MLPOut(nn.Module):
         self,
         residual: Float[Tensor, "batch pos d_model"],
         post_act: Float[Tensor, "batch pos d_model"],
-    ) -> (Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]):
+    ) -> tuple[Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]]:
         out = einsum(
             "batch pos d_mlp, d_mlp d_model -> batch pos d_model",
             post_act,
@@ -343,11 +347,8 @@ class SeqLayerNormPre_Folded(torch.nn.Module):
 
     def forward(
         self,
-        residual: Union[
-            Float[Tensor, "batch pos d_model"],
-            Float[Tensor, "batch pos head_index d_model"],
-        ],
-    ) -> Union[Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos head_index d_model"],]:
+        residual: Float[Tensor, "batch pos d_model"],
+    ) -> tuple[Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]]:
         x0 = residual[..., :-1]  # [batch, pos, length-1]
 
         x0 = x0 - x0.mean(-1, keepdim=True)  # [batch, pos, length-1]

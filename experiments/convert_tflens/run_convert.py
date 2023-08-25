@@ -22,7 +22,7 @@ class Config(BaseModel):
     )
 
     @model_validator(mode="after")
-    def verify_model_info(self) -> None:
+    def verify_model_info(self) -> "Config":
         if sum(1 for val in [self.tlens_pretrained, self.tlens_model_path] if val is not None) != 1:
             raise ValueError(
                 "Exactly one of [tlens_pretrained, tlens_model_path] must be specified"

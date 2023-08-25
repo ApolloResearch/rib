@@ -9,6 +9,9 @@ from rib.types import TORCH_DTYPES
 class SequentialTransformerConfig(BaseModel):
     """Config for the sequential transformer model.
 
+    The fields must be a subset of those in transformer-lens' HookedTransformerConfig (with exactly
+    the same names).
+
     Args:
         n_layers: The number of layers in the model.
         d_model: The dimensionality of the model (i.e. the size of the residual stream).
@@ -45,7 +48,7 @@ class SequentialTransformerConfig(BaseModel):
     @field_validator("dtype")
     @classmethod
     def set_dtype(cls, v: Union[str, torch.dtype]) -> torch.dtype:
-        """Verify and if needed convert the dtype to a torch.dtype."""
+        """Verify torch dtype or convert str to torch.dtype."""
         if isinstance(v, torch.dtype):
             if v not in TORCH_DTYPES.values():
                 raise ValueError(f"Unsupported dtype {v}")

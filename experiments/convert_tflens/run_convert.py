@@ -37,6 +37,7 @@ def main(config_path_str: str) -> None:
 
     if config.tlens_pretrained is not None:
         tlens_model = HookedTransformer.from_pretrained(config.tlens_pretrained)
+        # Create a SequentialTransformerConfig from the HookedTransformerConfig
         seq_cfg = SequentialTransformerConfig(**tlens_model.cfg.to_dict())
     elif config.tlens_model_path is not None:
         raise NotImplementedError("Haven't yet implemented loading a saved model")

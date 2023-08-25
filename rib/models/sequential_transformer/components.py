@@ -358,6 +358,7 @@ class SeqLayerNormPre_Folded(torch.nn.Module):
         return residual, x
 
 
+# Map from module names in SequentialTransformer to the corresponding component modules
 SEQUENTIAL_COMPONENT_REGISTRY = {
     "embed": Embed,
     "pos_embed": PosEmbed,

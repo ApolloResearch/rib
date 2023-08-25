@@ -26,7 +26,36 @@ class MultiSequential(nn.Sequential):
 
 
 class SequentialTransformer(nn.Module):
-    """Transformer whose modules are organised into a hierarchy based on the desired RIB graph."""
+    """Transformer whose modules are organised into a hierarchy based on the desired RIB graph.
+
+    Args:
+        cfg: The SequentialTransformer config
+        node_layers: The names of the node layers used to partition the transformer. There will be
+            `node_layers - 1` sections in the graph, one between each node layer.
+
+    For example:
+    >>> cfg = ... # config for gpt2
+    >>> node_layers = ["embed", "attn.0", "mlp_act.0"]
+    >>> model = SequentialTransformer(cfg, node_layers)
+    >>> print(model)
+        SequentialTransformer(
+            (module_sections): ModuleList(
+                (0): MultiSequential(
+                    (0): Embed()
+                    (1): PosEmbed()
+                    (2): Add()
+                    (3): SeqLayerNormPre_Folded()
+                )
+                (1): MultiSequential(
+                    (0): Attention()
+                    (1): Add()
+                    (2): SeqLayerNormPre_Folded()
+                    (3): MLPIn()
+                    (4): MLPAct()
+                )
+            )
+        )
+    """
 
     embed_module_names: list[str] = ["embed", "pos_embed", "add_embed"]
     block_module_names: list[str] = [
@@ -46,7 +75,7 @@ class SequentialTransformer(nn.Module):
         self.cfg = cfg
 
         assert len(node_layers) > 1, "Must have at least 2 node layers"
-        self.module_group_names = self.create_module_groups(cfg.n_layers, node_layers)
+        self.module_name_sections = self.create_module_name_sections(cfg.n_layers, node_layers)
 
         if cfg.normalization_type == "LNPre":
             ln_class = SeqLayerNormPre_Folded
@@ -56,9 +85,9 @@ class SequentialTransformer(nn.Module):
             raise ValueError(f"Normalization type {cfg.normalization_type} not supported")
 
         # Initialize the modules, creating a ModuleList of Sequential modules for each graph section
-        graph_sections: list[MultiSequential] = []
-        for module_names in self.module_group_names:
-            module_group: list[nn.Module] = []
+        module_sections: list[MultiSequential] = []
+        for module_names in self.module_name_sections:
+            module_section: list[nn.Module] = []
             for module_name in module_names:
                 module_type = module_name.split(".")[0]
                 module_class: Type[nn.Module]
@@ -67,47 +96,51 @@ class SequentialTransformer(nn.Module):
                 else:
                     module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
                 module = module_class(cfg)
-                module_group.append(module)
-            graph_sections.append(MultiSequential(*module_group))
-        self.graph_sections: nn.ModuleList = nn.ModuleList(graph_sections)
+                module_section.append(module)
+            module_sections.append(MultiSequential(*module_section))
+        self.module_sections: nn.ModuleList = nn.ModuleList(module_sections)
 
     @staticmethod
-    def create_module_groups(n_layers: int, node_layers: list[str]) -> list[list[str]]:
-        """Create ordered groups of modules, where each group is a graph section.
+    def create_module_name_sections(n_blocks: int, node_layers: list[str]) -> list[list[str]]:
+        """Create ordered groups of module names.
+
+        Each group will be a section of a RIB graph, with the exception that, if the first
+        node_layer is not "embed", the first group will be all of the modules from embed to the
+        first node layer (which will not make up part of the graph).
 
         We first create a flat list of all module names. We then iterate through this list,
         appending each module name to a group until we reach the next node layer, and repeat.
 
         Args:
-            n_layers: The number of layers in the model.
+            n_blocks: The number of layers/blocks in the model.
             node_layers: The names of the node layers to build the graph with.
 
         Returns:
             A list of lists of module names, where each list is a graph section.
         """
         all_layers = SequentialTransformer.embed_module_names.copy()
-        for i in range(n_layers):
+        for i in range(n_blocks):
             all_layers.extend(
                 [f"{module_name}.{i}" for module_name in SequentialTransformer.block_module_names]
             )
         all_layers.append(SequentialTransformer.unembed_module_name)
 
-        module_groups: list[list[str]] = []
-        current_module_group: list[str] = []
+        module_name_sections: list[list[str]] = []
+        current_module_name_section: list[str] = []
         node_idx = 0
         for module_name in all_layers:
             if module_name == node_layers[node_idx]:
-                # Need to start a new module group, store the current one if non-empty
-                if current_module_group:
-                    module_groups.append(current_module_group)
-                    current_module_group = []
+                if current_module_name_section:
+                    # Need to start a new module group, store the current one if non-empty
+                    module_name_sections.append(current_module_name_section)
+                    current_module_name_section = []
                 if node_idx == len(node_layers) - 1:
                     # We've reached the end of the node layers, so we're done
                     break
                 node_idx += 1
-            current_module_group.append(module_name)
+            current_module_name_section.append(module_name)
 
-        return module_groups
+        return module_name_sections
 
     def forward(self, input_ids: Int[Tensor, "batch n_ctx"]) -> tuple[Tensor]:
         """Forward pass through the model.
@@ -120,6 +153,6 @@ class SequentialTransformer(nn.Module):
             the graph gives.
         """
         xs = (input_ids,)
-        for module in self.graph_sections:
-            xs = module(*xs)
+        for module_section in self.module_sections:
+            xs = module_section(*xs)
         return xs

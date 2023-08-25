@@ -72,3 +72,7 @@ def get_model_attr(model: torch.nn.Module, attr_path: str) -> torch.nn.Module:
             logger.error(f"Attribute '{name}' not found in the path '{attr_path}'.")
             raise
     return attr
+
+
+def map_tlens_to_sequential():
+    pass

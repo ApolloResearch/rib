@@ -12,21 +12,28 @@ Steps to build the graph:
     from the final node layer and working backwards.
 7. Calculate the edges of the interaction graph between each node layer.
 """
+import json
 from pathlib import Path
 from typing import Any, Literal, Optional
 
 import fire
+import torch
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from torch.utils.data import DataLoader
 from transformer_lens import HookedTransformer
 
 from rib.data import ModularArithmeticDataset
+from rib.data_accumulator import collect_gram_matrices
+from rib.hook_manager import HookedModel
+from rib.log import logger
 from rib.models import SequentialTransformer, SequentialTransformerConfig
-from rib.utils import load_config, set_seed
+from rib.types import TORCH_DTYPES
+from rib.utils import load_config, overwrite_output, set_seed
 
 
 class Config(BaseModel):
+    exp_name: str = Field(..., description="The name of the experiment")
     seed: int = Field(..., description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2"]] = Field(
         None, description="Pretrained transformer lens model"
@@ -42,6 +49,12 @@ class Config(BaseModel):
         description="The dataset to use to build the graph. Currently only supports modular arithmetic",
     )
     batch_size: int = Field(..., description="The batch size to use when building the graph")
+    dtype: str = Field(..., description="The dtype to use when building the graph")
+
+    @field_validator("dtype")
+    def dtype_validator(cls, v):
+        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
+        return v
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "Config":
@@ -59,7 +72,7 @@ def map_tlens_weights_to_seq_transformer(
     raise NotImplementedError("Haven't yet implemented loading a saved model")
 
 
-def load_sequential_transformer(config: Config) -> SequentialTransformer:
+def load_sequential_transformer(config: Config) -> tuple[SequentialTransformer, dict]:
     """Load a SequentialTransformer model from a pretrained transformerlens model.
 
     Requires config to contain a pretrained model name or a path to a transformerlens model.
@@ -73,7 +86,8 @@ def load_sequential_transformer(config: Config) -> SequentialTransformer:
         config (Config): The config, containing either `tlens_pretrained` or `tlens_model_path`.
 
     Returns:
-        SequentialTransformer: The SequentialTransformer model.
+        - SequentialTransformer: The SequentialTransformer model.
+        - dict: The config used in the transformerlens model.
     """
 
     if config.tlens_pretrained is not None:
@@ -89,11 +103,14 @@ def load_sequential_transformer(config: Config) -> SequentialTransformer:
         tlens_cfg_dict = tlens_model.cfg.to_dict()
 
     seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
+    # Set the dtype to the one specified in the config for this script (as opposed to the one used
+    # to train the tlens model)
+    seq_cfg.dtype = TORCH_DTYPES[config.dtype]
     seq_model = SequentialTransformer(seq_cfg, config.node_layers)
-    return seq_model
+    return seq_model, tlens_cfg_dict
 
 
-def create_data_loader(config: Config) -> DataLoader:
+def create_data_loader(config: Config, train: bool = False) -> DataLoader:
     """Create a DataLoader for the dataset specified in `config.dataset`.
 
     Args:
@@ -109,7 +126,7 @@ def create_data_loader(config: Config) -> DataLoader:
             # The config specified in the YAML file used to train the tlens model
             train_config = yaml.safe_load(f)["train"]
         test_data = ModularArithmeticDataset(
-            train_config["modulus"], train_config["frac_train"], seed=config.seed, train=False
+            train_config["modulus"], train_config["frac_train"], seed=config.seed, train=train
         )
         # Note that the batch size for training typically gives 1 batch per epoch. We use a smaller
         # batch size here, mostly for verifying that our iterative code works.
@@ -125,13 +142,45 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
-    seq_model = load_sequential_transformer(config)
+    out_dir = Path(__file__).parent / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
+    if out_interaction_graph_file.exists() and not overwrite_output(out_interaction_graph_file):
+        logger.info("Exiting.")
+        return None
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    seq_model, tlens_cfg_dict = load_sequential_transformer(config)
+    seq_model.eval()
+    seq_model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_model = HookedModel(seq_model)
 
     data_loader = create_data_loader(config)
 
     # map_tlens_weights_to_seq_transformer(seq_model, tlens_model)
 
-    return None
+    # Don't build the graph for the section of the model before the first node layer
+    graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
+
+    gram_matrices = collect_gram_matrices(
+        hooked_model=hooked_model,
+        module_names=graph_module_names,
+        data_loader=data_loader,
+        device=device,
+        collect_output_gram=True,
+        hook_names=config.node_layers,
+    )
+    results = {
+        "exp_name": config.exp_name,
+        "gram_matrices": gram_matrices,
+        "config": json.loads(config.model_dump_json()),
+        "model_config_dict": tlens_cfg_dict,
+    }
+
+    # Save the results (which include torch tensors) to file
+    torch.save(results, out_interaction_graph_file)
+    logger.info("Saved results to %s", out_interaction_graph_file)
+    return results
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from rib.models.sequential_transformer.components import (
     SeqLayerNormPre_Folded,
 )
 from rib.models.sequential_transformer.config import SequentialTransformerConfig
+from rib.models.utils import create_list_partitions
 
 
 class MultiSequential(nn.Sequential):
@@ -28,6 +29,10 @@ class MultiSequential(nn.Sequential):
 class SequentialTransformer(nn.Module):
     """Transformer whose modules are organised into a hierarchy based on the desired RIB graph.
 
+    If the first node_layer is not "embed", we will have a pre-section of modules from embed to
+    the first node_layer. This pre-section will not be part of the graph but needs to be run
+    with all forward passes in order to feed the correct data to susbequent sections.
+
     Args:
         cfg: The SequentialTransformer config
         node_layers: The names of the node layers used to partition the transformer. There will be
@@ -39,7 +44,7 @@ class SequentialTransformer(nn.Module):
     >>> model = SequentialTransformer(cfg, node_layers)
     >>> print(model)
         SequentialTransformer(
-            (module_sections): ModuleList(
+            (sections): ModuleList(
                 (0): MultiSequential(
                     (0): Embed()
                     (1): PosEmbed()
@@ -84,9 +89,14 @@ class SequentialTransformer(nn.Module):
         else:
             raise ValueError(f"Normalization type {cfg.normalization_type} not supported")
 
+        has_pre_section = node_layers[0] != "embed"
         # Initialize the modules, creating a ModuleList of Sequential modules for each graph section
-        module_sections: list[MultiSequential] = []
-        for module_names in self.module_name_sections:
+        sections: dict[str, MultiSequential] = {}
+        # If has_pre_section, we need to start at -1 because the first section will be the
+        # pre-section which should not be part of the graph
+        for i, module_names in enumerate(self.module_name_sections, -1 if has_pre_section else 0):
+            section_name = "pre" if node_layers[0] != "embed" and i == -1 else f"section_{i}"
+
             module_section: list[nn.Module] = []
             for module_name in module_names:
                 module_type = module_name.split(".")[0]
@@ -97,8 +107,8 @@ class SequentialTransformer(nn.Module):
                     module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
                 module = module_class(cfg)
                 module_section.append(module)
-            module_sections.append(MultiSequential(*module_section))
-        self.module_sections: nn.ModuleList = nn.ModuleList(module_sections)
+            sections[section_name] = MultiSequential(*module_section)
+        self.sections: nn.ModuleDict = nn.ModuleDict(sections)
 
     @staticmethod
     def create_module_name_sections(n_blocks: int, node_layers: list[str]) -> list[list[str]]:
@@ -110,6 +120,10 @@ class SequentialTransformer(nn.Module):
 
         We first create a flat list of all module names. We then iterate through this list,
         appending each module name to a group until we reach the next node layer, and repeat.
+
+        If the first node_layer is not "embed", we will have a pre-section of modules from embed to
+        the first node_layer. This pre-section will not be part of the graph but needs to be run
+        with all forward passes regardless.
 
         Args:
             n_blocks: The number of layers/blocks in the model.
@@ -125,21 +139,7 @@ class SequentialTransformer(nn.Module):
             )
         all_layers.append(SequentialTransformer.unembed_module_name)
 
-        module_name_sections: list[list[str]] = []
-        current_module_name_section: list[str] = []
-        node_idx = 0
-        for module_name in all_layers:
-            if module_name == node_layers[node_idx]:
-                if current_module_name_section:
-                    # Need to start a new module group, store the current one if non-empty
-                    module_name_sections.append(current_module_name_section)
-                    current_module_name_section = []
-                if node_idx == len(node_layers) - 1:
-                    # We've reached the end of the node layers, so we're done
-                    break
-                node_idx += 1
-            current_module_name_section.append(module_name)
-
+        module_name_sections = create_list_partitions(all_layers, node_layers)
         return module_name_sections
 
     def forward(self, input_ids: Int[Tensor, "batch n_ctx"]) -> tuple[Tensor]:
@@ -152,7 +152,9 @@ class SequentialTransformer(nn.Module):
             A tuple of tensors, the number of which depends on how many outputs the final module in
             the graph gives.
         """
-        xs = (input_ids,)
-        for module_section in self.module_sections:
-            xs = module_section(*xs)
-        return xs
+        xs = input_ids
+        for module_section in self.sections.values():
+            inputs = xs if isinstance(xs, tuple) else (xs,)
+            xs = module_section(*inputs)
+        out = xs if isinstance(xs, tuple) else (xs,)
+        return out

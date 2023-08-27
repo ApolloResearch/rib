@@ -1,4 +1,6 @@
 seed: 0
 tlens_pretrained: null
 tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_2023-08-25_18-18-37/model_epoch_60000.pt
-node_layers: ["embed", "attn.0", "mlp_out.0"]
+dataset: modular_arithmetic
+batch_size: 5000
+node_layers: ["embed", "attn.0", "mlp_out.0", "unembed"]

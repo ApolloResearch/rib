@@ -8,7 +8,7 @@ model:
   d_vocab: 114  # modulus + 1
   n_ctx: 3
   act_fn: relu
-  normalization_type: LN
+  normalization_type: LNPre
 train:
   modulus: 113  # 'p' in the paper and code
   frac_train: .25

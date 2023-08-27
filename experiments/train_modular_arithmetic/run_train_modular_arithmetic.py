@@ -194,10 +194,10 @@ def main(config_path_str: str) -> tuple[float, float]:
 
     # Load the Modular Arithmetic train dataset
     train_data = ModularArithmeticDataset(
-        config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=True
+        config.train.modulus, config.train.frac_train, seed=config.seed, train=True
     )
     test_data = ModularArithmeticDataset(
-        config.train.modulus, config.train.frac_train, device=device, seed=config.seed, train=False
+        config.train.modulus, config.train.frac_train, seed=config.seed, train=False
     )
     train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=False)
     test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)

@@ -1,4 +1,4 @@
-from typing import Any, Callable, Union
+from typing import Any, Union
 
 import torch
 from einops import rearrange
@@ -245,14 +245,3 @@ def interaction_edge_forward_hook_fn(
         E = (f_hat_out_T_f_hat_in * C_out_O_C_in_pinv_T).sum(dim=0)
 
         add_to_hooked_matrix(hooked_data, hook_name, data_key, E)
-
-
-HookRegistryType = dict[str, tuple[Callable[..., Any], str]]
-
-HOOK_REGISTRY: HookRegistryType = {
-    "gram_forward_hook_fn": (gram_forward_hook_fn, "forward"),
-    "gram_pre_forward_hook_fn": (gram_pre_forward_hook_fn, "pre_forward"),
-    "rotate_orthog_pre_forward_hook_fn": (rotate_orthog_pre_forward_hook_fn, "pre_forward"),
-    "M_dash_and_Lambda_dash_forward_hook_fn": (M_dash_and_Lambda_dash_forward_hook_fn, "forward"),
-    "interaction_edge_forward_hook_fn": (interaction_edge_forward_hook_fn, "forward"),
-}

@@ -49,7 +49,7 @@ class Hook:
             "module",
             "inputs",
         ], f"Hook function must have signature (module, inputs, ...), got {fn_args}"
-        if fn_args[2] == "output":
+        if len(fn_args) > 2 and fn_args[2] == "output":
             self.hook_type = "forward"
             assert (
                 "forward" in self.fn.__name__ and "pre_forward" not in self.fn.__name__

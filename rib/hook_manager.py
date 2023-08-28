@@ -52,7 +52,7 @@ class Hook:
         if fn_args[2] == "output":
             self.hook_type = "forward"
             assert (
-                "forward" in self.fn.__name__
+                "forward" in self.fn.__name__ and "pre_forward" not in self.fn.__name__
             ), f"Hook name must contain 'forward' for forward hooks, got {self.fn.__name__}"
         else:
             self.hook_type = "pre_forward"

@@ -40,18 +40,18 @@ class SequentialTransformer(nn.Module):
 
     For example:
     >>> cfg = ... # config for gpt2
-    >>> node_layers = ["embed", "attn.0", "mlp_act.0"]
+    >>> node_layers = ["attn.0", "mlp_act.0"]
     >>> model = SequentialTransformer(cfg, node_layers)
     >>> print(model)
         SequentialTransformer(
-            (sections): ModuleList(
-                (0): MultiSequential(
+            (sections): ModuleDict(
+                (pre): MultiSequential(
                     (0): Embed()
                     (1): PosEmbed()
                     (2): Add()
                     (3): SeqLayerNormPre_Folded()
                 )
-                (1): MultiSequential(
+                (section_0): MultiSequential(
                     (0): Attention()
                     (1): Add()
                     (2): SeqLayerNormPre_Folded()

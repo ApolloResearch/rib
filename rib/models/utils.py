@@ -1,11 +1,14 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import torch
 import yaml
 from torch import nn
 
 from rib.log import logger
+
+T = TypeVar("T")
+
 
 ACTIVATION_MAP = {
     "relu": torch.nn.ReLU,
@@ -72,3 +75,32 @@ def get_model_attr(model: torch.nn.Module, attr_path: str) -> torch.nn.Module:
             logger.error(f"Attribute '{name}' not found in the path '{attr_path}'.")
             raise
     return attr
+
+
+def create_list_partitions(in_list: list[T], sub_list: list[T]) -> list[list[T]]:
+    """Create partitions of a list based on a sub-list of matching values
+
+    Args:
+        in_list: The list to partition.
+        sub_list: The sub-list of values to partition by.
+
+    Returns:
+        A list of lists, where each sub-list is a partition of the input list.
+
+    Example:
+        >>> all_layers = ['embed', 'pos_embed', 'add_embed', 'ln1.0', 'attn.0', 'add_resid1.0']
+        >>> node_layers = ['ln1.0', 'add_resid1.0']
+        >>> create_list_partitions(all_layers, node_layers)
+        [['embed', 'pos_embed', 'add_embed'], ['ln1.0', 'attn.0'], ['add_resid1.0']]
+    """
+    indices: list[int] = []
+    for entry in sub_list:
+        assert entry in in_list, f"Entry '{entry}' not found in the input list."
+        indices.append(in_list.index(entry))
+
+    partitions: list[list[T]] = []
+    for i, j in zip([0] + indices, indices + [None]):
+        sub_list = in_list[i:j]
+        if sub_list:
+            partitions.append(sub_list)
+    return partitions

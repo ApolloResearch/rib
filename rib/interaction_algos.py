@@ -63,7 +63,6 @@ def calculate_interaction_rotations(
     hooked_model: HookedModel,
     data_loader: DataLoader,
     device: str,
-    dtype: str = "float32",
     truncation_threshold: float = 1e-5,
     rotate_output: bool = True,
 ) -> list[InteractionRotation]:
@@ -85,7 +84,6 @@ def calculate_interaction_rotations(
         hooked_model: The hooked model.
         data_loader: The data loader.
         device: The device to run the model on.
-        dtype: The data type to run the model on.
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_output: Whether to rotate the output layer to its eigenbasis (which is equivalent
             to its interaction basis).
@@ -130,7 +128,6 @@ def calculate_interaction_rotations(
             data_loader=data_loader,
             module_name=module_name,
             device=device,
-            dtype=dtype,
         )
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()

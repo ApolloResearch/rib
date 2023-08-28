@@ -24,6 +24,15 @@ class Embed(nn.Module):
     def forward(
         self, tokens: Int[Tensor, "batch pos"]
     ) -> tuple[Int[Tensor, "d_vocab d_model"], Float[Tensor, "batch pos d_model"]]:
+        """Calculate token embeddings of the input tokens.
+
+        Args:
+            tokens (Int[Tensor, "batch pos"]): The input tokens.
+
+        Returns:
+            - The input tokens
+            - The token embeddings
+        """
         # If A has shape [a, b] and B has shape [c, d], then A[:, B] has shape [a, c, d]
         # B acts as a tensor of indices into the second dimension (so >=0 and <b)
         return tokens, self.W_E[tokens, :]

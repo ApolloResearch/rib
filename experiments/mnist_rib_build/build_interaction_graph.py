@@ -102,7 +102,6 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         module_names=config.module_names,
         data_loader=test_loader,
         device=device,
-        dtype=config.dtype,
         collect_output_gram=True,
     )
 
@@ -112,7 +111,6 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         hooked_model=hooked_mlp,
         data_loader=test_loader,
         device=device,
-        dtype=config.dtype,
         truncation_threshold=config.truncation_threshold,
         rotate_output=config.rotate_output,
     )
@@ -122,7 +120,6 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         hooked_model=hooked_mlp,
         data_loader=test_loader,
         device=device,
-        dtype=config.dtype,
     )
 
     results = {

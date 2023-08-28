@@ -1,6 +1,7 @@
 from typing import Any, Callable, Union
 
 import torch
+from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
 
@@ -33,8 +34,16 @@ def add_to_hooked_matrix(
 
 def gram_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch d_hidden"]],
-    output: Float[Tensor, "batch d_hidden"],
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    output: Union[
+        Float[Tensor, "batch d_hidden"],
+        Float[Tensor, "batch pos d_hidden"],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
@@ -45,38 +54,71 @@ def gram_forward_hook_fn(
     Args:
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module (not used).
-        output: output of the module.
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
-    out_acts = output.detach().clone()
+    # Output may be tuple of tensors if there are two outputs
+    outputs = output if isinstance(output, tuple) else (output,)
+    combined_tensors = []
+    for out_acts in outputs:
+        if out_acts.dim() == 3:  # tensor with pos embedding
+            pattern = "batch position d_hidden -> batch (position d_hidden)"
+        elif out_acts.dim() == 2:  # tensor without pos embedding
+            pattern = "batch d_hidden -> batch d_hidden"
+        else:
+            raise ValueError("Unexpected tensor rank")
+
+        combined_tensors.append(rearrange(out_acts.detach().clone(), pattern))
+    out_acts = torch.cat(combined_tensors, dim=-1)
+
     gram_matrix = out_acts.T @ out_acts
     add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
 def gram_pre_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch d_hidden"]],
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
     **_: Any,
 ) -> None:
-    """Calculates the gram matrix for the batch and adds it to the global.
+    """Calculate the gram matrix for inputs with positional indices and add it to the global.
+
+    First, we combine the pos and hidden dimensions into a single dimension. Then, if there are two
+    inputs, we concatenate them along this combined dimension. We then calculate the gram matrix.
 
     Args:
         module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module.
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one input.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
-    in_acts = inputs[0].detach().clone()
+    combined_tensors = []
+    for in_acts in inputs:
+        if in_acts.dim() == 3:  # tensor with pos embedding
+            pattern = "batch position d_hidden -> batch (position d_hidden)"
+        elif in_acts.dim() == 2:  # tensor without pos embedding
+            pattern = "batch d_hidden -> batch d_hidden"
+        else:
+            raise ValueError("Unexpected tensor rank")
+
+        combined_tensors.append(rearrange(in_acts.detach().clone(), pattern))
+    in_acts = torch.cat(combined_tensors, dim=-1)
+
     gram_matrix = in_acts.T @ in_acts
     add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 

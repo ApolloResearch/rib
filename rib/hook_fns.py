@@ -8,7 +8,7 @@ from torch import Tensor
 from rib.linalg import batched_jacobian
 
 
-def add_to_hooked_matrix(
+def _add_to_hooked_matrix(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: str,
@@ -30,6 +30,44 @@ def add_to_hooked_matrix(
     # If no data exists, initialize with zeros
     hooked_data.setdefault(hook_name, {}).setdefault(data_key, torch.zeros_like(hooked_matrix))
     hooked_data[hook_name][data_key] += hooked_matrix
+
+
+def _concatenate_with_embedding_reshape(
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ]
+) -> Float[Tensor, "batch d_hidden_combined"]:
+    """
+    Reshape tensors considering positional embeddings and concatenate them.
+
+    For tensors with a rank of 3 (assumed to have positional embeddings),
+    the positional and hidden dimensions are combined. For tensors with a rank of 2,
+    they remain unchanged. All the reshaped tensors are then concatenated.
+
+    Args:
+        x A tuple containing one or two tensors to be concatenated. If the tensors contain a
+            position dimensions (i.e. rank of 3), the positional and hidden dimensions are combined.
+
+    Returns:
+
+    Raises:
+        ValueError: If a tensor rank is neither 2 nor 3.
+    """
+    combined_tensors = []
+
+    for x in inputs:
+        if x.dim() == 3:  # tensor with pos embedding
+            pattern = "batch position d_hidden -> batch (position d_hidden)"
+        elif x.dim() == 2:  # tensor without pos embedding
+            pattern = "batch d_hidden -> batch d_hidden"
+        else:
+            raise ValueError("Unexpected tensor rank")
+
+        combined_tensors.append(rearrange(x.detach().clone(), pattern))
+
+    return torch.cat(combined_tensors, dim=-1)
 
 
 def gram_forward_hook_fn(
@@ -64,20 +102,11 @@ def gram_forward_hook_fn(
     assert isinstance(data_key, str), "data_key must be a string."
     # Output may be tuple of tensors if there are two outputs
     outputs = output if isinstance(output, tuple) else (output,)
-    combined_tensors = []
-    for out_acts in outputs:
-        if out_acts.dim() == 3:  # tensor with pos embedding
-            pattern = "batch position d_hidden -> batch (position d_hidden)"
-        elif out_acts.dim() == 2:  # tensor without pos embedding
-            pattern = "batch d_hidden -> batch d_hidden"
-        else:
-            raise ValueError("Unexpected tensor rank")
 
-        combined_tensors.append(rearrange(out_acts.detach().clone(), pattern))
-    out_acts = torch.cat(combined_tensors, dim=-1)
+    out_acts = _concatenate_with_embedding_reshape(outputs)  # type: ignore
 
     gram_matrix = out_acts.T @ out_acts
-    add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
 def gram_pre_forward_hook_fn(
@@ -107,20 +136,11 @@ def gram_pre_forward_hook_fn(
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
-    combined_tensors = []
-    for in_acts in inputs:
-        if in_acts.dim() == 3:  # tensor with pos embedding
-            pattern = "batch position d_hidden -> batch (position d_hidden)"
-        elif in_acts.dim() == 2:  # tensor without pos embedding
-            pattern = "batch d_hidden -> batch d_hidden"
-        else:
-            raise ValueError("Unexpected tensor rank")
 
-        combined_tensors.append(rearrange(in_acts.detach().clone(), pattern))
-    in_acts = torch.cat(combined_tensors, dim=-1)
+    in_acts = _concatenate_with_embedding_reshape(inputs)
 
     gram_matrix = in_acts.T @ in_acts
-    add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
 def rotate_orthog_pre_forward_hook_fn(
@@ -190,8 +210,8 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
         M_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_C_out_O.T @ f_hat_C_out_O
         Lambda_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_C_out_O.T @ in_acts
 
-        add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
-        add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
+        _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
+        _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
 
 
 def interaction_edge_forward_hook_fn(
@@ -244,4 +264,4 @@ def interaction_edge_forward_hook_fn(
         )
         E = (f_hat_out_T_f_hat_in * C_out_O_C_in_pinv_T).sum(dim=0)
 
-        add_to_hooked_matrix(hooked_data, hook_name, data_key, E)
+        _add_to_hooked_matrix(hooked_data, hook_name, data_key, E)

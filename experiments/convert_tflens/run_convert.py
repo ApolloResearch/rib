@@ -4,7 +4,8 @@ from typing import Literal, Optional
 
 import fire
 import torch
-from pydantic import BaseModel, Field, model_validator
+import yaml
+from pydantic import BaseModel, Field, field_validator, model_validator
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.models import SequentialTransformer, SequentialTransformerConfig
@@ -20,6 +21,12 @@ class Config(BaseModel):
     node_layers: list[str] = Field(
         ..., description="Names of the node layers to build the graph with"
     )
+    dtype: str = Field(..., description="The dtype to use when building the graph")
+
+    @field_validator("dtype")
+    def dtype_validator(cls, v):
+        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
+        return v
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "Config":

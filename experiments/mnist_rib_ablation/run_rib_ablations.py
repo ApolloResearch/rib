@@ -111,6 +111,8 @@ def ablate_and_test(
         total=len(ablation_schedule),
         desc=f"Ablating {module_name}",
     ):
+        interaction_rotation = interaction_rotation.to(device)
+        interaction_rotation_pinv = interaction_rotation_pinv.to(device)
         rotation_matrix = calc_rotation_matrix(
             vecs=interaction_rotation,
             vecs_pinv=interaction_rotation_pinv,

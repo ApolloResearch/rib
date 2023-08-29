@@ -9,12 +9,13 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.models import SequentialTransformer, SequentialTransformerConfig
+from rib.types import TORCH_DTYPES
 from rib.utils import load_config, set_seed
 
 
 class Config(BaseModel):
     seed: int = Field(..., description="The random seed value for reproducibility")
-    tlens_pretrained: Literal["gpt2"] = Field(None, description="Pretrained transformer lens model")
+    tlens_pretrained: Optional[str] = Field(None, description="Pretrained transformer lens model")
     tlens_model_path: Optional[str] = Field(
         None, description="Path to saved transformer lens model"
     )
@@ -44,17 +45,48 @@ def main(config_path_str: str) -> None:
 
     if config.tlens_pretrained is not None:
         tlens_model = HookedTransformer.from_pretrained(config.tlens_pretrained)
-        # Create a SequentialTransformerConfig from the HookedTransformerConfig
-        seq_cfg = SequentialTransformerConfig(**tlens_model.cfg.to_dict())
+        tlens_cfg_dict = tlens_model.cfg.to_dict()
+        model_state_dict = tlens_model.state_dict()
     elif config.tlens_model_path is not None:
-        raise NotImplementedError("Haven't yet implemented loading a saved model")
+        with open(
+            "empty",
+            "r",
+        ) as f:
+            # The config specified in the YAML file used to train the tlens model
+            provided_tlens_cfg_dict = yaml.safe_load(f)["model"]
+        tlens_model = HookedTransformer(provided_tlens_cfg_dict)
+        tlens_cfg_dict = tlens_model.cfg.to_dict()
+        model_state_dict = torch.load(config.tlens_model_path, map_location="cpu")
+        tlens_model.load_state_dict(model_state_dict)
 
-    print(seq_cfg)
+    seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
+
+    seq_cfg.dtype = TORCH_DTYPES[config.dtype]
     seq_model = SequentialTransformer(seq_cfg, config.node_layers)
+
     # TODO: Map the state dict from tlens_model to seq_model
+    mapped_state_dict = map_state_dict(tlens_model.state_dict(), seq_model.state_dict())
 
     input_ids = torch.randint(0, seq_model.cfg.d_vocab, size=(2, seq_model.cfg.n_ctx))
     output = seq_model(input_ids)
+
+
+def map_state_dict(tlens_state_dict: dict, seq_state_dict: dict) -> dict:
+    """Maps the state dict from a transformer lens model to a sequential transformer model.
+
+    Args:
+        tlens_state_dict: The state dict from the transformer lens model
+        seq_state_dict: The state dict from the sequential transformer model
+
+    Returns:
+        The mapped state dict
+    """
+
+    for name, param in tlens_state_dict.items():
+        if name in seq_state_dict:
+            seq_state_dict[name].copy_(param)
+
+    return seq_state_dict
 
 
 if __name__ == "__main__":

@@ -16,14 +16,12 @@ class ModularArithmeticDataset(Dataset):
         modulus: int,
         frac_train: float = 0.3,
         fn_name: str = "add",
-        device: str = "cpu",
         seed: int = 0,
         train: bool = True,
     ):
         self.modulus = modulus
         self.frac_train = frac_train
         self.fn_name = fn_name
-        self.device = device
         self.seed = seed
         self.train = train
 
@@ -58,10 +56,9 @@ class ModularArithmeticDataset(Dataset):
         self,
     ) -> tuple[Int[Tensor, "modulus_squared seq"], Int[Tensor, "modulus_squared"]]:
         x = torch.tensor(
-            [(i, j, self.modulus) for i in range(self.modulus) for j in range(self.modulus)],
-            device=self.device,
+            [(i, j, self.modulus) for i in range(self.modulus) for j in range(self.modulus)]
         )
-        y = torch.tensor([self.fn(i, j) for i, j, _ in x], device=self.device)
+        y = torch.tensor([self.fn(i, j) for i, j, _ in x])
         return x, y
 
     def split_dataset(

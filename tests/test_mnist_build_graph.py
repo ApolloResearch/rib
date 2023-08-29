@@ -87,7 +87,9 @@ def test_mnist_build_graph():
                 for Lambda_sqrt in Lambda_sqrts[::-1]
             ]
             # Check that the output layer rotation is an identity matrix
-            assert torch.allclose(Cs[-1]["C"], torch.eye(Cs[-1]["C"].shape[0]))
+            assert torch.allclose(
+                Cs[-1]["C"], torch.eye(Cs[-1]["C"].shape[0], device=Cs[-1]["C"].device)
+            )
 
             for i, module_name in enumerate(["layers.1", "layers.2"]):
                 # Check that the size of the sum of activations in the interaction basis is equal

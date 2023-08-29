@@ -44,6 +44,7 @@ from torchvision import datasets, transforms
 from tqdm import tqdm
 
 from rib.data_accumulator import collect_gram_matrices
+from rib.hook_fns import rotate_orthog_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.log import logger
@@ -125,7 +126,7 @@ def ablate_and_test(
         rotation_hook = Hook(
             name=module_name,
             data_key="rotation",
-            fn_name="rotate_orthog_pre_forward_hook_fn",
+            fn=rotate_orthog_pre_forward_hook_fn,
             module_name=module_name,
             fn_kwargs={"rotation_matrix": rotation_matrix},
         )

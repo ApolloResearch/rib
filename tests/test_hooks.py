@@ -1,10 +1,11 @@
+from inspect import signature
 from unittest.mock import Mock
 
 import pytest
 import torch
 
+from rib.hook_fns import gram_forward_hook_fn, gram_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
-from rib.hook_registry import HOOK_REGISTRY
 
 
 @pytest.fixture
@@ -20,23 +21,58 @@ def model():
     return TestModel()
 
 
+def test_register_hook_with_bad_name():
+    """Check that a hook fn without 'forward' or 'pre_forward' in the name raises an error"""
+    mock_fn = Mock(return_value=None)
+    # A forward hook should be a function with 'forward' in the name and have a signature of
+    # (module, inputs, output, ...)
+    mock_fn.__signature__ = signature(gram_forward_hook_fn)
+
+    with pytest.raises(AssertionError):
+        # Check that we get an assertion error without 'forward' in the name
+        mock_fn.__name__ = "mock_fn"
+        Hook(
+            name="test_forward",
+            data_key="gram",
+            fn=mock_fn,
+            module_name="linear",
+        )
+        # Check that we get an assertion error with 'pre_forward' in the name
+        mock_fn.__name__ = "mock_fn_pre_forward"
+        Hook(
+            name="test_forward",
+            data_key="gram",
+            fn=mock_fn,
+            module_name="linear",
+        )
+        # Check that we get an assertion error with 'forward' in the name but the signature is wrong
+        mock_fn.__name__ = "mock_fn_forward"
+        mock_fn.__signature__ = signature(gram_pre_forward_hook_fn)
+        Hook(
+            name="test_forward",
+            data_key="gram",
+            fn=mock_fn,
+            module_name="linear",
+        )
+
+
 def test_hooked_model_add_and_remove_hooks(model):
     """Test adding and removing hooks in the HookedModel"""
     torch.manual_seed(0)
     data = torch.randn((1, 3))
     hooked_model = HookedModel(model)
     mock_fn = Mock(return_value=None)
+    # Ensure mock_fn has the same signature as gram_forward_hook_fn so that the hook_type is set correctly
+    mock_fn.__signature__ = signature(gram_forward_hook_fn)
+    mock_fn.__name__ = "mock_fn_forward"
 
-    with pytest.raises(ValueError):
-        # Should raise ValueError if hook function is not registered
-        hooks = [
-            Hook(name="test_forward", data_key="gram", fn_name="mock_hook", module_name="linear"),
-        ]
-
-    # Register mock hook function
-    HOOK_REGISTRY.update({"mock_hook": (mock_fn, "forward")})
     hooks = [
-        Hook(name="test_forward", data_key="gram", fn_name="mock_hook", module_name="linear"),
+        Hook(
+            name="test_forward",
+            data_key="gram",
+            fn=mock_fn,
+            module_name="linear",
+        ),
     ]
 
     # Register mock hook and run forward pass
@@ -63,7 +99,7 @@ def test_gram_forward_hook_fn_accumulates_over_forward_passes(model):
         Hook(
             name="test_forward",
             data_key="gram",
-            fn_name="gram_forward_hook_fn",
+            fn=gram_forward_hook_fn,
             module_name="linear",
         ),
     ]

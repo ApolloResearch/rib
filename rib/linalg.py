@@ -1,6 +1,7 @@
-from typing import Callable
+from typing import Callable, Optional, Union
 
 import torch
+from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
 from torch.func import jacrev, vmap
@@ -93,8 +94,70 @@ def calc_rotation_matrix(
     return vecs_ablated @ vecs_pinv
 
 
+def _fold_jacobian_pos(
+    x: Float[Tensor, "batch out_pos out_hidden in_pos in_hidden"]
+) -> Float[Tensor, "batch out_pos_hidden in_pos_hidden"]:
+    out = rearrange(
+        x,
+        "batch out_pos out_hidden in_pos in_hidden -> batch (out_pos out_hidden) (in_pos in_hidden)",
+    )
+    return out
+
+
+def _get_jac_output_type(
+    in_tuple_len: int, out_tuple_len: int, JacType: Float[Tensor, "*dims"]
+) -> Union[
+    Float[Tensor, "*dims"],
+    tuple[Float[Tensor, "*dims"]],
+    tuple[Float[Tensor, "*dims"], Float[Tensor, "*dims"]],
+    tuple[
+        tuple[Float[Tensor, "*dims"], Float[Tensor, "*dims"]],
+        tuple[Float[Tensor, "*dims"], Float[Tensor, "*dims"]],
+    ],
+]:
+    """Deduce the output type of the vmapped jacrev function.
+
+    The jacrev function will return a tuple of jacobians if there are multiple outputs, and an
+    (inner) tuple of jacobians if there are multiple inputs. We need to handle all combinations of
+    these.
+
+    Args:
+        in_tuple_len: The number of inputs to the function.
+        out_tuple_len: The number of outputs of the function. If 0, we assume that the function
+            returns a single tensor as opposed to a tuple of tensors.
+        JacType: The type of a single element of the jacobian output (i.e. the output of the
+            vmapped jacrev function if only one output and input).
+
+    Returns:
+        The output type of the vmapped jacrev function
+    """
+    # Output shapes of the entire jacobian function which depends on in_tuple_len and out_tuple_len
+    if out_tuple_len == 0 and in_tuple_len == 1:
+        JacOutType = JacType
+    elif (out_tuple_len == 0 and in_tuple_len == 2) or (out_tuple_len == 2 and in_tuple_len == 1):
+        JacOutType = tuple[JacType, JacType]
+    elif out_tuple_len == 1 and in_tuple_len == 1:
+        JacOutType = tuple[JacType]
+    elif out_tuple_len == 1 and in_tuple_len == 2:
+        JacOutType = tuple[tuple[JacType, JacType]]
+    elif out_tuple_len == 2 and in_tuple_len == 2:
+        JacOutType = tuple[tuple[JacType, JacType], tuple[JacType, JacType]]
+    else:
+        raise ValueError(
+            f"Unsupported combination of in_tuple_len and out_tuple_len ({in_tuple_len}, {out_tuple_len})"
+        )
+
+    return JacOutType
+
+
 def batched_jacobian(
-    fn: Callable, x: Float[Tensor, "batch_size in_size"]
+    fn: Callable,
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos in_hidden"]],
+        tuple[Float[Tensor, "batch pos in_hidden1"], Float[Tensor, "batch pos in_hidden2"]],
+    ],
+    out_tuple_len: Optional[int] = 0,
 ) -> Float[Tensor, "batch_size out_size in_size"]:
     """Calculate the Jacobian of a function fn with respect to input x.
 
@@ -102,9 +165,72 @@ def batched_jacobian(
     across the batch using pytorch's vmap
     (https://pytorch.org/functorch/stable/generated/functorch.jacrev.html).
 
+    Handles the case where the input is a tuple of tensors, as well as when the output is a tuple
+    of tensors.
+
     Assumes that fn can take as input a non-batched x and return a non-batched output.
+
+    If we have a pos dimension, we concatenate the pos and hidden dimensions.
+
+    If we have multiple outputs, We element-wise sum their jacobians (handling the case where we
+    have one or two inputs).
+
+    If we have multiple inputs, we concatenate them over their hidden dimension.
+
+    Args:
+        fn: The function to calculate the Jacobian of.
+        inputs: The input to fn. Can be a tuple of tensors. If > 1 input, we concatenate their
+            hidden dimensions after calculating the jacobian.
+        out_tuple_len: The number of outputs of fn. If > 1, we concatenate their hidden dimensions
+            after calculating the jacobian. If 0, we assume that fn returns a single tensor.
+
+    Returns
     """
-    return vmap(jacrev(fn))(x)
+    in_tuple_len = len(inputs)
+    assert out_tuple_len in [0, 1, 2], "Currently only outputs of 0, 1 or 2 are supported."
+    has_pos_dim = any(x.dim() == 3 for x in inputs)
+
+    if has_pos_dim:
+        jac_out_dims = "batch out_pos out_hidden in_pos in_hidden"
+    else:
+        jac_out_dims = "batch out_hidden in_hidden"
+
+    # The type of a single element of the jacobian output (i.e. if only one output and input)
+    JacType = Float[Tensor, jac_out_dims]
+
+    JacOutType = _get_jac_output_type(in_tuple_len, out_tuple_len, JacType)
+
+    # Make tuple of n_inputs to get jacobians for each input. E.g. if n_inputs = 2, argnums = (0, 1)
+    argnums = tuple(range(in_tuple_len))
+    jac_out: JacOutType = vmap(jacrev(fn, argnums=argnums))(*inputs)
+
+    # If there are multiple outputs, we element-wise sum the jacobians of each output
+    if out_tuple_len == 2 and in_tuple_len == 1:
+        jac_out: JacType = sum(jac_out)
+    elif out_tuple_len == 2 and in_tuple_len == 2:
+        jac_out: tuple[JacType, JacType] = tuple(sum(x) for x in zip(*jac_out))
+
+    # If there is a pos dimension, we concatenate the pos and hidden dimensions
+    if has_pos_dim:
+        if isinstance(jac_out, torch.Tensor):
+            jac_out: Float[Tensor, "batch out_size in_size"] = _fold_jacobian_pos(jac_out)
+        elif isinstance(jac_out, tuple):
+            jac_out: Union[
+                tuple[Float[Tensor, "batch out_pos_hidden in_pos_hidden"]],
+                tuple[
+                    Float[Tensor, "batch out_pos_hidden in_pos_hidden"],
+                    Float[Tensor, "batch out_pos_hidden in_pos_hidden"],
+                ],
+            ] = tuple(_fold_jacobian_pos(x) for x in jac_out)
+
+    # Concatenate the inputs over the hidden dimensions (i.e. the final dimension)
+    if isinstance(jac_out, tuple):
+        jac_out: Float[Tensor, "batch out_size in_size"] = torch.cat(jac_out, dim=-1)
+
+    assert isinstance(jac_out, torch.Tensor), "jac_out should be a tensor at this point."
+    assert jac_out.ndim == 3, "jac_out should have 3 dimensions at this point."
+
+    return jac_out
 
 
 def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:

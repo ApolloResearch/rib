@@ -168,12 +168,20 @@ def rotate_orthog_pre_forward_hook_fn(
 
 def M_dash_and_Lambda_dash_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch in_hidden"]],
-    output: Float[Tensor, "batch out_hidden"],
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos in_hidden"]],
+        tuple[Float[Tensor, "batch pos in_hidden1"], Float[Tensor, "batch pos in_hidden2"]],
+    ],
+    output: Union[
+        Float[Tensor, "batch out_hidden"],
+        Float[Tensor, "batch pos out_hidden"],
+        tuple[Float[Tensor, "batch pos out_hidden1"], Float[Tensor, "batch pos out_hidden2"]],
+    ],
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
+    C_out: Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"],
     **_: Any,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
@@ -184,7 +192,10 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
 
     Args:
         module: Module that the hook is attached to.
-        inputs: Inputs to the module.
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one input.
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
@@ -197,18 +208,29 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
     module._forward_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    in_acts = inputs[0].detach().clone()
-    out_acts = output.detach().clone()
-    O: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, in_acts)
+    out_tuple_len = len(output) if isinstance(output, tuple) else 0
+
+    O: tuple[Float[Tensor, "batch out_hidden_combined in_hidden_combined"]] = batched_jacobian(
+        module, inputs, out_tuple_len=out_tuple_len
+    )
+
+    in_acts = _concatenate_with_embedding_reshape(inputs)
+
+    outputs = output if isinstance(output, tuple) else (output,)
+    out_acts = _concatenate_with_embedding_reshape(outputs)
 
     with torch.inference_mode():
         # This corresponds to the left half of the inner products in the M' and Lambda' equations
         # In latex: $\sum_i \hat{f}^{l+1}(X) {C^{l+1}}^T O^l$
-        f_hat_C_out_O: Float[Tensor, "batch in_hidden"] = torch.einsum(
+        f_hat_C_out_O: Float[Tensor, "batch in_hidden_combined"] = torch.einsum(
             "bi,iI,Ik,bkj->bj", out_acts, C_out, C_out.T, O
         )
-        M_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_C_out_O.T @ f_hat_C_out_O
-        Lambda_dash: Float[Tensor, "in_hidden in_hidden"] = f_hat_C_out_O.T @ in_acts
+        M_dash: Float[Tensor, "in_hidden_combined in_hidden_combined"] = (
+            f_hat_C_out_O.T @ f_hat_C_out_O
+        )
+        Lambda_dash: Float[Tensor, "in_hidden_combined in_hidden_combined"] = (
+            f_hat_C_out_O.T @ in_acts
+        )
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
@@ -249,9 +271,10 @@ def interaction_edge_forward_hook_fn(
     module._forward_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
+    O: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, inputs)
+
     in_acts: Float[Tensor, "batch in_hidden"] = inputs[0].detach().clone()
     out_acts: Float[Tensor, "batch out_hidden"] = output.detach().clone()
-    O: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, in_acts)
 
     with torch.inference_mode():
         # LHS of Hadamard product

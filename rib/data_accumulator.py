@@ -60,8 +60,8 @@ def collect_gram_matrices(
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
-
-    hook_names = hook_names or module_names
+    else:
+        hook_names = module_names
 
     gram_hooks: list[Hook] = []
     # Add input hooks
@@ -113,6 +113,7 @@ def collect_M_dash_and_Lambda_dash(
     data_loader: DataLoader,
     module_name: str,
     device: str,
+    hook_name: Optional[str] = None,
 ) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -126,12 +127,16 @@ def collect_M_dash_and_Lambda_dash(
         module_name: The name of the module whose inputs are the node layer we collect the matrices
             M' and Lambda' for.
         device: The device to run the model on.
+        hook_name: The name of the hook to use to store the matrices in the hooked model.
 
     Returns:
         A tuple containing M' and Lambda'.
     """
+    if hook_name is None:
+        hook_name = module_name
+
     interaction_hook = Hook(
-        name=module_name,
+        name=hook_name,
         data_key=["M_dash", "Lambda_dash"],
         fn=M_dash_and_Lambda_dash_forward_hook_fn,
         module_name=module_name,
@@ -142,8 +147,8 @@ def collect_M_dash_and_Lambda_dash(
 
     run_dataset_through_model(hooked_model, data_loader, hooks=[interaction_hook], device=device)
 
-    M_dash = hooked_model.hooked_data[module_name]["M_dash"]
-    Lambda_dash = hooked_model.hooked_data[module_name]["Lambda_dash"]
+    M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
+    Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
     hooked_model.clear_hooked_data()
 
     # Scale the matrices by the number of samples in the dataset.

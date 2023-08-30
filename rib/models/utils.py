@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -104,3 +105,29 @@ def create_list_partitions(in_list: list[T], sub_list: list[T]) -> list[list[T]]
         if sub_list:
             partitions.append(sub_list)
     return partitions
+
+
+def map_state_dict(tlens_state_dict: dict, seq_state_dict: dict) -> dict:
+    """Maps the state dict from a transformer lens model to a sequential transformer model.
+
+    Args:
+        tlens_state_dict: The state dict from the transformer lens model
+        seq_state_dict: The state dict from the sequential transformer model
+
+    Returns:
+        The mapped state dict
+    """
+    assert set(tlens_state_dict.keys()) == set(
+        seq_state_dict.keys()
+    ), "State dict keys do not match"
+
+    for name, param in tlens_state_dict.items():
+        if name in seq_state_dict:
+            seq_state_dict[name].copy_(param)
+            assert torch.allclose(
+                tlens_state_dict[name], seq_state_dict[name]
+            ), f"Parameter {name} not copied correctly"
+        else:
+            warnings.warn(f"Parameter {name} not found in sequential transformer model")
+
+    return seq_state_dict

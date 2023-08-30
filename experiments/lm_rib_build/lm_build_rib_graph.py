@@ -13,6 +13,7 @@ Steps to build the graph:
 7. Calculate the edges of the interaction graph between each node layer.
 """
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -197,9 +198,20 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         hook_names=config.node_layers,
     )
 
+    # Move interaction matrices to the cpu and store in dict
+    interaction_rotations = []
+    for C_info in Cs:
+        info_dict = asdict(C_info)
+        info_dict["C"] = info_dict["C"].cpu()
+        if info_dict["C_pinv"] is not None:
+            info_dict["C_pinv"] = info_dict["C_pinv"].cpu()
+        else:
+            info_dict["C_pinv"] = None
+        interaction_rotations.append(info_dict)
+
     results = {
         "exp_name": config.exp_name,
-        "gram_matrices": gram_matrices,
+        "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
     }

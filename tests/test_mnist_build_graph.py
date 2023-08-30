@@ -58,11 +58,8 @@ def test_mnist_build_graph():
     def mock_build_sorted_lambda_matrices(Lambda_diag_abs_sqrt, **kwargs):
         # Note that this will be called for layers.2 and then layers.1
         # Call the original function to get the real lambdas
-        Lambda_sqrts.append(Lambda_diag_abs_sqrt)
-        Lambda_abs_sqrt, Lambda_abs_sqrt_pinv = build_sorted_lambda_matrices(
-            Lambda_diag_abs_sqrt, **kwargs
-        )
-        return Lambda_abs_sqrt, Lambda_abs_sqrt_pinv
+        Lambda_sqrts.append(Lambda_diag_abs_sqrt.cpu())
+        return build_sorted_lambda_matrices(Lambda_diag_abs_sqrt, **kwargs)
 
     # Create a temporary file and write the mock config to it
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".yaml") as temp_config:

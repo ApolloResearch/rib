@@ -22,12 +22,12 @@ class Embed(nn.Module):
         )
 
     def forward(
-        self, tokens: Int[Tensor, "batch pos"]
-    ) -> tuple[Int[Tensor, "d_vocab d_model"], Float[Tensor, "batch pos d_model"]]:
+        self, tokens: Int[Tensor, "..."]
+    ) -> tuple[Int[Tensor, "d_vocab d_model"], Float[Tensor, "... d_model"]]:
         """Calculate token embeddings of the input tokens.
 
         Args:
-            tokens (Int[Tensor, "batch pos"]): The input tokens.
+            tokens: The input tokens, typically (batch, pos)
 
         Returns:
             - The input tokens
@@ -45,25 +45,27 @@ class PosEmbed(nn.Module):
         self.W_pos = nn.Parameter(torch.empty(self.cfg.n_ctx, self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(
-        self, tokens: Int[Tensor, "batch pos"], x: Float[Tensor, "batch pos d_model"]
-    ) -> tuple[Int[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]]:
+        self, tokens: Int[Tensor, "... pos"], x: Float[Tensor, "... pos d_model"]
+    ) -> tuple[Int[Tensor, "... pos d_model"], Float[Tensor, "... pos d_model"]]:
         """Add positional embeddings to the input.
 
         Args:
-            tokens (Int[Tensor, "batch pos"]): The input tokens.
-            x (Float[Tensor, "batch pos d_model"]): Tokens after embedding.
+            tokens (Int[Tensor, "... pos"]): The input tokens.
+            x (Float[Tensor, "... pos d_model"]): Tokens after embedding.
 
         Returns:
             - Positional embeddings
             - Token embeddings
         """
 
-        tokens_length = tokens.size(-1)
-        pos_embed = self.W_pos[:tokens_length, :]  # [pos, d_model]
-        broadcast_pos_embed = einops.repeat(
-            pos_embed, "pos d_model -> batch pos d_model", batch=tokens.size(0)
-        )  # [batch, pos, d_model]
-        return broadcast_pos_embed.clone(), x
+        n_tokens = tokens.size(-1)
+        pos_embed = self.W_pos[:n_tokens, :]  # [pos, d_model]
+        # If there is a batch dimension, we need to broadcast the positional embeddings
+        if tokens.dim() > 1:
+            pos_embed = einops.repeat(
+                pos_embed, "pos d_model -> batch pos d_model", batch=tokens.size(0)
+            )  # [..., pos, d_model]
+        return pos_embed, x
 
 
 class Unembed(nn.Module):
@@ -77,12 +79,10 @@ class Unembed(nn.Module):
             torch.zeros(self.cfg.d_vocab, dtype=cfg.dtype)
         )
 
-    def forward(
-        self, residual: Float[Tensor, "batch pos d_model"]
-    ) -> Float[Tensor, "batch pos d_vocab"]:
+    def forward(self, residual: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_vocab"]:
         return (
             einsum(
-                "batch pos d_model, d_model vocab -> batch pos vocab",
+                "... d_model, d_model vocab -> ... vocab",
                 residual,
                 self.W_U,
             )
@@ -109,7 +109,7 @@ class Attention(nn.Module):
     ):
         """Attention Block - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
-        Convention: All attention pattern-style matrices have shape [batch, head_index, query_pos, key_pos]
+        Convention: All attention pattern-style matrices have shape [..., head_index, query_pos, key_pos]
 
         Args:
             cfg (SequentialTransformerConfig): Config
@@ -155,9 +155,9 @@ class Attention(nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "batch pos d_model"],
-        x: Float[Tensor, "batch pos d_model"],
-    ) -> tuple[Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]]:
+        residual: Float[Tensor, "... pos d_model"],
+        x: Float[Tensor, "... pos d_model"],
+    ) -> tuple[Float[Tensor, "... pos d_model"], Float[Tensor, "... pos d_model"]]:
         """Forward through the entire attention block.
 
         TODO: Split into multiple modules so we can create graphs at each layer.
@@ -166,52 +166,52 @@ class Attention(nn.Module):
         def add_head_dimension(tensor):
             return einops.repeat(
                 tensor,
-                "batch pos d_model -> batch pos n_heads d_model",
+                "... pos d_model -> ... pos n_heads d_model",
                 n_heads=self.cfg.n_heads,
             ).clone()
 
         if self.cfg.use_split_qkv_input:
-            query_input: Float[Tensor, "batch pos head_index d_model"] = add_head_dimension(x)
-            key_input: Float[Tensor, "batch pos head_index d_model"] = add_head_dimension(x)
-            value_input: Float[Tensor, "batch pos head_index d_model"] = add_head_dimension(x)
+            query_input: Float[Tensor, "... pos head_index d_model"] = add_head_dimension(x)
+            key_input: Float[Tensor, "... pos head_index d_model"] = add_head_dimension(x)
+            value_input: Float[Tensor, "... pos head_index d_model"] = add_head_dimension(x)
         else:
             query_input, key_input, value_input = residual, residual, residual
 
         if self.cfg.use_split_qkv_input:
-            qkv_einops_string = "batch pos head_index d_model"
+            qkv_einops_string = "... pos head_index d_model"
         else:
-            qkv_einops_string = "batch pos d_model"
+            qkv_einops_string = "... pos d_model"
 
         q = (
             einsum(
                 f"{qkv_einops_string}, head_index d_model d_head \
-                -> batch pos head_index d_head",
+                -> ... pos head_index d_head",
                 query_input,
                 self.W_Q,
             )
             + self.b_Q
         )
-        # [batch, pos, head_index, d_head]
+        # [..., pos, head_index, d_head]
         k = (
             einsum(
                 f"{qkv_einops_string}, head_index d_model d_head \
-                -> batch pos head_index d_head",
+                -> ... pos head_index d_head",
                 key_input,
                 self.W_K,
             )
             + self.b_K
         )
-        # [batch, pos, head_index, d_head]
+        # [..., pos, head_index, d_head]
         v = (
             einsum(
                 f"{qkv_einops_string}, head_index d_model d_head \
-                -> batch pos head_index d_head",
+                -> ... pos head_index d_head",
                 value_input,
                 self.W_V,
             )
             + self.b_V
         )
-        # [batch, pos, head_index, d_head]
+        # [..., pos, head_index, d_head]
 
         if self.cfg.dtype not in [torch.float32, torch.float64]:
             # If using 16 bits, increase the precision to avoid numerical instabilities
@@ -220,47 +220,47 @@ class Attention(nn.Module):
 
         attn_scores = (
             einsum(
-                "batch query_pos head_index d_head, \
-                        batch key_pos head_index d_head \
-                        -> batch head_index query_pos key_pos",
+                "... query_pos head_index d_head, \
+                        ... key_pos head_index d_head \
+                        -> ... head_index query_pos key_pos",
                 q,
                 k,
             )
             / self.attn_scale
-        )  # [batch, head_index, query_pos, key_pos]
+        )  # [..., head_index, query_pos, key_pos]
 
         # Only supports causal attention (not bidirectional)
         # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
-        attn_scores = self.apply_causal_mask(attn_scores)  # [batch, head_index, query_pos, key_pos]
+        attn_scores = self.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
 
-        pattern = F.softmax(attn_scores, dim=-1)  # [batch, head_index, query_pos, key_pos]
+        pattern = F.softmax(attn_scores, dim=-1)  # [..., head_index, query_pos, key_pos]
         pattern = pattern.to(self.cfg.dtype)
         z = einsum(
-            "batch key_pos head_index d_head, \
-                batch head_index query_pos key_pos -> \
-                batch query_pos head_index d_head",
+            "... key_pos head_index d_head, \
+                ... head_index query_pos key_pos -> \
+                ... query_pos head_index d_head",
             v,
             pattern,
-        )  # [batch, pos, head_index, d_head]
+        )  # [..., pos, head_index, d_head]
 
         out = (
             (
                 einsum(
-                    "batch pos head_index d_head, \
+                    "... pos head_index d_head, \
                             head_index d_head d_model -> \
-                            batch pos d_model",
+                            ... pos d_model",
                     z,
                     self.W_O,
                 )
             )
             + self.b_O
-        )  # [batch, pos, d_model]
+        )  # [..., pos, d_model]
 
         return residual, out
 
     def apply_causal_mask(
         self,
-        attn_scores: Float[Tensor, "batch head_index pos pos_plus_past_kv_pos_offset"],
+        attn_scores: Float[Tensor, "... head_index pos pos_plus_past_kv_pos_offset"],
     ):
         # The key context length is the number of positions in the past - this includes all positions in the cache
         # If not caching, query_ctx_length == key_ctx_length
@@ -279,15 +279,14 @@ class MLPIn(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
-        self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(
         self,
-        residual: Float[Tensor, "batch pos d_model"],
-        x: Float[Tensor, "batch pos d_model"],
-    ) -> tuple[Float[Tensor, "batch_size pos d_model"], Float[Tensor, "batch pos d_model"]]:
-        pre_act = einsum("batch pos d_model, d_model d_mlp -> batch pos d_mlp", x, self.W_in)
-        # [batch, pos, d_mlp]
+        residual: Float[Tensor, "... d_model"],
+        x: Float[Tensor, "... d_model"],
+    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+        pre_act = einsum("... d_model, d_model d_mlp -> ... d_mlp", x, self.W_in)
+        # [..., d_mlp]
         return residual, pre_act
 
 
@@ -295,8 +294,6 @@ class MLPAct(nn.Module):
     def __init__(self, cfg: SequentialTransformerConfig):
         super().__init__()
         self.cfg = cfg
-        self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
-        self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
 
         self.act_fn: Callable[[Float[Tensor, "... d_model"]], Tensor]
         if self.cfg.act_fn == "relu":
@@ -310,11 +307,11 @@ class MLPAct(nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "batch pos d_model"],
-        pre_act: Float[Tensor, "batch pos d_model"],
-    ) -> tuple[Float[Tensor, "batch_size pos d_model"], Float[Tensor, "batch pos d_model"]]:
+        residual: Float[Tensor, "... d_model"],
+        pre_act: Float[Tensor, "... d_model"],
+    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         # Technically, all these einsums could be done with a single matmul, but this is more readable.
-        post_act = self.act_fn(pre_act)  # [batch, pos, d_mlp]
+        post_act = self.act_fn(pre_act)  # [..., d_mlp]
         return residual, post_act
 
 
@@ -322,16 +319,15 @@ class MLPOut(nn.Module):
     def __init__(self, cfg: SequentialTransformerConfig):
         super().__init__()
         self.cfg = cfg
-        self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
         self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(
         self,
-        residual: Float[Tensor, "batch pos d_model"],
-        post_act: Float[Tensor, "batch pos d_model"],
-    ) -> tuple[Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]]:
+        residual: Float[Tensor, "... d_model"],
+        post_act: Float[Tensor, "... d_model"],
+    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         out = einsum(
-            "batch pos d_mlp, d_mlp d_model -> batch pos d_model",
+            "... d_mlp, d_mlp d_model -> ... d_model",
             post_act,
             self.W_out,
         )
@@ -356,14 +352,14 @@ class SeqLayerNormPre_Folded(torch.nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "batch pos d_model"],
-    ) -> tuple[Float[Tensor, "batch pos d_model"], Float[Tensor, "batch pos d_model"]]:
-        x0 = residual[..., :-1]  # [batch, pos, length-1]
+        residual: Float[Tensor, "... d_model"],
+    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+        x0 = residual[..., :-1]  # [..., length-1]
 
-        x0 = x0 - x0.mean(-1, keepdim=True)  # [batch, pos, length-1]
-        scale: Float[Tensor, "batch pos 1"] = (x0.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
-        x0 = x0 / scale  # [batch, pos, length-1]
-        x = torch.cat([x0, residual[..., -1:]], dim=-1)  # [batch, pos, length]
+        x0 = x0 - x0.mean(-1, keepdim=True)  # [..., length-1]
+        scale: Float[Tensor, "... 1"] = (x0.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
+        x0 = x0 / scale  # [..., length-1]
+        x = torch.cat([x0, residual[..., -1:]], dim=-1)  # [..., length]
         return residual, x
 
 

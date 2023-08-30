@@ -13,6 +13,7 @@ Steps to build the graph:
 7. Calculate the edges of the interaction graph between each node layer.
 """
 import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -26,6 +27,7 @@ from transformer_lens import HookedTransformer
 from rib.data import ModularArithmeticDataset
 from rib.data_accumulator import collect_gram_matrices
 from rib.hook_manager import HookedModel
+from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.types import TORCH_DTYPES
@@ -49,6 +51,14 @@ class Config(BaseModel):
         description="The dataset to use to build the graph. Currently only supports modular arithmetic",
     )
     batch_size: int = Field(..., description="The batch size to use when building the graph")
+    truncation_threshold: float = Field(
+        ...,
+        description="Remove eigenvectors with eigenvalues below this threshold.",
+    )
+    rotate_output: bool = Field(
+        ...,
+        description="Whether to rotate the output layer to its eigenbasis.",
+    )
     dtype: str = Field(..., description="The dtype to use when building the graph")
 
     @field_validator("dtype")
@@ -152,6 +162,12 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     seq_model, tlens_cfg_dict = load_sequential_transformer(config)
     seq_model.eval()
+
+    # Randomly initialise all the weights in the model
+    # TODO: Remove when using real weights
+    for param in seq_model.parameters():
+        param.data = torch.randn_like(param.data)
+
     seq_model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_model = HookedModel(seq_model)
 
@@ -170,9 +186,32 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         collect_output_gram=True,
         hook_names=config.node_layers,
     )
+
+    Cs = calculate_interaction_rotations(
+        gram_matrices=gram_matrices,
+        module_names=graph_module_names,
+        hooked_model=hooked_model,
+        data_loader=data_loader,
+        device=device,
+        truncation_threshold=config.truncation_threshold,
+        rotate_output=config.rotate_output,
+        hook_names=config.node_layers,
+    )
+
+    # Move interaction matrices to the cpu and store in dict
+    interaction_rotations = []
+    for C_info in Cs:
+        info_dict = asdict(C_info)
+        info_dict["C"] = info_dict["C"].cpu()
+        if info_dict["C_pinv"] is not None:
+            info_dict["C_pinv"] = info_dict["C_pinv"].cpu()
+        else:
+            info_dict["C_pinv"] = None
+        interaction_rotations.append(info_dict)
+
     results = {
         "exp_name": config.exp_name,
-        "gram_matrices": gram_matrices,
+        "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
     }

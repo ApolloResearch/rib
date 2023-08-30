@@ -17,7 +17,7 @@ Usage:
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import fire
 import torch
@@ -122,11 +122,22 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         device=device,
     )
 
+    # Move interaction matrices to the cpu and store in dict
+    interaction_rotations = []
+    for C_info in Cs:
+        info_dict = asdict(C_info)
+        info_dict["C"] = info_dict["C"].cpu()
+        if info_dict["C_pinv"] is not None:
+            info_dict["C_pinv"] = info_dict["C_pinv"].cpu()
+        else:
+            info_dict["C_pinv"] = None
+        interaction_rotations.append(info_dict)
+
     results = {
         "exp_name": config.exp_name,
-        "gram_matrices": gram_matrices,
-        "interaction_rotations": [asdict(C_info) for C_info in Cs],
-        "edges": [(module, E_hats[module]) for module in config.module_names],
+        "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
+        "interaction_rotations": interaction_rotations,
+        "edges": [(module, E_hats[module].cpu()) for module in config.module_names],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": model_config_dict,
     }

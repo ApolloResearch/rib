@@ -279,7 +279,6 @@ class MLPIn(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
-        self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(
         self,
@@ -295,8 +294,6 @@ class MLPAct(nn.Module):
     def __init__(self, cfg: SequentialTransformerConfig):
         super().__init__()
         self.cfg = cfg
-        self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
-        self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
 
         self.act_fn: Callable[[Float[Tensor, "... d_model"]], Tensor]
         if self.cfg.act_fn == "relu":
@@ -322,7 +319,6 @@ class MLPOut(nn.Module):
     def __init__(self, cfg: SequentialTransformerConfig):
         super().__init__()
         self.cfg = cfg
-        self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
         self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(

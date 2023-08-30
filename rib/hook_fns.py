@@ -35,22 +35,21 @@ def _add_to_hooked_matrix(
 def _concatenate_with_embedding_reshape(
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
-    ]
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
 ) -> Float[Tensor, "batch d_hidden_combined"]:
     """
-    Reshape tensors considering positional embeddings and concatenate them.
+    Fold in position dim to hidden dim and concatenate the inputs over the hidden dimension.
 
-    For tensors with a rank of 3 (assumed to have positional embeddings),
-    the positional and hidden dimensions are combined. For tensors with a rank of 2,
-    they remain unchanged. All the reshaped tensors are then concatenated.
+    For tensors with a rank of 3 (assumed to have positional embeddings), the positional and hidden
+    dimensions are combined. For tensors with a rank of 2, they remain unchanged.
 
     Args:
-        x A tuple containing one or two tensors to be concatenated. If the tensors contain a
+        inputs: A tuple containing one or two tensors to be concatenated. If the tensors contain a
             position dimensions (i.e. rank of 3), the positional and hidden dimensions are combined.
 
     Returns:
+        The concatenated tensors with the positional and hidden dimensions combined.
 
     Raises:
         ValueError: If a tensor rank is neither 2 nor 3.
@@ -59,7 +58,7 @@ def _concatenate_with_embedding_reshape(
 
     for x in inputs:
         if x.dim() == 3:  # tensor with pos embedding
-            pattern = "batch position d_hidden -> batch (position d_hidden)"
+            pattern = "batch pos d_hidden -> batch (pos d_hidden)"
         elif x.dim() == 2:  # tensor without pos embedding
             pattern = "batch d_hidden -> batch d_hidden"
         else:
@@ -170,13 +169,11 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch in_hidden"]],
-        tuple[Float[Tensor, "batch pos in_hidden"]],
-        tuple[Float[Tensor, "batch pos in_hidden1"], Float[Tensor, "batch pos in_hidden2"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
     ],
     output: Union[
         Float[Tensor, "batch out_hidden"],
-        Float[Tensor, "batch pos out_hidden"],
-        tuple[Float[Tensor, "batch pos out_hidden1"], Float[Tensor, "batch pos out_hidden2"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -210,13 +207,14 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
 
     out_tuple_len = len(output) if isinstance(output, tuple) else 0
 
-    O: tuple[Float[Tensor, "batch out_hidden_combined in_hidden_combined"]] = batched_jacobian(
+    O: Float[Tensor, "batch out_hidden_combined in_hidden_combined"] = batched_jacobian(
         module, inputs, out_tuple_len=out_tuple_len
     )
 
     in_acts = _concatenate_with_embedding_reshape(inputs)
 
-    outputs = output if isinstance(output, tuple) else (output,)
+    # outputs = output if isinstance(output, tuple) else (output,)
+    outputs = (output,) if isinstance(output, torch.Tensor) else output
     out_acts = _concatenate_with_embedding_reshape(outputs)
 
     with torch.inference_mode():

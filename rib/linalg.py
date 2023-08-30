@@ -1,6 +1,7 @@
-from typing import Callable
+from typing import Callable, Optional, Union
 
 import torch
+from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
 from torch.func import jacrev, vmap
@@ -93,8 +94,29 @@ def calc_rotation_matrix(
     return vecs_ablated @ vecs_pinv
 
 
+def _fold_jacobian_pos_recursive(
+    x: Union[Float[Tensor, "batch out_pos out_hidden in_pos in_hidden"], tuple]
+) -> Union[Float[Tensor, "batch out_pos_hidden in_pos_hidden"], tuple]:
+    """Recursively fold the pos dimension into the hidden dimension."""
+    if isinstance(x, torch.Tensor):
+        out = rearrange(
+            x,
+            "batch out_pos out_hidden in_pos in_hidden -> batch (out_pos out_hidden) (in_pos in_hidden)",
+        )
+        return out
+    elif isinstance(x, tuple):
+        return tuple(_fold_jacobian_pos_recursive(y) for y in x)
+    else:
+        raise TypeError(f"Unsupported type {type(x)}")
+
+
 def batched_jacobian(
-    fn: Callable, x: Float[Tensor, "batch_size in_size"]
+    fn: Callable,
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
+    out_tuple_len: int = 0,
 ) -> Float[Tensor, "batch_size out_size in_size"]:
     """Calculate the Jacobian of a function fn with respect to input x.
 
@@ -102,9 +124,60 @@ def batched_jacobian(
     across the batch using pytorch's vmap
     (https://pytorch.org/functorch/stable/generated/functorch.jacrev.html).
 
-    Assumes that fn can take as input a non-batched x and return a non-batched output.
+    Handles the case where the inputs and output contains one or more tensors.
+
+    Assumes that fn can take as input a tensor without a batch dimension.
+
+    If we have a pos dimension (as in an LM), we concatenate the pos and hidden dimensions.
+
+    If we have multiple outputs, we concatenate them over their hidden dimension. We do the same
+    for multiple inputs.
+
+    Args:
+        fn: The function to calculate the Jacobian of.
+        inputs: The input to fn. Can be a tuple of tensors. If > 1 input, we concatenate their
+            hidden dimensions after calculating the jacobian.
+        out_tuple_len: The number of outputs of fn. If > 1, we concatenate their hidden dimensions
+            after calculating the jacobian. If 0, we assume that fn returns a single tensor.
+
+    Returns:
+        The Jacobian of the (concatenated) outputs of fn w.r.t its (concatenated) inputs, folding
+            the pos dimension into the hidden dimension if it exists.
     """
-    return vmap(jacrev(fn))(x)
+    in_tuple_len = len(inputs)
+    has_pos_dim = any(x.dim() == 3 for x in inputs)
+
+    argnums = tuple(range(in_tuple_len)) if in_tuple_len > 1 else 0
+    jac_out = vmap(jacrev(fn, argnums=argnums))(*inputs)
+
+    # If there is a pos dimension, we concatenate the pos and hidden dimensions for all tensors
+    if has_pos_dim:
+        jac_out = _fold_jacobian_pos_recursive(jac_out)
+
+    # If there are multiple inputs, the innermost tuple will correspond to the jacobians w.r.t
+    # each input. We concatenate over in_hidden (i.e. the last dimension)
+    if in_tuple_len > 1:
+        assert isinstance(jac_out, tuple), "jac_out should be a tuple if multiple inputs."
+        # Check whether there is also an inner tuple (indicating out_tuple_len > 0)
+        if isinstance(jac_out[0], tuple):
+            assert out_tuple_len > 0, "out_tuple_len should be > 0 if there is an inner tuple."
+            # Iterate over the inner tuples and concatenate over the hidden dimension
+            jac_out = tuple(torch.cat(jac_out_inner, dim=-1) for jac_out_inner in jac_out)
+        else:
+            assert out_tuple_len == 0, "out_tuple_len should be 0 if there is no inner tuple."
+            jac_out = torch.cat(jac_out, dim=-1)
+
+    # If out_tuple_len > 0, concatenate over out_hidden (i.e. the second last dimension)
+    if isinstance(jac_out, tuple):
+        # There should now be only max one tuple, depending on whether there are multiple outputs
+        assert all(isinstance(jac_out_inner, torch.Tensor) for jac_out_inner in jac_out)
+        assert out_tuple_len > 0, "out_tuple_len should be > 0 if there is still a tuple here."
+        jac_out = torch.cat(jac_out, dim=-2)
+
+    assert isinstance(jac_out, torch.Tensor), "jac_out should be a tensor at this point."
+    assert jac_out.ndim == 3, "jac_out should have 3 dimensions at this point."
+
+    return jac_out
 
 
 def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:

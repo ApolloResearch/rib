@@ -105,7 +105,9 @@ def test_batched_jacobian() -> None:
     d_hidden = 10
     x = torch.randn(batch_size, d_hidden)
 
-    actual: Float[Tensor, "batch d_hidden d_hidden"] = batched_jacobian(torch.sin, x)
+    actual: Float[Tensor, "batch d_hidden d_hidden"] = batched_jacobian(
+        torch.sin, (x,), out_tuple_len=0
+    )
 
     torch_jac_summed: Float[Tensor, "d_hidden batch d_hidden"] = torch.autograd.functional.jacobian(
         torch.sin, x

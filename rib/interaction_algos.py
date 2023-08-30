@@ -65,6 +65,7 @@ def calculate_interaction_rotations(
     device: str,
     truncation_threshold: float = 1e-5,
     rotate_output: bool = True,
+    hook_names: Optional[list[str]] = None,
 ) -> list[InteractionRotation]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -87,12 +88,18 @@ def calculate_interaction_rotations(
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_output: Whether to rotate the output layer to its eigenbasis (which is equivalent
             to its interaction basis).
+        hook_names: Used to store the interaction rotation matrices in the hooked model.
 
     Returns:
         A list of objects contain interaction rotation matrices and their pseudoinverses, ordered
         by node layer appearance in model.
     """
     assert "output" in gram_matrices, "Gram matrices must include an `output` key."
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
 
     # We start appending Cs from the output layer and work our way backwards
     Cs: list[InteractionRotation] = []
@@ -107,8 +114,8 @@ def calculate_interaction_rotations(
         )
     Cs.append(InteractionRotation(node_layer_name="output", C=C_output.clone().detach()))
 
-    for module_name in module_names[::-1]:
-        D_dash, U_dash = eigendecompose(gram_matrices[module_name])
+    for module_name, hook_name in zip(module_names[::-1], hook_names[::-1]):
+        D_dash, U_dash = eigendecompose(gram_matrices[hook_name])
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
         # Truncate the D matrix to remove small eigenvalues
@@ -128,6 +135,7 @@ def calculate_interaction_rotations(
             data_loader=data_loader,
             module_name=module_name,
             device=device,
+            hook_name=hook_name,
         )
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
@@ -150,7 +158,7 @@ def calculate_interaction_rotations(
         C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = Lambda_abs_sqrt_pinv @ U_D_sqrt_V.T
         Cs.append(
             InteractionRotation(
-                node_layer_name=module_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()
+                node_layer_name=hook_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()
             )
         )
 

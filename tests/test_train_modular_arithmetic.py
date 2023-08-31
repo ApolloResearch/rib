@@ -35,6 +35,7 @@ train:
   learning_rate: 0.001
   batch_size: 10000
   epochs: 100
+  eval_every_n_epochs: 40
   save_dir: null
   save_every_n_epochs: null
 wandb: null

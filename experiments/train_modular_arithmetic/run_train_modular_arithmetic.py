@@ -46,8 +46,9 @@ class TrainConfig(BaseModel):
     learning_rate: float
     batch_size: int  # Set to max(batch_size, <number of samples in dataset>)
     epochs: int
-    save_dir: Optional[Path]
-    save_every_n_epochs: Optional[int]
+    eval_every_n_epochs: int
+    save_dir: Optional[Path] = None
+    save_every_n_epochs: Optional[int] = None
 
 
 class WandbConfig(BaseModel):
@@ -116,9 +117,10 @@ def train_model(
             optimizer.step()
             scheduler.step()
 
-            if epoch % 100 == 0:
+            if epoch % config.train.eval_every_n_epochs == 0:
                 train_accuracy = evaluate_model(model, train_loader, device)
                 test_accuracy = evaluate_model(model, test_loader, device)
+                model.train()
 
                 logger.info(
                     "Epoch [%d/%d], Step [%d/%d], Train Accuracy: %f, Test Accuracy: %f",
@@ -170,7 +172,7 @@ def evaluate_model(model, test_loader: DataLoader, device: str) -> float:
     model.eval()
     correct = 0
     total = 0
-    for x, y in tqdm(test_loader, desc="Evaluating"):
+    for x, y in test_loader:
         x, y = x.to(device), y.to(device)
         outputs = model(x)
         total += y.size(0)

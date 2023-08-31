@@ -235,8 +235,14 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
 
 def interaction_edge_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch in_hidden"]],
-    output: Float[Tensor, "batch out_hidden"],
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
+    output: Union[
+        Float[Tensor, "batch out_hidden"],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
@@ -253,7 +259,10 @@ def interaction_edge_forward_hook_fn(
 
     Args:
         module: Module that the hook is attached to.
-        inputs: Inputs to the module.
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one input.
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.

@@ -1,4 +1,5 @@
 """Converts a transformer lens model to a sequential transformer model."""
+import warnings
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -39,41 +40,66 @@ class Config(BaseModel):
         return self
 
 
-def main(config_path_str: str) -> None:
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
-    set_seed(config.seed)
+def build_default_transformer():
+    model_config = {
+        "n_layers": 1,
+        "d_model": 128,
+        "d_head": 32,
+        "n_heads": 4,
+        "d_mlp": 512,
+        "d_vocab": 114,
+        "n_ctx": 3,
+        "act_fn": "relu",
+        "normalization_type": "LNPre",
+    }
 
-    if config.tlens_pretrained is not None:
-        tlens_model = HookedTransformer.from_pretrained(config.tlens_pretrained)
-        tlens_cfg_dict = tlens_model.cfg.to_dict()
-    elif config.tlens_model_path is not None:
-        with open(
-            "empty",
-            "r",
-        ) as f:
-            # The config specified in the YAML file used to train the tlens model
-            provided_tlens_cfg_dict = yaml.safe_load(f)["model"]
+    transformer_lens_config = HookedTransformerConfig(**model_config)
+    model = HookedTransformer(transformer_lens_config)
+    return model
 
-        tlens_model = HookedTransformer(provided_tlens_cfg_dict)
-        tlens_cfg_dict = tlens_model.cfg.to_dict()
-        model_state_dict = torch.load(config.tlens_model_path, map_location="cpu")
-        tlens_model.load_state_dict(model_state_dict, strict=False)
 
+def convert_tlens_to_seq(config: Config, tlens_model: HookedTransformer) -> SequentialTransformer:
+    tlens_cfg_dict = tlens_model.cfg.to_dict()
     seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
-
     seq_cfg.dtype = TORCH_DTYPES[config.dtype]
     seq_model = SequentialTransformer(seq_cfg, config.node_layers)
 
     mapped_state_dict = map_state_dict(tlens_model.state_dict(), seq_model.state_dict())
+    seq_model.load_state_dict(mapped_state_dict)
 
-    # Test model produces same output  # TODO not implemented
-    input_ids = torch.randint(0, seq_model.cfg.d_vocab, size=(2, seq_model.cfg.n_ctx))
-    output = seq_model(input_ids)
+    return seq_model
 
-    # Restructure model # TODO not implemented
-    seq_model.toggle_state_dict_renaming(False)  # Disable renaming state_dict
-    seq_model.structure_graph()
+
+def get_tlens(config: Config):
+    if config.tlens_pretrained is not None:
+        tlens_model = HookedTransformer.from_pretrained(config.tlens_pretrained)
+    elif config.tlens_model_path is not None:
+        model_training_config_path = "C:/Users/Avery/Projects/apollo/rib/experiments/train_modular_arithmetic/train_mod_arithmetic_config.yaml"
+        with open(model_training_config_path, "r") as f:
+            # The config specified in the YAML file used to train the tlens model
+            provided_tlens_cfg_dict = yaml.safe_load(f)["model"]
+
+        tlens_model = HookedTransformer(provided_tlens_cfg_dict)
+        model_state_dict = torch.load(config.tlens_model_path, map_location="cpu")
+        tlens_model.load_state_dict(model_state_dict, strict=False)
+    else:
+        warnings.WarningMessage(
+            "No tlens model specified in config, using default model", UserWarning
+        )
+        tlens_model = build_default_transformer()
+
+    return tlens_model
+
+
+def main(config_path_str: str) -> tuple[HookedTransformer, SequentialTransformer]:
+    config_path = Path(config_path_str)
+    config = load_config(config_path, config_model=Config)
+    set_seed(config.seed)
+
+    tlens_model = get_tlens(config)
+    seq_model = convert_tlens_to_seq(config, tlens_model)
+
+    return tlens_model, seq_model
 
 
 if __name__ == "__main__":

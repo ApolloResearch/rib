@@ -1,0 +1,13 @@
+exp_name: gpt2
+seed: 0
+tlens_pretrained: gpt2
+tlens_model_path: null
+dataset: wikitext
+batch_size: 16
+truncation_threshold: 1e-6
+rotate_output: false
+dtype: float32
+node_layers:
+  - ln1.0
+  - mlp_out.0
+  - unembed

@@ -43,6 +43,7 @@ def convert_tlens_weights(
             tlens_block_names = set(attn_names + mlp_names)
 
         param_name = seq_tf_key.split(".")[-1]
+
         if param_name == "W_E":
             state_dict[seq_tf_key] = tlens_model.embed.W_E
         elif param_name == "W_pos":

@@ -213,7 +213,6 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
 
     in_acts = _concatenate_with_embedding_reshape(inputs)
 
-    # outputs = output if isinstance(output, tuple) else (output,)
     outputs = (output,) if isinstance(output, torch.Tensor) else output
     out_acts = _concatenate_with_embedding_reshape(outputs)
 
@@ -269,10 +268,16 @@ def interaction_edge_forward_hook_fn(
     module._forward_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    O: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, inputs)
+    out_tuple_len = len(output) if isinstance(output, tuple) else 0
 
-    in_acts: Float[Tensor, "batch in_hidden"] = inputs[0].detach().clone()
-    out_acts: Float[Tensor, "batch out_hidden"] = output.detach().clone()
+    O: Float[Tensor, "batch out_hidden_combined in_hidden_combined"] = batched_jacobian(
+        module, inputs, out_tuple_len=out_tuple_len
+    )
+
+    in_acts = _concatenate_with_embedding_reshape(inputs)
+
+    outputs = (output,) if isinstance(output, torch.Tensor) else output
+    out_acts = _concatenate_with_embedding_reshape(outputs)
 
     with torch.inference_mode():
         # LHS of Hadamard product

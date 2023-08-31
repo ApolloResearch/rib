@@ -26,6 +26,31 @@ class MultiSequential(nn.Sequential):
         return inputs
 
 
+class Block(nn.Module):
+    def __init__(self, cfg):
+        super(Block, self).__init__()
+        self.attn = SEQUENTIAL_COMPONENT_REGISTRY["attn"](cfg)
+        self.ln1 = self.get_ln_class(cfg)
+        self.add_resid1 = SEQUENTIAL_COMPONENT_REGISTRY["add_resid1"](cfg)
+        self.ln2 = self.get_ln_class(cfg)
+        self.mlp_in = SEQUENTIAL_COMPONENT_REGISTRY["mlp_in"](cfg)
+        self.mlp_act = SEQUENTIAL_COMPONENT_REGISTRY["mlp_act"](cfg)
+        self.mlp_out = SEQUENTIAL_COMPONENT_REGISTRY["mlp_out"](cfg)
+        self.add_resid2 = SEQUENTIAL_COMPONENT_REGISTRY["add_resid2"](cfg)
+
+    @staticmethod
+    def get_ln_class(cfg):
+        if cfg.normalization_type == "LNPre":
+            return SeqLayerNormPre_Folded(cfg)
+        elif cfg.normalization_type is None:
+            return nn.Identity()
+        else:
+            raise ValueError(f"Normalization type {cfg.normalization_type} not supported")
+
+    def forward(self, *inputs):
+        pass
+
+
 class SequentialTransformer(nn.Module):
     """Transformer whose modules are organised into a hierarchy based on the desired RIB graph.
 
@@ -92,58 +117,11 @@ class SequentialTransformer(nn.Module):
         else:
             raise ValueError(f"Normalization type {self.cfg.normalization_type} not supported")
 
-        self.flattened_layers = self.initialize_flat_model()
-
-    def toggle_state_dict_renaming(self, flag: bool):
-        self.rename_state_dict_keys = flag
-
-    def state_dict(self, destination=None, prefix="", keep_vars=False) -> OrderedDict[str, Tensor]:
-        sd = super().state_dict(destination, prefix, keep_vars)
-
-        if not self.rename_state_dict_keys:
-            return sd
-
-        new_sd = OrderedDict()
-        for k, v in sd.items():
-            # Strip the undesired prefix and replace the underscore
-            new_k = k
-            if new_k.startswith("flattened_layers."):
-                new_k = new_k[len("flattened_layers.") :]
-            new_k = new_k.replace("blocks_", "blocks.")
-            new_k = new_k.replace("mlp_in", "mlp")
-            new_k = new_k.replace("mlp_out", "mlp")
-            new_sd[new_k] = v
-
-        return new_sd
-
-    def initialize_flat_model(self) -> nn.ModuleDict[str, nn.Module]:
-        main_dict = OrderedDict()
-
-        for module_name in SequentialTransformer.embed_module_names:
-            module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_name]
-            module = module_class(self.cfg)
-            main_dict[module_name] = module
-
-        for block_num in range(self.cfg.n_layers):
-            block_dict = OrderedDict()
-            for module_name in SequentialTransformer.block_module_names:
-                module_class = (
-                    self.ln_class
-                    if module_name in ["ln1", "ln2"]
-                    else SEQUENTIAL_COMPONENT_REGISTRY[module_name]
-                )
-                module = module_class(self.cfg)
-                block_dict[module_name] = module
-            block_module_dict = nn.ModuleDict(block_dict)
-            main_dict[f"blocks_{block_num}"] = block_module_dict
-
-        unembed_module_class = SEQUENTIAL_COMPONENT_REGISTRY[
-            SequentialTransformer.unembed_module_name
-        ]
-        unembed_module = unembed_module_class(self.cfg)
-        main_dict[SequentialTransformer.unembed_module_name] = unembed_module
-
-        return nn.ModuleDict(main_dict)
+        self.embed = SEQUENTIAL_COMPONENT_REGISTRY["embed"](self.cfg)
+        self.pos_embed = SEQUENTIAL_COMPONENT_REGISTRY["pos_embed"](self.cfg)
+        self.add_embed = SEQUENTIAL_COMPONENT_REGISTRY["add_embed"](self.cfg)
+        self.blocks = nn.ModuleList([Block(self.cfg) for _ in range(self.cfg.n_layers)])
+        self.unembed = SEQUENTIAL_COMPONENT_REGISTRY["unembed"](self.cfg)
 
     # TODO refactor given initialize_flat_model
     def structure_graph(self):

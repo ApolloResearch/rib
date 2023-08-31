@@ -48,7 +48,16 @@ class Block(nn.Module):
             raise ValueError(f"Normalization type {cfg.normalization_type} not supported")
 
     def forward(self, *inputs):
-        pass
+        xs = inputs
+        xs = self.attn(*xs)
+        xs = self.ln1(*xs)
+        xs = self.add_resid1(*xs)
+        xs = self.ln2(*xs)
+        xs = self.mlp_in(*xs)
+        xs = self.mlp_act(*xs)
+        xs = self.mlp_out(*xs)
+        xs = self.add_resid2(*xs)
+        return xs
 
 
 class SequentialTransformer(nn.Module):

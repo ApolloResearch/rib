@@ -162,6 +162,7 @@ def collect_M_dash_and_Lambda_dash(
 def collect_interaction_edges(
     Cs: list["InteractionRotation"],
     hooked_model: HookedModel,
+    module_names: list[str],
     data_loader: DataLoader,
     device: str,
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
@@ -173,6 +174,7 @@ def collect_interaction_edges(
     Args:
         Cs: The interaction rotation matrix and its pseudoinverse, order by node layer.
         hooked_model: The hooked model.
+        module_names: The names of the modules to apply the hooks to.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
 
@@ -183,13 +185,13 @@ def collect_interaction_edges(
 
     assert Cs[-1].node_layer_name == "output", "The last node layer name must be 'output'."
     edge_hooks: list[Hook] = []
-    for idx, C_info in enumerate(Cs[:-1]):
+    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], module_names)):
         edge_hooks.append(
             Hook(
                 name=C_info.node_layer_name,
                 data_key="edge",
                 fn=interaction_edge_forward_hook_fn,
-                module_name=C_info.node_layer_name,
+                module_name=module_name,
                 fn_kwargs={
                     "C_in": C_info.C,  # C from the current node layer
                     "C_in_pinv": C_info.C_pinv,  # C_pinv from the current node layer

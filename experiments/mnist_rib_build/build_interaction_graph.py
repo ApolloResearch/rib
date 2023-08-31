@@ -117,6 +117,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
 
     E_hats = collect_interaction_edges(
         Cs=Cs,
+        module_names=config.module_names,
         hooked_model=hooked_mlp,
         data_loader=test_loader,
         device=device,

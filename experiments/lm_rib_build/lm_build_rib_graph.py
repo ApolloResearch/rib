@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader
 from transformer_lens import HookedTransformer
 
 from rib.data import ModularArithmeticDataset
-from rib.data_accumulator import collect_gram_matrices
+from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
@@ -198,6 +198,14 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         hook_names=config.node_layers,
     )
 
+    E_hats = collect_interaction_edges(
+        Cs=Cs,
+        hooked_model=hooked_model,
+        module_names=graph_module_names,
+        data_loader=data_loader,
+        device=device,
+    )
+
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []
     for C_info in Cs:
@@ -212,6 +220,8 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     results = {
         "exp_name": config.exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
+        "interaction_rotations": interaction_rotations,
+        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in config.node_layers],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
     }

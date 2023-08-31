@@ -279,13 +279,14 @@ class MLPIn(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
+        self.b_in = nn.Parameter(torch.zeros(self.cfg.d_mlp, dtype=cfg.dtype))
 
     def forward(
         self,
         residual: Float[Tensor, "... d_model"],
         x: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
-        pre_act = einsum("... d_model, d_model d_mlp -> ... d_mlp", x, self.W_in)
+        pre_act = einsum("... d_model, d_model d_mlp -> ... d_mlp", x, self.W_in) + self.b_in
         # [..., d_mlp]
         return residual, pre_act
 
@@ -320,16 +321,20 @@ class MLPOut(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
+        self.b_out = nn.Parameter(torch.zeros(self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(
         self,
         residual: Float[Tensor, "... d_model"],
         post_act: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
-        out = einsum(
-            "... d_mlp, d_mlp d_model -> ... d_model",
-            post_act,
-            self.W_out,
+        out = (
+            einsum(
+                "... d_mlp, d_mlp d_model -> ... d_model",
+                post_act,
+                self.W_out,
+            )
+            + self.b_out
         )
         return residual, out
 

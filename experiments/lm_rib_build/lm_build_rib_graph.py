@@ -30,6 +30,8 @@ from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
 from rib.models import SequentialTransformer, SequentialTransformerConfig
+from rib.models.sequential_transformer.converter import convert_tlens_weights
+from rib.tlens_mapper import model_fold_bias
 from rib.types import TORCH_DTYPES
 from rib.utils import load_config, overwrite_output, set_seed
 
@@ -75,13 +77,6 @@ class Config(BaseModel):
         return self
 
 
-def map_tlens_weights_to_seq_transformer(
-    seq_model: SequentialTransformer, tlens_model: HookedTransformer
-) -> None:
-    """Map the weights from a transformer lens model to a sequential transformer model."""
-    raise NotImplementedError("Haven't yet implemented loading a saved model")
-
-
 def load_sequential_transformer(config: Config) -> tuple[SequentialTransformer, dict]:
     """Load a SequentialTransformer model from a pretrained transformerlens model.
 
@@ -89,8 +84,6 @@ def load_sequential_transformer(config: Config) -> tuple[SequentialTransformer, 
 
     First loads a HookedTransformer model, then uses its config to create an instance of
     SequentialTransformerConfig, which is then used to create a SequentialTransformer.
-
-    TODO: map model weights from tlens to seq_model
 
     Args:
         config (Config): The config, containing either `tlens_pretrained` or `tlens_model_path`.
@@ -117,6 +110,11 @@ def load_sequential_transformer(config: Config) -> tuple[SequentialTransformer, 
     # to train the tlens model)
     seq_cfg.dtype = TORCH_DTYPES[config.dtype]
     seq_model = SequentialTransformer(seq_cfg, config.node_layers)
+
+    # Load the transformer-lens weights into the sequential transformer model
+    state_dict = convert_tlens_weights(list(seq_model.state_dict().keys()), tlens_model)
+    seq_model.load_state_dict(state_dict)
+
     return seq_model, tlens_cfg_dict
 
 
@@ -163,17 +161,10 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     seq_model, tlens_cfg_dict = load_sequential_transformer(config)
     seq_model.eval()
 
-    # Randomly initialise all the weights in the model
-    # TODO: Remove when using real weights
-    for param in seq_model.parameters():
-        param.data = torch.randn_like(param.data)
-
     seq_model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_model = HookedModel(seq_model)
 
     data_loader = create_data_loader(config)
-
-    # map_tlens_weights_to_seq_transformer(seq_model, tlens_model)
 
     # Don't build the graph for the section of the model before the first node layer
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]

@@ -213,7 +213,6 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
 
     in_acts = _concatenate_with_embedding_reshape(inputs)
 
-    # outputs = output if isinstance(output, tuple) else (output,)
     outputs = (output,) if isinstance(output, torch.Tensor) else output
     out_acts = _concatenate_with_embedding_reshape(outputs)
 
@@ -236,8 +235,14 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
 
 def interaction_edge_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch in_hidden"]],
-    output: Float[Tensor, "batch out_hidden"],
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
+    output: Union[
+        Float[Tensor, "batch out_hidden"],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
@@ -254,7 +259,10 @@ def interaction_edge_forward_hook_fn(
 
     Args:
         module: Module that the hook is attached to.
-        inputs: Inputs to the module.
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one input.
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
@@ -269,10 +277,16 @@ def interaction_edge_forward_hook_fn(
     module._forward_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    O: Float[Tensor, "batch out_hidden in_hidden"] = batched_jacobian(module, inputs)
+    out_tuple_len = len(output) if isinstance(output, tuple) else 0
 
-    in_acts: Float[Tensor, "batch in_hidden"] = inputs[0].detach().clone()
-    out_acts: Float[Tensor, "batch out_hidden"] = output.detach().clone()
+    O: Float[Tensor, "batch out_hidden_combined in_hidden_combined"] = batched_jacobian(
+        module, inputs, out_tuple_len=out_tuple_len
+    )
+
+    in_acts = _concatenate_with_embedding_reshape(inputs)
+
+    outputs = (output,) if isinstance(output, torch.Tensor) else output
+    out_acts = _concatenate_with_embedding_reshape(outputs)
 
     with torch.inference_mode():
         # LHS of Hadamard product

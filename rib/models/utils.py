@@ -107,10 +107,19 @@ def create_list_partitions(in_list: list[T], sub_list: list[T]) -> list[list[T]]
     return partitions
 
 
-def rename_state_dict(state_dict):
-    new_state_dict = {
-        k.replace("mlp_in", "mlp").replace("mlp_out", "mlp"): v for k, v in state_dict.items()
-    }
+def rename_state_dict(state_dict, reverse=False):
+    if reverse:
+        new_state_dict = {
+            k.replace("mlp.W_in", "mlp_in.W_in")
+            .replace("mlp.W_out", "mlp_out.W_out")
+            .replace("mlp.b_in", "mlp_in.b_in")
+            .replace("mlp.b_out", "mlp_out.b_out"): v
+            for k, v in state_dict.items()
+        }
+    else:
+        new_state_dict = {
+            k.replace("mlp_in", "mlp").replace("mlp_out", "mlp"): v for k, v in state_dict.items()
+        }
     return new_state_dict
 
 
@@ -137,5 +146,5 @@ def map_state_dict(tlens_state_dict: dict, seq_state_dict: dict) -> dict:
             ), f"Parameter {name} not copied correctly"
         else:
             warnings.warn(f"Parameter {name} not found in sequential transformer model")
-
+    seq_state_dict = rename_state_dict(seq_state_dict, reverse=True)
     return seq_state_dict

@@ -5,10 +5,9 @@ import pytest
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from transformer_lens.utils import gelu_new
 
 from rib.models import MLP, Layer
-from rib.models.utils import get_model_attr
+from rib.models.utils import gelu_new, get_model_attr
 from rib.utils import calc_ablation_schedule, eval_model_accuracy, find_root
 
 

@@ -1,11 +1,14 @@
 from pathlib import Path
 from typing import Any, TypeVar
 
+import numpy as np
 import torch
 import yaml
-from torch import nn
+from jaxtyping import Float
+from torch import Tensor, nn
 
 from rib.log import logger
+from rib.utils import find_root
 
 T = TypeVar("T")
 
@@ -104,3 +107,141 @@ def create_list_partitions(in_list: list[T], sub_list: list[T]) -> list[list[T]]
         if sub_list:
             partitions.append(sub_list)
     return partitions
+
+
+def gelu_new(input: Float[Tensor, "... d_mlp"]) -> Float[Tensor, "... d_mlp"]:
+    """Implementation of GeLU used by GPT2 - subtly different from PyTorch's.
+
+    Taken from transformer-lens.
+    """
+    return (
+        0.5
+        * input
+        * (1.0 + torch.tanh(np.sqrt(2.0 / np.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
+    )
+
+
+def concat_zeros(x: Float[Tensor, "a b"]) -> None:
+    """Concatenates zeros to the last dimension of a tensor. Updating the data in-place."""
+    x.data = torch.cat(
+        [x.data, torch.zeros(x.shape[0], 1, device=x.device, dtype=x.dtype)], dim=1
+    )  # (a, b+1)
+
+
+def concat_ones(x: Float[Tensor, "a b"]) -> None:
+    """Concatenates ones to the last dimension of a tensor. Updating the data in-place."""
+    x.data = torch.cat(
+        [x.data, torch.ones(x.shape[0], 1, device=x.device, dtype=x.dtype)], dim=1
+    )  # (a, b+1)
+
+
+def fold_attn_QKV(
+    weight: Float[Tensor, "head_index d_model d_head"], bias: Float[Tensor, "head_index d_head"]
+) -> None:
+    """Concatenate the bias to the d_model dimension of the weight matrix and zero out the bias.
+
+    This is used for the Q, K and V matrices in the attention layer.
+    """
+    weight.data = torch.cat(
+        [weight.data, bias.data[:, None]], dim=1
+    )  # (head_idx, d_model+1, d_head)
+    bias.data = torch.zeros_like(bias.data)
+
+
+def add_dim_attn_O(
+    weight: Float[Tensor, "head_index d_head d_model"], bias: Float[Tensor, "d_model"]
+) -> None:
+    """DOES NOT FOLD IN BIAS. Merely adds a dimension to the weight and bias.
+
+    This should be updated in the future to fold in the bias (see issue #72). For now, this just
+    adds a dimension of zeros to the weight and bias so that the output, when added back to the
+    residual stream, will have an extra dimension of ones (the residual stream will already have an
+    extra dimension of ones).
+
+    """
+    weight.data = torch.cat(
+        [
+            weight.data,
+            torch.zeros(
+                weight.shape[0], weight.shape[1], 1, dtype=weight.dtype, device=weight.device
+            ),
+        ],
+        dim=2,
+    )  # (head_idx, d_head, d_model+1)
+    bias.data = torch.cat(
+        [
+            bias.data,
+            torch.zeros(1, device=bias.device, dtype=bias.dtype),
+        ],
+        dim=0,
+    )  # (d_model+1)
+
+
+def fold_mlp_in(
+    act_fn: str,
+    weight: Float[Tensor, "d_model d_mlp"],
+    bias: Float[Tensor, "d_mlp"],
+) -> None:
+    """Fold in the bias to the input weight matrix of the MLP.
+
+    We concat the bias vector to the row dimension and then add an extra column with all zeros and
+    a single value at the end equal to the value that would be transformed to 1 by the activation
+    function (denoted root_1). I.e. W_in_folded will be of shape (d_model + 1, d_mlp + 1).
+
+    If the activation function has a root_1 of 0 (such as ReLU), the value added to the end will be
+    1. This will result in act_fn(x @ W_in_folded) giving the same result as act_fn(x @ W_in + b_in).
+    """
+
+    if act_fn == "relu":
+        # relu(1) = 1
+        root_one = 1.0
+    elif act_fn == "gelu_new":
+        # Find the value of x such that act_fn(x) = 1
+        root_one = find_root(
+            lambda x: gelu_new(x) - 1.0,
+            xmin=torch.tensor(-1.0),
+            xmax=torch.tensor(4.0),
+            tol=1e-11,
+            max_iter=1000,
+        )
+    else:
+        raise ValueError(f"Unsupported activation function: {act_fn} for bias folding.")
+
+    weight.data = torch.cat(
+        [
+            torch.cat([weight.data, bias.data[None, :]], dim=0),
+            torch.cat(
+                [
+                    torch.zeros(weight.shape[0], 1, device=weight.device, dtype=weight.dtype),
+                    torch.ones(1, 1, device=weight.device, dtype=weight.dtype) * root_one,
+                ],
+                dim=0,
+            ),
+        ],
+        dim=1,
+    )  # (d_model+1, d_mlp+1)
+    bias.data = torch.zeros(bias.shape[0] + 1, device=bias.device, dtype=bias.dtype)  # (d_mlp+1)
+
+
+def fold_mlp_out(weight: Float[Tensor, "d_mlp d_model"], bias: Float[Tensor, "d_model"]) -> None:
+    """Fold in the bias to the output weight matrix of the MLP.
+
+    We concat the bias vector to the row dimension and then add an extra column of all zeros.
+    Since the MLP block is added to the residual stream, which already has a feature of ones
+    concatenated to the end of it, adding both of these together will result in a feature of ones,
+    which is what is needed to preserve the bias in the next layer.
+    """
+    weight.data = torch.cat(
+        [
+            torch.cat([weight.data, bias.data[None, :]], dim=0),
+            torch.zeros(weight.shape[0] + 1, 1, device=weight.device, dtype=weight.dtype),
+        ],
+        dim=1,
+    )  # (d_mlp+1, d_model+1)
+    bias.data = torch.zeros(bias.shape[0] + 1, device=bias.device, dtype=bias.dtype)  # (d_model+1)
+
+
+def fold_unembed(weight: Float[Tensor, "d_model d_vocab"], bias: Float[Tensor, "d_vocab"]) -> None:
+    """Fold in the bias to the 0th dimension of the weight matrix and zero out the bias."""
+    weight.data = torch.cat([weight.data, bias.data[None, :]], dim=0)  # (d_model+1, d_vocab)
+    bias.data = torch.zeros(1, bias.shape[0], device=bias.device, dtype=bias.dtype)  # (1, d_vocab)

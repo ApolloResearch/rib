@@ -3,7 +3,8 @@ Defines a Transformer based on transformer lens but with a module hierarchy that
 building of a RIB graph.
 """
 
-from typing import Type
+from functools import partial
+from typing import Callable, Type
 
 from jaxtyping import Int
 from torch import Tensor, nn
@@ -14,7 +15,18 @@ from rib.models.sequential_transformer.components import (
     LayerNormPreFolded,
 )
 from rib.models.sequential_transformer.config import SequentialTransformerConfig
-from rib.models.utils import create_list_partitions
+from rib.models.utils import (
+    add_dim_attn_O,
+    concat_ones,
+    concat_zeros,
+    create_list_partitions,
+    fold_attn_QKV,
+    fold_mlp_in,
+    fold_mlp_out,
+    fold_unembed,
+    get_model_attr,
+)
+from rib.utils import find_root
 
 
 class MultiSequential(nn.Sequential):
@@ -33,6 +45,10 @@ class SequentialTransformer(nn.Module):
     If the first node_layer is not "embed", we will have a pre-section of modules from embed to
     the first node_layer. This pre-section will not be part of the graph but needs to be run
     with all forward passes in order to feed the correct data to susbequent sections.
+
+    A SequentialTransformer contains a fold_bias method which modifies the weights of the model
+    to fold in the bias parameters. If called, beware that the dimensions of the weight matrices
+    will change.
 
     Args:
         cfg: The SequentialTransformer config
@@ -111,6 +127,8 @@ class SequentialTransformer(nn.Module):
             sections[section_name] = MultiSequential(*module_section)
         self.sections: nn.ModuleDict = nn.ModuleDict(sections)
 
+        self.has_folded_bias = False
+
     @staticmethod
     def create_module_name_sections(n_blocks: int, node_layers: list[str]) -> list[list[str]]:
         """Create ordered groups of module names.
@@ -142,6 +160,54 @@ class SequentialTransformer(nn.Module):
 
         module_name_sections = create_list_partitions(all_layers, node_layers)
         return module_name_sections
+
+    def fold_bias(self) -> None:
+        """Fold the bias parameters into the weight parameters.
+
+        Also converts any instances of LayerNormPre into LayerNormPreFolded to ensure that the
+        layer norm does not consider the extra feature of ones when calculating the mean and std.
+
+        We define a mapping from each weight-bias pair to a function defining how to fold the bias.
+        """
+        fold_fns: dict[str, Callable] = {
+            "W_E": concat_zeros,
+            "W_pos": concat_ones,
+            "W_Q": fold_attn_QKV,
+            "W_K": fold_attn_QKV,
+            "W_V": fold_attn_QKV,
+            "W_O": add_dim_attn_O,
+            "W_in": partial(fold_mlp_in, self.cfg.act_fn),
+            "W_out": fold_mlp_out,
+            "W_U": fold_unembed,
+        }
+
+        # Get the parameter keys of the model
+        seq_tf_keys = list(self.state_dict().keys())
+        for seq_tf_key in seq_tf_keys:
+            sections, section_name, module_idx, param_name = seq_tf_key.split(".")
+            if param_name[:2] == "W_":
+                if param_name not in fold_fns:
+                    # No folding needed for this weight parameter
+                    continue
+                # It's a weight parameter. Get it's corresponding bias if it has one
+                bias_key = f"{sections}.{section_name}.{module_idx}.b_{param_name[2:]}"
+                bias_param = get_model_attr(self, bias_key) if bias_key in seq_tf_keys else None
+                weight_param = get_model_attr(self, seq_tf_key)
+                args = (weight_param,) if bias_param is None else (weight_param, bias_param)
+                fold_fn = fold_fns[param_name]
+                fold_fn(*args)
+        # We also need to convert all instances of LayerNormPre into LayerNormPreFolded
+        lnpre_folded_cfg = self.cfg.model_copy(
+            update={"d_model:": self.cfg.d_model + 1, "d_mlp": self.cfg.d_mlp + 1}
+        )
+        # Iterate through the sections
+        for section_name, section in self.sections.items():
+            for module_idx, module in enumerate(section):  # type: ignore
+                if isinstance(module, LayerNormPre):
+                    modified_module = LayerNormPreFolded(lnpre_folded_cfg)
+                    self.sections[section_name][module_idx] = modified_module
+
+        self.has_folded_bias = True
 
     def forward(self, input_ids: Int[Tensor, "batch n_ctx"]) -> tuple[Tensor]:
         """Forward pass through the model.

@@ -188,6 +188,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     seq_model.eval()
 
     seq_model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
     data_loader = create_data_loader(config)

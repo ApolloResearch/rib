@@ -1,6 +1,6 @@
 import random
 from pathlib import Path
-from typing import Callable, Optional, Type, TypeVar, Union
+from typing import TYPE_CHECKING, Callable, Optional, Type, TypeVar, Union
 
 import numpy as np
 import torch
@@ -10,7 +10,8 @@ from pydantic import BaseModel
 from torch import Tensor
 from torch.utils.data import DataLoader
 
-from rib.hook_manager import Hook, HookedModel
+if TYPE_CHECKING:
+    from rib.hook_manager import Hook, HookedModel
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -19,7 +20,7 @@ REPO_ROOT = Path(__file__).parent.parent
 
 @torch.inference_mode()
 def eval_model_accuracy(
-    hooked_model: HookedModel, dataloader: DataLoader, hooks: list[Hook], device: str = "cuda"
+    hooked_model: "HookedModel", dataloader: DataLoader, hooks: list["Hook"], device: str = "cuda"
 ) -> float:
     """Run the model on the dataset and return the accuracy.
 

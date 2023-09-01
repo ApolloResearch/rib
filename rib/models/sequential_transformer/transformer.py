@@ -10,7 +10,8 @@ from torch import Tensor, nn
 
 from rib.models.sequential_transformer.components import (
     SEQUENTIAL_COMPONENT_REGISTRY,
-    SeqLayerNormPre_Folded,
+    LayerNormPre,
+    LayerNormPreFolded,
 )
 from rib.models.sequential_transformer.config import SequentialTransformerConfig
 from rib.models.utils import create_list_partitions
@@ -83,7 +84,7 @@ class SequentialTransformer(nn.Module):
         self.module_name_sections = self.create_module_name_sections(cfg.n_layers, node_layers)
 
         if cfg.normalization_type == "LNPre":
-            ln_class = SeqLayerNormPre_Folded
+            ln_class = LayerNormPre
         elif cfg.normalization_type is None:
             ln_class = nn.Identity
         else:

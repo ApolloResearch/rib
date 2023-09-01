@@ -11,6 +11,20 @@ Steps to build the graph:
 6. Calculate the interaction basis matrices (labelled C in the paper) for each node layer, starting
     from the final node layer and working backwards.
 7. Calculate the edges of the interaction graph between each node layer.
+
+Usage:
+    python lm_build_rib_graph.py <path/to/config.yaml>
+
+The config.yaml should contain the `node_layers` field. This describes the sections of the
+graph that will be built: A graph layer will be built on the inputs to each specified node layer,
+as well as the output of the final node layer. For example, if `node_layers` is ["attn.0",
+"mlp_act.0"], this script will build the following graph layers:
+- One on the inputs to the "attn.0" node layer. This will include the residual stream concatenated
+    with the output of ln1.0.
+- One on the input to "mlp_act.0". This will include the residual stream concatenated with the
+    output of "mlp_in.0".
+- One on the output of "mlp_act.0". This will include the residual stream concatenated with the
+    output of "mlp_act.0".
 """
 import json
 from dataclasses import asdict

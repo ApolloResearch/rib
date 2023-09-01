@@ -1,5 +1,5 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import Callable, Optional, Union, cast
+from typing import Callable, Optional, cast
 
 import einops
 import numpy as np
@@ -339,15 +339,10 @@ class MLPOut(nn.Module):
         return residual, out
 
 
-class SeqLayerNormPre_Folded(torch.nn.Module):
-    """Sequential version of rib.models.tlens_components.LayerNormPre_Folded.
+class LayerNormPre(torch.nn.Module):
+    """Sequential version of transformer-lens' LayerNormPre.
 
-    LayerNormPre - the 'center and normalise' part of LayerNorm. Length is
-    normally d_model, but is d_mlp for softmax. Not needed as a parameter. This
-    should only be used in inference mode after folding in LayerNorm weights
-
-    Folded: the last hidden dimension is the constant function 1, and does not participate in the layernorm
-
+    A standard LayerNorm without the element-wise affine parameters.
     """
 
     def __init__(self, cfg: SequentialTransformerConfig):
@@ -359,7 +354,29 @@ class SeqLayerNormPre_Folded(torch.nn.Module):
         self,
         residual: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
-        x0 = residual[..., :-1]  # [..., length-1]
+        if self.cfg.dtype not in [torch.float32, torch.float64]:
+            residual = residual.to(torch.float32)
+
+        x = residual.clone()
+        x = x - x.mean(-1, keepdim=True)
+        scale: Float[Tensor, "... 1"] = (x.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
+        x = x / scale
+        return residual, x
+
+
+class LayerNormPreFolded(torch.nn.Module):
+    """A version of LayerNormPre where we assume the input has a constant final dimension."""
+
+    def __init__(self, cfg: SequentialTransformerConfig):
+        super().__init__()
+        self.cfg = cfg
+        self.eps = self.cfg.eps
+
+    def forward(
+        self,
+        residual: Float[Tensor, "... d_model"],
+    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+        x0 = residual[..., :-1].clone()  # [..., length-1]
 
         x0 = x0 - x0.mean(-1, keepdim=True)  # [..., length-1]
         scale: Float[Tensor, "... 1"] = (x0.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()

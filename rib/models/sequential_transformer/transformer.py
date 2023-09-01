@@ -26,7 +26,6 @@ from rib.models.utils import (
     fold_unembed,
     get_model_attr,
 )
-from rib.utils import find_root
 
 
 class MultiSequential(nn.Sequential):
@@ -196,11 +195,11 @@ class SequentialTransformer(nn.Module):
                 args = (weight_param,) if bias_param is None else (weight_param, bias_param)
                 fold_fn = fold_fns[param_name]
                 fold_fn(*args)
+
         # We also need to convert all instances of LayerNormPre into LayerNormPreFolded
         lnpre_folded_cfg = self.cfg.model_copy(
             update={"d_model:": self.cfg.d_model + 1, "d_mlp": self.cfg.d_mlp + 1}
         )
-        # Iterate through the sections
         for section_name, section in self.sections.items():
             for module_idx, module in enumerate(section):  # type: ignore
                 if isinstance(module, LayerNormPre):

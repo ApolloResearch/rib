@@ -30,7 +30,9 @@ def convert_tlens_weights(
         "We currently only support the token and positional embeddings in the `pre` section."
         "This will occur if the first element of node_layers is not in embed_module_names"
     )
-    "We currently only support the token embedding"
+    assert set([key.split(".")[-1] for key in seq_tf_keys]) == set(
+        attn_names + mlp_names + ["W_E", "W_pos", "W_U", "b_U"]
+    ), "All params in the seq_tf_keys must be in attn_names, mlp_names, W_E, W_pos, W_U, b_U"
 
     # The current block number in the tlens model
     block_num: int = 0

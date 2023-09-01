@@ -15,8 +15,14 @@ from rib.utils import overwrite_output
 
 
 def main(results_file: str) -> None:
+    """Plot an interaction graph given a results file contain the graph edges.
+
+    TODO: Handle showing a different number of nodes per layer as opposed to the same n_nodes in
+    all layers after the first one.
+    """
     results = torch.load(results_file)
 
+    # How many nodes get displayed. If None, display all nodes.
     nodes_input_layer = 40
     nodes_per_layer = 40
     # results["edges"] contains a list of edges which are tuples of

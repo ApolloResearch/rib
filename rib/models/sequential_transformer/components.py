@@ -8,9 +8,9 @@ from fancy_einsum import einsum
 from jaxtyping import Bool, Float, Int
 from torch import Tensor, nn
 from torch.nn import functional as F
-from transformer_lens.utils import gelu_new
 
 from rib.models import SequentialTransformerConfig
+from rib.models.utils import gelu_new
 
 
 class Embed(nn.Module):

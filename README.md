@@ -36,7 +36,26 @@ Supported experiments:
 - Ablating eigenvectors from the orthogonal basis: `experiments/mnist_orthog_ablation/`
 - Calculating the interaction graph: `experiments/mnist_rib_build/`
 - Ablating vectors from the interaction basis: `experiments/mnist_rib_ablation/`
+
+### LMs
+
+Supported experiments:
+
 - Training a transformer_lens model on Modular Arithmetic: `experiments/train_modular_arithmetic/`
+- Building the interaction graph for a LM: `experiments/lm_rib_build/`. Currently supports the
+modular arithmetic and gpt2 models (loading via transformer-lens). Although any model other than
+the modular arithmetic will currently fail due to severe memory issues.
+
+As can be seen in `experiments/lm_rib_build/lm_build_rib_graph.py`, the process for building a graph
+for an LM is as follows:
+- Load a pretrained LM (currently only supports some transformer-lens models)
+- Map the LM to a SequentialTransformer model, which allows us to analyse (e.g. take jacobians of)
+arbitrary sections of the LM.
+- Fold in the model's biases into the weights. This is required for the RIB decompositions to
+consider all the relevant interactions.
+- Run the RIB algorithm, outlined in the Code Implementation section of [this writeup](https://www.overleaf.com/project/6437d0bde0eaf2e8c7ac3649).
+- Plot the graph using `experiments/lm_rib_build/plot_rib_graph.py`, passing the path to the
+results file generated from `experiments/lm_rib_build/lm_build_rib_graph.py`
 
 ## Development
 

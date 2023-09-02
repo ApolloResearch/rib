@@ -300,3 +300,39 @@ def interaction_edge_forward_hook_fn(
         E = (f_hat_out_T_f_hat_in * C_out_O_C_in_pinv_T).sum(dim=0)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key, E)
+
+
+def acts_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    output: Union[
+        Float[Tensor, "batch d_hidden"],
+        Float[Tensor, "batch pos d_hidden"],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    **_: Any,
+) -> None:
+    """Hook function for storing the output activations.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module (not used).
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        **_: Additional keyword arguments (not used).
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+    outputs = output if isinstance(output, tuple) else (output,)
+    detached_outputs = [x.detach().cpu() for x in outputs]
+    # Store the output activations
+    hooked_data[hook_name] = {data_key: detached_outputs}

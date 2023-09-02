@@ -9,5 +9,5 @@ rotate_output: false
 dtype: float32
 node_layers:
   - ln1.0
-  - mlp_out.0
+  - mlp_in.0
   - unembed

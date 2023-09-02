@@ -7,10 +7,11 @@ is a wrapper around a PyTorch model that allows hooks to be added and removed.
 import inspect
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 
+from rib.hook_fns import acts_forward_hook_fn
 from rib.models.utils import get_model_attr
 
 
@@ -122,3 +123,26 @@ class HookedModel(torch.nn.Module):
     def clear_hooked_data(self) -> None:
         """Clear all data stored in the hooked_data attribute."""
         self.hooked_data = {}
+
+    def run_with_cache(self, *args, **kwargs) -> tuple[Any, dict[str, Any]]:
+        """Run the forward pass of the model and return the output and all internal activations."""
+        # We don't care about the activations of the root modules, and not e.g. modules that contain
+        # other modules (e.g. Sequential or ModuleList)
+        has_children: Callable[[torch.nn.Module], bool] = (
+            lambda module: sum(1 for _ in module.children()) > 0
+        )
+        module_names = [name for name, mod in self.model.named_modules() if not has_children(mod)]
+        act_hooks: list[Hook] = []
+        for module_name in module_names:
+            act_hooks.append(
+                Hook(
+                    name=module_name,
+                    data_key="acts",
+                    fn=acts_forward_hook_fn,
+                    module_name=module_name,
+                )
+            )
+        output = self.forward(*args, hooks=act_hooks, **kwargs)
+        hooked_data = self.hooked_data
+        self.clear_hooked_data()
+        return output, hooked_data

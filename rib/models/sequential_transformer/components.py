@@ -45,13 +45,13 @@ class PosEmbed(nn.Module):
         self.W_pos = nn.Parameter(torch.empty(self.cfg.n_ctx, self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(
-        self, tokens: Int[Tensor, "... pos"], x: Float[Tensor, "... pos d_model"]
+        self, tokens: Int[Tensor, "... pos"], token_embed: Float[Tensor, "... pos d_model"]
     ) -> tuple[Int[Tensor, "... pos d_model"], Float[Tensor, "... pos d_model"]]:
         """Add positional embeddings to the input.
 
         Args:
             tokens (Int[Tensor, "... pos"]): The input tokens.
-            x (Float[Tensor, "... pos d_model"]): Tokens after embedding.
+            token_embed (Float[Tensor, "... pos d_model"]): Tokens after embedding.
 
         Returns:
             - Positional embeddings
@@ -65,7 +65,7 @@ class PosEmbed(nn.Module):
             pos_embed = einops.repeat(
                 pos_embed, "pos d_model -> batch pos d_model", batch=tokens.size(0)
             )  # [..., pos, d_model]
-        return pos_embed, x
+        return pos_embed, token_embed
 
 
 class Unembed(nn.Module):
@@ -160,6 +160,10 @@ class Attention(nn.Module):
     ) -> tuple[Float[Tensor, "... pos d_model"], Float[Tensor, "... pos d_model"]]:
         """Forward through the entire attention block.
 
+        Args:
+            residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
+            x (Float[Tensor, "... pos d_model]): The normed residual stream (the input to the attention block)
+
         TODO: Split into multiple modules so we can create graphs at each layer.
         """
 
@@ -175,7 +179,7 @@ class Attention(nn.Module):
             key_input: Float[Tensor, "... pos head_index d_model"] = add_head_dimension(x)
             value_input: Float[Tensor, "... pos head_index d_model"] = add_head_dimension(x)
         else:
-            query_input, key_input, value_input = residual, residual, residual
+            query_input, key_input, value_input = x, x, x
 
         if self.cfg.use_split_qkv_input:
             qkv_einops_string = "... pos head_index d_model"
@@ -354,14 +358,13 @@ class LayerNormPre(torch.nn.Module):
         self,
         residual: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
-        if self.cfg.dtype not in [torch.float32, torch.float64]:
-            residual = residual.to(torch.float32)
-
         x = residual.clone()
+        if self.cfg.dtype not in [torch.float32, torch.float64]:
+            x = x.to(torch.float32)
         x = x - x.mean(-1, keepdim=True)
         scale: Float[Tensor, "... 1"] = (x.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
         x = x / scale
-        return residual, x
+        return residual, x.to(self.cfg.dtype)
 
 
 class LayerNormPreFolded(torch.nn.Module):
@@ -378,11 +381,14 @@ class LayerNormPreFolded(torch.nn.Module):
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         x0 = residual[..., :-1].clone()  # [..., length-1]
 
+        if self.cfg.dtype not in [torch.float32, torch.float64]:
+            x0 = x0.to(torch.float32)
+
         x0 = x0 - x0.mean(-1, keepdim=True)  # [..., length-1]
         scale: Float[Tensor, "... 1"] = (x0.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
         x0 = x0 / scale  # [..., length-1]
         x = torch.cat([x0, residual[..., -1:]], dim=-1)  # [..., length]
-        return residual, x
+        return residual, x.to(self.cfg.dtype)
 
 
 # Map from module names in SequentialTransformer to the corresponding component modules

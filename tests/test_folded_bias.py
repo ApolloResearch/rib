@@ -1,4 +1,4 @@
-"""Tests for the tlens_mapper module."""
+"""Test that folding in the bias works for Sequential Transformer."""
 
 from dataclasses import asdict
 
@@ -8,8 +8,8 @@ from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.hook_manager import HookedModel
 from rib.models import SequentialTransformer, SequentialTransformerConfig
+from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.models.utils import get_model_attr
-from rib.tlens_mapper import model_fold_bias
 from rib.utils import set_seed
 
 
@@ -96,14 +96,20 @@ def test_gpt2_folded_bias() -> None:
     Uses float64 to avoid floating point errors.
     """
     set_seed(42)
-    model_raw = HookedTransformer.from_pretrained("gpt2")
-    model_folded = HookedTransformer(cfg=model_raw.cfg, tokenizer=model_raw.tokenizer)
-    model_folded.load_state_dict(model_raw.state_dict())
-    model_fold_bias(model_folded)
+    tlens_model = HookedTransformer.from_pretrained("gpt2")
+    cfg = SequentialTransformerConfig(**asdict(tlens_model.cfg))
 
-    model_raw.eval()
-    model_folded.eval()
+    node_layers = ["attn.0", "mlp_act.0"]
+    model_raw = SequentialTransformer(cfg, node_layers)
+    # Load the transformer-lens weights into the sequential transformer model
+    state_dict = convert_tlens_weights(list(model_raw.state_dict().keys()), tlens_model)
+    model_raw.load_state_dict(state_dict)
     model_raw.to(torch.float64)
+    model_raw.eval()
+    model_folded = SequentialTransformer(cfg, node_layers)
+    model_folded.load_state_dict(state_dict)
+    model_folded.fold_bias()
     model_folded.to(torch.float64)
-    # Need to use atol=1e-3 if you want to test float32.
+    model_folded.eval()
+
     _folded_bias_comparison(model_raw, model_folded, atol=1e-6)

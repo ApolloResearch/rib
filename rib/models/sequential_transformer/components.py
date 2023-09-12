@@ -166,6 +166,7 @@ class Attention(nn.Module):
 
         TODO: Split into multiple modules so we can create graphs at each layer.
         """
+        in_dtype = x.dtype
 
         def add_head_dimension(tensor):
             return einops.repeat(
@@ -217,7 +218,7 @@ class Attention(nn.Module):
         )
         # [..., pos, head_index, d_head]
 
-        if self.cfg.dtype not in [torch.float32, torch.float64]:
+        if in_dtype not in [torch.float32, torch.float64]:
             # If using 16 bits, increase the precision to avoid numerical instabilities
             q = q.to(torch.float32)
             k = k.to(torch.float32)
@@ -238,7 +239,7 @@ class Attention(nn.Module):
         attn_scores = self.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
 
         pattern = F.softmax(attn_scores, dim=-1)  # [..., head_index, query_pos, key_pos]
-        pattern = pattern.to(self.cfg.dtype)
+        pattern = pattern.to(in_dtype)
         z = einsum(
             "... key_pos head_index d_head, \
                 ... head_index query_pos key_pos -> \
@@ -358,13 +359,14 @@ class LayerNormPre(torch.nn.Module):
         self,
         residual: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+        in_dtype = residual.dtype
         x = residual.clone()
-        if self.cfg.dtype not in [torch.float32, torch.float64]:
+        if in_dtype not in [torch.float32, torch.float64]:
             x = x.to(torch.float32)
         x = x - x.mean(-1, keepdim=True)
         scale: Float[Tensor, "... 1"] = (x.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
         x = x / scale
-        return residual, x.to(self.cfg.dtype)
+        return residual, x.to(in_dtype)
 
 
 class LayerNormPreFolded(torch.nn.Module):
@@ -379,16 +381,17 @@ class LayerNormPreFolded(torch.nn.Module):
         self,
         residual: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+        in_dtype = residual.dtype
         x0 = residual[..., :-1].clone()  # [..., length-1]
 
-        if self.cfg.dtype not in [torch.float32, torch.float64]:
+        if in_dtype not in [torch.float32, torch.float64]:
             x0 = x0.to(torch.float32)
 
         x0 = x0 - x0.mean(-1, keepdim=True)  # [..., length-1]
         scale: Float[Tensor, "... 1"] = (x0.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
         x0 = x0 / scale  # [..., length-1]
         x = torch.cat([x0, residual[..., -1:]], dim=-1)  # [..., length]
-        return residual, x.to(self.cfg.dtype)
+        return residual, x.to(in_dtype)
 
 
 # Map from module names in SequentialTransformer to the corresponding component modules

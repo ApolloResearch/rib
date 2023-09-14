@@ -87,8 +87,7 @@ def test_modular_arithmetic_conversion() -> None:
     seq_model = HookedModel(seq_model_raw)
 
     input_ids = torch.randint(0, tlens_model.cfg.d_vocab, size=(1, tlens_model.cfg.n_ctx))
-    outputA, cacheA = tlens_model.run_with_cache(input_ids)
-    outputB, cacheB = seq_model.run_with_cache(input_ids)
+
     # Mapping from some tlens cache keys to SequentialTransformer cache keys (and their tuple index)
     mappings = {
         "blocks.0.hook_resid_pre": {
@@ -104,13 +103,18 @@ def test_modular_arithmetic_conversion() -> None:
             "tuple_idx": 1,
         },
     }
+    outputA, cacheA = tlens_model.run_with_cache(input_ids)
+    # Only store the activations we care about (storing all activations may cause CI failure)
+    cacheA = [cacheA[key] for key in mappings]
+
+    outputB, cacheB = seq_model.run_with_cache(input_ids)
+    cacheB = [cacheB[v["seq_key"]]["acts"][v["tuple_idx"]] for v in mappings.values()]
+
     assert torch.allclose(outputA, outputB[0], atol=atol), "Outputs are not equal"
-    for tlens_key in mappings:
-        seq_key = mappings[tlens_key]["seq_key"]
-        tuple_idx = mappings[tlens_key]["tuple_idx"]
+    for i, (tlens_act, seq_act) in enumerate(zip(cacheA, cacheB)):
         assert torch.allclose(
-            cacheA[tlens_key], cacheB[seq_key]["acts"][tuple_idx], atol=atol
-        ), f"tlens key {tlens_key} not equal to seq key {seq_key}"
+            tlens_act, seq_act, atol=atol
+        ), f"Activations are not equal for mapping index {i}"
 
 
 @pytest.mark.slow()
@@ -174,8 +178,6 @@ def test_gpt2_conversion():
     seq_model = HookedModel(seq_model_raw)
 
     input_ids = torch.randint(0, tlens_model.cfg.d_vocab, size=(1, tlens_model.cfg.n_ctx))
-    outputA, cacheA = tlens_model.run_with_cache(input_ids)
-    outputB, cacheB = seq_model.run_with_cache(input_ids)
     # Mapping from some tlens cache keys to SequentialTransformer cache keys (and their tuple index)
     mappings = {
         "blocks.0.hook_resid_pre": {
@@ -191,10 +193,15 @@ def test_gpt2_conversion():
             "tuple_idx": 0,
         },
     }
+    outputA, cacheA = tlens_model.run_with_cache(input_ids)
+    # Only store the activations we care about (storing all activations may cause CI failure)
+    cacheA = [cacheA[key] for key in mappings]
+
+    outputB, cacheB = seq_model.run_with_cache(input_ids)
+    cacheB = [cacheB[v["seq_key"]]["acts"][v["tuple_idx"]] for v in mappings.values()]
+
     assert torch.allclose(outputA, outputB[0], atol=atol), "Outputs are not equal"
-    for tlens_key in mappings:
-        seq_key = mappings[tlens_key]["seq_key"]
-        tuple_idx = mappings[tlens_key]["tuple_idx"]
+    for i, (tlens_act, seq_act) in enumerate(zip(cacheA, cacheB)):
         assert torch.allclose(
-            cacheA[tlens_key], cacheB[seq_key]["acts"][tuple_idx], atol=atol
-        ), f"tlens key {tlens_key} not equal to seq key {seq_key}"
+            tlens_act, seq_act, atol=atol
+        ), f"Activations are not equal for mapping index {i}"

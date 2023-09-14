@@ -118,7 +118,7 @@ def test_modular_arithmetic_conversion() -> None:
         ), f"Activations are not equal for mapping index {i}"
 
 
-# @pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
+@pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
 @pytest.mark.slow()
 def test_gpt2_conversion():
     """Test that gpt2 in tlens and SequentialTransformer give the same outputs and internal
@@ -220,10 +220,8 @@ def test_gpt2_conversion():
     seq_cache = [
         seq_model.hooked_data[v["seq_key"]]["acts"][v["tuple_idx"]] for v in mappings.values()
     ]
-    assert torch.allclose(
-        tlens_output[:, -10:, -100:], seq_output[:, -10:, -100:], atol=atol
-    ), "Outputs are not equal"
+    assert torch.allclose(tlens_output, seq_output, atol=atol), "Outputs are not equal"
     for i, (tlens_act, seq_act) in enumerate(zip(tlens_cache, seq_cache)):
         assert torch.allclose(
-            tlens_act[:, -10:, -100:], seq_act[:, -10:, -100:], atol=atol
+            tlens_act, seq_act, atol=atol
         ), f"Activations are not equal for mapping index {i}"

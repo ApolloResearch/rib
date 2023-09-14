@@ -118,7 +118,8 @@ def test_modular_arithmetic_conversion() -> None:
         ), f"Activations are not equal for mapping index {i}"
 
 
-@pytest.mark.slow()
+# @pytest.mark.skip_ci  # Seems like this test uses too much memory for Github's runners
+# @pytest.mark.slow()
 def test_gpt2_conversion():
     """Test that gpt2 in tlens and SequentialTransformer give the same outputs and internal
     activations.
@@ -195,32 +196,32 @@ def test_gpt2_conversion():
 
     input_ids = torch.randint(0, tlens_model.cfg.d_vocab, size=(1, tlens_model.cfg.n_ctx))
 
-    # Collect activations from the tlens model
-    tlens_cache = []
+    # # Collect activations from the tlens model
+    # tlens_cache = []
 
-    def tlens_store_activations_hook(output, hook):
-        tlens_cache.append(output.detach().clone())
+    # def tlens_store_activations_hook(output, hook):
+    #     tlens_cache.append(output.detach().clone())
 
-    tlens_hooks = [(name, tlens_store_activations_hook) for name in mappings]
-    tlens_output = tlens_model.run_with_hooks(input_ids, fwd_hooks=tlens_hooks)
+    # tlens_hooks = [(name, tlens_store_activations_hook) for name in mappings]
+    # tlens_output = tlens_model.run_with_hooks(input_ids, fwd_hooks=tlens_hooks)
 
+    # assert True
+    # Collect activations from the sequential transformer model
+    seq_hooks: list[Hook] = []
+    for module_name in [v["seq_key"] for v in mappings.values()]:
+        seq_hooks.append(
+            Hook(
+                name=module_name,
+                data_key="acts",
+                fn=acts_forward_hook_fn,
+                module_name=module_name,
+            )
+        )
+    seq_output = seq_model(input_ids, hooks=seq_hooks)[0]
+    seq_cache = [
+        seq_model.hooked_data[v["seq_key"]]["acts"][v["tuple_idx"]] for v in mappings.values()
+    ]
     assert True
-    # # Collect activations from the sequential transformer model
-    # seq_hooks: list[Hook] = []
-    # for module_name in [v["seq_key"] for v in mappings.values()]:
-    #     seq_hooks.append(
-    #         Hook(
-    #             name=module_name,
-    #             data_key="acts",
-    #             fn=acts_forward_hook_fn,
-    #             module_name=module_name,
-    #         )
-    #     )
-    # seq_output = seq_model(input_ids, hooks=seq_hooks)[0]
-    # seq_cache = [
-    #     seq_model.hooked_data[v["seq_key"]]["acts"][v["tuple_idx"]] for v in mappings.values()
-    # ]
-
     # assert torch.allclose(tlens_output, seq_output, atol=atol), "Outputs are not equal"
     # for i, (tlens_act, seq_act) in enumerate(zip(tlens_cache, seq_cache)):
     #     assert torch.allclose(

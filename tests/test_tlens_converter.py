@@ -6,7 +6,8 @@ import pytest
 import torch
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
-from rib.hook_manager import HookedModel
+from rib.hook_fns import acts_forward_hook_fn
+from rib.hook_manager import Hook, HookedModel
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.utils import set_seed
@@ -162,7 +163,22 @@ def test_gpt2_conversion():
     set_seed(42)
     # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
     atol = 1e-8
-
+    # Mapping from some tlens cache keys to SequentialTransformer cache keys
+    # The tuple_idx is the index of the module's output to use
+    mappings = {
+        "blocks.0.hook_resid_pre": {
+            "seq_key": "sections.pre.2",
+            "tuple_idx": 0,
+        },
+        "blocks.3.hook_resid_mid": {
+            "seq_key": "sections.section_0.15",
+            "tuple_idx": 0,
+        },
+        "blocks.8.hook_resid_post": {
+            "seq_key": "sections.section_0.60",
+            "tuple_idx": 0,
+        },
+    }
     tlens_model = HookedTransformer.from_pretrained("gpt2")
     tlens_model.to(torch.float64)
     tlens_model.to("cpu")
@@ -178,30 +194,34 @@ def test_gpt2_conversion():
     seq_model = HookedModel(seq_model_raw)
 
     input_ids = torch.randint(0, tlens_model.cfg.d_vocab, size=(1, tlens_model.cfg.n_ctx))
-    # Mapping from some tlens cache keys to SequentialTransformer cache keys (and their tuple index)
-    mappings = {
-        "blocks.0.hook_resid_pre": {
-            "seq_key": "sections.pre.2",
-            "tuple_idx": 0,
-        },
-        "blocks.3.hook_resid_mid": {
-            "seq_key": "sections.section_0.15",
-            "tuple_idx": 0,
-        },
-        "blocks.8.hook_resid_post": {
-            "seq_key": "sections.section_0.60",
-            "tuple_idx": 0,
-        },
-    }
-    outputA, cacheA = tlens_model.run_with_cache(input_ids)
-    # Only store the activations we care about (storing all activations may cause CI failure)
-    cacheA = [cacheA[key] for key in mappings]
 
-    outputB, cacheB = seq_model.run_with_cache(input_ids)
-    cacheB = [cacheB[v["seq_key"]]["acts"][v["tuple_idx"]] for v in mappings.values()]
+    # Collect activations from the tlens model
+    tlens_cache = []
 
-    assert torch.allclose(outputA, outputB[0], atol=atol), "Outputs are not equal"
-    for i, (tlens_act, seq_act) in enumerate(zip(cacheA, cacheB)):
+    def tlens_store_activations_hook(output, hook):
+        tlens_cache.append(output.detach().clone())
+
+    tlens_hooks = [(name, tlens_store_activations_hook) for name in mappings]
+    tlens_output = tlens_model.run_with_hooks(input_ids, fwd_hooks=tlens_hooks)
+
+    # Collect activations from the sequential transformer model
+    seq_hooks: list[Hook] = []
+    for module_name in [v["seq_key"] for v in mappings.values()]:
+        seq_hooks.append(
+            Hook(
+                name=module_name,
+                data_key="acts",
+                fn=acts_forward_hook_fn,
+                module_name=module_name,
+            )
+        )
+    seq_output = seq_model(input_ids, hooks=seq_hooks)[0]
+    seq_cache = [
+        seq_model.hooked_data[v["seq_key"]]["acts"][v["tuple_idx"]] for v in mappings.values()
+    ]
+
+    assert torch.allclose(tlens_output, seq_output, atol=atol), "Outputs are not equal"
+    for i, (tlens_act, seq_act) in enumerate(zip(tlens_cache, seq_cache)):
         assert torch.allclose(
             tlens_act, seq_act, atol=atol
         ), f"Activations are not equal for mapping index {i}"

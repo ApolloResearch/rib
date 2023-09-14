@@ -1,5 +1,5 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import Callable, Optional, cast
+from typing import Callable, Optional, Union, cast
 
 import einops
 import numpy as np
@@ -10,7 +10,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from rib.models import SequentialTransformerConfig
-from rib.models.utils import gelu_new
+from rib.models.utils import gelu_new, layer_norm
 
 
 class Embed(nn.Module):
@@ -350,48 +350,48 @@ class LayerNormPre(torch.nn.Module):
     A standard LayerNorm without the element-wise affine parameters.
     """
 
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: SequentialTransformerConfig, return_residual: bool = False):
         super().__init__()
         self.cfg = cfg
-        self.eps = self.cfg.eps
+        self.return_residual = return_residual
 
     def forward(
         self,
         residual: Float[Tensor, "... d_model"],
-    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
-        in_dtype = residual.dtype
-        x = residual.clone()
-        if in_dtype not in [torch.float32, torch.float64]:
-            x = x.to(torch.float32)
-        x = x - x.mean(-1, keepdim=True)
-        scale: Float[Tensor, "... 1"] = (x.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
-        x = x / scale
-        return residual, x.to(in_dtype)
+    ) -> Union[
+        Float[Tensor, "... d_model"],
+        tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]],
+    ]:
+        out = layer_norm(residual.clone(), self.cfg.eps)
+        if self.return_residual:
+            return residual, out
+        else:
+            return out
 
 
 class LayerNormPreFolded(torch.nn.Module):
     """A version of LayerNormPre where we assume the input has a constant final dimension."""
 
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: SequentialTransformerConfig, return_residual: bool = False):
         super().__init__()
         self.cfg = cfg
-        self.eps = self.cfg.eps
+        self.return_residual = return_residual
 
     def forward(
         self,
         residual: Float[Tensor, "... d_model"],
-    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
-        in_dtype = residual.dtype
+    ) -> Union[
+        Float[Tensor, "... d_model"],
+        tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]],
+    ]:
         x0 = residual[..., :-1].clone()  # [..., length-1]
 
-        if in_dtype not in [torch.float32, torch.float64]:
-            x0 = x0.to(torch.float32)
-
-        x0 = x0 - x0.mean(-1, keepdim=True)  # [..., length-1]
-        scale: Float[Tensor, "... 1"] = (x0.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
-        x0 = x0 / scale  # [..., length-1]
-        x = torch.cat([x0, residual[..., -1:]], dim=-1)  # [..., length]
-        return residual, x.to(in_dtype)
+        x0_out = layer_norm(x0, self.cfg.eps)
+        out = torch.cat([x0_out, residual[..., -1:]], dim=-1)  # [..., length]
+        if self.return_residual:
+            return residual, out
+        else:
+            return out
 
 
 # Map from module names in SequentialTransformer to the corresponding component modules

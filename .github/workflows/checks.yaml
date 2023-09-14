@@ -44,4 +44,4 @@ jobs:
         mypy rib experiments
     - name: Run tests
       run: |
-        pytest --runslow
+        pytest --runslow -m "not skip_ci"

@@ -89,6 +89,7 @@ class SequentialTransformer(nn.Module):
         "mlp_out",
         "add_resid2",
     ]
+    ln_final_name: str = "ln_final"
     unembed_module_name: str = "unembed"
 
     def __init__(self, cfg: SequentialTransformerConfig, node_layers: list[str]):
@@ -119,9 +120,14 @@ class SequentialTransformer(nn.Module):
                 module_class: Type[nn.Module]
                 if module_type in ["ln1", "ln2"]:
                     module_class = ln_class
+                    kwargs = {"return_residual": True}
+                elif module_type == "ln_final":
+                    module_class = ln_class
+                    kwargs = {"return_residual": False}
                 else:
                     module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
-                module = module_class(cfg)
+                    kwargs = {}
+                module = module_class(cfg, **kwargs)
                 module_section.append(module)
             sections[section_name] = MultiSequential(*module_section)
         self.sections: nn.ModuleDict = nn.ModuleDict(sections)
@@ -155,6 +161,7 @@ class SequentialTransformer(nn.Module):
             all_layers.extend(
                 [f"{module_name}.{i}" for module_name in SequentialTransformer.block_module_names]
             )
+        all_layers.append(SequentialTransformer.ln_final_name)
         all_layers.append(SequentialTransformer.unembed_module_name)
 
         module_name_sections = create_list_partitions(all_layers, node_layers)
@@ -203,7 +210,9 @@ class SequentialTransformer(nn.Module):
         for section_name, section in self.sections.items():
             for module_idx, module in enumerate(section):  # type: ignore
                 if isinstance(module, LayerNormPre):
-                    modified_module = LayerNormPreFolded(lnpre_folded_cfg)
+                    modified_module = LayerNormPreFolded(
+                        lnpre_folded_cfg, return_residual=module.return_residual
+                    )
                     self.sections[section_name][module_idx] = modified_module
 
         self.has_folded_bias = True

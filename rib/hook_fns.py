@@ -102,9 +102,17 @@ def gram_forward_hook_fn(
     # Output may be tuple of tensors if there are two outputs
     outputs = output if isinstance(output, tuple) else (output,)
 
-    out_acts = _concatenate_with_embedding_reshape(outputs)  # type: ignore
+    # Concat over the hidden dimension
+    out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
-    gram_matrix = out_acts.T @ out_acts
+    if out_acts.dim() == 3:  # tensor with pos embedding
+        einsum_pattern = "bpi, bpj -> ij"
+    elif out_acts.dim() == 2:  # tensor without pos embedding
+        einsum_pattern = "bi, bj -> ij"
+    else:
+        raise ValueError("Unexpected tensor rank")
+
+    gram_matrix = torch.einsum(einsum_pattern, out_acts, out_acts)
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
@@ -122,8 +130,8 @@ def gram_pre_forward_hook_fn(
 ) -> None:
     """Calculate the gram matrix for inputs with positional indices and add it to the global.
 
-    First, we combine the pos and hidden dimensions into a single dimension. Then, if there are two
-    inputs, we concatenate them along this combined dimension. We then calculate the gram matrix.
+    First, we concatenate all inputs along the d_hidden dimension. Our gram matrix is then
+    calculated by summing over the batch and position dimension (if there is a pos dimension).
 
     Args:
         module: Module that the hook is attached to (not used).
@@ -136,9 +144,18 @@ def gram_pre_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
-    in_acts = _concatenate_with_embedding_reshape(inputs)
+    # Concat over the hidden dimension
+    in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
 
-    gram_matrix = in_acts.T @ in_acts
+    if in_acts.dim() == 3:  # tensor with pos embedding
+        einsum_pattern = "bpi, bpj -> ij"
+    elif in_acts.dim() == 2:  # tensor without pos embedding
+        einsum_pattern = "bi, bj -> ij"
+    else:
+        raise ValueError("Unexpected tensor rank")
+
+    gram_matrix = torch.einsum(einsum_pattern, in_acts, in_acts)
+
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 

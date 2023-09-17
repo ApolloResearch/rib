@@ -1,11 +1,12 @@
+from functools import partial
 from typing import Any, Union
 
 import torch
-from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
+from torch.func import jacrev, vmap
 
-from rib.linalg import batched_jacobian
+from rib.linalg import edge_norm
 
 
 def _add_to_hooked_matrix(
@@ -30,43 +31,6 @@ def _add_to_hooked_matrix(
     # If no data exists, initialize with zeros
     hooked_data.setdefault(hook_name, {}).setdefault(data_key, torch.zeros_like(hooked_matrix))
     hooked_data[hook_name][data_key] += hooked_matrix
-
-
-def _concatenate_with_embedding_reshape(
-    inputs: Union[
-        tuple[Float[Tensor, "batch d_hidden"]],
-        tuple[Float[Tensor, "batch pos _"], ...],
-    ],
-) -> Float[Tensor, "batch d_hidden_combined"]:
-    """
-    Fold in position dim to hidden dim and concatenate the inputs over the hidden dimension.
-
-    For tensors with a rank of 3 (assumed to have positional embeddings), the positional and hidden
-    dimensions are combined. For tensors with a rank of 2, they remain unchanged.
-
-    Args:
-        inputs: A tuple containing one or two tensors to be concatenated. If the tensors contain a
-            position dimensions (i.e. rank of 3), the positional and hidden dimensions are combined.
-
-    Returns:
-        The concatenated tensors with the positional and hidden dimensions combined.
-
-    Raises:
-        ValueError: If a tensor rank is neither 2 nor 3.
-    """
-    combined_tensors = []
-
-    for x in inputs:
-        if x.dim() == 3:  # tensor with pos embedding
-            pattern = "batch pos d_hidden -> batch (pos d_hidden)"
-        elif x.dim() == 2:  # tensor without pos embedding
-            pattern = "batch d_hidden -> batch d_hidden"
-        else:
-            raise ValueError("Unexpected tensor rank")
-
-        combined_tensors.append(rearrange(x.detach().clone(), pattern))
-
-    return torch.cat(combined_tensors, dim=-1)
 
 
 def gram_forward_hook_fn(
@@ -105,9 +69,9 @@ def gram_forward_hook_fn(
     # Concat over the hidden dimension
     out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
-    if out_acts.dim() == 3:  # tensor with pos embedding
+    if out_acts.dim() == 3:  # tensor with pos dimension
         einsum_pattern = "bpi, bpj -> ij"
-    elif out_acts.dim() == 2:  # tensor without pos embedding
+    elif out_acts.dim() == 2:  # tensor without pos dimension
         einsum_pattern = "bi, bj -> ij"
     else:
         raise ValueError("Unexpected tensor rank")
@@ -147,9 +111,9 @@ def gram_pre_forward_hook_fn(
     # Concat over the hidden dimension
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
 
-    if in_acts.dim() == 3:  # tensor with pos embedding
+    if in_acts.dim() == 3:  # tensor with pos dimension
         einsum_pattern = "bpi, bpj -> ij"
-    elif in_acts.dim() == 2:  # tensor without pos embedding
+    elif in_acts.dim() == 2:  # tensor without pos dimension
         einsum_pattern = "bi, bj -> ij"
     else:
         raise ValueError("Unexpected tensor rank")
@@ -182,15 +146,11 @@ def rotate_orthog_pre_forward_hook_fn(
     return (in_acts @ rotation_matrix,)
 
 
-def M_dash_and_Lambda_dash_forward_hook_fn(
+def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch in_hidden"]],
-        tuple[Float[Tensor, "batch pos _"], ...],
-    ],
-    output: Union[
-        Float[Tensor, "batch out_hidden"],
-        tuple[Float[Tensor, "batch pos _"], ...],
+        tuple[Float[Tensor, "batch pos in_hidden"], ...],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -200,16 +160,10 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
-    For calculating the Jacobian, we need to run the inputs through the module. Unfortunately,
-    this causes an infinite recursion because the module has a hook which runs this function. To
-    avoid this, we (hackily) remove the hook before running the module and then add it back after.
-
     Args:
         module: Module that the hook is attached to.
         inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
             and positional indices. If no positional indices, assumes one input.
-        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
-            and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
@@ -218,46 +172,63 @@ def M_dash_and_Lambda_dash_forward_hook_fn(
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
-    # Remove the foward hook to avoid recursion when calculating the jacobian
-    module._forward_hooks.popitem()
+    # Remove the pre foward hook to avoid recursion when calculating the jacobian
+    module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    out_tuple_len = len(output) if isinstance(output, tuple) else 0
+    # Ensure that the inputs have requires_grad=True
+    for x in inputs:
+        x.requires_grad_(True)
 
-    O: Float[Tensor, "batch out_hidden_combined in_hidden_combined"] = batched_jacobian(
-        module, inputs, out_tuple_len=out_tuple_len
-    )
+    integral_step = 1  # TODO: Make this configurable or use numerical integration package
+    for alpha in torch.arange(integral_step, 1 + integral_step, integral_step):
+        alpha_inputs = tuple(alpha * x for x in inputs)
+        output = module(*alpha_inputs)
+        outputs = (output,) if isinstance(output, torch.Tensor) else output
 
-    in_acts = _concatenate_with_embedding_reshape(inputs)
+        # Concatenate the outputs over the hidden dimension
+        out_acts = torch.cat(outputs, dim=-1)
 
-    outputs = (output,) if isinstance(output, torch.Tensor) else output
-    out_acts = _concatenate_with_embedding_reshape(outputs)
+        f_hat: Union[
+            Float[Tensor, "batch out_hidden_combined_trunc"],
+            Float[Tensor, "batch pos out_hidden_combined_trunc"],
+        ] = (
+            out_acts @ C_out
+        )
+        f_hat_norm: Float[Tensor, ""] = (f_hat**2).sum()
+
+        # Accumulate the grad of f_hat_norm w.r.t the input tensors (ignoring all other gradients)
+        f_hat_norm.backward(inputs=inputs, retain_graph=True)
+
+    has_pos = inputs[0].dim() == 3
+    if has_pos:
+        einsum_pattern = "bpj,bpJ->jJ"
+    else:
+        einsum_pattern = "bj,bJ->jJ"
 
     with torch.inference_mode():
-        # This corresponds to the left half of the inner products in the M' and Lambda' equations
-        # In latex: $\sum_i \hat{f}^{l+1}(X) {C^{l+1}}^T O^l$
-        f_hat_C_out_O: Float[Tensor, "batch in_hidden_combined"] = torch.einsum(
-            "bi,iI,Ik,bkj->bj", out_acts, C_out, C_out.T, O
-        )
-        M_dash: Float[Tensor, "in_hidden_combined in_hidden_combined"] = (
-            f_hat_C_out_O.T @ f_hat_C_out_O
-        )
-        Lambda_dash: Float[Tensor, "in_hidden_combined in_hidden_combined"] = (
-            f_hat_C_out_O.T @ in_acts
-        )
+        in_grads_list: list[Tensor] = []
+        for x in inputs:
+            assert x.grad is not None, "Input tensor does not have a gradient."
+            in_grads_list.append(x.grad)
+        in_grads: Union[
+            Float[Tensor, "batch in_hidden_combined"],
+            Float[Tensor, "batch pos in_hidden_combined"],
+        ] = torch.cat(in_grads_list, dim=-1)
+
+        M_dash = torch.einsum(einsum_pattern, in_grads, in_grads)
+        # Concatenate the inputs over the hidden dimension
+        in_acts = torch.cat(inputs, dim=-1)
+        Lambda_dash = torch.einsum(einsum_pattern, in_grads, in_acts)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
 
 
-def interaction_edge_forward_hook_fn(
+def interaction_edge_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch in_hidden"]],
-        tuple[Float[Tensor, "batch pos _"], ...],
-    ],
-    output: Union[
-        Float[Tensor, "batch out_hidden"],
         tuple[Float[Tensor, "batch pos _"], ...],
     ],
     hooked_data: dict[str, Any],
@@ -278,8 +249,6 @@ def interaction_edge_forward_hook_fn(
         module: Module that the hook is attached to.
         inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
             and positional indices. If no positional indices, assumes one input.
-        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
-            and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
@@ -290,31 +259,50 @@ def interaction_edge_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
-    # Remove the foward hook to avoid recursion when calculating the jacobian
-    module._forward_hooks.popitem()
+    # Remove the pre-foward hook to avoid recursion when calculating the jacobian
+    module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    out_tuple_len = len(output) if isinstance(output, tuple) else 0
+    has_pos = inputs[0].dim() == 3
+    if has_pos:
+        # jac_size is (batch, out_hidden_trunc, pos, in_hidden_trunc)
+        jac_size = [inputs[0].shape[0], C_out.shape[1], inputs[0].shape[1], C_in.shape[1]]
+    else:
+        # jac_size is (batch, out_hidden_trunc, in_hidden_trunc)
+        jac_size = [inputs[0].shape[0], C_out.shape[1], C_in.shape[1]]
 
-    O: Float[Tensor, "batch out_hidden_combined in_hidden_combined"] = batched_jacobian(
-        module, inputs, out_tuple_len=out_tuple_len
-    )
+    jac_out: Union[
+        Float[Tensor, "batch out_hidden_trunc in_hidden_trunc"],
+        Float[Tensor, "batch out_hidden_trunc pos in_hidden_trunc"],
+    ] = torch.zeros(size=jac_size, device=inputs[0].device, dtype=inputs[0].dtype)
+    # We first concatenate the inputs over the hidden dimension
+    in_acts = torch.cat(inputs, dim=-1)
+    # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
+    f_hat = in_acts @ C_in
 
-    in_acts = _concatenate_with_embedding_reshape(inputs)
+    integral_step = 1  # TODO: Make this configurable or use numerical integration package
+    for alpha in torch.arange(integral_step, 1 + integral_step, integral_step):
+        alpha_input = alpha * f_hat
+        edge_norm_partial = partial(
+            edge_norm,
+            module=module,
+            C_in_pinv=C_in_pinv,
+            C_out=C_out,
+            in_hidden_dims=[x.shape[-1] for x in inputs],
+            has_pos=has_pos,
+        )
+        alpha_jac_out = vmap(jacrev(edge_norm_partial))(alpha_input)
 
-    outputs = (output,) if isinstance(output, torch.Tensor) else output
-    out_acts = _concatenate_with_embedding_reshape(outputs)
+        jac_out += alpha_jac_out
+
+    has_pos = inputs[0].dim() == 3
+    if has_pos:
+        einsum_pattern = "bipj,bpj->ij"
+    else:
+        einsum_pattern = "bij,bj->ij"
 
     with torch.inference_mode():
-        # LHS of Hadamard product
-        f_hat_out_T_f_hat_in: Float[Tensor, "out_hidden_trunc in_hidden_trunc"] = torch.einsum(
-            "bi,ik,bj,jm->bkm", out_acts, C_out, in_acts, C_in
-        )
-        # RHS of Hadamard product
-        C_out_O_C_in_pinv_T: Float[Tensor, "out_hidden_trunc in_hidden_trunc"] = torch.einsum(
-            "ik,bij,jm->bkm", C_out, O, C_in_pinv.T
-        )
-        E = (f_hat_out_T_f_hat_in * C_out_O_C_in_pinv_T).sum(dim=0)
+        E = torch.einsum(einsum_pattern, jac_out, f_hat)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key, E)
 

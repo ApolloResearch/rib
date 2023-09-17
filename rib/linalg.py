@@ -1,10 +1,9 @@
-from typing import Callable, Optional, Union
+from typing import Union
 
 import torch
 from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
-from torch.func import jacrev, vmap
 
 from rib.types import TORCH_DTYPES
 
@@ -110,76 +109,6 @@ def _fold_jacobian_pos_recursive(
         raise TypeError(f"Unsupported type {type(x)}")
 
 
-def batched_jacobian(
-    fn: Callable,
-    inputs: Union[
-        tuple[Float[Tensor, "batch in_hidden"]],
-        tuple[Float[Tensor, "batch pos _"], ...],
-    ],
-    out_tuple_len: int = 0,
-) -> Float[Tensor, "batch_size out_size in_size"]:
-    """Calculate the Jacobian of a function fn with respect to input x.
-
-    Makes use of the fact that x is batched, allowing for vectorized computation of the Jacobian
-    across the batch using pytorch's vmap
-    (https://pytorch.org/functorch/stable/generated/functorch.jacrev.html).
-
-    Handles the case where the inputs and output contains one or more tensors.
-
-    Assumes that fn can take as input a tensor without a batch dimension.
-
-    If we have a pos dimension (as in an LM), we concatenate the pos and hidden dimensions.
-
-    If we have multiple outputs, we concatenate them over their hidden dimension. We do the same
-    for multiple inputs.
-
-    Args:
-        fn: The function to calculate the Jacobian of.
-        inputs: The input to fn. Can be a tuple of tensors. If > 1 input, we concatenate their
-            hidden dimensions after calculating the jacobian.
-        out_tuple_len: The number of outputs of fn. If > 1, we concatenate their hidden dimensions
-            after calculating the jacobian. If 0, we assume that fn returns a single tensor.
-
-    Returns:
-        The Jacobian of the (concatenated) outputs of fn w.r.t its (concatenated) inputs, folding
-            the pos dimension into the hidden dimension if it exists.
-    """
-    in_tuple_len = len(inputs)
-    has_pos_dim = any(x.dim() == 3 for x in inputs)
-
-    argnums = tuple(range(in_tuple_len)) if in_tuple_len > 1 else 0
-    jac_out = vmap(jacrev(fn, argnums=argnums))(*inputs)
-
-    # If there is a pos dimension, we concatenate the pos and hidden dimensions for all tensors
-    if has_pos_dim:
-        jac_out = _fold_jacobian_pos_recursive(jac_out)
-
-    # If there are multiple inputs, the innermost tuple will correspond to the jacobians w.r.t
-    # each input. We concatenate over in_hidden (i.e. the last dimension)
-    if in_tuple_len > 1:
-        assert isinstance(jac_out, tuple), "jac_out should be a tuple if multiple inputs."
-        # Check whether there is also an inner tuple (indicating out_tuple_len > 0)
-        if isinstance(jac_out[0], tuple):
-            assert out_tuple_len > 0, "out_tuple_len should be > 0 if there is an inner tuple."
-            # Iterate over the inner tuples and concatenate over the hidden dimension
-            jac_out = tuple(torch.cat(jac_out_inner, dim=-1) for jac_out_inner in jac_out)
-        else:
-            assert out_tuple_len == 0, "out_tuple_len should be 0 if there is no inner tuple."
-            jac_out = torch.cat(jac_out, dim=-1)
-
-    # If out_tuple_len > 0, concatenate over out_hidden (i.e. the second last dimension)
-    if isinstance(jac_out, tuple):
-        # There should now be only max one tuple, depending on whether there are multiple outputs
-        assert all(isinstance(jac_out_inner, torch.Tensor) for jac_out_inner in jac_out)
-        assert out_tuple_len > 0, "out_tuple_len should be > 0 if there is still a tuple here."
-        jac_out = torch.cat(jac_out, dim=-2)
-
-    assert isinstance(jac_out, torch.Tensor), "jac_out should be a tensor at this point."
-    assert jac_out.ndim == 3, "jac_out should have 3 dimensions at this point."
-
-    return jac_out
-
-
 def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
     """Calculate the pseudo-inverse of a diagonal matrix.
 
@@ -201,3 +130,52 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
     ), "It appears there are non-zero off-diagonal entries. "
     res = torch.diag(x.diag().reciprocal())
     return res
+
+
+def edge_norm(
+    f_C_in: Float[Tensor, "... in_hidden_combined"],
+    module: torch.nn.Module,
+    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
+    C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
+    in_hidden_dims: list[int],
+    has_pos: bool = False,
+) -> Float[Tensor, "batch pos in_hidden_combined_trunc out_hidden_combined_trunc"]:
+    """Calculates the norm of the alpha * in_acts @ C_in @ C_in_pinv when passed through the model.
+
+    Since the module may take a tuple of inputs, we need to split the `x` tensor into a tuple
+    based on the `in_hidden_dims` of each input.
+
+    Note that f_C_in may be a GradTensor resulting from a vmap operation over the batch dim.
+    If this is the case, it will not have a batch dimension.
+
+    Args:
+        f_C_in: The alpha-adjusted concatenated inputs to the model.
+            i.e. alpha * in_acts @ C_in
+        module: The model to pass the f_C_in through.
+        C_in_pinv: The pseudoinverse of C_in.
+        C_out: The truncated interaction rotation matrix for the output node layer.
+        in_hidden_dims: The hidden dimension of the original inputs to the module.
+
+    """
+    f_C_in_C_in_pinv: Float[Tensor, "... in_hidden_combined_trunc"] = f_C_in @ C_in_pinv
+    input_tuples = torch.split(f_C_in_C_in_pinv, in_hidden_dims, dim=-1)
+
+    output = module(*input_tuples)
+
+    outputs = (output,) if isinstance(output, torch.Tensor) else output
+    # Concatenate the outputs over the hidden dimension
+    out_acts = torch.cat(outputs, dim=-1)
+
+    f_hat: Float[Tensor, "... out_hidden_combined_trunc"] = out_acts @ C_out
+
+    # Calculate the square and sum over the pos dimension if it exists.
+    f_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = f_hat**2
+    if has_pos:
+        # f_hat is shape (pos, hidden) if vmapped or (batch, pos, hidden) otherwise
+        assert (
+            f_hat.dim() == 2 or f_hat.dim() == 3
+        ), f"f_hat should have 2 or 3 dims, got {f_hat.dim()}"
+        pos_dim = 0 if f_hat.dim() == 2 else 1
+        f_hat_norm = f_hat_norm.sum(dim=pos_dim)
+
+    return f_hat_norm

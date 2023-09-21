@@ -69,9 +69,10 @@ class PosEmbed(nn.Module):
 
 
 class Unembed(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: SequentialTransformerConfig, last_pos_only: bool = False):
         super().__init__()
         self.cfg = cfg
+        self.last_pos_only = last_pos_only
         self.W_U: Float[Tensor, "d_model d_vocab"] = nn.Parameter(
             torch.empty(self.cfg.d_model, self.cfg.d_vocab, dtype=cfg.dtype)
         )
@@ -79,10 +80,20 @@ class Unembed(nn.Module):
             torch.zeros(self.cfg.d_vocab, dtype=cfg.dtype)
         )
 
-    def forward(self, residual: Float[Tensor, "... d_model"]) -> Float[Tensor, "... d_vocab"]:
+    def forward(
+        self, residual: Float[Tensor, "... pos d_model"]
+    ) -> Union[Float[Tensor, "... pos d_vocab"], Float[Tensor, "... 1 d_vocab"]]:
+        if self.last_pos_only:
+            if residual.dim() == 3:
+                residual = residual[:, -1:, :]
+            elif residual.dim() == 2:
+                # No batch dimension (e.g. due to vmap)
+                residual = residual[-1:, :]
+            else:
+                raise ValueError(f"residual should have dim 2 or 3, but has dim {residual.dim()}")
         return (
             einsum(
-                "... d_model, d_model vocab -> ... vocab",
+                "... pos_trunc d_model, d_model vocab -> ... pos_trunc vocab",
                 residual,
                 self.W_U,
             )

@@ -1,4 +1,4 @@
-"""Test various properties of the built mnist interaction graph.
+"""Test various properties of an lm interaction graph.
 
 Properties tested:
 1. The size of the sum of activations in the interaction basis (calculated with
@@ -20,41 +20,43 @@ ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
 
-from experiments.mnist_rib_build.build_interaction_graph import main as build_graph_main
+from experiments.lm_rib_build.lm_build_rib_graph import main as build_graph_main
 from rib.interaction_algos import build_sorted_lambda_matrices
 from rib.utils import load_config
 
 MOCK_CONFIG = """
 exp_name: test
-mlp_path: OVERWRITE/IN/MOCK
-batch_size: 64
 seed: 0
+tlens_pretrained: null
+tlens_model_path: OVERWRITE/IN/MOCK
+dataset: modular_arithmetic
+batch_size: 16
 truncation_threshold: 1e-6
 rotate_output: false
+last_pos_only: true
 dtype: float32
-module_names:
-    - layers.1
-    - layers.2
+node_layers:
+  - ln1.0
+  - mlp_in.0
+  - unembed
 """
 
 
 def mock_load_config(*args, **kwargs):
     # Load the config as normal but set the mlp_path using a relative path
     config = load_config(*args, **kwargs)
-    config.mlp_path = (
+    config.tlens_model_path = (
         Path(__file__).parent.parent
-        / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-08-13_16-23-59/model_epoch_3.pt"
+        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_2023-08-31_09-33-30/model_epoch_60000.pt"
     )
     return config
 
 
 @pytest.mark.slow
-def test_mnist_build_graph():
-    # Store the lambdas in the order [layers.2, layers.1]
+def test_modular_arithmetic_build_graph():
     Lambda_sqrts: list[torch.Tensor] = []
 
     def mock_build_sorted_lambda_matrices(Lambda_diag_abs_sqrt, **kwargs):
-        # Note that this will be called for layers.2 and then layers.1
         # Call the original function to get the real lambdas
         Lambda_sqrts.append(Lambda_diag_abs_sqrt.cpu())
         return build_sorted_lambda_matrices(Lambda_diag_abs_sqrt, **kwargs)
@@ -65,7 +67,7 @@ def test_mnist_build_graph():
         temp_config.flush()
 
         with patch("torch.save"), patch(
-            "experiments.mnist_rib_build.build_interaction_graph.load_config",
+            "experiments.lm_rib_build.lm_build_rib_graph.load_config",
             side_effect=mock_load_config,
         ), patch(
             "rib.interaction_algos.build_sorted_lambda_matrices",
@@ -86,11 +88,15 @@ def test_mnist_build_graph():
                 Cs[-1]["C"], torch.eye(Cs[-1]["C"].shape[0], device=Cs[-1]["C"].device)
             )
 
-            for i, module_name in enumerate(["layers.1", "layers.2"]):
+            for i, module_name in enumerate(edge_info[0] for edge_info in E_hats):
                 # Check that the size of the sum of activations in the interaction basis is equal
                 # to the outgoing edges of a node
                 act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
                 edge_size = E_hats[i][1].sum(0).abs()
-                assert torch.allclose(act_size, edge_size, atol=1e-4)
+                assert torch.allclose(
+                    act_size, edge_size, atol=1e-3
+                ), f"act_size not equal to edge_size for {module_name}"
                 # Check that the Lambdas are also the same
-                assert torch.allclose(act_size, Lambdas[i])
+                assert torch.allclose(
+                    act_size, Lambdas[i], atol=1e-4
+                ), f"act_size not equal to Lambdas for {module_name}"

@@ -303,7 +303,6 @@ class MLPIn(nn.Module):
         x: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         pre_act = einsum("... d_model, d_model d_mlp -> ... d_mlp", x, self.W_in) + self.b_in
-        # [..., d_mlp]
         return residual, pre_act
 
 

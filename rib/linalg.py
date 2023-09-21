@@ -133,7 +133,7 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
 
 
 def edge_norm(
-    f_C_in: Float[Tensor, "... in_hidden_combined"],
+    f_in_hat: Float[Tensor, "... in_hidden_combined"],
     module: torch.nn.Module,
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
@@ -145,20 +145,21 @@ def edge_norm(
     Since the module may take a tuple of inputs, we need to split the `x` tensor into a tuple
     based on the `in_hidden_dims` of each input.
 
-    Note that f_C_in may be a GradTensor resulting from a vmap operation over the batch dim.
+    Note that f_in_hat may be a GradTensor resulting from a vmap operation over the batch dim.
     If this is the case, it will not have a batch dimension.
 
     Args:
-        f_C_in: The alpha-adjusted concatenated inputs to the model.
+        f_in_hat: The alpha-adjusted concatenated inputs to the model.
             i.e. alpha * in_acts @ C_in
-        module: The model to pass the f_C_in through.
+        module: The model to pass the f_in_hat through.
         C_in_pinv: The pseudoinverse of C_in.
         C_out: The truncated interaction rotation matrix for the output node layer.
         in_hidden_dims: The hidden dimension of the original inputs to the module.
 
     """
-    f_C_in_C_in_pinv: Float[Tensor, "... in_hidden_combined_trunc"] = f_C_in @ C_in_pinv
-    input_tuples = torch.split(f_C_in_C_in_pinv, in_hidden_dims, dim=-1)
+    # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
+    f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_in_hat @ C_in_pinv
+    input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
 
     output = module(*input_tuples)
 
@@ -166,16 +167,16 @@ def edge_norm(
     # Concatenate the outputs over the hidden dimension
     out_acts = torch.cat(outputs, dim=-1)
 
-    f_hat: Float[Tensor, "... out_hidden_combined_trunc"] = out_acts @ C_out
+    f_out_hat: Float[Tensor, "... out_hidden_combined_trunc"] = out_acts @ C_out
 
     # Calculate the square and sum over the pos dimension if it exists.
-    f_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = f_hat**2
+    f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = f_out_hat**2
     if has_pos:
-        # f_hat is shape (pos, hidden) if vmapped or (batch, pos, hidden) otherwise
+        # f_out_hat is shape (pos, hidden) if vmapped or (batch, pos, hidden) otherwise
         assert (
-            f_hat.dim() == 2 or f_hat.dim() == 3
-        ), f"f_hat should have 2 or 3 dims, got {f_hat.dim()}"
-        pos_dim = 0 if f_hat.dim() == 2 else 1
-        f_hat_norm = f_hat_norm.sum(dim=pos_dim)
+            f_out_hat.dim() == 2 or f_out_hat.dim() == 3
+        ), f"f_out_hat should have 2 or 3 dims, got {f_out_hat.dim()}"
+        pos_dim = 0 if f_out_hat.dim() == 2 else 1
+        f_out_hat_norm = f_out_hat_norm.sum(dim=pos_dim)
 
-    return f_hat_norm
+    return f_out_hat_norm

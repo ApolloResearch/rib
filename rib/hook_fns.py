@@ -195,10 +195,11 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         ] = (
             out_acts @ C_out
         )
+
         f_hat_norm: Float[Tensor, ""] = (f_hat**2).sum()
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors (ignoring all other gradients)
-        f_hat_norm.backward(inputs=inputs, retain_graph=True)
+        f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
 
     has_pos = inputs[0].dim() == 3
     if has_pos:
@@ -208,7 +209,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
     with torch.inference_mode():
         in_grads_list: list[Tensor] = []
-        for x in inputs:
+        for x in alpha_inputs:
             assert x.grad is not None, "Input tensor does not have a gradient."
             in_grads_list.append(x.grad)
         in_grads: Union[
@@ -280,7 +281,7 @@ def interaction_edge_pre_forward_hook_fn(
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
     f_hat = in_acts @ C_in
 
-    integral_step = 1  # TODO: Make this configurable or use numerical integration package
+    integral_step = 1  # TODO: Use numerical integration package or implement trapezoidal rule
     for alpha in torch.arange(integral_step, 1 + integral_step, integral_step):
         alpha_input = alpha * f_hat
         edge_norm_partial = partial(
@@ -295,7 +296,6 @@ def interaction_edge_pre_forward_hook_fn(
 
         jac_out += alpha_jac_out
 
-    has_pos = inputs[0].dim() == 3
     if has_pos:
         einsum_pattern = "bipj,bpj->ij"
     else:

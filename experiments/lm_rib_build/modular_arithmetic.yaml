@@ -6,6 +6,7 @@ dataset: modular_arithmetic
 batch_size: 256
 truncation_threshold: 1e-6
 rotate_output: false
+last_pos_only: true
 dtype: float32
 node_layers:
   - ln1.0

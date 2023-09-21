@@ -92,9 +92,12 @@ class SequentialTransformer(nn.Module):
     ln_final_name: str = "ln_final"
     unembed_module_name: str = "unembed"
 
-    def __init__(self, cfg: SequentialTransformerConfig, node_layers: list[str]):
+    def __init__(
+        self, cfg: SequentialTransformerConfig, node_layers: list[str], last_pos_only: bool = False
+    ):
         super().__init__()
         self.cfg = cfg
+        self.last_pos_only = last_pos_only
 
         assert len(node_layers) > 1, "Must have at least 2 node layers"
         self.module_name_sections = self.create_module_name_sections(cfg.n_layers, node_layers)
@@ -124,6 +127,9 @@ class SequentialTransformer(nn.Module):
                 elif module_type == "ln_final":
                     module_class = ln_class
                     kwargs = {"return_residual": False}
+                elif module_type == "unembed":
+                    module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
+                    kwargs = {"last_pos_only": last_pos_only}
                 else:
                     module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
                     kwargs = {}

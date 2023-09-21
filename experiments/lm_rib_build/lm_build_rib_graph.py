@@ -76,6 +76,11 @@ class Config(BaseModel):
         ...,
         description="Whether to rotate the output layer to its eigenbasis.",
     )
+    last_pos_only: bool = Field(
+        False,
+        description="Whether the unembed module should only be applied to the last position.",
+    )
+
     dtype: str = Field(..., description="The dtype to use when building the graph.")
 
     @field_validator("dtype")
@@ -124,7 +129,7 @@ def load_sequential_transformer(config: Config) -> tuple[SequentialTransformer, 
     # Set the dtype to the one specified in the config for this script (as opposed to the one used
     # to train the tlens model)
     seq_cfg.dtype = TORCH_DTYPES[config.dtype]
-    seq_model = SequentialTransformer(seq_cfg, config.node_layers)
+    seq_model = SequentialTransformer(seq_cfg, config.node_layers, config.last_pos_only)
 
     # Load the transformer-lens weights into the sequential transformer model
     state_dict = convert_tlens_weights(list(seq_model.state_dict().keys()), tlens_model)

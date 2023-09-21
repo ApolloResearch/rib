@@ -7,10 +7,10 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.hook_fns import (
-    M_dash_and_Lambda_dash_forward_hook_fn,
+    M_dash_and_Lambda_dash_pre_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
-    interaction_edge_forward_hook_fn,
+    interaction_edge_pre_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
 
@@ -138,7 +138,7 @@ def collect_M_dash_and_Lambda_dash(
     interaction_hook = Hook(
         name=hook_name,
         data_key=["M_dash", "Lambda_dash"],
-        fn=M_dash_and_Lambda_dash_forward_hook_fn,
+        fn=M_dash_and_Lambda_dash_pre_forward_hook_fn,
         module_name=module_name,
         fn_kwargs={
             "C_out": C_out,
@@ -190,7 +190,7 @@ def collect_interaction_edges(
             Hook(
                 name=C_info.node_layer_name,
                 data_key="edge",
-                fn=interaction_edge_forward_hook_fn,
+                fn=interaction_edge_pre_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={
                     "C_in": C_info.C,  # C from the current node layer

@@ -149,8 +149,13 @@ def create_data_loader(config: Config, train: bool = False) -> DataLoader:
             # The config specified in the YAML file used to train the tlens model
             train_config = yaml.safe_load(f)["train"]
         test_data = ModularArithmeticDataset(
-            train_config["modulus"], train_config["frac_train"], seed=config.seed, train=train
+            train_config["modulus"],
+            # train_config["frac_train"],
+            seed=config.seed,
+            train=train,
+            frac_train=1.0,
         )
+        test_data.train = True
         # Note that the batch size for training typically gives 1 batch per epoch. We use a smaller
         # batch size here, mostly for verifying that our iterative code works.
         test_loader = DataLoader(test_data, batch_size=config.batch_size, shuffle=False)

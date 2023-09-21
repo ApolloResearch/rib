@@ -170,6 +170,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         **_: Additional keyword arguments (not used).
     """
+    from rib.models.sequential_transformer.components import MLPIn
+
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
     # Remove the pre foward hook to avoid recursion when calculating the jacobian
@@ -196,7 +198,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             out_acts @ C_out
         )
         f_hat_norm: Float[Tensor, ""] = (f_hat**2).sum()
-
+        if isinstance(module[0], MLPIn):  # type: ignore
+            print("INSIDE seciton 2")
         # Accumulate the grad of f_hat_norm w.r.t the input tensors (ignoring all other gradients)
         f_hat_norm.backward(inputs=inputs, retain_graph=True)
 

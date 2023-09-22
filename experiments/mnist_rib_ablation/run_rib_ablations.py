@@ -26,7 +26,7 @@ from typing import Optional
 import fire
 import torch
 from jaxtyping import Float
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
@@ -37,6 +37,7 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix
 from rib.log import logger
 from rib.models import MLP
+from rib.types import TORCH_DTYPES
 from rib.utils import (
     REPO_ROOT,
     calc_ablation_schedule,
@@ -53,8 +54,14 @@ class Config(BaseModel):
         None,
         description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
     )
+    dtype: str
     module_names: list[str]
     batch_size: int
+
+    @field_validator("dtype")
+    def dtype_validator(cls, v):
+        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
+        return v
 
 
 def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
@@ -85,6 +92,7 @@ def ablate_and_test(
     interaction_rotation: Float[Tensor, "d_hidden d_hidden_trunc"],
     interaction_rotation_pinv: Float[Tensor, "d_hidden_trunc d_hidden"],
     test_loader: DataLoader,
+    dtype: torch.dtype,
     device: str,
     ablation_schedule: list[int],
 ) -> dict[int, float]:
@@ -97,6 +105,7 @@ def ablate_and_test(
         interaction_rotation_pinv: The pseudo-inverse of the interaction rotation matrix. (C^+)
         hook_config: The config for the hook point.
         test_loader: The DataLoader for the test data.
+        dtype: The data type to use for model computations.
         device: The device to run the model on.
         ablation_schedule: A list of the number of vectors to ablate at each step.
 
@@ -127,7 +136,7 @@ def ablate_and_test(
         )
 
         accuracy_ablated = eval_model_accuracy(
-            hooked_mlp, test_loader, hooks=[rotation_hook], device=device
+            hooked_mlp, test_loader, hooks=[rotation_hook], dtype=dtype, device=device
         )
         accuracies[n_ablated_vecs] = accuracy_ablated
 
@@ -142,6 +151,8 @@ def run_ablations(
         tuple[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden_trunc d_hidden"]]
     ],
     ablate_every_vec_cutoff: Optional[int],
+    dtype: torch.dtype,
+    device: str,
     batch_size: int = 512,
 ) -> dict[str, dict[int, float]]:
     """Rotate to and from orthogonal basis and compare accuracies with and without ablation.
@@ -152,16 +163,18 @@ def run_ablations(
         module_names: The names of the modules whos inputs we want to ablate.
         interaction_matrices: The interaction rotation matrix and its pseudoinverse.
         ablate_every_vec_cutoff: The point in the ablation schedule to start ablating every vector.
+        dtype: The data type to use for model computations.
+        device: The device to run the model on.
         batch_size: The batch size to pass through the model.
 
 
     Returns:
         A dictionary mapping node lyae to accuracy results.
     """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, mlp_path)
     mlp.eval()
     mlp.to(device)
+    mlp.to(dtype)
     hooked_mlp = HookedModel(mlp)
 
     test_loader = load_mnist_dataloader(train=False, batch_size=batch_size)
@@ -178,6 +191,7 @@ def run_ablations(
             interaction_rotation=C,
             interaction_rotation_pinv=C_pinv,
             test_loader=test_loader,
+            dtype=dtype,
             device=device,
             ablation_schedule=ablation_schedule,
         )
@@ -190,6 +204,8 @@ def main(config_path_str: str) -> None:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[config.dtype]
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
     # Get the interaction rotations and their pseudoinverses (C and C_pinv) using the module_names
@@ -200,7 +216,9 @@ def main(config_path_str: str) -> None:
     for module_name in config.module_names:
         for rotation_info in interaction_graph_info["interaction_rotations"]:
             if rotation_info["node_layer_name"] == module_name:
-                interaction_matrices.append((rotation_info["C"], rotation_info["C_pinv"]))
+                C = rotation_info["C"].to(dtype=dtype, device=device)
+                C_pinv = rotation_info["C_pinv"].to(dtype=dtype, device=device)
+                interaction_matrices.append((C, C_pinv))
                 break
     assert len(interaction_matrices) == len(
         config.module_names
@@ -219,6 +237,8 @@ def main(config_path_str: str) -> None:
         module_names=config.module_names,
         interaction_matrices=interaction_matrices,
         ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
+        dtype=dtype,
+        device=device,
         batch_size=config.batch_size,
     )
     results = {

@@ -37,7 +37,7 @@ import fire
 import torch
 import yaml
 from jaxtyping import Float
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
@@ -49,6 +49,7 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix, eigendecompose
 from rib.log import logger
 from rib.models import MLP
+from rib.types import TORCH_DTYPES
 from rib.utils import (
     REPO_ROOT,
     calc_ablation_schedule,
@@ -65,7 +66,13 @@ class Config(BaseModel):
         None,
         description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
     )
+    dtype: str
     module_names: list[str]
+
+    @field_validator("dtype")
+    def dtype_validator(cls, v):
+        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
+        return v
 
 
 def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
@@ -95,6 +102,7 @@ def ablate_and_test(
     module_name: str,
     test_loader: DataLoader,
     eigenvecs: Float[Tensor, "d_hidden d_hidden"],
+    dtype: torch.dtype,
     device: str,
     ablation_schedule: list[int],
 ) -> dict[int, float]:
@@ -106,6 +114,7 @@ def ablate_and_test(
         hook_config: The config for the hook point.
         test_loader: The DataLoader for the test data.
         eigenvecs: A matrix whose columns are the eigenvectors of the gram matrix.
+        dtype: The data type to use for model computations.
         device: The device to run the model on.
         ablation_schedule: A list of the number of vectors to ablate at each step.
 
@@ -132,7 +141,7 @@ def ablate_and_test(
         )
 
         accuracy_ablated = eval_model_accuracy(
-            hooked_mlp, test_loader, hooks=[rotation_hook], device=device
+            hooked_mlp, test_loader, hooks=[rotation_hook], dtype=dtype, device=device
         )
         accuracies[n_ablated_vecs] = accuracy_ablated
 
@@ -144,6 +153,7 @@ def run_ablations(
     mlp_path: Path,
     module_names: list[str],
     ablate_every_vec_cutoff: Optional[int],
+    dtype: torch.dtype,
 ) -> dict[str, dict[int, float]]:
     """Rotate to and from orthogonal basis and compare accuracies with and without ablation.
 
@@ -152,6 +162,7 @@ def run_ablations(
         mlp_path: The path to the saved mlp.
         module_names: The names of the modules we want to build the graph around.
         ablate_every_vec_cutoff: The point in the ablation schedule to start ablating every vector.
+        dtype: The data type to use for model computations.
 
 
     Returns:
@@ -161,12 +172,13 @@ def run_ablations(
     mlp = load_mlp(model_config_dict, mlp_path)
     mlp.eval()
     mlp.to(device)
+    mlp.to(dtype)
     hooked_mlp = HookedModel(mlp)
 
     test_loader = load_mnist_dataloader(train=False, batch_size=512)
 
     gram_matrices = collect_gram_matrices(
-        hooked_mlp, module_names, test_loader, device=device, collect_output_gram=False
+        hooked_mlp, module_names, test_loader, dtype=dtype, device=device, collect_output_gram=False
     )
 
     results: dict[str, dict[int, float]] = {}
@@ -182,6 +194,7 @@ def run_ablations(
             module_name=module_name,
             test_loader=test_loader,
             eigenvecs=eigenvecs,
+            dtype=dtype,
             device=device,
             ablation_schedule=ablation_schedule,
         )
@@ -209,6 +222,7 @@ def main(config_path_str: str) -> None:
         mlp_path=config.mlp_path,
         module_names=config.module_names,
         ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
+        dtype=TORCH_DTYPES[config.dtype],
     )
     results = {
         "config": json.loads(config.model_dump_json()),

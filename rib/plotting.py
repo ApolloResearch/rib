@@ -83,6 +83,10 @@ def plot_interaction_graph(
             the other layers. Defaults to 1.0.
 
     """
+
+    # Convert the edges to float32 (bfloat16 will cause errors and we don't need higher precision)
+    edges = [(module_name, edge_matrix.float()) for module_name, edge_matrix in edges]
+
     # Create the undirected graph
     graph = nx.Graph()
 

@@ -20,7 +20,11 @@ REPO_ROOT = Path(__file__).parent.parent
 
 @torch.inference_mode()
 def eval_model_accuracy(
-    hooked_model: "HookedModel", dataloader: DataLoader, hooks: list["Hook"], device: str = "cuda"
+    hooked_model: "HookedModel",
+    dataloader: DataLoader,
+    hooks: list["Hook"],
+    dtype: torch.dtype = torch.float32,
+    device: str = "cuda",
 ) -> float:
     """Run the model on the dataset and return the accuracy.
 
@@ -30,6 +34,7 @@ def eval_model_accuracy(
         hooked_model: The model to evaluate.
         dataloader: The dataloader for the dataset.
         hooks: The hooks to use.
+        dtype: The data type to use for model computations.
         device: The device to run the model on.
 
     Returns:
@@ -41,7 +46,7 @@ def eval_model_accuracy(
 
     for batch in dataloader:
         data, labels = batch
-        data, labels = data.to(device), labels.to(device)
+        data, labels = data.to(device=device, dtype=dtype), labels.to(device)
         raw_output: Union[
             Float[Tensor, "batch d_vocab"], tuple[Float[Tensor, "batch pos d_vocab"]]
         ] = hooked_model(data, hooks=hooks)

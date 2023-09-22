@@ -34,10 +34,10 @@ def eigendecompose(
         eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
         eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
-    eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=TORCH_DTYPES[dtype], device="cpu"))
+    eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=TORCH_DTYPES[dtype]))
 
-    eigenvalues = eigenvalues.to(dtype=x.dtype, device=x.device).abs()
-    eigenvectors = eigenvectors.to(dtype=x.dtype, device=x.device)
+    eigenvalues = eigenvalues.to(dtype=x.dtype).abs()
+    eigenvectors = eigenvectors.to(dtype=x.dtype)
     if descending:
         idx = torch.argsort(eigenvalues, descending=True)
         eigenvalues = eigenvalues[idx]

@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING, Optional
 
+import torch
 from jaxtyping import Float
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -22,6 +23,7 @@ def run_dataset_through_model(
     hooked_model: HookedModel,
     dataloader: DataLoader,
     hooks: list[Hook],
+    dtype: torch.dtype,
     device: str = "cuda",
 ) -> None:
     """Simply pass all batches through a hooked model."""
@@ -29,6 +31,9 @@ def run_dataset_through_model(
     for batch in dataloader:
         data, _ = batch
         data = data.to(device=device)
+        # Change the dtype unless the inputs are integers (e.g. like they are for LMs)
+        if data.dtype != torch.int64:
+            data = data.to(dtype=dtype)
 
         hooked_model(data, hooks=hooks)
 
@@ -38,6 +43,7 @@ def collect_gram_matrices(
     module_names: list[str],
     data_loader: DataLoader,
     device: str,
+    dtype: torch.dtype,
     collect_output_gram: bool = True,
     hook_names: Optional[list[str]] = None,
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
@@ -49,10 +55,11 @@ def collect_gram_matrices(
     Args:
         hooked_model: The hooked model.
         module_names: The names of the modules to collect gram matrices for.
-        hook_names: Used to store the gram matrices in the hooked model.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
+        dtype: The data type to use for model computations.
         collect_output_gram: Whether to collect the gram matrix for the output of the final module.
+        hook_names: Used to store the gram matrices in the hooked model.
 
     Returns:
         A dictionary of gram matrices, where the keys are the hook names (a.k.a. node layer names)
@@ -85,7 +92,7 @@ def collect_gram_matrices(
             )
         )
 
-    run_dataset_through_model(hooked_model, data_loader, gram_hooks, device=device)
+    run_dataset_through_model(hooked_model, data_loader, gram_hooks, dtype=dtype, device=device)
 
     gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["gram"]
@@ -112,6 +119,7 @@ def collect_M_dash_and_Lambda_dash(
     hooked_model: HookedModel,
     data_loader: DataLoader,
     module_name: str,
+    dtype: torch.dtype,
     device: str,
     hook_name: Optional[str] = None,
 ) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
@@ -126,6 +134,7 @@ def collect_M_dash_and_Lambda_dash(
         data_loader: The data loader.
         module_name: The name of the module whose inputs are the node layer we collect the matrices
             M' and Lambda' for.
+        dtype: The data type to use for model computations.
         device: The device to run the model on.
         hook_name: The name of the hook to use to store the matrices in the hooked model.
 
@@ -145,7 +154,9 @@ def collect_M_dash_and_Lambda_dash(
         },
     )
 
-    run_dataset_through_model(hooked_model, data_loader, hooks=[interaction_hook], device=device)
+    run_dataset_through_model(
+        hooked_model, data_loader, hooks=[interaction_hook], dtype=dtype, device=device
+    )
 
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
     Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
@@ -164,6 +175,7 @@ def collect_interaction_edges(
     hooked_model: HookedModel,
     module_names: list[str],
     data_loader: DataLoader,
+    dtype: torch.dtype,
     device: str,
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
@@ -176,6 +188,7 @@ def collect_interaction_edges(
         hooked_model: The hooked model.
         module_names: The names of the modules to apply the hooks to.
         data_loader: The pytorch data loader.
+        dtype: The data type to use for model computations.
         device: The device to run the model on.
 
     Returns:
@@ -200,7 +213,7 @@ def collect_interaction_edges(
             )
         )
 
-    run_dataset_through_model(hooked_model, data_loader, edge_hooks, device=device)
+    run_dataset_through_model(hooked_model, data_loader, edge_hooks, dtype=dtype, device=device)
 
     edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {
         node_layer_name: hooked_model.hooked_data[node_layer_name]["edge"]

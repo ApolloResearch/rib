@@ -1,5 +1,5 @@
 exp_name: 2-node-layers
-mlp_path: /mnt/ssd-apollo/models/MNIST/checkpoints/lr-0.001_bs-64_2023-07-25_09-49-21/model_epoch_12.pt
+mlp_path: /mnt/ssd-apollo/models/MNIST/checkpoints/lr-0.001_bs-64_2023-08-31_10-42-52/model_epoch_12.pt
 batch_size: 256
 seed: 0
 truncation_threshold: 1e-3

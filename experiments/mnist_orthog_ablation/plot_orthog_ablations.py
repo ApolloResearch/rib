@@ -31,7 +31,7 @@ def main(results_file: str) -> None:
     plot_ablation_accuracies(
         accuracies=results["accuracies"],
         plot_file=plot_file,
-        exp_name=results["exp_name"],
+        exp_name=results["config"]["exp_name"],
         experiment_type="orthog",
     )
 

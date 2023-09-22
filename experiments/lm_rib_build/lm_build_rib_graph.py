@@ -203,10 +203,12 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         return None
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[config.dtype]
+
     seq_model, tlens_cfg_dict = load_sequential_transformer(config)
     seq_model.eval()
 
-    seq_model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    seq_model.to(device=torch.device(device), dtype=dtype)
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
@@ -222,6 +224,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         hooked_model=hooked_model,
         module_names=graph_module_names,
         data_loader=data_loader,
+        dtype=dtype,
         device=device,
         collect_output_gram=True,
         hook_names=config.node_layers,
@@ -232,6 +235,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         module_names=graph_module_names,
         hooked_model=hooked_model,
         data_loader=data_loader,
+        dtype=dtype,
         device=device,
         truncation_threshold=config.truncation_threshold,
         rotate_output=config.rotate_output,
@@ -243,6 +247,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         hooked_model=hooked_model,
         module_names=graph_module_names,
         data_loader=data_loader,
+        dtype=dtype,
         device=device,
     )
 

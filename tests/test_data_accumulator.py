@@ -10,6 +10,8 @@ def test_collect_gram_matrices():
     """Test collect gram matrices function"""
 
     torch.manual_seed(0)
+    dtype = torch.float32
+    device = "cpu"
 
     class TestModel(torch.nn.Module):
         def __init__(self):
@@ -28,13 +30,14 @@ def test_collect_gram_matrices():
 
     # Test with no module_names should raise assertion
     with pytest.raises(AssertionError):
-        collect_gram_matrices(hooked_mlp, [], data_loader, "cpu")
+        collect_gram_matrices(hooked_mlp, [], data_loader, device=device, dtype=dtype)
 
     module_names = ["linear", "relu"]
-    device = "cpu"
 
     # Run collect_gram_matrices
-    gram_matrices = collect_gram_matrices(hooked_mlp, module_names, data_loader, device)
+    gram_matrices = collect_gram_matrices(
+        hooked_mlp, module_names, data_loader, device=device, dtype=dtype
+    )
 
     # Ensure hooked_mlp.hooked_data got removed after collect_gram_matrices
     assert not hooked_mlp.hooked_data

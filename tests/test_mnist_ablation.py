@@ -150,6 +150,7 @@ def test_run_orthog_ablations():
     exp_name: null  # Prevent saving output
     mlp_path: OVERWRITE/IN/MOCK
     ablate_every_vec_cutoff: 2
+    dtype: float32
     module_names:
         - layers.1
         - layers.2
@@ -186,6 +187,7 @@ def test_run_rib_ablations():
     exp_name: null  # Prevent saving output
     interaction_graph_path: OVERWRITE/IN/MOCK
     ablate_every_vec_cutoff: 2
+    dtype: float32
     module_names:
         - layers.1  # 100 non-zero basis vectors remaining in the graph
         - layers.2  # 94 non-zero basis vectors remaining in the graph

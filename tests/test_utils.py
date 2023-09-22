@@ -56,6 +56,7 @@ def test_eval_model_accuracy() -> None:
     hooked_model = Mock()
     hooks = [Mock() for _ in range(3)]  # assume there are 3 hooks
     device = "cpu"
+    dtype = torch.float32
 
     # Create a simple DataLoader with hardcoded tensors
     data = torch.randn(3, 2)
@@ -69,15 +70,15 @@ def test_eval_model_accuracy() -> None:
 
     # Test case 1: All predictions are correct
     hooked_model.side_effect = model_output_generator([[1.2, -0.8], [-1.5, 2.1], [3.0, -1.5]])
-    assert eval_model_accuracy(hooked_model, dataloader, hooks, device) == 1.0
+    assert eval_model_accuracy(hooked_model, dataloader, hooks, dtype, device) == 1.0
 
     # Test case 2: Only one prediction is correct
     hooked_model.side_effect = model_output_generator([[-0.7, 1.2], [-1.5, 2.1], [3.0, -1.5]])
-    assert eval_model_accuracy(hooked_model, dataloader, hooks, device) == 2 / 3
+    assert eval_model_accuracy(hooked_model, dataloader, hooks, dtype, device) == 2 / 3
 
     # Test case 3: No predictions are correct
     hooked_model.side_effect = model_output_generator([[-0.7, 1.2], [1.5, -2.1], [-3.0, 1.5]])
-    assert eval_model_accuracy(hooked_model, dataloader, hooks, device) == 0.0
+    assert eval_model_accuracy(hooked_model, dataloader, hooks, dtype, device) == 0.0
 
 
 @pytest.mark.parametrize(

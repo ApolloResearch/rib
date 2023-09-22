@@ -101,6 +101,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         hooked_model=hooked_mlp,
         module_names=config.module_names,
         data_loader=test_loader,
+        dtype=TORCH_DTYPES[config.dtype],
         device=device,
         collect_output_gram=True,
     )
@@ -110,6 +111,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         module_names=config.module_names,
         hooked_model=hooked_mlp,
         data_loader=test_loader,
+        dtype=TORCH_DTYPES[config.dtype],
         device=device,
         truncation_threshold=config.truncation_threshold,
         rotate_output=config.rotate_output,
@@ -120,6 +122,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         module_names=config.module_names,
         hooked_model=hooked_mlp,
         data_loader=test_loader,
+        dtype=TORCH_DTYPES[config.dtype],
         device=device,
     )
 

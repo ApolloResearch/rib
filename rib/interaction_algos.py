@@ -52,6 +52,7 @@ def build_sorted_lambda_matrices(
     assert torch.allclose(
         lambda_matrix @ lambda_matrix_pinv,
         torch.eye(lambda_matrix.shape[0], dtype=lambda_vals.dtype, device=lambda_vals.device),
+        atol=1e-4,
     ), "Lambda matrix and its pseudoinverse are not inverses of each other."
 
     return lambda_matrix, lambda_matrix_pinv
@@ -62,6 +63,7 @@ def calculate_interaction_rotations(
     module_names: list[str],
     hooked_model: HookedModel,
     data_loader: DataLoader,
+    dtype: torch.dtype,
     device: str,
     truncation_threshold: float = 1e-5,
     rotate_output: bool = True,
@@ -84,6 +86,7 @@ def calculate_interaction_rotations(
         module_names: The names of the modules to build the graph from, in order of appearance.
         hooked_model: The hooked model.
         data_loader: The data loader.
+        dtype: The data type to use for model computations.
         device: The device to run the model on.
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_output: Whether to rotate the output layer to its eigenbasis (which is equivalent
@@ -134,6 +137,7 @@ def calculate_interaction_rotations(
             hooked_model=hooked_model,
             data_loader=data_loader,
             module_name=module_name,
+            dtype=dtype,
             device=device,
             hook_name=hook_name,
         )

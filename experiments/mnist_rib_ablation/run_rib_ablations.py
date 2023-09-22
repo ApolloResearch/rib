@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
 
-from rib.hook_fns import rotate_orthog_pre_forward_hook_fn
+from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix
 from rib.log import logger
@@ -121,7 +121,7 @@ def ablate_and_test(
         rotation_hook = Hook(
             name=module_name,
             data_key="rotation",
-            fn=rotate_orthog_pre_forward_hook_fn,
+            fn=rotate_pre_forward_hook_fn,
             module_name=module_name,
             fn_kwargs={"rotation_matrix": rotation_matrix},
         )
@@ -165,7 +165,6 @@ def run_ablations(
     hooked_mlp = HookedModel(mlp)
 
     test_loader = load_mnist_dataloader(train=False, batch_size=batch_size)
-
     results: dict[str, dict[int, float]] = {}
     for module_name, (C, C_pinv) in zip(module_names, interaction_matrices):
         ablation_schedule = calc_ablation_schedule(

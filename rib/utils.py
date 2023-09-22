@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Callable, Optional, Type, TypeVar, Union
 import numpy as np
 import torch
 import yaml
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from pydantic import BaseModel
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -24,6 +24,8 @@ def eval_model_accuracy(
 ) -> float:
     """Run the model on the dataset and return the accuracy.
 
+    In the case where the output has a position dimension, we take the last position as the output.
+
     Args:
         hooked_model: The model to evaluate.
         dataloader: The dataloader for the dataset.
@@ -40,10 +42,20 @@ def eval_model_accuracy(
     for batch in dataloader:
         data, labels = batch
         data, labels = data.to(device), labels.to(device)
-        output: Float[Tensor, "batch d_vocab"] = hooked_model(data, hooks=hooks)
+        raw_output: Union[
+            Float[Tensor, "batch d_vocab"], tuple[Float[Tensor, "batch pos d_vocab"]]
+        ] = hooked_model(data, hooks=hooks)
+        if isinstance(raw_output, tuple):
+            assert len(raw_output) == 1, "Only one output is supported."
+            # Check if the pos is 1, if so, squeeze it out. (This is the case for modular addition)
+            output: Float[Tensor, "... d_vocab"] = raw_output[0]
+            if output.ndim == 3:
+                output = output[:, -1, :]
+        else:
+            output = raw_output
 
         # Assuming output is raw logits and labels are class indices.
-        predicted_labels: Float[Tensor, "batch"] = output.argmax(dim=1)
+        predicted_labels: Int[Tensor, "batch"] = output.argmax(dim=-1)
         correct_predictions += (predicted_labels == labels).sum().item()
         total_predictions += labels.shape[0]
 

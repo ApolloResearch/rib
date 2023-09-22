@@ -181,6 +181,9 @@ class SequentialTransformer(nn.Module):
 
         We define a mapping from each weight-bias pair to a function defining how to fold the bias.
         """
+        if self.has_folded_bias:
+            raise ValueError("Model already has folded bias")
+
         fold_fns: dict[str, Callable] = {
             "W_E": concat_zeros,
             "W_pos": concat_ones,

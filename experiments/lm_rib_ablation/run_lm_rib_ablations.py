@@ -61,7 +61,7 @@ class Config(BaseModel):
 
 
 def load_sequential_transformer(
-    ablation_config: Config, graph_config_dict: dict
+    ablation_config: Config, graph_config_dict: dict, device: str
 ) -> SequentialTransformer:
     """Load a SequentialTransformer model from a pretrained transformerlens model.
 
@@ -71,7 +71,9 @@ def load_sequential_transformer(
     SequentialTransformerConfig, which is then used to create a SequentialTransformer.
 
     Args:
-        config (Config): The config, containing either `tlens_pretrained` or `tlens_model_path`.
+        ablation_config: The config for the ablation experiment.
+        graph_config_dict: The config dictionary used to build the interaction graph.
+        device: The device to run the model on.
 
     Returns:
         - SequentialTransformer: The SequentialTransformer model.
@@ -90,7 +92,9 @@ def load_sequential_transformer(
         # The entire tlens config (including default values)
         tlens_cfg_dict = tlens_model.cfg.to_dict()
         # Load the weights from the tlens model
-        tlens_model.load_state_dict(torch.load(graph_config_dict["tlens_model_path"]))
+        tlens_model.load_state_dict(
+            torch.load(graph_config_dict["tlens_model_path"], map_location=device)
+        )
 
     seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
     # Set the dtype to the one specified in the config for this script (as opposed to the one used
@@ -183,7 +187,7 @@ def run_ablations(
         A dictionary mapping node layers to accuracy results.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    seq_model = load_sequential_transformer(ablation_config, graph_config_dict)
+    seq_model = load_sequential_transformer(ablation_config, graph_config_dict, device)
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=TORCH_DTYPES[ablation_config.dtype])
     seq_model.fold_bias()

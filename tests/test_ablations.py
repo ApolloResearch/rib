@@ -207,7 +207,7 @@ def ablation_mock_run(
                 assert _is_roughly_sorted(accuracies, k=sort_tolerance)
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 def test_run_mnist_orthog_ablations():
     mock_orthog_config = """
     exp_name: null  # Prevent saving output

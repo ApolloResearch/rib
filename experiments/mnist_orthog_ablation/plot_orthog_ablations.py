@@ -32,6 +32,7 @@ def main(results_file: str) -> None:
         accuracies=results["accuracies"],
         plot_file=plot_file,
         exp_name=results["config"]["exp_name"],
+        model_name="MLP MNIST",
         experiment_type="orthog",
     )
 

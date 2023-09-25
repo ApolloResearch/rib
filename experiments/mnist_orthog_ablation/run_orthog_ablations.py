@@ -36,27 +36,18 @@ from typing import Optional
 import fire
 import torch
 import yaml
-from jaxtyping import Float
 from pydantic import BaseModel, Field, field_validator
-from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from tqdm import tqdm
 
+from rib.ablations import ablate_and_test
 from rib.data_accumulator import collect_gram_matrices
-from rib.hook_fns import rotate_pre_forward_hook_fn
-from rib.hook_manager import Hook, HookedModel
-from rib.linalg import calc_rotation_matrix, eigendecompose
+from rib.hook_manager import HookedModel
+from rib.linalg import eigendecompose
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
-from rib.utils import (
-    REPO_ROOT,
-    calc_ablation_schedule,
-    eval_model_accuracy,
-    load_config,
-    overwrite_output,
-)
+from rib.utils import REPO_ROOT, calc_ablation_schedule, load_config, overwrite_output
 
 
 class Config(BaseModel):
@@ -95,57 +86,6 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     )
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
     return test_loader
-
-
-def ablate_and_test(
-    hooked_mlp: HookedModel,
-    module_name: str,
-    test_loader: DataLoader,
-    eigenvecs: Float[Tensor, "d_hidden d_hidden"],
-    dtype: torch.dtype,
-    device: str,
-    ablation_schedule: list[int],
-) -> dict[int, float]:
-    """Ablate eigenvectors and test the model accuracy.
-
-    Args:
-        hooked_mlp: The hooked model.
-        module_name: The name of the module whose inputs we want to rotate and ablate.
-        hook_config: The config for the hook point.
-        test_loader: The DataLoader for the test data.
-        eigenvecs: A matrix whose columns are the eigenvectors of the gram matrix.
-        dtype: The data type to use for model computations.
-        device: The device to run the model on.
-        ablation_schedule: A list of the number of vectors to ablate at each step.
-
-    Returns:
-        Dictionary mapping the number of ablated vectors to the resulting accuracy.
-    """
-
-    accuracies: dict[int, float] = {}
-    # Iterate through possible number of ablated vectors.
-    for n_ablated_vecs in tqdm(
-        ablation_schedule,
-        total=len(ablation_schedule),
-        desc=f"Ablating {module_name}",
-    ):
-        rotation_matrix = calc_rotation_matrix(
-            vecs=eigenvecs, vecs_pinv=eigenvecs.T, n_ablated_vecs=n_ablated_vecs
-        )
-        rotation_hook = Hook(
-            name=module_name,
-            data_key="rotation",
-            fn=rotate_pre_forward_hook_fn,
-            module_name=module_name,
-            fn_kwargs={"rotation_matrix": rotation_matrix},
-        )
-
-        accuracy_ablated = eval_model_accuracy(
-            hooked_mlp, test_loader, hooks=[rotation_hook], dtype=dtype, device=device
-        )
-        accuracies[n_ablated_vecs] = accuracy_ablated
-
-    return accuracies
 
 
 def run_ablations(
@@ -190,14 +130,16 @@ def run_ablations(
             n_vecs=len(eigenvecs),
         )
         module_accuracies: dict[int, float] = ablate_and_test(
-            hooked_mlp=hooked_mlp,
+            hooked_model=hooked_mlp,
             module_name=module_name,
+            interaction_rotation=eigenvecs,
+            interaction_rotation_pinv=eigenvecs.T,
             test_loader=test_loader,
-            eigenvecs=eigenvecs,
-            dtype=dtype,
             device=device,
             ablation_schedule=ablation_schedule,
+            hook_name=module_name,
         )
+
         results[module_name] = module_accuracies
 
     return results

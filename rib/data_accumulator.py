@@ -32,7 +32,7 @@ def run_dataset_through_model(
         data, _ = batch
         data = data.to(device=device)
         # Change the dtype unless the inputs are integers (e.g. like they are for LMs)
-        if data.dtype != torch.int64:
+        if data.dtype not in [torch.int64, torch.int32]:
             data = data.to(dtype=dtype)
 
         hooked_model(data, hooks=hooks)

@@ -15,45 +15,31 @@ is not useful.
 Usage:
     python run_lm_rib_ablations.py <path/to/yaml_config_file>
 
-TODO: This script will take X minutes...
 """
 
 import json
-from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import fire
 import torch
 import yaml
 from datasets import load_dataset
 from jaxtyping import Float
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 from torch import Tensor
 from torch.utils.data import DataLoader, TensorDataset
-from torchvision import datasets, transforms
-from tqdm import tqdm
 from transformer_lens import HookedTransformer
 from transformers import GPT2TokenizerFast
 
+from rib.ablations import ablate_and_test
 from rib.data import ModularArithmeticDataset
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
-from rib.hook_fns import rotate_pre_forward_hook_fn
-from rib.hook_manager import Hook, HookedModel
-from rib.interaction_algos import calculate_interaction_rotations
-from rib.linalg import calc_rotation_matrix
+from rib.hook_manager import HookedModel
 from rib.log import logger
-from rib.models import MLP, SequentialTransformer, SequentialTransformerConfig
+from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.types import TORCH_DTYPES
-from rib.utils import (
-    REPO_ROOT,
-    calc_ablation_schedule,
-    eval_model_accuracy,
-    load_config,
-    overwrite_output,
-    set_seed,
-)
+from rib.utils import calc_ablation_schedule, load_config, overwrite_output, set_seed
 
 
 class Config(BaseModel):
@@ -179,80 +165,8 @@ def create_data_loader(
     return test_loader
 
 
-def ablate_and_test(
-    hooked_model: HookedModel,
-    module_name: str,
-    interaction_rotation: Float[Tensor, "d_hidden d_hidden_trunc"],
-    interaction_rotation_pinv: Float[Tensor, "d_hidden_trunc d_hidden"],
-    test_loader: DataLoader,
-    device: str,
-    ablation_schedule: list[int],
-    hook_name: Optional[str] = None,
-) -> dict[int, float]:
-    """Ablate eigenvectors and test the model accuracy.
-
-    Args:
-        hooked_model: The hooked model.
-        module_name: The name of the module whose inputs we want to rotate and ablate.
-        interaction_rotation: The matrix that rotates activations to the interaction basis. (C)
-        interaction_rotation_pinv: The pseudo-inverse of the interaction rotation matrix. (C^+)
-        hook_config: The config for the hook point.
-        test_loader: The DataLoader for the test data.
-        device: The device to run the model on.
-        ablation_schedule: A list of the number of vectors to ablate at each step.
-        hook_name: The name of the hook point to use. If None, defaults to `module_name`.
-
-    Returns:
-        Dictionary mapping the number of ablated vectors to the resulting accuracy.
-    """
-
-    if hook_name is None:
-        hook_name = module_name
-
-    accuracies: dict[int, float] = {}
-    # Iterate through possible number of ablated vectors.
-    for n_ablated_vecs in tqdm(
-        ablation_schedule,
-        total=len(ablation_schedule),
-        desc=f"Ablating {module_name}",
-    ):
-        if n_ablated_vecs == 0:
-            print("SDS")
-        interaction_rotation = interaction_rotation.to(device)
-        interaction_rotation_pinv = interaction_rotation_pinv.to(device)
-        rotation_matrix = calc_rotation_matrix(
-            vecs=interaction_rotation,
-            vecs_pinv=interaction_rotation_pinv,
-            n_ablated_vecs=n_ablated_vecs,
-        )
-        rotation_hook = Hook(
-            name=hook_name,
-            data_key="rotation",
-            fn=rotate_pre_forward_hook_fn,
-            module_name=module_name,
-            fn_kwargs={"rotation_matrix": rotation_matrix},
-        )
-
-        accuracy_ablated = eval_model_accuracy(
-            hooked_model, test_loader, hooks=[rotation_hook], device=device
-        )
-        accuracies[n_ablated_vecs] = accuracy_ablated
-
-    return accuracies
-
-
 def run_ablations(
-    # model_config_dict: dict,
-    # tlens_pretrained: Optional[str],
-    # tlens_model_path: Optional[Path],
-    # module_names: list[str],
-    # interaction_matrices: list[
-    #     tuple[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden_trunc d_hidden"]]
-    # ],
-    # ablate_every_vec_cutoff: Optional[int],
-    # batch_size: int = 512,
     ablation_config: Config,
-    model_config_dict: dict[str, Any],
     graph_config_dict: dict[str, Any],
     interaction_matrices: list[
         tuple[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden_trunc d_hidden"]]
@@ -262,13 +176,11 @@ def run_ablations(
 
     Args:
         ablation_config: The config for the ablation experiment.
-        model_config_dict: The config dictionary used for training the mlp.
         graph_config_dict: The config dictionary used to build the interaction graph.
         interaction_matrices: The interaction rotation matrix and its pseudoinverse.
 
-
     Returns:
-        A dictionary mapping node lyae to accuracy results.
+        A dictionary mapping node layers to accuracy results.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     seq_model = load_sequential_transformer(ablation_config, graph_config_dict)
@@ -278,18 +190,6 @@ def run_ablations(
     hooked_model = HookedModel(seq_model)
 
     test_loader = create_data_loader(ablation_config, graph_config_dict, train=False)
-
-    # # Check if the model outputs reasonable things
-    # data, labels = next(iter(test_loader))
-    overall_correct = 0
-    overall_total = 0
-    # Iterate over the whole dataset
-    for data, labels in tqdm(test_loader, total=len(test_loader), desc="Checking model output"):
-        output = seq_model(data.to(device=device))[0][:, -1, :]
-        correct = (output.argmax(dim=-1) == labels.to(device=device)).sum()
-        overall_correct += correct
-        overall_total += len(labels)
-    print(f"Model accuracy: {overall_correct / overall_total}")
 
     assert (
         graph_config_dict["tlens_pretrained"] is None
@@ -325,10 +225,10 @@ def main(config_path_str: str) -> None:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
 
+    set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
-    # Get the interaction rotations and their pseudoinverses (C and C_pinv) using the module_names
-    # as keys
+    # Get the interaction rotations and their pseudoinverses (C and C_pinv)
     interaction_matrices: list[
         tuple[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden_trunc d_hidden"]]
     ] = []
@@ -350,7 +250,6 @@ def main(config_path_str: str) -> None:
 
     accuracies: dict[str, dict[int, float]] = run_ablations(
         ablation_config=config,
-        model_config_dict=interaction_graph_info["model_config_dict"],
         graph_config_dict=interaction_graph_info["config"],
         interaction_matrices=interaction_matrices,
     )

@@ -34,7 +34,7 @@ def eval_model_accuracy(
         hooked_model: The model to evaluate.
         dataloader: The dataloader for the dataset.
         hooks: The hooks to use.
-        dtype: The data type to use for model computations.
+        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
         device: The device to run the model on.
 
     Returns:
@@ -48,7 +48,7 @@ def eval_model_accuracy(
         data, labels = batch
         data, labels = data.to(device=device), labels.to(device)
         # Change the dtype unless the inputs are integers (e.g. like they are for LMs)
-        if data.dtype != torch.int64:
+        if data.dtype not in [torch.int64, torch.int32]:
             data = data.to(dtype=dtype)
         raw_output: Union[
             Float[Tensor, "batch d_vocab"], tuple[Float[Tensor, "batch pos d_vocab"]]

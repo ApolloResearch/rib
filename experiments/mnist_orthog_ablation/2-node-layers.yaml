@@ -5,3 +5,4 @@ dtype: float32
 module_names:
   - layers.1
   - layers.2
+seed: 0

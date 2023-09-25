@@ -7,3 +7,4 @@ module_names:  # Rotate input to these modules
   - layers.1
   - layers.2
 batch_size: 512
+seed: 0

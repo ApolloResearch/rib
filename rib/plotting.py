@@ -135,6 +135,7 @@ def plot_ablation_accuracies(
     accuracies: dict[str, dict[str, float]],
     plot_file: Path,
     exp_name: str,
+    model_name: str,
     experiment_type: Literal["orthog", "rib"],
 ) -> None:
     """Plot accuracy vs number of remaining basis vectors.
@@ -163,7 +164,7 @@ def plot_ablation_accuracies(
         y_values = [
             accuracies[module_name][str(n_ablated_vecs)] for n_ablated_vecs in n_ablated_vecs
         ]
-        axs[i].plot(n_vecs_remaining, y_values, "-o", label="MNIST test")
+        axs[i].plot(n_vecs_remaining, y_values, "-o", label="test")
 
         title_extra = (
             "n_remaining_eigenvalues" if experiment_type == "orthog" else "n_remaining_basis_vecs"
@@ -174,7 +175,7 @@ def plot_ablation_accuracies(
             else "Number of remaining interaction basis vectors"
         )
 
-        axs[i].set_title(f"{exp_name}-MLP MNIST acc vs {title_extra} for input to {module_name}")
+        axs[i].set_title(f"{exp_name} {model_name} acc vs {title_extra} for input to {module_name}")
         axs[i].set_xlabel(xlabel_extra)
         axs[i].set_ylabel("Accuracy")
         axs[i].set_ylim(0, 1)

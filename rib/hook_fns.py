@@ -123,15 +123,18 @@ def gram_pre_forward_hook_fn(
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
-def rotate_orthog_pre_forward_hook_fn(
+def rotate_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: tuple[Float[Tensor, "batch d_hidden"]],
     rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
     **_: Any,
-) -> tuple[Float[Tensor, "batch d_hidden"]]:
+) -> tuple[Float[Tensor, "batch d_hidden"], ...]:
     """Hook function for rotating the input tensor to a module.
 
     The input is rotated by the specified rotation matrix.
+
+    Handles multiple inputs by concatenating over the hidden dimension and then splitting the
+    rotated tensor back into the original input sizes.
 
     Args:
         module: Module that the hook is attached to (not used).
@@ -142,8 +145,12 @@ def rotate_orthog_pre_forward_hook_fn(
     Returns:
         Rotated activations.
     """
-    in_acts = inputs[0].detach().clone()
-    return (in_acts @ rotation_matrix,)
+    # Concatenate over the hidden dimension
+    in_hidden_dims = [x.shape[-1] for x in inputs]
+    in_acts = torch.cat(inputs, dim=-1)
+    rotated = in_acts @ rotation_matrix
+    adjusted_inputs = tuple(torch.split(rotated, in_hidden_dims, dim=-1))
+    return adjusted_inputs
 
 
 def M_dash_and_Lambda_dash_pre_forward_hook_fn(

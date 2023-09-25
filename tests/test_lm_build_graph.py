@@ -31,7 +31,7 @@ tlens_pretrained: null
 tlens_model_path: OVERWRITE/IN/MOCK
 dataset: modular_arithmetic
 batch_size: 16
-truncation_threshold: 1e-6
+truncation_threshold: 1e-20
 rotate_output: false
 last_pos_only: true
 dtype: float32

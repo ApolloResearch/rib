@@ -47,7 +47,13 @@ from rib.linalg import eigendecompose
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
-from rib.utils import REPO_ROOT, calc_ablation_schedule, load_config, overwrite_output
+from rib.utils import (
+    REPO_ROOT,
+    calc_ablation_schedule,
+    load_config,
+    overwrite_output,
+    set_seed,
+)
 
 
 class Config(BaseModel):
@@ -59,6 +65,7 @@ class Config(BaseModel):
     )
     dtype: str
     module_names: list[str]
+    seed: int
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -148,6 +155,8 @@ def run_ablations(
 def main(config_path_str: str) -> None:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
+
+    set_seed(config.seed)
 
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)

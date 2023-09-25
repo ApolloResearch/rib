@@ -216,7 +216,7 @@ def run_ablations(
             ablation_schedule=ablation_schedule,
             hook_name=hook_name,
         )
-        results[module_name] = module_accuracies
+        results[hook_name] = module_accuracies
 
     return results
 

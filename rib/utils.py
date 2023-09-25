@@ -46,7 +46,10 @@ def eval_model_accuracy(
 
     for batch in dataloader:
         data, labels = batch
-        data, labels = data.to(device=device, dtype=dtype), labels.to(device)
+        data, labels = data.to(device=device), labels.to(device)
+        # Change the dtype unless the inputs are integers (e.g. like they are for LMs)
+        if data.dtype != torch.int64:
+            data = data.to(dtype=dtype)
         raw_output: Union[
             Float[Tensor, "batch d_vocab"], tuple[Float[Tensor, "batch pos d_vocab"]]
         ] = hooked_model(data, hooks=hooks)

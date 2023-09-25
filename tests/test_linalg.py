@@ -99,10 +99,6 @@ def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
             torch.diag(torch.tensor([1.0, 2.0, 3.0])),
             torch.diag(torch.tensor([1.0, 0.5, 1.0 / 3.0])),
         ),
-        (
-            torch.diag(torch.tensor([1.0, 0.0, 3.0])),
-            torch.diag(torch.tensor([1.0, float("inf"), 1.0 / 3.0])),
-        ),
     ],
 )
 def test_pinv_diag(x, expected):
@@ -114,6 +110,7 @@ def test_pinv_diag(x, expected):
     "x",
     [
         (torch.tensor([[1.0, 0.5], [0.0, 2.0]])),
+        (torch.diag(torch.tensor([1.0, 0.0, 3.0]))),
     ],
 )
 def test_pinv_diag_failure(x):

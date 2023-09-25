@@ -128,7 +128,12 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
     assert torch.allclose(
         x, torch.diag(x.diag())
     ), "It appears there are non-zero off-diagonal entries. "
+
     res = torch.diag(x.diag().reciprocal())
+
+    # Check if there are any 'inf' values in the result
+    assert not torch.isinf(res).any(), "The resulting matrix contains 'inf' values."
+
     return res
 
 

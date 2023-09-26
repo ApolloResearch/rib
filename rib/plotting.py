@@ -137,6 +137,7 @@ def plot_ablation_accuracies(
     exp_name: str,
     model_name: str,
     experiment_type: Literal["orthog", "rib"],
+    log_scale: bool = False,
 ) -> None:
     """Plot accuracy vs number of remaining basis vectors.
 
@@ -146,6 +147,7 @@ def plot_ablation_accuracies(
         plot_file: The file to save the plot to.
         exp_name: The name of the experiment
         experiment_type: Either 'orthog' or 'rib'.
+        log_scale: Whether to use a log scale for the x-axis. Defaults to False.
     """
     module_names = list(accuracies.keys())
     n_plots = len(module_names)
@@ -179,6 +181,10 @@ def plot_ablation_accuracies(
         axs[i].set_xlabel(xlabel_extra)
         axs[i].set_ylabel("Accuracy")
         axs[i].set_ylim(0, 1)
+
+        if log_scale:
+            axs[i].set_xscale("log")
+
         axs[i].grid(True)
         axs[i].legend()
 

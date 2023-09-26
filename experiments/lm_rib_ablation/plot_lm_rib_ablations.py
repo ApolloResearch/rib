@@ -31,6 +31,7 @@ def main(results_file: str) -> None:
         exp_name=results["exp_name"],
         model_name="LM",
         experiment_type="rib",
+        log_scale=True,
     )
 
 

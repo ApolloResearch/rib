@@ -50,7 +50,10 @@ from rib.utils import (
 
 
 class Config(BaseModel):
-    exp_name: str = Field(..., description="The name of the experiment")
+    exp_name: Optional[str] = Field(
+        None,
+        description="The name of the experiment. If None, don't write results to file.",
+    )
     tlens_pretrained: Optional[Literal["gpt2"]] = Field(
         None, description="Pretrained transformer lens model."
     )

@@ -33,20 +33,13 @@ from typing import Any, Literal, Optional
 
 import fire
 import torch
-import yaml
-from datasets import load_dataset
 from pydantic import BaseModel, Field, field_validator, model_validator
-from torch.utils.data import DataLoader, TensorDataset
-from transformer_lens import HookedTransformer
-from transformers import GPT2TokenizerFast
 
-from rib.data import ModularArithmeticDataset
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
+from rib.loader import create_data_loader, load_sequential_transformer
 from rib.log import logger
-from rib.models import SequentialTransformer, SequentialTransformerConfig
-from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.types import TORCH_DTYPES
 from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
 
@@ -97,102 +90,6 @@ class Config(BaseModel):
         return self
 
 
-def load_sequential_transformer(config: Config, device: str) -> tuple[SequentialTransformer, dict]:
-    """Load a SequentialTransformer model from a pretrained transformerlens model.
-
-    Requires config to contain a pretrained model name or a path to a transformerlens model.
-
-    First loads a HookedTransformer model, then uses its config to create an instance of
-    SequentialTransformerConfig, which is then used to create a SequentialTransformer.
-
-    Args:
-        config (Config): The config, containing either `tlens_pretrained` or `tlens_model_path`.
-        device (str): The device for mapping the stored weights to.
-
-    Returns:
-        - SequentialTransformer: The SequentialTransformer model.
-        - dict: The config used in the transformerlens model.
-    """
-
-    if config.tlens_pretrained is not None:
-        tlens_model = HookedTransformer.from_pretrained(config.tlens_pretrained)
-        # Create a SequentialTransformerConfig from the HookedTransformerConfig
-        tlens_cfg_dict = tlens_model.cfg.to_dict()
-    elif config.tlens_model_path is not None:
-        with open(config.tlens_model_path.parent / "config.yaml", "r") as f:
-            # The config specified in the YAML file used to train the tlens model
-            provided_tlens_cfg_dict = yaml.safe_load(f)["model"]
-        tlens_model = HookedTransformer(provided_tlens_cfg_dict)
-        # The entire tlens config (including default values)
-        tlens_cfg_dict = tlens_model.cfg.to_dict()
-
-        # Load the weights from the saved model
-        tlens_model.load_state_dict(torch.load(config.tlens_model_path, map_location=device))
-
-    seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
-    # Set the dtype to the one specified in the config for this script (as opposed to the one used
-    # to train the tlens model)
-    seq_cfg.dtype = TORCH_DTYPES[config.dtype]
-    seq_model = SequentialTransformer(seq_cfg, config.node_layers, config.last_pos_only)
-
-    # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(list(seq_model.state_dict().keys()), tlens_model)
-    seq_model.load_state_dict(state_dict)
-
-    return seq_model, tlens_cfg_dict
-
-
-def create_data_loader(config: Config, train: bool = False) -> DataLoader:
-    """Create a DataLoader for the dataset specified in `config.dataset`.
-
-    Args:
-        config (Config): The config, containing the dataset name.
-
-    Returns:
-        DataLoader: The DataLoader to use for building the graph.
-    """
-    if config.dataset == "modular_arithmetic":
-        # Get the dataset config from our training config
-        assert config.tlens_model_path is not None, "tlens_model_path must be specified"
-        with open(config.tlens_model_path.parent / "config.yaml", "r") as f:
-            # The config specified in the YAML file used to train the tlens model
-            train_config = yaml.safe_load(f)["train"]
-        test_data = ModularArithmeticDataset(
-            train_config["modulus"], train_config["frac_train"], seed=config.seed, train=train
-        )
-        # Note that the batch size for training typically gives 1 batch per epoch. We use a smaller
-        # batch size here, mostly for verifying that our iterative code works.
-        test_loader = DataLoader(test_data, batch_size=config.batch_size, shuffle=False)
-    elif config.dataset == "wikitext":
-        # Step 1: Load a sample language modelling dataset
-        dataset = load_dataset("wikitext", "wikitext-103-raw-v1", split="test[:30%]")
-
-        # Step 2: Tokenize using GPT-2 tokenizer
-        tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
-        tokenizer.pad_token = tokenizer.eos_token
-
-        # Remove empty data points
-        dataset = dataset.filter(lambda example: len(example["text"]) > 0)
-        tokenized_dataset = dataset.map(
-            lambda examples: tokenizer(
-                examples["text"], truncation=True, padding="max_length", max_length=1024
-            ),
-            batched=True,
-        )
-        # Create a dataloader from the Dataset
-        input_ids = torch.tensor(tokenized_dataset["input_ids"], dtype=torch.long)
-
-        # Create labels by shifting input_ids by 1
-        labels = input_ids.clone()
-        labels[:, :-1] = input_ids[:, 1:]
-        labels[:, -1] = tokenizer.pad_token_id
-
-        test_loader = DataLoader(
-            TensorDataset(input_ids, labels), batch_size=config.batch_size, shuffle=True
-        )
-    return test_loader
-
-
 def main(config_path_str: str) -> Optional[dict[str, Any]]:
     """Build the interaction graph and store it on disk."""
     config_path = Path(config_path_str)
@@ -206,25 +103,36 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         logger.info("Exiting.")
         return None
 
+    assert (
+        config.tlens_pretrained is None and config.tlens_model_path is not None
+    ), "Currently can't build graphs for pretrained models due to memory limits."
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
-    seq_model, tlens_cfg_dict = load_sequential_transformer(config, device=device)
+    seq_model, tlens_cfg_dict = load_sequential_transformer(
+        node_layers=config.node_layers,
+        last_pos_only=config.last_pos_only,
+        tlens_pretrained=config.tlens_pretrained,
+        tlens_model_path=config.tlens_model_path,
+        dtype=dtype,
+        device=device,
+    )
     seq_model.eval()
-
     seq_model.to(device=torch.device(device), dtype=dtype)
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    data_loader = create_data_loader(config)
+    data_loader = create_data_loader(
+        dataset_name=config.dataset,
+        tlens_model_path=config.tlens_model_path,
+        seed=config.seed,
+        batch_size=config.batch_size,
+    )
 
     # Test model accuracy before graph building
     accuracy = eval_model_accuracy(hooked_model, data_loader, dtype=dtype, device=device)
     logger.info("Model accuracy on dataset: %.2f%%", accuracy * 100)
-
-    assert (
-        config.tlens_pretrained is None
-    ), "Currently can't build graphs for pretrained models due to memory limits."
 
     # Don't build the graph for the section of the model before the first node layer
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]

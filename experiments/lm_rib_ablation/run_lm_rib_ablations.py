@@ -39,7 +39,13 @@ from rib.log import logger
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.types import TORCH_DTYPES
-from rib.utils import calc_ablation_schedule, load_config, overwrite_output, set_seed
+from rib.utils import (
+    calc_ablation_schedule,
+    eval_model_accuracy,
+    load_config,
+    overwrite_output,
+    set_seed,
+)
 
 
 class Config(BaseModel):
@@ -187,9 +193,10 @@ def run_ablations(
         A dictionary mapping node layers to accuracy results.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[ablation_config.dtype]
     seq_model = load_sequential_transformer(ablation_config, graph_config_dict, device)
     seq_model.eval()
-    seq_model.to(device=torch.device(device), dtype=TORCH_DTYPES[ablation_config.dtype])
+    seq_model.to(device=torch.device(device), dtype=dtype)
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
@@ -198,6 +205,9 @@ def run_ablations(
     assert (
         graph_config_dict["tlens_pretrained"] is None
     ), "Currently can't build graphs for pretrained models due to memory limits."
+
+    accuracy = eval_model_accuracy(hooked_model, test_loader, dtype=dtype, device=device)
+    logger.info("Accuracy of model without any ablation: %s", accuracy)
 
     # Don't build the graph for the section of the model before the first node layer
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
@@ -259,6 +269,7 @@ def main(config_path_str: str) -> None:
     )
     results = {
         "exp_name": config.exp_name,
+        "config": json.loads(config.model_dump_json()),
         "accuracies": accuracies,
     }
     if config.exp_name is not None:

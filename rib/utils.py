@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).parent.parent
 def eval_model_accuracy(
     hooked_model: "HookedModel",
     dataloader: DataLoader,
-    hooks: list["Hook"],
+    hooks: Optional[list["Hook"]] = None,
     dtype: torch.dtype = torch.float32,
     device: str = "cuda",
 ) -> float:

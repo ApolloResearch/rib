@@ -48,7 +48,7 @@ from rib.log import logger
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.types import TORCH_DTYPES
-from rib.utils import load_config, overwrite_output, set_seed
+from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
 
 
 class Config(BaseModel):
@@ -97,7 +97,7 @@ class Config(BaseModel):
         return self
 
 
-def load_sequential_transformer(config: Config) -> tuple[SequentialTransformer, dict]:
+def load_sequential_transformer(config: Config, device: str) -> tuple[SequentialTransformer, dict]:
     """Load a SequentialTransformer model from a pretrained transformerlens model.
 
     Requires config to contain a pretrained model name or a path to a transformerlens model.
@@ -107,6 +107,7 @@ def load_sequential_transformer(config: Config) -> tuple[SequentialTransformer, 
 
     Args:
         config (Config): The config, containing either `tlens_pretrained` or `tlens_model_path`.
+        device (str): The device for mapping the stored weights to.
 
     Returns:
         - SequentialTransformer: The SequentialTransformer model.
@@ -124,6 +125,9 @@ def load_sequential_transformer(config: Config) -> tuple[SequentialTransformer, 
         tlens_model = HookedTransformer(provided_tlens_cfg_dict)
         # The entire tlens config (including default values)
         tlens_cfg_dict = tlens_model.cfg.to_dict()
+
+        # Load the weights from the saved model
+        tlens_model.load_state_dict(torch.load(config.tlens_model_path, map_location=device))
 
     seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
     # Set the dtype to the one specified in the config for this script (as opposed to the one used
@@ -205,7 +209,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
-    seq_model, tlens_cfg_dict = load_sequential_transformer(config)
+    seq_model, tlens_cfg_dict = load_sequential_transformer(config, device=device)
     seq_model.eval()
 
     seq_model.to(device=torch.device(device), dtype=dtype)
@@ -213,6 +217,11 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     hooked_model = HookedModel(seq_model)
 
     data_loader = create_data_loader(config)
+
+    # Test model accuracy before graph building
+    accuracy = eval_model_accuracy(hooked_model, data_loader, dtype=dtype, device=device)
+    logger.info("Model accuracy on dataset: %.2f%%", accuracy * 100)
+
     assert (
         config.tlens_pretrained is None
     ), "Currently can't build graphs for pretrained models due to memory limits."

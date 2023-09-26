@@ -26,6 +26,12 @@ import torch
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
+from experiments.lm_orthog_ablation.run_lm_orthog_ablations import (
+    main as lm_orthog_ablations_main,
+)
+from experiments.lm_orthog_ablation.run_lm_orthog_ablations import (
+    run_ablations as run_lm_orthog_ablations,
+)
 from experiments.lm_rib_ablation.run_lm_rib_ablations import (
     main as lm_rib_ablations_main,
 )
@@ -38,7 +44,9 @@ from experiments.mnist_orthog_ablation.run_orthog_ablations import (
 from experiments.mnist_orthog_ablation.run_orthog_ablations import (
     run_ablations as run_mnist_orthog_ablations,
 )
-from experiments.mnist_rib_ablation.run_rib_ablations import main as rib_ablations_main
+from experiments.mnist_rib_ablation.run_rib_ablations import (
+    main as mnist_rib_ablations_main,
+)
 from experiments.mnist_rib_ablation.run_rib_ablations import (
     run_ablations as run_minst_rib_ablations,
 )
@@ -56,7 +64,7 @@ def mock_load_config_mnist_orthog(*args, **kwargs):
 
 
 def mock_load_config_mnist_rib(*args, **kwargs):
-    # Load the config as normal but set the mlp_path using a relative path
+    # Load the config as normal but set the interaction_graph_path using a relative path
     config = load_config(*args, **kwargs)
     config.interaction_graph_path = (
         Path(__file__).parent.parent
@@ -66,11 +74,21 @@ def mock_load_config_mnist_rib(*args, **kwargs):
 
 
 def mock_load_config_lm_rib(*args, **kwargs):
-    # Load the config as normal but set the mlp_path using a relative path
+    # Load the config as normal but set the interaction_graph_path using a relative path
     config = load_config(*args, **kwargs)
     config.interaction_graph_path = (
         Path(__file__).parent.parent
         / "experiments/lm_rib_build/sample_graphs/modular_arithmetic_interaction_graph_sample.pt"
+    )
+    return config
+
+
+def mock_load_config_lm_orthog(*args, **kwargs):
+    # Load the config as normal but set the mlp_path using a relative path
+    config = load_config(*args, **kwargs)
+    config.tlens_model_path = (
+        Path(__file__).parent.parent
+        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_2023-08-31_09-33-30/model_epoch_60000.pt"
     )
     return config
 
@@ -95,6 +113,13 @@ def mock_run_ablations_lm_rib(*args, **kwargs):
     # Call the original function to get the real ablation results
     accuracies = run_lm_rib_ablations(*args, **kwargs)
     mock_run_ablations_lm_rib.accuracies = accuracies  # Store the accuracies on the mock itself
+    return accuracies
+
+
+def mock_run_ablations_lm_orthog(*args, **kwargs):
+    # Call the original function to get the real ablation results
+    accuracies = run_lm_orthog_ablations(*args, **kwargs)
+    mock_run_ablations_lm_orthog.accuracies = accuracies  # Store the accuracies on the mock itself
     return accuracies
 
 
@@ -217,6 +242,7 @@ def ablation_mock_run(
 
 @pytest.mark.slow
 def test_run_mnist_orthog_ablations():
+    """Test various ablation result properties for orthogonal ablations on MNIST."""
     mock_orthog_config = """
     exp_name: null  # Prevent saving output
     mlp_path: OVERWRITE/IN/MOCK
@@ -241,7 +267,7 @@ def test_run_mnist_orthog_ablations():
 
 @pytest.mark.slow
 def test_run_mnist_rib_ablations():
-    """Test our ablation criteria for RIB on MNIST.
+    """Test various ablation result properties for RIB on MNIST.
 
     Unlike the test_run_orthog_ablations test, this test takes as input a precomputed graph path
     so that we have access to the rotation matrix for each layer. These rotation matrices assume
@@ -272,7 +298,7 @@ def test_run_mnist_rib_ablations():
         script_path="experiments.mnist_rib_ablation.run_rib_ablations",
         mock_load_config_fn=mock_load_config_mnist_rib,
         mock_run_ablations_fn=mock_run_ablations_mnist_rib,
-        mock_main_fn=rib_ablations_main,
+        mock_main_fn=mnist_rib_ablations_main,
         layer_keys=["layers.1", "layers.2"],
         max_accuracy_threshold=0.95,  # Model should converge to at least 95% accuracy
     )
@@ -280,7 +306,7 @@ def test_run_mnist_rib_ablations():
 
 @pytest.mark.slow
 def test_run_modular_arithmetic_rib_ablations():
-    """Test our ablation criteria for RIB on modular arithmetic."""
+    """Test various ablation result properties for RIB on modular arithmetic."""
 
     mock_rib_config = """
     exp_name: null  # Prevent saving output
@@ -301,6 +327,37 @@ def test_run_modular_arithmetic_rib_ablations():
         mock_load_config_fn=mock_load_config_lm_rib,
         mock_run_ablations_fn=mock_run_ablations_lm_rib,
         mock_main_fn=lm_rib_ablations_main,
+        layer_keys=["ln1.0", "mlp_in.0", "unembed"],
+        max_accuracy_threshold=1.0,  # Model should converge to 100% accuracy
+    )
+
+
+@pytest.mark.slow
+def test_run_modular_arithmetic_orthog_ablations():
+    """Test various ablation result properties for orthogonal ablations on modular arithmetic."""
+
+    mock_orthog_config = """
+    exp_name: null  # Prevent saving output
+    tlens_pretrained: null
+    tlens_model_path: OVERWRITE/IN/MOCK
+    dataset: modular_arithmetic
+    batch_size: 16
+    last_pos_only: true
+    ablate_every_vec_cutoff: 10
+    dtype: float32
+    node_layers:
+        - ln1.0
+        - mlp_in.0
+        - unembed
+    seed: 0
+    """
+
+    ablation_mock_run(
+        mock_config=mock_orthog_config,
+        script_path="experiments.lm_orthog_ablation.run_lm_orthog_ablations",
+        mock_load_config_fn=mock_load_config_lm_orthog,
+        mock_run_ablations_fn=mock_run_ablations_lm_orthog,
+        mock_main_fn=lm_orthog_ablations_main,
         layer_keys=["ln1.0", "mlp_in.0", "unembed"],
         max_accuracy_threshold=1.0,  # Model should converge to 100% accuracy
     )

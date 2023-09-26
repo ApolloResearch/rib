@@ -106,8 +106,8 @@ def calculate_interaction_rotations(
 
     # We start appending Cs from the output layer and work our way backwards
     Cs: list[InteractionRotation] = []
+    _, U_output = eigendecompose(gram_matrices["output"])
     if rotate_output:
-        _, U_output = eigendecompose(gram_matrices["output"])
         C_output: Float[Tensor, "d_hidden d_hidden"] = U_output
     else:
         C_output = torch.eye(
@@ -117,6 +117,7 @@ def calculate_interaction_rotations(
         )
     Cs.append(InteractionRotation(node_layer_name="output", C=C_output.clone().detach()))
 
+    Us = [U_output]
     for module_name, hook_name in zip(module_names[::-1], hook_names[::-1]):
         D_dash, U_dash = eigendecompose(gram_matrices[hook_name])
 
@@ -134,6 +135,7 @@ def calculate_interaction_rotations(
 
         M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
             C_out=Cs[-1].C,  # most recently stored interaction matrix
+            U_out=Us[-1],
             hooked_model=hooked_model,
             data_loader=data_loader,
             module_name=module_name,
@@ -165,5 +167,6 @@ def calculate_interaction_rotations(
                 node_layer_name=hook_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()
             )
         )
+        Us.append(U)
 
     return Cs[::-1]

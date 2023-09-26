@@ -111,6 +111,10 @@ def gram_pre_forward_hook_fn(
     # Concat over the hidden dimension
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
 
+    from rib.models.sequential_transformer.components import MLPIn
+
+    if isinstance(module[0], MLPIn):
+        in_acts = in_acts[:, -1, :]
     if in_acts.dim() == 3:  # tensor with pos dimension
         einsum_pattern = "bpi, bpj -> ij"
     elif in_acts.dim() == 2:  # tensor without pos dimension
@@ -163,6 +167,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     C_out: Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"],
+    U_out: Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"],
     **_: Any,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
@@ -202,7 +207,38 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         ] = (
             out_acts @ C_out
         )
+        f_orthog = out_acts @ U_out
+        if hook_name == "mlp_in.0":
+            import numpy as np
 
+            DEVICE = "cuda"
+            p = 113
+            fourier_basis = []
+            fourier_basis.append(torch.ones(p) / np.sqrt(p))
+            fourier_basis_names = ["Const"]
+            # Note that if p is even, we need to explicitly add a term for cos(kpi), ie
+            # alternating +1 and -1
+            for i in range(1, p // 2 + 1):
+                fourier_basis.append(torch.cos(2 * torch.pi * torch.arange(p) * i / p))
+                fourier_basis.append(torch.sin(2 * torch.pi * torch.arange(p) * i / p))
+                fourier_basis[-2] /= fourier_basis[-2].norm()
+                fourier_basis[-1] /= fourier_basis[-1].norm()
+                fourier_basis_names.append(f"cos {i}")
+                fourier_basis_names.append(f"sin {i}")
+            fourier_basis = torch.stack(fourier_basis, dim=0).to(DEVICE)
+
+            # f_hat_trunc = f_hat[:, -1, :]
+            f_hat_trunc = f_orthog[:, -1, :]
+            plot_data = []
+            for hidden_idx in range(f_hat_trunc.shape[-1]):
+                f_hat_trunc_idx = f_hat_trunc[:, hidden_idx].view(113, 113)
+                transformed = fourier_basis @ f_hat_trunc_idx @ fourier_basis.T
+                # transformed = f_hat_trunc_idx
+                plot_data.append(transformed)
+
+            # Save plot_data
+            with open("/mnt/ssd-apollo/dan/RIB/fourier_data_mlpin_orthog_preln.pt", "wb") as f:
+                torch.save(plot_data, f)
         f_hat_norm: Float[Tensor, ""] = (f_hat**2).sum()
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors (ignoring all other gradients)

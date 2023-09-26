@@ -116,6 +116,7 @@ def collect_gram_matrices(
 
 def collect_M_dash_and_Lambda_dash(
     C_out: Float[Tensor, "out_hidden out_hidden"],
+    U_out: Float[Tensor, "out_hidden out_hidden_trunc"],
     hooked_model: HookedModel,
     data_loader: DataLoader,
     module_name: str,
@@ -151,6 +152,7 @@ def collect_M_dash_and_Lambda_dash(
         module_name=module_name,
         fn_kwargs={
             "C_out": C_out,
+            "U_out": U_out,
         },
     )
 

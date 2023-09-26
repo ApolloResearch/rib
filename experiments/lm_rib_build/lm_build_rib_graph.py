@@ -128,6 +128,8 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         tlens_model_path=config.tlens_model_path,
         seed=config.seed,
         batch_size=config.batch_size,
+        frac_train=1.0,
+        train=True,
     )
 
     # Test model accuracy before graph building

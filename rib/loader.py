@@ -100,7 +100,7 @@ def create_data_loader(
             train_config = yaml.safe_load(f)["train"]
         frac_train = frac_train or train_config["frac_train"]
         test_data = ModularArithmeticDataset(
-            train_config["modulus"], train_config["frac_train"], seed=seed, train=train
+            train_config["modulus"], frac_train, seed=seed, train=train
         )
         # Note that the batch size for training typically gives 1 batch per epoch. We use a smaller
         # batch size here, mostly for verifying that our iterative code works.

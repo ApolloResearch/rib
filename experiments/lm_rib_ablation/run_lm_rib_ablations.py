@@ -71,7 +71,7 @@ def run_ablations(
     ablate_every_vec_cutoff: Optional[int],
     device: str,
 ) -> dict[str, dict[int, float]]:
-    """Rotate to and from the interaction basis and compare accuracies with and without ablation.
+    """Rotate to and from a truncated interaction basis and compare ablation accuracies.
 
     Args:
         interaction_matrices: The interaction rotation matrix and its pseudoinverse.
@@ -83,7 +83,7 @@ def run_ablations(
         device: The device to run the model on.
 
     Returns:
-        A dictionary mapping node layers to accuracy results.
+        A dictionary mapping node layers to ablation accuracies.
     """
     results: dict[str, dict[int, float]] = {}
     for hook_name, module_name, (C, C_pinv) in zip(

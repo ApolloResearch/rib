@@ -25,23 +25,46 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
+
     - name: Set up Python 3.9
       uses: actions/setup-python@v4
       with:
         python-version: 3.9
+
+    - name: Set up virtual environment
+      run: |
+        python -m venv venv
+
+    - name: Cache virtual environment
+      uses: actions/cache@v3
+      with:
+        path: venv
+        key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-venv-
+
     - name: Install dependencies
       run: |
+        source venv/bin/activate
         python -m pip install --upgrade pip
         pip install ".[dev]"
+
     - name: Check with Black
       run: |
+        source venv/bin/activate
         black --check --diff --line-length 100 rib experiments tests
+
     - name: Check with isort
       run: |
+        source venv/bin/activate
         isort --check --thirdparty wandb --profile black rib experiments tests
+
     - name: Check with mypy
       run: |
+        source venv/bin/activate
         mypy rib experiments
+
     - name: Run tests
       run: |
+        source venv/bin/activate
         pytest --runslow -m "not skip_ci"

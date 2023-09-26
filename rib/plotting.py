@@ -182,6 +182,9 @@ def plot_ablation_accuracies(
         axs[i].grid(True)
         axs[i].legend()
 
+    # Make a title for the entire figure
+    plt.suptitle(f"{exp_name} {model_name} acc vs {title_extra}")
+
     # Adjust the spacing between subplots
     plt.subplots_adjust(hspace=0.4)
 

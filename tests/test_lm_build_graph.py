@@ -54,6 +54,9 @@ def mock_load_config(*args, **kwargs):
 
 @pytest.mark.slow
 def test_modular_arithmetic_build_graph():
+    # Set the atol based on the dtype
+    atol = 1e-2 if "dtype: float32" in MOCK_CONFIG else 1e-8
+
     Lambda_sqrts: list[torch.Tensor] = []
 
     def mock_build_sorted_lambda_matrices(Lambda_diag_abs_sqrt, **kwargs):
@@ -95,9 +98,9 @@ def test_modular_arithmetic_build_graph():
                 act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
                 edge_size = E_hats[i][1].sum(0).abs()
                 assert torch.allclose(
-                    act_size, edge_size, atol=1e-2
+                    act_size, edge_size, atol=atol
                 ), f"act_size not equal to edge_size for {module_name}"
                 # Check that the Lambdas are also the same
                 assert torch.allclose(
-                    act_size, Lambdas[i], atol=1e-2
+                    act_size, Lambdas[i], atol=atol
                 ), f"act_size not equal to Lambdas for {module_name}"

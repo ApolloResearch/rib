@@ -102,14 +102,24 @@ class Unembed(nn.Module):
 
 
 class Add(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: SequentialTransformerConfig, last_pos_only: bool = False):
         super().__init__()
         self.cfg = cfg
+        self.last_pos_only = last_pos_only
 
     def forward(
         self, x: Float[Tensor, "#dims"], y: Float[Tensor, "#dims"]
     ) -> Float[Tensor, "#dims"]:
-        return x + y
+        summed = x + y
+        if self.last_pos_only:
+            if summed.dim() == 3:
+                summed = summed[:, -1:, :]
+            elif summed.dim() == 2:
+                # No batch dimension (e.g. due to vmap)
+                summed = summed[-1:, :]
+            else:
+                raise ValueError(f"summed should have dim 2 or 3, but has dim {summed.dim()}")
+        return summed
 
 
 class Attention(nn.Module):

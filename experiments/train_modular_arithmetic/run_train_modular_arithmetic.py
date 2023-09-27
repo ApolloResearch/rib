@@ -36,7 +36,7 @@ class ModelConfig(BaseModel):
     d_vocab: int
     n_ctx: int
     act_fn: str
-    normalization_type: str
+    normalization_type: Optional[str]
 
 
 class TrainConfig(BaseModel):
@@ -209,7 +209,7 @@ def main(config_path_str: str) -> tuple[float, float]:
     model = HookedTransformer(transformer_lens_config)
     model = model.to(device)
 
-    run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}"
+    run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}_norm-{config.model.normalization_type}"
     if config.wandb:
         wandb.init(
             name=run_name,

@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Optional, Union
 
 import torch
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -39,7 +39,7 @@ class SequentialTransformerConfig(BaseModel):
     d_vocab: int
     n_ctx: int
     act_fn: str
-    normalization_type: str
+    normalization_type: Optional[str]
     eps: float
     dtype: torch.dtype
     use_attn_scale: bool

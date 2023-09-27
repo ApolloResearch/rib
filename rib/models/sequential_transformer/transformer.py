@@ -121,6 +121,8 @@ class SequentialTransformer(nn.Module):
                 module_type = module_name.split(".")[0]
                 module_class: Type[nn.Module]
                 kwargs = {}
+                if module_type == "add_resid1":
+                    kwargs["last_pos_only"] = last_pos_only
                 if module_type in ["ln1", "ln2", "ln_final"]:
                     if cfg.normalization_type == "LNPre":
                         module_class = LayerNormPre
@@ -128,12 +130,8 @@ class SequentialTransformer(nn.Module):
                         kwargs["return_residual"] = module_type in ["ln1", "ln2"]
                     else:
                         module_class = nn.Identity if module_type == "ln_final" else IdentitySplit
-                elif module_type == "unembed":
-                    module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
-                    kwargs = {"last_pos_only": last_pos_only}
                 else:
                     module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
-                    kwargs = {}
                 module = module_class(cfg, **kwargs)
                 module_section.append(module)
             sections[section_name] = MultiSequential(*module_section)

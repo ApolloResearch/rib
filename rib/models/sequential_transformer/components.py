@@ -404,6 +404,20 @@ class LayerNormPreFolded(torch.nn.Module):
             return out
 
 
+class IdentitySplit(torch.nn.Module):
+    """Identity that splits the input into two outputs."""
+
+    def __init__(self, cfg: SequentialTransformerConfig):
+        super().__init__()
+        self.cfg = cfg
+
+    def forward(
+        self,
+        residual: Float[Tensor, "... d_model"],
+    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+        return residual, residual.clone()
+
+
 # Map from module names in SequentialTransformer to the corresponding component modules
 SEQUENTIAL_COMPONENT_REGISTRY = {
     "embed": Embed,

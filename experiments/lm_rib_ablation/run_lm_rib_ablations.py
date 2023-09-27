@@ -115,6 +115,9 @@ def main(config_path_str: str) -> None:
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[config.dtype]
+
     # Get the interaction rotations and their pseudoinverses (C and C_pinv)
     interaction_matrices: list[
         tuple[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden_trunc d_hidden"]]
@@ -122,7 +125,9 @@ def main(config_path_str: str) -> None:
     for module_name in config.node_layers:
         for rotation_info in interaction_graph_info["interaction_rotations"]:
             if rotation_info["node_layer_name"] == module_name:
-                interaction_matrices.append((rotation_info["C"], rotation_info["C_pinv"]))
+                interaction_matrices.append(
+                    (rotation_info["C"].to(dtype), rotation_info["C_pinv"].to(dtype))
+                )
                 break
     assert len(interaction_matrices) == len(
         config.node_layers
@@ -140,8 +145,6 @@ def main(config_path_str: str) -> None:
         and interaction_graph_info["config"]["tlens_model_path"] is not None
     ), "Currently can't build graphs for pretrained models due to memory limits."
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = TORCH_DTYPES[config.dtype]
     tlens_model_path = Path(interaction_graph_info["config"]["tlens_model_path"])
 
     seq_model, _ = load_sequential_transformer(

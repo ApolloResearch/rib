@@ -11,6 +11,7 @@ from torch import Tensor, nn
 
 from rib.models.sequential_transformer.components import (
     SEQUENTIAL_COMPONENT_REGISTRY,
+    IdentitySplit,
     LayerNormPre,
     LayerNormPreFolded,
 )
@@ -102,12 +103,10 @@ class SequentialTransformer(nn.Module):
         assert len(node_layers) > 1, "Must have at least 2 node layers"
         self.module_name_sections = self.create_module_name_sections(cfg.n_layers, node_layers)
 
-        if cfg.normalization_type == "LNPre":
-            ln_class = LayerNormPre
-        elif cfg.normalization_type is None:
-            ln_class = nn.Identity
-        else:
-            raise ValueError(f"Normalization type {cfg.normalization_type} not supported")
+        assert cfg.normalization_type in [None, "LNPre"], (
+            f"Normalization type {cfg.normalization_type} not supported. "
+            "Only LayerNormPre and None are currently supported."
+        )
 
         has_pre_section = node_layers[0] != "embed"
         # Initialize the modules, creating a ModuleList of Sequential modules for each graph section
@@ -121,12 +120,14 @@ class SequentialTransformer(nn.Module):
             for module_name in module_names:
                 module_type = module_name.split(".")[0]
                 module_class: Type[nn.Module]
-                if module_type in ["ln1", "ln2"]:
-                    module_class = ln_class
-                    kwargs = {"return_residual": True}
-                elif module_type == "ln_final":
-                    module_class = ln_class
-                    kwargs = {"return_residual": False}
+                kwargs = {}
+                if module_type in ["ln1", "ln2", "ln_final"]:
+                    if cfg.normalization_type == "LNPre":
+                        module_class = LayerNormPre
+                        # ln1 and ln2 need to output both the residual and normed residual
+                        kwargs["return_residual"] = module_type in ["ln1", "ln2"]
+                    else:
+                        module_class = nn.Identity if module_type == "ln_final" else IdentitySplit
                 elif module_type == "unembed":
                     module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
                     kwargs = {"last_pos_only": last_pos_only}

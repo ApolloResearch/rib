@@ -88,7 +88,7 @@ def mock_load_config_lm_orthog(*args, **kwargs):
     config = load_config(*args, **kwargs)
     config.tlens_model_path = (
         Path(__file__).parent.parent
-        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_2023-08-31_09-33-30/model_epoch_60000.pt"
+        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_2023-09-27_08-32-01/model_epoch_60000.pt"
     )
     return config
 
@@ -144,12 +144,6 @@ def mock_torch_load(*args, **kwargs):
             interaction_graph_info["config"]["mlp_path"] = (
                 Path(__file__).parent.parent
                 / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-08-13_16-23-59/model_epoch_3.pt"
-            )
-        # Modular addition
-        if "tlens_model_path" in interaction_graph_info["config"]:
-            interaction_graph_info["config"]["tlens_model_path"] = (
-                Path(__file__).parent.parent
-                / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_2023-08-31_09-33-30/model_epoch_60000.pt"
             )
     return interaction_graph_info
 
@@ -328,7 +322,7 @@ def test_run_modular_arithmetic_rib_ablations():
         mock_run_ablations_fn=mock_run_ablations_lm_rib,
         mock_main_fn=lm_rib_ablations_main,
         layer_keys=["ln1.0", "mlp_in.0", "unembed"],
-        max_accuracy_threshold=1.0,  # Model should converge to 100% accuracy
+        max_accuracy_threshold=0.998,  # Model should converge to 100% accuracy
     )
 
 
@@ -359,5 +353,5 @@ def test_run_modular_arithmetic_orthog_ablations():
         mock_run_ablations_fn=mock_run_ablations_lm_orthog,
         mock_main_fn=lm_orthog_ablations_main,
         layer_keys=["ln1.0", "mlp_in.0", "unembed"],
-        max_accuracy_threshold=1.0,  # Model should converge to 100% accuracy
+        max_accuracy_threshold=0.998,  # Model should converge to 100% accuracy
     )

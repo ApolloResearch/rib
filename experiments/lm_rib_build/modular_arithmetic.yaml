@@ -4,10 +4,10 @@ tlens_pretrained: null
 tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
 dataset: modular_arithmetic
 batch_size: 256
-truncation_threshold: 1e-20
+truncation_threshold: 1e-6
 rotate_output: false
 last_pos_only: true  # attn + residual will only output the last position
-dtype: float64
+dtype: float32
 node_layers:
   - ln1.0
   - mlp_in.0

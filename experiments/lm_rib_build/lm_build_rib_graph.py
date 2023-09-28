@@ -128,6 +128,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
 
     assert config.dataset == "modular_arithmetic", "Currently only supports modular arithmetic."
 
+    # Importantly, use the same dataset as was used for training
     train_loader = create_modular_arithmetic_data_loader(
         shuffle=True,
         return_set="train",

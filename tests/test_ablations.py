@@ -88,7 +88,7 @@ def mock_load_config_lm_orthog(*args, **kwargs):
     config = load_config(*args, **kwargs)
     config.tlens_model_path = (
         Path(__file__).parent.parent
-        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_2023-09-27_08-32-01/model_epoch_60000.pt"
+        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
     )
     return config
 

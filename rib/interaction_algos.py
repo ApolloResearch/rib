@@ -49,10 +49,11 @@ def build_sorted_lambda_matrices(
         lambda_vals.reciprocal()
     )[idxs, :]
 
+    assert not torch.any(torch.isnan(lambda_matrix_pinv)), "NaNs in the pseudoinverse."
     assert torch.allclose(
         lambda_matrix @ lambda_matrix_pinv,
         torch.eye(lambda_matrix.shape[0], dtype=lambda_vals.dtype, device=lambda_vals.device),
-        atol=1e-4,
+        atol=1e-6,
     ), "Lambda matrix and its pseudoinverse are not inverses of each other."
 
     return lambda_matrix, lambda_matrix_pinv

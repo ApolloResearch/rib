@@ -37,7 +37,10 @@ from rib.ablations import ablate_and_test
 from rib.data_accumulator import collect_gram_matrices
 from rib.hook_manager import HookedModel
 from rib.linalg import eigendecompose
-from rib.loader import create_data_loader, load_sequential_transformer
+from rib.loader import (
+    create_modular_arithmetic_data_loader,
+    load_sequential_transformer,
+)
 from rib.log import logger
 from rib.types import TORCH_DTYPES
 from rib.utils import (
@@ -177,11 +180,15 @@ def main(config_path_str: str) -> None:
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    data_loader = create_data_loader(
-        dataset_name=config.dataset,
+    assert config.dataset == "modular_arithmetic", "Currently only supports modular arithmetic."
+
+    data_loader = create_modular_arithmetic_data_loader(
+        shuffle=True,
+        return_set="test",
         tlens_model_path=config.tlens_model_path,
-        seed=config.seed,
         batch_size=config.batch_size,
+        seed=config.seed,
+        frac_train=0.5,  # Take a random 50% split of the dataset
     )
 
     # Test model accuracy before ablation

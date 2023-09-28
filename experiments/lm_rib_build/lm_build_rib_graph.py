@@ -38,7 +38,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
-from rib.loader import create_data_loader, load_sequential_transformer
+from rib.loader import (
+    create_modular_arithmetic_data_loader,
+    load_sequential_transformer,
+)
 from rib.log import logger
 from rib.types import TORCH_DTYPES
 from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
@@ -123,15 +126,18 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    data_loader = create_data_loader(
-        dataset_name=config.dataset,
+    assert config.dataset == "modular_arithmetic", "Currently only supports modular arithmetic."
+
+    # Importantly, use the same dataset as was used for training
+    train_loader = create_modular_arithmetic_data_loader(
+        shuffle=True,
+        return_set="train",
         tlens_model_path=config.tlens_model_path,
-        seed=config.seed,
         batch_size=config.batch_size,
     )
 
-    # Test model accuracy before graph building
-    accuracy = eval_model_accuracy(hooked_model, data_loader, dtype=dtype, device=device)
+    # Test model accuracy before graph building, ta be sure
+    accuracy = eval_model_accuracy(hooked_model, train_loader, dtype=dtype, device=device)
     logger.info("Model accuracy on dataset: %.2f%%", accuracy * 100)
 
     # Don't build the graph for the section of the model before the first node layer
@@ -140,7 +146,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_model,
         module_names=graph_module_names,
-        data_loader=data_loader,
+        data_loader=train_loader,
         dtype=dtype,
         device=device,
         collect_output_gram=True,
@@ -151,7 +157,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         gram_matrices=gram_matrices,
         module_names=graph_module_names,
         hooked_model=hooked_model,
-        data_loader=data_loader,
+        data_loader=train_loader,
         dtype=dtype,
         device=device,
         truncation_threshold=config.truncation_threshold,
@@ -163,7 +169,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         Cs=Cs,
         hooked_model=hooked_model,
         module_names=graph_module_names,
-        data_loader=data_loader,
+        data_loader=train_loader,
         dtype=dtype,
         device=device,
     )

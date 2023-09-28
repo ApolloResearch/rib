@@ -32,6 +32,7 @@ def main(results_file: str) -> None:
         model_name="LM",
         experiment_type="rib",
         log_scale=False,
+        xmax=20,
     )
 
 

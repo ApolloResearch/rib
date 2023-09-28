@@ -21,10 +21,10 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
-from rib.data import ModularArithmeticDataset
+from rib.loader import create_modular_arithmetic_data_loader
 from rib.log import logger
 from rib.models.utils import save_model
-from rib.utils import load_config
+from rib.utils import load_config, set_seed
 
 
 class ModelConfig(BaseModel):
@@ -187,22 +187,22 @@ def main(config_path_str: str) -> tuple[float, float]:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
 
-    torch.manual_seed(config.seed)
+    set_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
 
     if not config.train.save_dir:
         config.train.save_dir = Path(__file__).parent / ".checkpoints" / "modular_arithmetic"
 
-    # Load the Modular Arithmetic train dataset
-    train_data = ModularArithmeticDataset(
-        config.train.modulus, config.train.frac_train, seed=config.seed, train=True
+    train_loader, test_loader = create_modular_arithmetic_data_loader(
+        shuffle=True,
+        return_set="both",
+        fn_name=config.train.fn_name,
+        modulus=config.train.modulus,
+        batch_size=config.train.batch_size,
+        seed=config.seed,
+        frac_train=config.train.frac_train,
     )
-    test_data = ModularArithmeticDataset(
-        config.train.modulus, config.train.frac_train, seed=config.seed, train=False
-    )
-    train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=False)
-    test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)
 
     # Initialize the Transformer model
     transformer_lens_config = HookedTransformerConfig(**config.model.model_dump())

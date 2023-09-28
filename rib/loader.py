@@ -1,18 +1,17 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional, Union, overload
 
 import torch
 import yaml
-from datasets import load_dataset
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 from transformer_lens import HookedTransformer
-from transformers import GPT2TokenizerFast
 
 from rib.data import ModularArithmeticDataset
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
+from rib.utils import train_test_split
 
 
 def load_sequential_transformer(
@@ -76,62 +75,103 @@ def load_sequential_transformer(
     return seq_model, tlens_cfg_dict
 
 
-def create_data_loader(
-    dataset_name: str,
-    tlens_model_path: Path,
-    seed: int,
-    batch_size: int,
+@overload
+def create_modular_arithmetic_data_loader(
+    shuffle: bool,
+    return_set: Literal["train", "test", "all"],
+    tlens_model_path: Optional[Path] = None,
+    fn_name: Optional[str] = None,
+    modulus: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    seed: Optional[int] = None,
     frac_train: Optional[float] = None,
-    train: bool = False,
 ) -> DataLoader:
-    """Create a DataLoader for the dataset specified in `config.dataset`.
+    ...
+
+
+@overload
+def create_modular_arithmetic_data_loader(
+    shuffle: bool,
+    return_set: Literal["both"],
+    tlens_model_path: Optional[Path] = None,
+    fn_name: Optional[str] = None,
+    modulus: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    seed: Optional[int] = None,
+    frac_train: Optional[float] = None,
+) -> tuple[DataLoader, DataLoader]:
+    ...
+
+
+def create_modular_arithmetic_data_loader(
+    shuffle: bool,
+    return_set: Literal["train", "test", "both", "all"],
+    tlens_model_path: Optional[Path] = None,
+    fn_name: Optional[str] = None,
+    modulus: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    seed: Optional[int] = None,
+    frac_train: Optional[float] = None,
+) -> Union[DataLoader, tuple[DataLoader, DataLoader]]:
+    """Create a DataLoader for the specified dataset.
+
+    Either loads the relevant config from the config.yaml associated with `tlens_model_path`, and/or
+    uses the provided arguments.
 
     Args:
-        config (Config): The config, containing the dataset name.
+        shuffle (bool): Whether to shuffle the dataset(s) each epoch.
+        return_set (Literal["train", "test", "both", "all"]): Whether to return the training set,
+            test set, both, or just the full dataset.
+        tlens_model_path (Optional[Path]): The path to the tlens model.
+        fn_name (Optional[str]): The name of the function to use for the modular arithmetic dataset.
+        modulus (Optional[int]): The modulus to use for the modular arithmetic dataset.
+        batch_size (Optional[int]): The batch size to use.
+        seed (Optional[int]): The seed to use for splitting the dataset.
+        frac_train (Optional[float]): The fraction of the dataset to use for training.
 
     Returns:
-        DataLoader: The DataLoader to use for building the graph.
+        The DataLoader or tuple of DataLoaders (in the case where `return_set` is "both")
     """
-    if dataset_name == "modular_arithmetic":
-        # Get the dataset config from our training config
-        assert tlens_model_path is not None, "tlens_model_path must be specified"
+    assert not (return_set == "all" and frac_train is not None), (
+        "If `return_set` is 'all' the whole dataset will be returned, so `frac_train` should be "
+        "None."
+    )
+    if tlens_model_path is not None:
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
             # The config specified in the YAML file used to train the tlens model
-            train_config = yaml.safe_load(f)["train"]
-        frac_train = frac_train or train_config["frac_train"]
-        test_data = ModularArithmeticDataset(
-            train_config["modulus"], frac_train, seed=seed, train=train
-        )
-        # Note that the batch size for training typically gives 1 batch per epoch. We use a smaller
-        # batch size here, mostly for verifying that our iterative code works.
-        data_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-    elif dataset_name == "wikitext":
-        # Step 1: Load a sample language modelling dataset
-        dataset = load_dataset("wikitext", "wikitext-103-raw-v1", split="test[:30%]")
+            cfg = yaml.safe_load(f)
 
-        # Step 2: Tokenize using GPT-2 tokenizer
-        tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
-        tokenizer.pad_token = tokenizer.eos_token
-
-        # Remove empty data points
-        dataset = dataset.filter(lambda example: len(example["text"]) > 0)
-        tokenized_dataset = dataset.map(
-            lambda examples: tokenizer(
-                examples["text"], truncation=True, padding="max_length", max_length=1024
-            ),
-            batched=True,
-        )
-        # Create a dataloader from the Dataset
-        input_ids = torch.tensor(tokenized_dataset["input_ids"], dtype=torch.long)
-
-        # Create labels by shifting input_ids by 1
-        labels = input_ids.clone()
-        labels[:, :-1] = input_ids[:, 1:]
-        labels[:, -1] = tokenizer.pad_token_id
-
-        data_loader = DataLoader(
-            TensorDataset(input_ids, labels), batch_size=batch_size, shuffle=True
-        )
+        modulus = modulus if modulus is not None else cfg["train"]["modulus"]
+        fn_name = fn_name if fn_name is not None else cfg["train"]["fn_name"]
+        batch_size = batch_size if batch_size is not None else cfg["train"]["batch_size"]
+        frac_train = frac_train if frac_train is not None else cfg["train"]["frac_train"]
+        seed = seed if seed is not None else cfg["seed"]
     else:
-        raise ValueError(f"Unknown dataset: {dataset_name}")
-    return data_loader
+        assert (
+            modulus is not None
+            and fn_name is not None
+            and batch_size is not None
+            and frac_train is not None
+            and seed is not None
+        ), (
+            "If `tlens_model_path` is not specified, then `modulus`, `fn_name`, `batch_size`, "
+            "`frac_train`, and `seed` must be specified."
+        )
+    raw_dataset = ModularArithmeticDataset(modulus=modulus, fn_name=fn_name)
+
+    if return_set == "all":
+        return DataLoader(raw_dataset, batch_size=batch_size, shuffle=shuffle)
+    else:
+        train_dataset, test_dataset = train_test_split(
+            raw_dataset, frac_train=frac_train, seed=seed
+        )
+        if return_set == "train":
+            return DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
+        elif return_set == "test":
+            return DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle)
+        else:
+            assert return_set == "both"
+            return (
+                DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle),
+                DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle),
+            )

@@ -34,7 +34,7 @@ batch_size: 16
 truncation_threshold: 1e-20
 rotate_output: false
 last_pos_only: true
-dtype: float32
+dtype: float64
 node_layers:
   - ln1.0
   - mlp_in.0
@@ -47,7 +47,7 @@ def mock_load_config(*args, **kwargs):
     config = load_config(*args, **kwargs)
     config.tlens_model_path = (
         Path(__file__).parent.parent
-        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_2023-08-31_09-33-30/model_epoch_60000.pt"
+        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
     )
     return config
 
@@ -55,7 +55,7 @@ def mock_load_config(*args, **kwargs):
 @pytest.mark.slow
 def test_modular_arithmetic_build_graph():
     # Set the atol based on the dtype
-    atol = 1e-2 if "dtype: float32" in MOCK_CONFIG else 1e-8
+    atol = 1e-2 if "dtype: float32" in MOCK_CONFIG else 1e-6
 
     Lambda_sqrts: list[torch.Tensor] = []
 

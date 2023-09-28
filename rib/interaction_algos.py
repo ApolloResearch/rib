@@ -24,6 +24,14 @@ class InteractionRotation:
     C_pinv: Optional[Float[Tensor, "d_hidden_trunc d_hidden"]] = None
 
 
+@dataclass
+class Eigenvectors:
+    """Dataclass storing the eigenvectors of a node layer."""
+
+    node_layer_name: str
+    U: Float[Tensor, "d_hidden d_hidden"]
+
+
 def build_sorted_lambda_matrices(
     lambda_vals: Float[Tensor, "d_hidden_trunc"],
 ) -> tuple[
@@ -69,7 +77,7 @@ def calculate_interaction_rotations(
     truncation_threshold: float = 1e-5,
     rotate_output: bool = True,
     hook_names: Optional[list[str]] = None,
-) -> list[InteractionRotation]:
+) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
     This function implements Algorithm 1 of the paper. We name the variables as they are named in
@@ -95,8 +103,10 @@ def calculate_interaction_rotations(
         hook_names: Used to store the interaction rotation matrices in the hooked model.
 
     Returns:
-        A list of objects contain interaction rotation matrices and their pseudoinverses, ordered
-        by node layer appearance in model.
+        - A list of objects containing the interaction rotation matrices and their pseudoinverses,
+        ordered by node layer appearance in model.
+        - A list of objects containing the eigenvectors of each node layer, ordered by node layer
+        appearance in model.
     """
     assert "output" in gram_matrices, "Gram matrices must include an `output` key."
     assert len(module_names) > 0, "No modules specified."
@@ -105,10 +115,12 @@ def calculate_interaction_rotations(
     else:
         hook_names = module_names
 
-    # We start appending Cs from the output layer and work our way backwards
+    _, U_output = eigendecompose(gram_matrices["output"])
+    Us: list[Eigenvectors] = [Eigenvectors(node_layer_name="output", U=U_output.detach().cpu())]
+
+    # We start appending Us and Cs from the output layer and work our way backwards
     Cs: list[InteractionRotation] = []
     if rotate_output:
-        _, U_output = eigendecompose(gram_matrices["output"])
         C_output: Float[Tensor, "d_hidden d_hidden"] = U_output
     else:
         C_output = torch.eye(
@@ -132,6 +144,7 @@ def calculate_interaction_rotations(
         U: Float[Tensor, "d_hidden d_hidden_trunc"] = (
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
         )
+        Us.append(Eigenvectors(node_layer_name=hook_name, U=U.detach().cpu()))
 
         M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
             C_out=Cs[-1].C,  # most recently stored interaction matrix
@@ -167,4 +180,4 @@ def calculate_interaction_rotations(
             )
         )
 
-    return Cs[::-1]
+    return Cs[::-1], Us[::-1]

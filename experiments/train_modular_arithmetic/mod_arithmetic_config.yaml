@@ -11,7 +11,7 @@ model:
   normalization_type: null
 train:
   modulus: 113  # 'p' in the paper and code
-  frac_train: .25
+  frac_train: .30
   fn_name: add
   learning_rate: 0.001
   batch_size: 10000

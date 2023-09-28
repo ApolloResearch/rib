@@ -8,7 +8,7 @@ import yaml
 from jaxtyping import Float, Int
 from pydantic import BaseModel
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset, random_split
 
 if TYPE_CHECKING:
     from rib.hook_manager import Hook, HookedModel
@@ -171,3 +171,24 @@ def find_root(
         if abs(func(xmid)) < tol:
             return xmid
     raise ValueError(f"Finding the root of {func} via bisection failed to converge")
+
+
+def train_test_split(dataset: Dataset, frac_train: float, seed: int) -> tuple[Dataset, Dataset]:
+    """Split a dataset into a training and test set.
+
+    Args:
+        dataset: The dataset to split.
+        frac_train: The fraction of the dataset to use for training.
+        seed: The random seed to use for the split.
+
+    Returns:
+        The training and test sets.
+    """
+    assert 0 <= frac_train <= 1, "frac_train must be between 0 and 1."
+    train_size = int(len(dataset) * frac_train)  # type: ignore
+    test_size = len(dataset) - train_size  # type: ignore
+    generator = torch.Generator().manual_seed(seed)
+    train_dataset, test_dataset = random_split(
+        dataset, [train_size, test_size], generator=generator
+    )
+    return train_dataset, test_dataset

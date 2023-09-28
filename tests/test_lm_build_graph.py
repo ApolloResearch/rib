@@ -5,6 +5,10 @@ Properties tested:
     (C.T @ gram_matrices[module_name] @ C).diag()) is equal to both the outgoing edges of a node
     (calculated E_hats[i].sum(0).abs()), and the absolute sorted Lambdas of that layer.
 2. The output rotation (C) is an identity matrix (i.e. it should be the eigenspace)
+
+Note that, when comparing tensors, we normalize by their max value to account for tensors of
+various scales. This is because combining atol and rtol does not work particularly well for tensors
+that have a small set of large numbers and a large set of small numbers.
 """
 
 import sys
@@ -30,8 +34,8 @@ seed: 0
 tlens_pretrained: null
 tlens_model_path: OVERWRITE/IN/MOCK
 dataset: modular_arithmetic
-batch_size: 16
-truncation_threshold: 1e-20
+batch_size: 128
+truncation_threshold: 1e-6
 rotate_output: false
 last_pos_only: true
 dtype: float32
@@ -47,15 +51,14 @@ def mock_load_config(*args, **kwargs):
     config = load_config(*args, **kwargs)
     config.tlens_model_path = (
         Path(__file__).parent.parent
-        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_2023-08-31_09-33-30/model_epoch_60000.pt"
+        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
     )
     return config
 
 
 @pytest.mark.slow
 def test_modular_arithmetic_build_graph():
-    # Set the atol based on the dtype
-    atol = 1e-2 if "dtype: float32" in MOCK_CONFIG else 1e-8
+    atol = 1e-5
 
     Lambda_sqrts: list[torch.Tensor] = []
 
@@ -98,9 +101,9 @@ def test_modular_arithmetic_build_graph():
                 act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
                 edge_size = E_hats[i][1].sum(0).abs()
                 assert torch.allclose(
-                    act_size, edge_size, atol=atol
+                    act_size / act_size.abs().max(), edge_size / edge_size.abs().max(), atol=atol
                 ), f"act_size not equal to edge_size for {module_name}"
                 # Check that the Lambdas are also the same
                 assert torch.allclose(
-                    act_size, Lambdas[i], atol=atol
+                    act_size / act_size.abs().max(), Lambdas[i] / Lambdas[i].abs().max(), atol=atol
                 ), f"act_size not equal to Lambdas for {module_name}"

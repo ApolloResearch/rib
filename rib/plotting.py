@@ -8,7 +8,7 @@ plot_ablation_accuracies:
 
 """
 from pathlib import Path
-from typing import Literal, Union
+from typing import Literal, Optional, Union
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -138,6 +138,7 @@ def plot_ablation_accuracies(
     model_name: str,
     experiment_type: Literal["orthog", "rib"],
     log_scale: bool = False,
+    xmax: Optional[int] = None,
 ) -> None:
     """Plot accuracy vs number of remaining basis vectors.
 
@@ -148,6 +149,7 @@ def plot_ablation_accuracies(
         exp_name: The name of the experiment
         experiment_type: Either 'orthog' or 'rib'.
         log_scale: Whether to use a log scale for the x-axis. Defaults to False.
+        xmax: The maximum value for the x-axis. Defaults to None.
     """
     module_names = list(accuracies.keys())
     n_plots = len(module_names)
@@ -179,6 +181,8 @@ def plot_ablation_accuracies(
 
         axs[i].set_title(f"{exp_name} {model_name} acc vs {title_extra} for input to {module_name}")
         axs[i].set_xlabel(xlabel_extra)
+        if xmax is not None:
+            axs[i].set_xlim(0, xmax)
         axs[i].set_ylabel("Accuracy")
         axs[i].set_ylim(0, 1)
 

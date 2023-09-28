@@ -153,7 +153,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         hook_names=config.node_layers,
     )
 
-    Cs = calculate_interaction_rotations(
+    Cs, Us = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
         module_names=graph_module_names,
         hooked_model=hooked_model,
@@ -185,10 +185,13 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
             info_dict["C_pinv"] = None
         interaction_rotations.append(info_dict)
 
+    eigenvectors = [asdict(U_info) for U_info in Us]
+
     results = {
         "exp_name": config.exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
+        "eigenvectors": eigenvectors,
         "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in config.node_layers],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,

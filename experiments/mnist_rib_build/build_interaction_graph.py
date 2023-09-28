@@ -106,7 +106,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         collect_output_gram=True,
     )
 
-    Cs = calculate_interaction_rotations(
+    Cs, Us = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
         module_names=config.module_names,
         hooked_model=hooked_mlp,
@@ -137,10 +137,13 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
             info_dict["C_pinv"] = None
         interaction_rotations.append(info_dict)
 
+    eigenvectors = [asdict(U_info) for U_info in Us]
+
     results = {
         "exp_name": config.exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
+        "eigenvectors": eigenvectors,
         "edges": [(module, E_hats[module].cpu()) for module in config.module_names],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": model_config_dict,

@@ -5,12 +5,9 @@
 3. There are accuracies for all ablated vectors.
 4. The accuracies are sorted roughly in descending order of the number of ablated vectors.
 
-This is currently very hacky. In particular, for the rib ablation script we need to mock
-torch.load to return an interaction graph with an updated MLP path. This is necessary because the
-interaction graph is saved with an absolute path to the MLP, and a github action will not have
-access to the same absolute path.
-
-
+This is currently quite hacky. In particular, we mock torch.load to return an interaction graph
+with an updated MLP path. This is necessary because the interaction graph is saved with an
+absolute path to the MLP, and a github action will not have access to the same absolute path.
 """
 
 import sys
@@ -25,25 +22,6 @@ import torch
 # Append the root directory to sys.path
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
-
-# from experiments.lm_rib_ablation.run_lm_rib_ablations import (
-#     main as lm_rib_ablations_main,
-# )
-# from experiments.lm_rib_ablation.run_lm_rib_ablations import (
-#     run_ablations as run_lm_rib_ablations,
-# )
-# from experiments.mnist_orthog_ablation.run_orthog_ablations import (
-#     main as mnist_orthog_ablations_main,
-# )
-# from experiments.mnist_orthog_ablation.run_orthog_ablations import (
-#     run_ablations as run_mnist_orthog_ablations,
-# )
-# from experiments.mnist_rib_ablation.run_rib_ablations import (
-#     main as mnist_rib_ablations_main,
-# )
-# from experiments.mnist_rib_ablation.run_rib_ablations import (
-#     run_ablations as run_minst_rib_ablations,
-# )
 
 from experiments.lm_ablations.run_lm_ablations import main as lm_ablations_main
 from experiments.mnist_ablations.run_mnist_ablations import main as mnist_ablations_main

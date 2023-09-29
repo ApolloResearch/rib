@@ -136,7 +136,7 @@ def plot_ablation_accuracies(
     plot_file: Path,
     exp_name: str,
     model_name: str,
-    experiment_type: Literal["orthog", "rib"],
+    ablation_type: Literal["orthogonal", "rib"],
     log_scale: bool = False,
     xmax: Optional[int] = None,
 ) -> None:
@@ -144,10 +144,10 @@ def plot_ablation_accuracies(
 
     Args:
         accuracies: A dictionary mapping module names to an inner dictionary mapping the number of
-            ablated vectors to model accuracy.
+            basis vectors remaining.
         plot_file: The file to save the plot to.
         exp_name: The name of the experiment
-        experiment_type: Either 'orthog' or 'rib'.
+        ablation_type: Either 'orthog' or 'rib'.
         log_scale: Whether to use a log scale for the x-axis. Defaults to False.
         xmax: The maximum value for the x-axis. Defaults to None.
     """
@@ -162,20 +162,19 @@ def plot_ablation_accuracies(
         # module_accuracies = {int(k): v for k, v in accuracies[module_name].items()}
         # We want to show number of vecs remaining, not number of vecs ablated.
         # We thus reverse the list of ablated vecs
-        n_ablated_vecs = sorted(list(int(k) for k in accuracies[module_name]), reverse=True)
-        n_vecs = max(n_ablated_vecs)
-        n_vecs_remaining = [n_vecs - n for n in n_ablated_vecs]
-        y_values = [
-            accuracies[module_name][str(n_ablated_vecs)] for n_ablated_vecs in n_ablated_vecs
-        ]
+        # n_ablated_vecs = sorted(list(int(k) for k in accuracies[module_name]), reverse=True)
+        # n_vecs = max(n_ablated_vecs)
+        # n_vecs_remaining = [n_vecs - n for n in n_ablated_vecs]
+        n_vecs_remaining = sorted(list(int(k) for k in accuracies[module_name]))
+        y_values = [accuracies[module_name][str(i)] for i in n_vecs_remaining]
         axs[i].plot(n_vecs_remaining, y_values, "-o", label="test")
 
         title_extra = (
-            "n_remaining_eigenvalues" if experiment_type == "orthog" else "n_remaining_basis_vecs"
+            "n_remaining_eigenvalues" if ablation_type == "orthogonal" else "n_remaining_basis_vecs"
         )
         xlabel_extra = (
             "Number of remaining eigenvalues"
-            if experiment_type == "orthog"
+            if ablation_type == "orthogonal"
             else "Number of remaining interaction basis vectors"
         )
 

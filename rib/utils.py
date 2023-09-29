@@ -23,7 +23,7 @@ def eval_model_accuracy(
     hooked_model: "HookedModel",
     dataloader: DataLoader,
     hooks: Optional[list["Hook"]] = None,
-    dtype: torch.dtype = torch.float32,
+    dtype: Optional[torch.dtype] = None,
     device: str = "cuda",
 ) -> float:
     """Run the model on the dataset and return the accuracy.
@@ -48,7 +48,7 @@ def eval_model_accuracy(
         data, labels = batch
         data, labels = data.to(device=device), labels.to(device)
         # Change the dtype unless the inputs are integers (e.g. like they are for LMs)
-        if data.dtype not in [torch.int64, torch.int32]:
+        if data.dtype not in [torch.int64, torch.int32] and dtype is not None:
             data = data.to(dtype=dtype)
         raw_output: Union[
             Float[Tensor, "batch d_vocab"], tuple[Float[Tensor, "batch pos d_vocab"]]
@@ -100,6 +100,7 @@ def calc_ablation_schedule(
     Args:
         ablate_every_vec_cutoff: The point in which we ablate every vector. If None, we ablate
         every vector in the schedule individually (i.e. no exponential schedule).
+        n_vecs: Total number of vectors.
 
     Returns:
         The schedule for the number of vectors to ablate.

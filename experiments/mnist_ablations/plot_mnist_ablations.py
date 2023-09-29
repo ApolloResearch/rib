@@ -1,9 +1,9 @@
-"""Plot the results of the lm_orthog_ablation experiment.
+"""Plot the results of the mnist_ablations experiment.
 
 Usage:
-    python plot_lm_orthog_ablations.py <path/to/results_json_file>
+    python plot_mnist_ablations.py <path/to/results_json_file>
 
-    The results_json_file should be the output of the run_lm_orthog_ablations.py script.
+    The results_json_file should be the output of the run_mnist_ablations.py script.
 """
 import json
 from pathlib import Path
@@ -18,8 +18,8 @@ def main(results_file: str) -> None:
     with open(results_file, "r") as f:
         results = json.load(f)
 
-    out_dir = Path(__file__).parent / "out"
-    plot_file = out_dir / f"{results['exp_name']}_accuracy_vs_orthog_ablation.png"
+    exp_name = results["config"]["exp_name"]
+    plot_file = Path(__file__).parent / "out" / f"{exp_name}_accuracy_vs_ablated_vecs.png"
 
     if plot_file.exists() and not overwrite_output(plot_file):
         print("Exiting.")
@@ -28,11 +28,9 @@ def main(results_file: str) -> None:
     plot_ablation_accuracies(
         accuracies=results["accuracies"],
         plot_file=plot_file,
-        exp_name=results["exp_name"],
-        model_name="LM",
-        experiment_type="orthog",
-        log_scale=False,
-        xmax=20,
+        exp_name=exp_name,
+        model_name="MLP MNIST",
+        ablation_type=results["config"]["ablation_type"],
     )
 
 

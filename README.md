@@ -32,22 +32,21 @@ variable `WANDB_API_KEY` to your API key.
 
 Supported experiments:
 
-- Training an MLP on MNIST: `experiments/train_mnist/`
-- Ablating eigenvectors from the orthogonal basis: `experiments/mnist_orthog_ablation/`
-- Calculating the interaction graph: `experiments/mnist_rib_build/`
-- Ablating vectors from the interaction basis: `experiments/mnist_rib_ablation/`
+- Training an MLP: `experiments/train_mnist/`
+- Ablating vectors from the interaction or orthogonal basis: `experiments/mnist_ablations/`
+- Building an interaction graph: `experiments/mnist_rib_build/`
 
 ### LMs
 
 Supported experiments:
 
-- Training a transformer_lens model on Modular Arithmetic: `experiments/train_modular_arithmetic/`
-- Building the interaction graph for a LM: `experiments/lm_rib_build/`. Currently supports the
-modular arithmetic and gpt2 models (loading via transformer-lens). Although any model other than
-the modular arithmetic will currently fail due to severe memory issues.
+- Training a 1-layer LM on the modular addition task: `experiments/train_modular_arithmetic/`
+- Ablating vectors from the interaction or orthogonal basis: `experiments/lm_ablations/`
+- Building an interaction graph: `experiments/lm_rib_ablation/`
 
 As can be seen in `experiments/lm_rib_build/lm_build_rib_graph.py`, the process for building a graph
 for an LM is as follows:
+
 - Load a pretrained LM (currently only supports some transformer-lens models)
 - Map the LM to a SequentialTransformer model, which allows us to analyse (e.g. take jacobians of)
 arbitrary sections of the LM.

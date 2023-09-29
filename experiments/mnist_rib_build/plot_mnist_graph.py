@@ -30,15 +30,15 @@ def main(results_file: str) -> None:
         edges.append((module_name, weight_matrix[:nodes_per_layer, :n_nodes_in]))
 
     out_dir = Path(__file__).parent / "out"
-    plot_file = out_dir / f"{results['exp_name']}_interaction_graph.png"
+    out_file = out_dir / f"{results['exp_name']}_interaction_graph.png"
 
-    if plot_file.exists() and not overwrite_output(plot_file):
+    if out_file.exists() and not overwrite_output(out_file):
         print("Exiting.")
         return
 
     plot_interaction_graph(
         edges=edges,
-        plot_file=plot_file,
+        out_file=out_file,
         exp_name=results["exp_name"],
         n_nodes_ratio=nodes_input_layer / nodes_per_layer,
     )

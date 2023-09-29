@@ -1,4 +1,5 @@
-exp_name: modular_arithmetic
+exp_name: rib_modular_arithmetic
+ablation_type: rib
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt
 ablate_every_vec_cutoff: 10
 node_layers:  # Rotate input to these modules

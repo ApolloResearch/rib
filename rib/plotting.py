@@ -68,7 +68,7 @@ def add_edges_to_graph(
 
 def plot_interaction_graph(
     edges: list[tuple[str, torch.Tensor]],
-    plot_file: Path,
+    out_file: Path,
     exp_name: str,
     n_nodes_ratio: float = 1.0,
 ) -> None:
@@ -77,7 +77,7 @@ def plot_interaction_graph(
     Args:
         edges: A list of tuples of (module_name, edge_weights), each with shape
             (n_nodes_in_l+1, n_nodes_in_l).
-        plot_file: The file to save the plot to.
+        out_file: The file to save the plot to.
         exp_name: The name of the experiment
         n_nodes_ratio: Ratio of the number of nodes in the first layer to the number of nodes in
             the other layers. Defaults to 1.0.
@@ -128,68 +128,64 @@ def plot_interaction_graph(
 
     plt.tight_layout()
     ax.axis("off")
-    plt.savefig(plot_file)
+    plt.savefig(out_file)
 
 
 def plot_ablation_accuracies(
-    accuracies: dict[str, dict[str, float]],
-    plot_file: Path,
-    exp_name: str,
-    model_name: str,
-    ablation_type: Literal["orthogonal", "rib"],
+    accuracies: list[dict[str, dict[str, float]]],
+    out_file: Path,
+    exp_names: list[str],
+    ablation_types: list[Literal["orthogonal", "rib"]],
     log_scale: bool = False,
     xmax: Optional[int] = None,
 ) -> None:
     """Plot accuracy vs number of remaining basis vectors.
 
     Args:
-        accuracies: A dictionary mapping module names to an inner dictionary mapping the number of
-            basis vectors remaining.
-        plot_file: The file to save the plot to.
-        exp_name: The name of the experiment
-        model_name: The name of the model
-        ablation_type: Either 'orthog' or 'rib'.
+        accuracies: A list of dictionares mapping node layers to an inner dictionary that maps the
+            number of basis vectors remaining to the accuracy.
+        out_file: The file to save the plot to.
+        exp_names: The names of the experiments.
+        ablation_types: The type of ablation performed for each experiment ("orthogonal" or "rib").
         log_scale: Whether to use a log scale for the x-axis. Defaults to False.
         xmax: The maximum value for the x-axis. Defaults to None.
     """
-    module_names = list(accuracies.keys())
-    n_plots = len(module_names)
+    # Verify that all accuracies have the same node layers
+    node_layers_per_exp = [set(accuracy.keys()) for accuracy in accuracies]
+    assert all(
+        node_layers == node_layers_per_exp[0] for node_layers in node_layers_per_exp[1:]
+    ), "All accuracies must have the same node layers."
+
+    node_layers = accuracies[0].keys()
+    n_plots = len(node_layers)
     _, axs = plt.subplots(n_plots, 1, figsize=(15, 4 * n_plots), dpi=140)
 
     if n_plots == 1:
         axs = [axs]
 
-    for i, module_name in enumerate(module_names):
-        n_vecs_remaining = sorted(list(int(k) for k in accuracies[module_name]))
-        y_values = [accuracies[module_name][str(i)] for i in n_vecs_remaining]
-        axs[i].plot(n_vecs_remaining, y_values, "-o", label="test")
+    for i, node_layer in enumerate(node_layers):
+        for exp_name, ablation_type, exp_accuracies in zip(exp_names, ablation_types, accuracies):
+            n_vecs_remaining = sorted(list(int(k) for k in exp_accuracies[node_layer]))
+            y_values = [exp_accuracies[node_layer][str(i)] for i in n_vecs_remaining]
+            axs[i].plot(n_vecs_remaining, y_values, "-o", label=exp_name)
 
-        title_extra = (
-            "n_remaining_eigenvalues" if ablation_type == "orthogonal" else "n_remaining_basis_vecs"
-        )
-        xlabel_extra = (
-            "Number of remaining eigenvalues"
-            if ablation_type == "orthogonal"
-            else "Number of remaining interaction basis vectors"
-        )
+            axs[i].set_title(f"acc vs n_remaining_basis_vecs for input to {node_layer}")
+            axs[i].set_xlabel("Number of remaining basis vecs")
+            if xmax is not None:
+                axs[i].set_xlim(0, xmax)
+            axs[i].set_ylabel("Accuracy")
+            axs[i].set_ylim(0, 1)
 
-        axs[i].set_title(f"{exp_name} {model_name} acc vs {title_extra} for input to {module_name}")
-        axs[i].set_xlabel(xlabel_extra)
-        if xmax is not None:
-            axs[i].set_xlim(0, xmax)
-        axs[i].set_ylabel("Accuracy")
-        axs[i].set_ylim(0, 1)
+            if log_scale:
+                axs[i].set_xscale("log")
 
-        if log_scale:
-            axs[i].set_xscale("log")
-
-        axs[i].grid(True)
-        axs[i].legend()
+            axs[i].grid(True)
+            axs[i].legend()
 
     # Make a title for the entire figure
-    plt.suptitle(f"{exp_name} {model_name} acc vs {title_extra}")
+    plt.suptitle("_".join(exp_names))
 
     # Adjust the spacing between subplots
     plt.subplots_adjust(hspace=0.4)
 
-    plt.savefig(plot_file)
+    plt.savefig(out_file)

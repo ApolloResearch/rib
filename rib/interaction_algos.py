@@ -33,36 +33,51 @@ class Eigenvectors:
 
 
 def build_sorted_lambda_matrices(
-    lambda_vals: Float[Tensor, "d_hidden_trunc"],
+    Lambda_abs: Float[Tensor, "d_hidden_trunc"],
+    truncation_threshold: float,
 ) -> tuple[
-    Float[Tensor, "d_hidden_trunc d_hidden_trunc"], Float[Tensor, "d_hidden_trunc d_hidden_trunc"]
+    Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"],
+    Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"],
 ]:
-    """Build the sorted Lambda matrix and its pseudoinverse.
+    """Build the sqrt sorted Lambda matrix and its pseudoinverse.
+
+    We truncate the Lambda matrix to remove small values.
 
     Args:
-        lambda_vals: The vectors of lambda values
+        Lambda_abs: Vector of the absolute values of the lambdas.
 
     Returns:
-        - The sorted Lambda matrix
-        - The pseudoinverse of the sorted Lambda matrix
+        - The sqrt of the sorted Lambda matrix
+        - The pseudoinverse of the sqrt sorted Lambda matrix
 
     """
     # Get the sort indices in descending order
-    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(lambda_vals, descending=True)
-    # Create a matrix from lambda_vals with the columns sorted in descending order
-    # of their values
-    lambda_matrix: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(lambda_vals)[:, idxs]
-    # We also need the pseudoinverse of this matrix
-    lambda_matrix_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = torch.diag(
-        lambda_vals.reciprocal()
-    )[idxs, :]
+    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(Lambda_abs, descending=True)
+
+    # Get the number of values we will truncate
+    n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
+
+    truncated_idxs: Int[Tensor, "d_hidden_extra_trunc"] = (
+        idxs[:-n_small_lambdas] if n_small_lambdas > 0 else idxs
+    )
+
+    Lambda_abs_sqrt: Float[Tensor, "d_hidden_trunc"] = Lambda_abs.sqrt()
+    # Create a matrix from lambda_vals with the sorted columns and removing n_small_lambdas cols
+    lambda_matrix: Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"] = torch.diag(
+        Lambda_abs_sqrt
+    )[:, truncated_idxs]
+    # We also need the pseudoinverse of this matrix. We sort and remove the n_small_lambdas rows
+    lambda_matrix_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"] = torch.diag(
+        Lambda_abs_sqrt.reciprocal()
+    )[truncated_idxs, :]
 
     assert not torch.any(torch.isnan(lambda_matrix_pinv)), "NaNs in the pseudoinverse."
+    # (lambda_matrix @ lambda_matrix_pinv).diag() should contain d_hidden_extra_trunc 1s and
+    # d_hidden_trunc - d_hidden_extra_trunc 0s
     assert torch.allclose(
-        lambda_matrix @ lambda_matrix_pinv,
-        torch.eye(lambda_matrix.shape[0], dtype=lambda_vals.dtype, device=lambda_vals.device),
-        atol=1e-6,
-    ), "Lambda matrix and its pseudoinverse are not inverses of each other."
+        (lambda_matrix @ lambda_matrix_pinv).diag().sum(),
+        torch.tensor(lambda_matrix.shape[0] - n_small_lambdas, dtype=lambda_matrix.dtype),
+    )
 
     return lambda_matrix, lambda_matrix_pinv
 
@@ -164,16 +179,20 @@ def calculate_interaction_rotations(
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
         D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
         U_D_sqrt_pinv_T_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv.T @ V
-        Lambda_raw: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_T_V
+        Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
+            (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_T_V).diag().abs()
         )
-        # We only care about the sqrt of the absolute value of diagonal elements of Lambda_raw
-        Lambda_diag_abs_sqrt: Float[Tensor, "d_hidden_trunc"] = Lambda_raw.diag().abs().sqrt()
 
-        Lambda_abs_sqrt, Lambda_abs_sqrt_pinv = build_sorted_lambda_matrices(Lambda_diag_abs_sqrt)
+        Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
+            Lambda_abs, truncation_threshold
+        )
 
-        C: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt_pinv_T_V @ Lambda_abs_sqrt
-        C_pinv: Float[Tensor, "d_hidden_trunc d_hidden"] = Lambda_abs_sqrt_pinv @ U_D_sqrt_V.T
+        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
+            U_D_sqrt_pinv_T_V @ Lambda_abs_sqrt_trunc
+        )
+        C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
+            Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T
+        )
         Cs.append(
             InteractionRotation(
                 node_layer_name=hook_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()

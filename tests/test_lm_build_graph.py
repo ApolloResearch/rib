@@ -60,12 +60,12 @@ def mock_load_config(*args, **kwargs):
 def test_modular_arithmetic_build_graph():
     atol = 1e-5
 
-    Lambda_sqrts: list[torch.Tensor] = []
+    Lambda_abs: list[torch.Tensor] = []
 
-    def mock_build_sorted_lambda_matrices(Lambda_diag_abs_sqrt, **kwargs):
+    def mock_build_sorted_lambda_matrices(Lambda_abs_arg, *args, **kwargs):
         # Call the original function to get the real lambdas
-        Lambda_sqrts.append(Lambda_diag_abs_sqrt.cpu())
-        return build_sorted_lambda_matrices(Lambda_diag_abs_sqrt, **kwargs)
+        Lambda_abs.append(Lambda_abs_arg.cpu())
+        return build_sorted_lambda_matrices(Lambda_abs_arg, *args, **kwargs)
 
     # Create a temporary file and write the mock config to it
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".yaml") as temp_config:
@@ -84,11 +84,11 @@ def test_modular_arithmetic_build_graph():
             Cs = results["interaction_rotations"]
             E_hats = results["edges"]
 
-            # Square, sort, and reverse the order of the lambda_sqrts
+            # Sort, and reverse the order of the Lambda_abs
             Lambdas = [
-                torch.sort(Lambda_sqrt**2, descending=True).values
-                for Lambda_sqrt in Lambda_sqrts[::-1]
+                torch.sort(Lambda_abs, descending=True).values for Lambda_abs in Lambda_abs[::-1]
             ]
+
             # Check that the output layer rotation is an identity matrix
             assert torch.allclose(
                 Cs[-1]["C"],
@@ -103,7 +103,13 @@ def test_modular_arithmetic_build_graph():
                 assert torch.allclose(
                     act_size / act_size.abs().max(), edge_size / edge_size.abs().max(), atol=atol
                 ), f"act_size not equal to edge_size for {module_name}"
-                # Check that the Lambdas are also the same
+
+                # Check that the Lambdas are also the same as the act_size and edge_size
+                # Note that the Lambdas need to be truncated to the same size as the edge_size (this
+                # happens in `rib.interaction_algos.build_sort_lambda_matrix)
+                Lambdas_trunc = Lambdas[i][: len(edge_size)]
                 assert torch.allclose(
-                    act_size / act_size.abs().max(), Lambdas[i] / Lambdas[i].abs().max(), atol=atol
+                    act_size / act_size.abs().max(),
+                    Lambdas_trunc / Lambdas_trunc.max(),
+                    atol=atol,
                 ), f"act_size not equal to Lambdas for {module_name}"

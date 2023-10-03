@@ -1,4 +1,4 @@
-"""Test various properties of an lm interaction graph.
+"""Test various properties of an lm and mnist interaction graph.
 
 Properties tested:
 1. The size of the sum of activations in the interaction basis (calculated with
@@ -14,6 +14,7 @@ that have a small set of large numbers and a large set of small numbers.
 import sys
 import tempfile
 from pathlib import Path
+from typing import Callable
 from unittest.mock import patch
 
 import pytest
@@ -24,40 +25,20 @@ ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
 
-from experiments.lm_rib_build.lm_build_rib_graph import main as build_graph_main
+from experiments.lm_rib_build.lm_build_rib_graph import main as lm_build_graph_main
+from experiments.mnist_rib_build.build_interaction_graph import (
+    main as mnist_build_graph_main,
+)
 from rib.interaction_algos import build_sorted_lambda_matrices
 from rib.utils import load_config
 
-MOCK_CONFIG = """
-exp_name: test
-seed: 0
-tlens_pretrained: null
-tlens_model_path: OVERWRITE/IN/MOCK
-dataset: modular_arithmetic
-batch_size: 128
-truncation_threshold: 1e-6
-rotate_output: false
-last_pos_only: true
-dtype: float32
-node_layers:
-  - ln1.0
-  - mlp_in.0
-  - unembed
-"""
 
-
-def mock_load_config(*args, **kwargs):
-    # Load the config as normal but set the mlp_path using a relative path
-    config = load_config(*args, **kwargs)
-    config.tlens_model_path = (
-        Path(__file__).parent.parent
-        / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
-    )
-    return config
-
-
-@pytest.mark.slow
-def test_modular_arithmetic_build_graph():
+def graph_build_test(
+    mock_config: str,
+    load_config_mock_fn: Callable,
+    load_config_path: str,
+    build_graph_main_fn: Callable,
+):
     atol = 1e-5
 
     Lambda_abs: list[torch.Tensor] = []
@@ -69,17 +50,14 @@ def test_modular_arithmetic_build_graph():
 
     # Create a temporary file and write the mock config to it
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".yaml") as temp_config:
-        temp_config.write(MOCK_CONFIG)
+        temp_config.write(mock_config)
         temp_config.flush()
 
-        with patch("torch.save"), patch(
-            "experiments.lm_rib_build.lm_build_rib_graph.load_config",
-            side_effect=mock_load_config,
-        ), patch(
+        with patch("torch.save"), patch(load_config_path, side_effect=load_config_mock_fn), patch(
             "rib.interaction_algos.build_sorted_lambda_matrices",
             side_effect=mock_build_sorted_lambda_matrices,
         ):
-            results = build_graph_main(temp_config.name)
+            results = build_graph_main_fn(temp_config.name)
             grams = results["gram_matrices"]
             Cs = results["interaction_rotations"]
             E_hats = results["edges"]
@@ -113,3 +91,73 @@ def test_modular_arithmetic_build_graph():
                     Lambdas_trunc / Lambdas_trunc.max(),
                     atol=atol,
                 ), f"act_size not equal to Lambdas for {module_name}"
+
+
+@pytest.mark.slow
+def test_modular_arithmetic_build_graph():
+    mock_config = """
+    exp_name: test
+    seed: 0
+    tlens_pretrained: null
+    tlens_model_path: OVERWRITE/IN/MOCK
+    dataset: modular_arithmetic
+    batch_size: 128
+    truncation_threshold: 1e-6
+    rotate_output: false
+    last_pos_only: true
+    dtype: float32
+    node_layers:
+      - ln1.0
+      - mlp_in.0
+      - unembed
+    """
+    load_config_path = "experiments.lm_rib_build.lm_build_rib_graph.load_config"
+
+    def mock_load_config_modular_arithmetic(*args, **kwargs):
+        # Load the config as normal but set the mlp_path using a relative path
+        config = load_config(*args, **kwargs)
+        config.tlens_model_path = (
+            Path(__file__).parent.parent
+            / "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
+        )
+        return config
+
+    graph_build_test(
+        mock_config=mock_config,
+        load_config_mock_fn=mock_load_config_modular_arithmetic,
+        load_config_path=load_config_path,
+        build_graph_main_fn=lm_build_graph_main,
+    )
+
+
+@pytest.mark.slow
+def test_mnsit_build_graph():
+    mock_config = """
+    exp_name: test
+    mlp_path: OVERWRITE/IN/MOCK
+    batch_size: 64
+    seed: 0
+    truncation_threshold: 1e-6
+    rotate_output: false
+    dtype: float32
+    module_names:
+        - layers.1
+        - layers.2
+    """
+    load_config_path = "experiments.mnist_rib_build.build_interaction_graph.load_config"
+
+    def mock_load_config_mnist(*args, **kwargs):
+        # Load the config as normal but set the mlp_path using a relative path
+        config = load_config(*args, **kwargs)
+        config.mlp_path = (
+            Path(__file__).parent.parent
+            / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-08-13_16-23-59/model_epoch_3.pt"
+        )
+        return config
+
+    graph_build_test(
+        mock_config=mock_config,
+        load_config_mock_fn=mock_load_config_mnist,
+        load_config_path=load_config_path,
+        build_graph_main_fn=mnist_build_graph_main,
+    )

@@ -187,7 +187,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     for x in inputs:
         x.requires_grad_(True)
 
-    integral_step = 1  # TODO: Make this configurable or use numerical integration package
+    # Set as 1/2 since we are looking at the derivative of a squared term.
+    integral_step = 0.5  # TODO: Make this configurable or use numerical integration package
     for alpha in torch.arange(integral_step, 1 + integral_step, integral_step):
         alpha_inputs = tuple(alpha * x for x in inputs)
         output = module(*alpha_inputs)

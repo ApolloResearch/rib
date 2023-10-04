@@ -42,7 +42,7 @@ Supported experiments:
 
 - Training a 1-layer LM on the modular addition task: `experiments/train_modular_arithmetic/`
 - Ablating vectors from the interaction or orthogonal basis: `experiments/lm_ablations/`
-- Building an interaction graph: `experiments/lm_rib_ablation/`
+- Building an interaction graph: `experiments/lm_rib_build/`
 
 As can be seen in `experiments/lm_rib_build/lm_build_rib_graph.py`, the process for building a graph
 for an LM is as follows:

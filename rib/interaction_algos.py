@@ -71,13 +71,22 @@ def build_sorted_lambda_matrices(
         Lambda_abs_sqrt.reciprocal()
     )[truncated_idxs, :]
 
+    # Verify various properties of the lambda matrices
     assert not torch.any(torch.isnan(lambda_matrix_pinv)), "NaNs in the pseudoinverse."
+
+    lambda_lambda_pinv = lambda_matrix @ lambda_matrix_pinv
     # (lambda_matrix @ lambda_matrix_pinv).diag() should contain d_hidden_extra_trunc 1s and
     # d_hidden_trunc - d_hidden_extra_trunc 0s
     assert torch.allclose(
-        (lambda_matrix @ lambda_matrix_pinv).diag().sum(),
+        lambda_lambda_pinv.diag().sum(),
         torch.tensor(lambda_matrix.shape[0] - n_small_lambdas, dtype=lambda_matrix.dtype),
     )
+    # zero out diag els
+    lambda_lambda_pinv[
+        torch.arange(lambda_lambda_pinv.shape[0]), torch.arange(lambda_lambda_pinv.shape[0])
+    ] = 0.0
+    # assert all off-diagonal elements are zero
+    assert torch.allclose(lambda_lambda_pinv, torch.zeros_like(lambda_lambda_pinv))
 
     return lambda_matrix, lambda_matrix_pinv
 
@@ -155,6 +164,14 @@ def calculate_interaction_rotations(
             if n_small_eigenvals > 0
             else torch.diag(D_dash)
         )
+        # Set D to an identity matrix for testing
+        # D = torch.eye(D.shape[0], dtype=D.dtype, device=D.device)
+        # Set D to a diagonal matrix with floating point numbers between 1 and 2
+        # D = torch.zeros(D.shape, dtype=D.dtype, device=D.device)
+        # D[torch.arange(D.shape[0]), torch.arange(D.shape[0])] = (
+        #     torch.rand(D.shape[0], dtype=D.dtype, device=D.device) * 0.0001
+        # )
+
         # Truncate the columns of U to remove small eigenvalues
         U: Float[Tensor, "d_hidden d_hidden_trunc"] = (
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
@@ -171,28 +188,61 @@ def calculate_interaction_rotations(
             hook_name=hook_name,
         )
 
+        # # NOTE: For testing
+        # if hook_name == "unembed":
+        #     W_U = hooked_model.model.sections.section_2[0].W_U.detach().clone()
+        #     M_dash = W_U @ W_U.T
+        #     # Make M_dash be a random matrix
+        #     # M_dash = torch.rand(M_dash.shape, dtype=M_dash.dtype, device=M_dash.device)
+        #     # Add some random noise to the M_dash matrix
+        #     # M_dash += torch.rand(M_dash.shape, dtype=M_dash.dtype, device=M_dash.device) * 0.1
+
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
-        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
-        _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
+        temp1 = U @ pinv_diag(D.sqrt())
+        temp2 = D.sqrt() @ U.T
+        # M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
+        # M_eigvals, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
+        # # Make V be an identity to test that we get the same results
+        # # V = torch.eye(V.shape[0], dtype=V.dtype, device=V.device)
 
-        # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
-        U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
-        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
-        U_D_sqrt_pinv_T_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv.T @ V
-        Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
-            (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_T_V).diag().abs()
-        )
+        # # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
+        # U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
+        # D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
+        # U_D_sqrt_pinv_T_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv.T @ V
+        # Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
+        #     (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_T_V).diag().abs()
+        # )
 
-        Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
-            Lambda_abs, truncation_threshold
-        )
+        # Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
+        #     Lambda_abs, truncation_threshold
+        # )
+        # Change all the non-zero values to 1s
+        # Lambda_abs_sqrt_trunc[Lambda_abs_sqrt_trunc != 0.0] = 1.0
+        # Lambda_abs_sqrt_trunc_pinv[Lambda_abs_sqrt_trunc_pinv != 0.0] = 1.0
 
-        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
-            U_D_sqrt_pinv_T_V @ Lambda_abs_sqrt_trunc
-        )
-        C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
-            Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T
-        )
+        # Lambda_abs_sqrt_trunc = Lambda_abs.diag()
+        # Lambda_abs_sqrt_trunc_pinv = Lambda_abs.reciprocal().diag()
+        # # Set both lambda matrices to (truncated) identity matrices
+        # Lambda_abs_sqrt_trunc = torch.zeros_like(Lambda_abs_sqrt_trunc)
+        # # Set the leading diagonal to ones
+        # Lambda_abs_sqrt_trunc[
+        #     torch.arange(Lambda_abs_sqrt_trunc.shape[1]),
+        #     torch.arange(Lambda_abs_sqrt_trunc.shape[1]),
+        # ] = 1.0
+        # Lambda_abs_sqrt_trunc_pinv = torch.zeros_like(Lambda_abs_sqrt_trunc_pinv)
+        # Lambda_abs_sqrt_trunc_pinv[
+        #     torch.arange(Lambda_abs_sqrt_trunc_pinv.shape[0]),
+        #     torch.arange(Lambda_abs_sqrt_trunc_pinv.shape[0]),
+        # ] = 1.0
+
+        # C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
+        #     U_D_sqrt_pinv_T_V @ Lambda_abs_sqrt_trunc
+        # )
+        # C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
+        #     Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T
+        # )
+        C = temp1
+        C_pinv = temp2
         Cs.append(
             InteractionRotation(
                 node_layer_name=hook_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()

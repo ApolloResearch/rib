@@ -15,6 +15,7 @@ from pathlib import Path
 
 import fire
 
+from rib.log import logger
 from rib.plotting import plot_ablation_accuracies
 from rib.utils import overwrite_output
 
@@ -25,6 +26,10 @@ def main(*results_files: str) -> None:
     ablation_types = []
 
     for results_file in results_files:
+        if not results_file.endswith(".json"):
+            # Raise a warning to the user, but don't exit.
+            logger.warning(f"Skipping {results_file} because it is not a JSON file.")
+            continue
         with open(results_file, "r") as f:
             results = json.load(f)
 

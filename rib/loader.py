@@ -105,7 +105,7 @@ def create_modular_arithmetic_data_loader(
 
 def create_modular_arithmetic_data_loader(
     shuffle: bool,
-    return_set: Literal["train", "test", "both", "all"],
+    return_set: Union[Literal["train", "test", "all"], Literal["both"]],
     tlens_model_path: Optional[Path] = None,
     fn_name: Optional[str] = None,
     modulus: Optional[int] = None,

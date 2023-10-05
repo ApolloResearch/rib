@@ -79,6 +79,7 @@ def ablate_and_test(
     return accuracies
 
 
+@torch.inference_mode()
 def run_ablations(
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]],
     node_layers: list[str],

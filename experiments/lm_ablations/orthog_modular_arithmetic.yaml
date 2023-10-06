@@ -5,7 +5,7 @@ ablate_every_vec_cutoff: 10
 node_layers:  # Rotate the input to these modules into the orthogonal basis
   - ln1.0
   - ln2.0
-  - mlp_act.0
+  - mlp_out.0
   - unembed
 batch_size: 128
 dtype: float32

@@ -11,5 +11,5 @@ dtype: float32
 node_layers:
   - ln1.0
   - ln2.0
-  - mlp_act.0
+  - mlp_out.0
   - unembed

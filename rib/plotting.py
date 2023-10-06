@@ -16,10 +16,10 @@ import numpy as np
 import torch
 
 
-def create_node_layers(edges: list[tuple[str, torch.Tensor]]) -> list[np.ndarray]:
+def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:
     """Create a list of node layers from the given edges."""
     layers = []
-    for i, (_, weight_matrix) in enumerate(edges):
+    for i, weight_matrix in enumerate(edges):
         # Only add nodes to the graph for the current layer if it's the first layer
         if i == 0:
             current_layer = np.arange(weight_matrix.shape[1])
@@ -36,24 +36,23 @@ def create_node_layers(edges: list[tuple[str, torch.Tensor]]) -> list[np.ndarray
     return layers
 
 
-def add_edges_to_graph(
+def _add_edges_to_graph(
     graph: nx.Graph,
-    edges: list[tuple[str, torch.Tensor]],
+    edges: list[torch.Tensor],
     layers: list[np.ndarray],
-    pos_color: str = "blue",
-    neg_color: str = "red",
+    pos_color: Optional[str] = "blue",
+    neg_color: Optional[str] = "red",
 ) -> None:
     """Add edges to the graph object (note that there is one more layer than there are edges).
 
     Args:
-        graph: The graph object to add edges to.
-        edges: A list of tuples of (module_name, edge_weights), each with shape
-            (n_nodes_in_l+1, n_nodes_in_l).
-        layers: A list of node layers, where each layer is an array of node indices.
-        pos_color: The color to use for positive edges. Defaults to "blue".
-        neg_color: The color to use for negative edges. Defaults to "red".
+        graph (nx.Graph): The graph object to add edges to.
+        edges (list[torch.Tensor]): A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
+        layers (list[np.ndarray]): A list of node layers with each layer an array of node indices.
+        pos_color (Optional[str]): The color to use for positive edges. Defaults to "blue".
+        neg_color (Optional[str]): The color to use for negative edges. Defaults to "red".
     """
-    for module_idx, (_, edge_matrix) in enumerate(edges):
+    for module_idx, edge_matrix in enumerate(edges):
         for j in range(edge_matrix.shape[1]):
             for i in range(edge_matrix.shape[0]):
                 color = pos_color if edge_matrix[i, j] > 0 else neg_color
@@ -66,38 +65,73 @@ def add_edges_to_graph(
                 )
 
 
+def _prepare_edges_for_plotting(
+    raw_edges: list[tuple[str, torch.Tensor]],
+    nodes_input_layer: int,
+    nodes_per_layer: int,
+) -> list[torch.Tensor]:
+    """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
+
+    Args:
+        raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
+            (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
+        nodes_input_layer (int): Number of nodes in the input layer.
+        nodes_per_layer (int): Number of nodes in each layer after the first one.
+
+    Returns:
+        list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
+    """
+    edges: list[torch.Tensor] = []
+    for i, (_, weight_matrix) in enumerate(raw_edges):
+        # Convert edges to float32 (bfloat16 will cause errors and we don't need higher precision)
+        weight_matrix = weight_matrix.float()
+        n_nodes_in = nodes_input_layer if i == 0 else nodes_per_layer
+        # Normalize the edge weights by the sum of the absolute values of the weights
+        weight_matrix /= torch.sum(torch.abs(weight_matrix))
+        # Only keep the first nodes_per_layer nodes in each layer
+        edges.append(weight_matrix[:nodes_per_layer, :n_nodes_in])
+    return edges
+
+
 def plot_interaction_graph(
-    edges: list[tuple[str, torch.Tensor]],
-    out_file: Path,
+    raw_edges: list[tuple[str, torch.Tensor]],
     exp_name: str,
-    n_nodes_ratio: float = 1.0,
+    nodes_input_layer: int,
+    nodes_per_layer: int,
+    out_file: Path,
 ) -> None:
     """Plot the interaction graph for the given edges.
 
     Args:
-        edges: A list of tuples of (module_name, edge_weights), each with shape
-            (n_nodes_in_l+1, n_nodes_in_l).
-        out_file: The file to save the plot to.
-        exp_name: The name of the experiment
-        n_nodes_ratio: Ratio of the number of nodes in the first layer to the number of nodes in
-            the other layers. Defaults to 1.0.
-
+        raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
+            (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
+        exp_name (str): The name of the experiment.
+        nodes_input_layer (int): Number of nodes in the input layer.
+        nodes_per_layer (int): Number of nodes in each layer after the first one.
+        out_file (Path): The file to save the plot to.
     """
 
-    # Convert the edges to float32 (bfloat16 will cause errors and we don't need higher precision)
-    edges = [(module_name, edge_matrix.float()) for module_name, edge_matrix in edges]
+    n_nodes_ratio = nodes_input_layer / nodes_per_layer
+
+    edges = _prepare_edges_for_plotting(raw_edges, nodes_input_layer, nodes_per_layer)
+
+    # The graph contains a final layer corresponding to the output of the final module
+    layer_names = [module_name for module_name, _ in raw_edges] + [f"{raw_edges[-1][0]}-output"]
 
     # Create the undirected graph
     graph = nx.Graph()
 
     fig, ax = plt.subplots(1, 1, figsize=(20, 10))
 
-    layers = create_node_layers(edges)
+    layers = _create_node_layers(edges)
     # Add nodes to the graph object
     for layer in layers:
         graph.add_nodes_from(layer)
 
-    add_edges_to_graph(graph, edges, layers)
+    _add_edges_to_graph(graph, edges, layers)
+
+    # Calculate the max layer height for label positioning based on the largest layer
+    max_layer_height = max([len(layer) for layer in layers])
 
     # Create positions for each node
     pos: dict[int, tuple[int, Union[int, float]]] = {}
@@ -110,10 +144,13 @@ def plot_interaction_graph(
     # Draw nodes
     colors = ["black", "green", "orange", "purple"]  # Add more colors if you have more layers
     options = {"edgecolors": "tab:gray", "node_size": 100, "alpha": 0.3}
-    for i, layer in enumerate(layers):
+    for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
         nx.draw_networkx_nodes(
             graph, pos, nodelist=layer, node_color=colors[i % len(colors)], **options
         )
+        # Add layer label above the nodes
+        plt.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+
     # Draw edges
     width_factor = 15
     # for edge in graph.edges(data=True):

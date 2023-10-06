@@ -16,7 +16,7 @@ from rib.utils import train_test_split
 
 def load_sequential_transformer(
     node_layers: list[str],
-    last_pos_only: bool,
+    last_pos_module_type: Optional[Literal["add_resid1", "unembed"]],
     tlens_pretrained: Optional[str],
     tlens_model_path: Optional[Path],
     dtype: torch.dtype = torch.float32,
@@ -31,7 +31,8 @@ def load_sequential_transformer(
 
     Args:
         node_layers (list[str]): The module names defining the graph sections.
-        last_pos_only (bool): Whether to only use the last position index in the unembed module.
+        last_pos_module_type (Optional[Literal["add_resid1", "unembed"]]): Module in which to only
+            output the last position index.
         tlens_pretrained (Optional[str]): The name of a pretrained transformerlens model.
         tlens_model_path (Optional[Path]): The path to a transformerlens model.
         dtype (Optional[torch.dtype]): The dtype to use for the model.
@@ -66,7 +67,9 @@ def load_sequential_transformer(
     # Set the dtype to the one specified in the config for this script (as opposed to the one used
     # to train the tlens model)
     seq_cfg.dtype = dtype
-    seq_model = SequentialTransformer(seq_cfg, node_layers, last_pos_only)
+    seq_model = SequentialTransformer(
+        seq_cfg, node_layers, last_pos_module_type=last_pos_module_type
+    )
 
     # Load the transformer-lens weights into the sequential transformer model
     state_dict = convert_tlens_weights(list(seq_model.state_dict().keys()), tlens_model)

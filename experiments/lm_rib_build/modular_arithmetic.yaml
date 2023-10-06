@@ -6,9 +6,10 @@ dataset: modular_arithmetic
 batch_size: 256
 truncation_threshold: 1e-6
 rotate_output: false
-last_pos_only: true  # attn + residual will only output the last position
+last_pos_module_type: add_resid1  # module type in which to only output the last position index
 dtype: float32
 node_layers:
   - ln1.0
-  - mlp_in.0
+  - ln2.0
+  - mlp_act.0
   - unembed

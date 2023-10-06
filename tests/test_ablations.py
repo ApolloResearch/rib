@@ -250,7 +250,6 @@ def test_run_modular_arithmetic_rib_ablations():
     ablate_every_vec_cutoff: 2
     node_layers:
         - ln1.0
-        - mlp_in.0
         - unembed
     batch_size: 64
     dtype: float32
@@ -262,7 +261,7 @@ def test_run_modular_arithmetic_rib_ablations():
         script_path="experiments.lm_ablations.run_lm_ablations",
         mock_load_config_fn=mock_load_config_lm,
         mock_main_fn=lm_ablations_main,
-        layer_keys=["ln1.0", "mlp_in.0", "unembed"],
+        layer_keys=["ln1.0", "unembed"],
         max_accuracy_threshold=0.998,  # Model should converge to 100% accuracy
     )
 
@@ -278,7 +277,6 @@ def test_run_modular_arithmetic_orthog_ablations():
     ablate_every_vec_cutoff: 10
     node_layers:
         - ln1.0
-        - mlp_in.0
         - unembed
     batch_size: 64
     dtype: float32
@@ -290,6 +288,6 @@ def test_run_modular_arithmetic_orthog_ablations():
         script_path="experiments.lm_ablations.run_lm_ablations",
         mock_load_config_fn=mock_load_config_lm,
         mock_main_fn=lm_ablations_main,
-        layer_keys=["ln1.0", "mlp_in.0", "unembed"],
+        layer_keys=["ln1.0", "unembed"],
         max_accuracy_threshold=0.998,  # Model should converge to 100% accuracy
     )

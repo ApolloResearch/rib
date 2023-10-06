@@ -28,11 +28,13 @@ def main(results_file: str) -> None:
         print("Exiting.")
         return
 
+    # Set all layers to have the same number of nodes
+    nodes_per_layer = 40
+
     plot_interaction_graph(
         raw_edges=results["edges"],
         exp_name=results["exp_name"],
-        nodes_input_layer=40,
-        nodes_per_layer=40,
+        nodes_per_layer=nodes_per_layer,
         out_file=out_file,
     )
 

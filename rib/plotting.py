@@ -67,16 +67,14 @@ def _add_edges_to_graph(
 
 def _prepare_edges_for_plotting(
     raw_edges: list[tuple[str, torch.Tensor]],
-    nodes_input_layer: int,
-    nodes_per_layer: int,
+    nodes_per_layer: list[int],
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
     Args:
         raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
             (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
-        nodes_input_layer (int): Number of nodes in the input layer.
-        nodes_per_layer (int): Number of nodes in each layer after the first one.
+        nodes_per_layer (list[int]): The number of nodes in each layer.
 
     Returns:
         list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
@@ -85,19 +83,19 @@ def _prepare_edges_for_plotting(
     for i, (_, weight_matrix) in enumerate(raw_edges):
         # Convert edges to float32 (bfloat16 will cause errors and we don't need higher precision)
         weight_matrix = weight_matrix.float()
-        n_nodes_in = nodes_input_layer if i == 0 else nodes_per_layer
         # Normalize the edge weights by the sum of the absolute values of the weights
         weight_matrix /= torch.sum(torch.abs(weight_matrix))
-        # Only keep the first nodes_per_layer nodes in each layer
-        edges.append(weight_matrix[:nodes_per_layer, :n_nodes_in])
+        # Only keep the desired number of nodes in each layer
+        in_nodes = nodes_per_layer[i]
+        out_nodes = nodes_per_layer[i + 1]
+        edges.append(weight_matrix[:out_nodes, :in_nodes])
     return edges
 
 
 def plot_interaction_graph(
     raw_edges: list[tuple[str, torch.Tensor]],
     exp_name: str,
-    nodes_input_layer: int,
-    nodes_per_layer: int,
+    nodes_per_layer: Union[int, list[int]],
     out_file: Path,
 ) -> None:
     """Plot the interaction graph for the given edges.
@@ -106,14 +104,19 @@ def plot_interaction_graph(
         raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
             (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
         exp_name (str): The name of the experiment.
-        nodes_input_layer (int): Number of nodes in the input layer.
-        nodes_per_layer (int): Number of nodes in each layer after the first one.
+        nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
+            all layers have the same number of nodes. If list, then the number of nodes in each
+            layer is given by the list.
         out_file (Path): The file to save the plot to.
     """
 
-    n_nodes_ratio = nodes_input_layer / nodes_per_layer
+    if isinstance(nodes_per_layer, int):
+        # Note that there is one more layer than there edge matrices
+        nodes_per_layer = [nodes_per_layer] * (len(raw_edges) + 1)
 
-    edges = _prepare_edges_for_plotting(raw_edges, nodes_input_layer, nodes_per_layer)
+    max_layer_height = max(nodes_per_layer)
+
+    edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
 
     # The graph contains a final layer corresponding to the output of the final module
     layer_names = [module_name for module_name, _ in raw_edges] + [f"{raw_edges[-1][0]}-output"]
@@ -130,14 +133,11 @@ def plot_interaction_graph(
 
     _add_edges_to_graph(graph, edges, layers)
 
-    # Calculate the max layer height for label positioning based on the largest layer
-    max_layer_height = max([len(layer) for layer in layers])
-
     # Create positions for each node
     pos: dict[int, tuple[int, Union[int, float]]] = {}
     for i, layer in enumerate(layers):
-        # Add extra spacing for all nodes after the first layer if there are fewer of them
-        spacing = 1 if i == 0 else n_nodes_ratio
+        # Add extra spacing for nodes that have fewer nodes than the biggest layer
+        spacing = 1 if i == 0 else max_layer_height / len(layer)
         for j, node in enumerate(layer):
             pos[node] = (i, j * spacing)
 

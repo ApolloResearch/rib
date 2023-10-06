@@ -126,6 +126,7 @@ def plot_interaction_graph(
         edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
     )
 
+    plt.suptitle(exp_name)
     plt.tight_layout()
     ax.axis("off")
     plt.savefig(out_file)

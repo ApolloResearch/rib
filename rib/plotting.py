@@ -118,8 +118,8 @@ def plot_interaction_graph(
 
     edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
 
-    # The graph contains a final layer corresponding to the output of the final module
-    layer_names = [module_name for module_name, _ in raw_edges] + [f"{raw_edges[-1][0]}-output"]
+    # The graph contains a final layer corresponding to the output of the network
+    layer_names = [module_name for module_name, _ in raw_edges] + ["output"]
 
     # Create the undirected graph
     graph = nx.Graph()

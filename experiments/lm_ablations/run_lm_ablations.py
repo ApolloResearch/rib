@@ -89,7 +89,7 @@ def main(config_path_str: str) -> None:
 
     seq_model, _ = load_sequential_transformer(
         node_layers=config.node_layers,
-        last_pos_only=interaction_graph_info["config"]["last_pos_only"],
+        last_pos_module_type=interaction_graph_info["config"]["last_pos_module_type"],
         tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
         tlens_model_path=tlens_model_path,
         dtype=dtype,

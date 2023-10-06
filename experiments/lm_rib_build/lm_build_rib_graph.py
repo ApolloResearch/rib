@@ -72,9 +72,9 @@ class Config(BaseModel):
         ...,
         description="Whether to rotate the output layer to its eigenbasis.",
     )
-    last_pos_only: bool = Field(
-        False,
-        description="Whether the unembed module should only be applied to the last position.",
+    last_pos_module_type: Optional[Literal["add_resid1", "unembed"]] = Field(
+        None,
+        description="Module type in which to only output the last position index.",
     )
 
     dtype: str = Field(..., description="The dtype to use when building the graph.")
@@ -115,7 +115,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
 
     seq_model, tlens_cfg_dict = load_sequential_transformer(
         node_layers=config.node_layers,
-        last_pos_only=config.last_pos_only,
+        last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
         dtype=dtype,

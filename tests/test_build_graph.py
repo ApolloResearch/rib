@@ -104,7 +104,7 @@ def test_modular_arithmetic_build_graph():
     batch_size: 128
     truncation_threshold: 1e-6
     rotate_output: false
-    last_pos_only: true
+    last_pos_module_type: add_resid1
     dtype: float32
     node_layers:
       - ln1.0

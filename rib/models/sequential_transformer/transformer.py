@@ -4,7 +4,7 @@ building of a RIB graph.
 """
 
 from functools import partial
-from typing import Callable, Type
+from typing import Callable, Literal, Optional, Type
 
 from jaxtyping import Int
 from torch import Tensor, nn
@@ -51,9 +51,11 @@ class SequentialTransformer(nn.Module):
     will change.
 
     Args:
-        cfg: The SequentialTransformer config
-        node_layers: The names of the node layers used to partition the transformer. There will be
-            `node_layers - 1` sections in the graph, one between each node layer.
+        cfg (SequentialTransformerConfig): The SequentialTransformer config.
+        node_layers (list[str]): The names of the node layers used to partition the transformer.
+            There will be `node_layers - 1` sections in the graph, one between each node layer.
+        last_pos_module_type (Optional[Literal["add_resid1", "unembed"]]): The name of the module
+            in which to only output the last position index.
 
     For example:
     >>> cfg = ... # config for gpt2
@@ -94,11 +96,16 @@ class SequentialTransformer(nn.Module):
     unembed_module_name: str = "unembed"
 
     def __init__(
-        self, cfg: SequentialTransformerConfig, node_layers: list[str], last_pos_only: bool = False
+        self,
+        cfg: SequentialTransformerConfig,
+        node_layers: list[str],
+        last_pos_module_type: Optional[Literal["add_resid1", "unembed"]] = None,
     ):
         super().__init__()
         self.cfg = cfg
-        self.last_pos_only = last_pos_only
+        self.node_layers = node_layers
+        self.last_pos_module_type = last_pos_module_type
+        self.has_folded_bias = False
 
         assert len(node_layers) > 1, "Must have at least 2 node layers"
         self.module_name_sections = self.create_module_name_sections(cfg.n_layers, node_layers)
@@ -121,8 +128,8 @@ class SequentialTransformer(nn.Module):
                 module_type = module_name.split(".")[0]
                 module_class: Type[nn.Module]
                 kwargs = {}
-                if module_type == "add_resid1":
-                    kwargs["last_pos_only"] = last_pos_only
+                if module_type == last_pos_module_type:
+                    kwargs["last_pos_only"] = True
                 if module_type in ["ln1", "ln2", "ln_final"]:
                     if cfg.normalization_type == "LNPre":
                         module_class = LayerNormPre
@@ -136,8 +143,6 @@ class SequentialTransformer(nn.Module):
                 module_section.append(module)
             sections[section_name] = MultiSequential(*module_section)
         self.sections: nn.ModuleDict = nn.ModuleDict(sections)
-
-        self.has_folded_bias = False
 
     @staticmethod
     def create_module_name_sections(n_blocks: int, node_layers: list[str]) -> list[list[str]]:

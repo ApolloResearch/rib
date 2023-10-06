@@ -21,20 +21,6 @@ def main(results_file: str) -> None:
     all layers after the first one.
     """
     results = torch.load(results_file)
-
-    # How many nodes get displayed. If None, display all nodes.
-    nodes_input_layer = 40
-    nodes_per_layer = 40
-    # results["edges"] contains a list of edges which are tuples of
-    # (module, edge_weights), each with shape (n_nodes_in_l+1, n_nodes_in_l)
-    edges: list[tuple[str, torch.Tensor]] = []
-    for i, (module_name, weight_matrix) in enumerate(results["edges"]):
-        n_nodes_in = nodes_input_layer if i == 0 else nodes_per_layer
-        # Normalize the edge weights by the sum of the absolute values of the weights
-        weight_matrix /= torch.sum(torch.abs(weight_matrix))
-        # Only keep the first nodes_per_layer nodes in each layer
-        edges.append((module_name, weight_matrix[:nodes_per_layer, :n_nodes_in]))
-
     out_dir = Path(__file__).parent / "out"
     out_file = out_dir / f"{results['exp_name']}_interaction_graph.png"
 
@@ -42,11 +28,14 @@ def main(results_file: str) -> None:
         print("Exiting.")
         return
 
+    # Set all layers to have the same number of nodes
+    nodes_per_layer = 40
+
     plot_interaction_graph(
-        edges=edges,
-        out_file=out_file,
+        raw_edges=results["edges"],
         exp_name=results["exp_name"],
-        n_nodes_ratio=nodes_input_layer / nodes_per_layer,
+        nodes_per_layer=nodes_per_layer,
+        out_file=out_file,
     )
 
 

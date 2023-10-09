@@ -13,5 +13,5 @@ truncation_threshold: 1e-6
 rotate_output: false
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
 n_intervals: 0
-dtype: float64
+dtype: float32
 

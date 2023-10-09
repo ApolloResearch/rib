@@ -4,7 +4,6 @@ from typing import Any, Union
 import torch
 from jaxtyping import Float
 from torch import Tensor
-from torch.func import jacrev, vmap
 
 from rib.linalg import (
     edge_norm,

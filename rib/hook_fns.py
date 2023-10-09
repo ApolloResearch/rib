@@ -179,8 +179,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
-        n_intervals: Number of intervals to use for the trapezoidal rule. If 1, this is equivalent
-            to taking a point estimate at alpha == 1 and scaling it by 1/2.
+        n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
+            to taking a point estimate at alpha == 1.
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
@@ -245,8 +245,8 @@ def interaction_edge_pre_forward_hook_fn(
         C_in: The C matrix for the current layer (C^l in the paper).
         C_in_pinv: The pseudoinverse of the C matrix for the current layer ((C^l)^+ in the paper).
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
-        n_intervals: Number of intervals to use for the trapezoidal rule. If 1, this is equivalent
-            to taking a point estimate at alpha == 1 and scaling it by 1/2.
+        n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
+            to taking a point estimate at alpha == 1.
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."

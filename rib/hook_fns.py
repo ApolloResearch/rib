@@ -199,7 +199,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
     has_pos = inputs[0].dim() == 3
 
-    einsum_pattern = "bipj,bpj->ij" if has_pos else "bij,bj->ij"
+    einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
 
     with torch.inference_mode():
         M_dash = torch.einsum(einsum_pattern, in_grads, in_grads)

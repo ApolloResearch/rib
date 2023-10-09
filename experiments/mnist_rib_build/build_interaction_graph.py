@@ -42,6 +42,7 @@ class Config(BaseModel):
     seed: int
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
     rotate_output: bool  # Whether to rotate the output layer to its eigenbasis.
+    n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
     module_names: list[str]
 
@@ -113,14 +114,16 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         data_loader=test_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
+        n_intervals=config.n_intervals,
         truncation_threshold=config.truncation_threshold,
         rotate_output=config.rotate_output,
     )
 
     E_hats = collect_interaction_edges(
         Cs=Cs,
-        module_names=config.module_names,
         hooked_model=hooked_mlp,
+        n_intervals=config.n_intervals,
+        module_names=config.module_names,
         data_loader=test_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,

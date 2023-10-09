@@ -231,9 +231,8 @@ def interaction_edge_pre_forward_hook_fn(
     this causes an infinite recursion because the module has a hook which runs this function. To
     avoid this, we (hackily) remove the hook before running the module and then add it back after.
 
-    The trapezoidal rule is used to approximate the integrated gradient. Note that if alpha == 0,
-    the gradient is 0, so we ignore this case when accumulating the sum. If n_intervals == 1, the
-    integrated gradient effectively takes a point estimate at alpha == 1 and scales it by 1/2.
+    The trapezoidal rule is used to approximate the integrated gradient. If n_intervals == 0, the
+    integrated gradient effectively takes a point estimate for the integral at alpha == 1.
 
     Args:
         module: Module that the hook is attached to.

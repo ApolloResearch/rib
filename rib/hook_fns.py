@@ -6,7 +6,11 @@ from jaxtyping import Float
 from torch import Tensor
 from torch.func import jacrev, vmap
 
-from rib.linalg import edge_norm, integrated_gradient_norm
+from rib.linalg import (
+    edge_norm,
+    integrated_gradient_trapezoidal_jacobian,
+    integrated_gradient_trapezoidal_norm,
+)
 
 
 def _add_to_hooked_matrix(
@@ -186,7 +190,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    in_grads = integrated_gradient_norm(
+    in_grads = integrated_gradient_trapezoidal_norm(
         module=module,
         inputs=inputs,
         C_out=C_out,
@@ -194,10 +198,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     )
 
     has_pos = inputs[0].dim() == 3
-    if has_pos:
-        einsum_pattern = "bpj,bpJ->jJ"
-    else:
-        einsum_pattern = "bj,bJ->jJ"
+
+    einsum_pattern = "bipj,bpj->ij" if has_pos else "bij,bj->ij"
 
     with torch.inference_mode():
         M_dash = torch.einsum(einsum_pattern, in_grads, in_grads)
@@ -221,7 +223,7 @@ def interaction_edge_pre_forward_hook_fn(
     C_in: Float[Tensor, "in_hidden in_hidden_trunc"],
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
-    n_intervals: int = 1,
+    n_intervals: int,
     **_: Any,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
@@ -255,17 +257,7 @@ def interaction_edge_pre_forward_hook_fn(
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
     has_pos = inputs[0].dim() == 3
-    if has_pos:
-        # jac_size is (batch, out_hidden_trunc, pos, in_hidden_trunc)
-        jac_size = [inputs[0].shape[0], C_out.shape[1], inputs[0].shape[1], C_in.shape[1]]
-    else:
-        # jac_size is (batch, out_hidden_trunc, in_hidden_trunc)
-        jac_size = [inputs[0].shape[0], C_out.shape[1], C_in.shape[1]]
 
-    jac_out: Union[
-        Float[Tensor, "batch out_hidden_trunc in_hidden_trunc"],
-        Float[Tensor, "batch out_hidden_trunc pos in_hidden_trunc"],
-    ] = torch.zeros(size=jac_size, device=inputs[0].device, dtype=inputs[0].dtype)
     # We first concatenate the inputs over the hidden dimension
     in_acts = torch.cat(inputs, dim=-1)
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
@@ -281,22 +273,13 @@ def interaction_edge_pre_forward_hook_fn(
         has_pos=has_pos,
     )
 
-    # Use the trapezoidal rule to approximate the integral
-    interval_size = 1.0 / n_intervals
-    for alpha in torch.arange(interval_size, 1 + interval_size, interval_size):
-        alpha_jac_out = vmap(jacrev(edge_norm_partial))(alpha * f_hat)
-
-        # As per the trapezoidal rule, we multiply the last output by 1/2.
-        if alpha == 1:
-            alpha_jac_out = 0.5 * alpha_jac_out
-
-        jac_out += alpha_jac_out
-    jac_out *= interval_size
-
-    if has_pos:
-        einsum_pattern = "bipj,bpj->ij"
-    else:
-        einsum_pattern = "bij,bj->ij"
+    jac_out = integrated_gradient_trapezoidal_jacobian(
+        fn=edge_norm_partial,
+        in_tensor=f_hat,
+        n_intervals=n_intervals,
+        fn_out_size=C_out.shape[1],
+    )
+    einsum_pattern = "bipj,bpj->ij" if has_pos else "bij,bj->ij"
 
     with torch.inference_mode():
         E = torch.einsum(einsum_pattern, jac_out, f_hat)

@@ -4,7 +4,8 @@ import torch
 from rib.linalg import (
     calc_rotation_matrix,
     eigendecompose,
-    integrated_gradient_norm,
+    integrated_gradient_trapezoidal_jacobian,
+    integrated_gradient_trapezoidal_norm,
     pinv_diag,
 )
 
@@ -123,57 +124,125 @@ def test_pinv_diag_failure(x):
         y = pinv_diag(x)
 
 
-def test_intergrated_gradient_norm_linear():
-    """Check independence of n_intervals for integrated gradient over a linear module without bias.
+def test_intergrated_gradient_trapezoidal_norm_linear():
+    """Check integrated gradient values over a linear module without bias for different intervals.
 
-    This should be the case as we're integrating over alpha * inputs, which is linear in alpha.
+    We check three cases:
+        1. Point estimate (n_intervals=0), leads to alpha=1
+        2. n_intervals=1
+        3. n_intervals=5
+
+    The point estimate should be double the value of n_intervals==1, and n_intervals==5 given that
+    our function is linear between 0 and 1.
     """
     torch.manual_seed(0)
-    # Hyperparameters
     batch_size = 3
     in_hidden = 4
     out_hidden = 6
     out_hidden_trunc = 5
 
-    # 1. Generate random tensors for `C_out` and `inputs`
     C_out = torch.randn(out_hidden, out_hidden_trunc)
     inputs = (torch.randn(batch_size, in_hidden),)
 
-    # 2. Initialize a `torch.nn.Linear` module
     linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
 
-    # 3. Call the `integrated_gradient_norm` function
-    result_1 = integrated_gradient_norm(module=linear, inputs=inputs, C_out=C_out, n_intervals=1)
-    result_5 = integrated_gradient_norm(module=linear, inputs=inputs, C_out=C_out, n_intervals=5)
+    result_point_estimate = integrated_gradient_trapezoidal_norm(
+        module=linear, inputs=inputs, C_out=C_out, n_intervals=0
+    )
+    result_1 = integrated_gradient_trapezoidal_norm(
+        module=linear, inputs=inputs, C_out=C_out, n_intervals=1
+    )
+    result_5 = integrated_gradient_trapezoidal_norm(
+        module=linear, inputs=inputs, C_out=C_out, n_intervals=5
+    )
 
-    # 4. Assert that the results are close enough
-    assert torch.allclose(result_1, result_5), "Results are not close enough"
+    assert torch.allclose(
+        result_point_estimate, result_1 * 2
+    ), "Point estimate and double the n_intervals==1 estimate are not close enough"
+    assert torch.allclose(
+        result_1, result_5
+    ), "n_intervals==1 and n_intervals==5 are not close enough"
 
 
-def test_integrated_gradient_norm_non_linear():
-    """A non-linear module should be sensitive to the number of intervals.
+def test_integrated_gradient_trapezoidal_norm_polynomial():
+    """Show that our integrated gradient converges to the analytical solution for a polynomial.
 
-    This is because the integrated gradient is calculated by integrating over alpha * f(inputs),
-    where f is the non-linear function. This is not linear in alpha between 0 and 1, so the number
-    of intervals should matter.
+    Assume we have a polynomial function f = x^3. Our normed function for the integrated gradient
+    is then:
+    f_norm = integral_{0}^{1} day(((alpha * x)^3 @ C_out)^2) / day(alpha * x) d_alpha.
+           = [x^5 C_out^2 alpha^6]^1_0
+           = x^5 C_out^2
+
+    We show that this analytical solution is approached as n_intervals increases.
     """
 
     torch.manual_seed(0)
-    # Hyperparameters
-    batch_size = 3
-    hidden = 4
-    hidden_trunc = 2
+    batch_size = 2
+    hidden = 3
 
-    # Torch module which is non-linear in alpha between 0 and 1
-    sigmoid = torch.nn.Sigmoid()
+    poly_module = torch.nn.Module()
+    poly_module.forward = lambda x: x**3
 
-    # 1. Generate random tensors for `C_out` and `inputs`
-    C_out = torch.randn(hidden, hidden_trunc)
+    # Let C_out be a square identity matrix to avoid issues with partial derivative dimensions
+    # TODO: Handle non-identity C_out
+    C_out = torch.eye(hidden)
     inputs = (torch.randn(batch_size, hidden),)
 
-    # 2. Call the `integrated_gradient_norm` function
-    result_1 = integrated_gradient_norm(module=sigmoid, inputs=inputs, C_out=C_out, n_intervals=1)
-    result_5 = integrated_gradient_norm(module=sigmoid, inputs=inputs, C_out=C_out, n_intervals=5)
+    result_2 = integrated_gradient_trapezoidal_norm(
+        module=poly_module, inputs=inputs, C_out=C_out, n_intervals=2
+    )
+    result_20 = integrated_gradient_trapezoidal_norm(
+        module=poly_module, inputs=inputs, C_out=C_out, n_intervals=20
+    )
 
-    # 3. Assert that the results are not close enough
-    assert not torch.allclose(result_1, result_5), "Results are close enough"
+    result_200 = integrated_gradient_trapezoidal_norm(
+        module=poly_module, inputs=inputs, C_out=C_out, n_intervals=200
+    )
+
+    analytical_result = inputs[0] ** 5 @ C_out**2
+
+    assert torch.allclose(
+        result_200, analytical_result, atol=1e-2
+    ), "Integrated grad norms are not close enough"
+
+    # Check that the results approach inputs[0]**5 as n_intervals increases
+    differences = [
+        (result - analytical_result).sum().abs() for result in [result_2, result_20, result_200]
+    ]  # Check that differences is decreasing
+    assert (
+        differences[0] > differences[1] > differences[2]
+    ), "Integrated grad norms are not decreasing"
+
+
+def test_integrated_gradient_trapezoidal_jacobian_linear():
+    """Check independence of n_intervals for integrated gradient jacobian over a linear module
+    without bias.
+
+    This should be the case as we're integrating over alpha * inputs, which is linear in alpha.
+    """
+    torch.manual_seed(0)
+    batch_size = 2
+    in_hidden = 3
+    out_hidden = 4
+
+    in_tensor = torch.randn(batch_size, in_hidden)
+
+    linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+
+    result_point_estimate = integrated_gradient_trapezoidal_jacobian(
+        fn=linear, in_tensor=in_tensor, n_intervals=0, fn_out_size=out_hidden
+    )
+    result_1 = integrated_gradient_trapezoidal_jacobian(
+        fn=linear, in_tensor=in_tensor, n_intervals=1, fn_out_size=out_hidden
+    )
+    result_5 = integrated_gradient_trapezoidal_jacobian(
+        fn=linear, in_tensor=in_tensor, n_intervals=2, fn_out_size=out_hidden
+    )
+
+    # Check that all results are close
+    assert torch.allclose(
+        result_point_estimate, result_1
+    ), "Point estimate and n_intervals==1 are not close enough"
+    assert torch.allclose(
+        result_1, result_5
+    ), "n_intervals==1 and n_intervals==5 are not close enough"

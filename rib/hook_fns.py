@@ -349,3 +349,61 @@ def acts_forward_hook_fn(
     detached_outputs = [x.detach().cpu() for x in outputs]
     # Store the output activations
     hooked_data[hook_name] = {data_key: detached_outputs}
+
+
+def relu_interaction_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    output: Union[
+        Float[Tensor, "batch d_hidden"],
+        Float[Tensor, "batch pos d_hidden"],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    **_: Any,
+) -> None:
+    """Hook function to store pre and post output activations for ReLU operators.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module (not used).
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        **_: Additional keyword arguments (not used).
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+
+    # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
+    # Do not concat over hidden dimension for inputs as inputs are always tuple
+    detached_inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+
+    outputs = output if isinstance(outputm, tuple) else (output,)
+    # Concat outputs over the hidden dimension
+    detached_outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+    operator: Union[Float[Tensor, "batch d_hidden"], Float[Tensor, "batch pos d_hidden_concat"]] = torch.div(detached_outputs, in_acts)
+
+    # Use reshaping and broadcasting to compare every element to every other element
+    if operator.dim() == 2:
+        operator_expanded: Float[Tensor, "batch d_hidden 1"] = operator.unsqueeze(-1)
+        relu_interaction_matrix: Float[Tensor, "batch d_hidden d_hidden"] = (operator_expanded == operator).int()
+    elif operator.dim() == 3:
+        batch, pos, d_hidden_concat = operator.shape
+        operator_expanded_ij: Float[Tensor, "batch pos 1 1 d_hidden_concat"] = operator.unsqueeze(2).unsqueze(3)
+        operator_expanded_kl; Float[Tensor, "batch 1 pos d_hidden_concat 1"] = operator.unsqueeze(1).unsqueeze(4)
+        # operator_matrix[batch,i,j,k,l] is 1 if operator[i,j] == operator[k,l] and 0 otherwise
+        relu_interacton_matrix: Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"] = (operator_expanded_ij == operator_expanded_kl).int()
+
+    # Store operator (ReLU pointwise ratio)
+    hooked_data[hook_name] = {data_key: relu_interaction_matrix}
+
+
+

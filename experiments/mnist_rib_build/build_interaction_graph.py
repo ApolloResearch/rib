@@ -106,6 +106,8 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         collect_output_gram=True,
     )
 
+    # Calls on collect_M_dash_and_Lambda_dash
+    # Builds sqrt sorted Lambda matrix and its inverse
     Cs, Us = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
         module_names=config.module_names,

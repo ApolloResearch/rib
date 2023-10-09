@@ -77,6 +77,11 @@ class Config(BaseModel):
         description="Module type in which to only output the last position index.",
     )
 
+    n_intervals: int = Field(
+        ...,
+        description="The number of intervals to use for the integrated gradient approximation.",
+    )
+
     dtype: str = Field(..., description="The dtype to use when building the graph.")
 
     @field_validator("dtype")
@@ -160,6 +165,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         data_loader=train_loader,
         dtype=dtype,
         device=device,
+        n_intervals=config.n_intervals,
         truncation_threshold=config.truncation_threshold,
         rotate_output=config.rotate_output,
         hook_names=config.node_layers,
@@ -168,6 +174,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     E_hats = collect_interaction_edges(
         Cs=Cs,
         hooked_model=hooked_model,
+        n_intervals=config.n_intervals,
         module_names=graph_module_names,
         data_loader=train_loader,
         dtype=dtype,

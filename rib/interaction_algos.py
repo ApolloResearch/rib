@@ -89,6 +89,7 @@ def calculate_interaction_rotations(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
+    n_intervals: int,
     truncation_threshold: float = 1e-5,
     rotate_output: bool = True,
     hook_names: Optional[list[str]] = None,
@@ -112,6 +113,7 @@ def calculate_interaction_rotations(
         data_loader: The data loader.
         dtype: The data type to use for model computations.
         device: The device to run the model on.
+        n_intervals: The number of intervals to use for integrated gradients.
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_output: Whether to rotate the output layer to its eigenbasis (which is equivalent
             to its interaction basis).
@@ -164,6 +166,7 @@ def calculate_interaction_rotations(
         M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
             C_out=Cs[-1].C,  # most recently stored interaction matrix
             hooked_model=hooked_model,
+            n_intervals=n_intervals,
             data_loader=data_loader,
             module_name=module_name,
             dtype=dtype,

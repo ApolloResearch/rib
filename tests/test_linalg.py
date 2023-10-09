@@ -1,7 +1,12 @@
 import pytest
 import torch
 
-from rib.linalg import calc_rotation_matrix, eigendecompose, pinv_diag
+from rib.linalg import (
+    calc_rotation_matrix,
+    eigendecompose,
+    integrated_gradient_norm,
+    pinv_diag,
+)
 
 
 @pytest.mark.parametrize("descending", [True, False])
@@ -116,3 +121,59 @@ def test_pinv_diag(x, expected):
 def test_pinv_diag_failure(x):
     with pytest.raises(AssertionError):
         y = pinv_diag(x)
+
+
+def test_intergrated_gradient_norm_linear():
+    """Check independence of n_intervals for integrated gradient over a linear module without bias.
+
+    This should be the case as we're integrating over alpha * inputs, which is linear in alpha.
+    """
+    torch.manual_seed(0)
+    # Hyperparameters
+    batch_size = 3
+    in_hidden = 4
+    out_hidden = 6
+    out_hidden_trunc = 5
+
+    # 1. Generate random tensors for `C_out` and `inputs`
+    C_out = torch.randn(out_hidden, out_hidden_trunc)
+    inputs = (torch.randn(batch_size, in_hidden),)
+
+    # 2. Initialize a `torch.nn.Linear` module
+    linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+
+    # 3. Call the `integrated_gradient_norm` function
+    result_1 = integrated_gradient_norm(module=linear, inputs=inputs, C_out=C_out, n_intervals=1)
+    result_5 = integrated_gradient_norm(module=linear, inputs=inputs, C_out=C_out, n_intervals=5)
+
+    # 4. Assert that the results are close enough
+    assert torch.allclose(result_1, result_5), "Results are not close enough"
+
+
+def test_integrated_gradient_norm_non_linear():
+    """A non-linear module should be sensitive to the number of intervals.
+
+    This is because the integrated gradient is calculated by integrating over alpha * f(inputs),
+    where f is the non-linear function. This is not linear in alpha between 0 and 1, so the number
+    of intervals should matter.
+    """
+
+    torch.manual_seed(0)
+    # Hyperparameters
+    batch_size = 3
+    hidden = 4
+    hidden_trunc = 2
+
+    # Torch module which is non-linear in alpha between 0 and 1
+    sigmoid = torch.nn.Sigmoid()
+
+    # 1. Generate random tensors for `C_out` and `inputs`
+    C_out = torch.randn(hidden, hidden_trunc)
+    inputs = (torch.randn(batch_size, hidden),)
+
+    # 2. Call the `integrated_gradient_norm` function
+    result_1 = integrated_gradient_norm(module=sigmoid, inputs=inputs, C_out=C_out, n_intervals=1)
+    result_5 = integrated_gradient_norm(module=sigmoid, inputs=inputs, C_out=C_out, n_intervals=5)
+
+    # 3. Assert that the results are not close enough
+    assert not torch.allclose(result_1, result_5), "Results are close enough"

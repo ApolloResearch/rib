@@ -185,3 +185,64 @@ def edge_norm(
         f_out_hat_norm = f_out_hat_norm.sum(dim=pos_dim)
 
     return f_out_hat_norm
+
+
+def integrated_gradient_norm(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
+    C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
+    n_intervals: int,
+) -> Float[Tensor, "... in_hidden_combined"]:
+    """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs.
+
+    Unlike in the integrated gradient calculation for the edge weights, this function takes the norm
+    of the output of the module, condensing the output to a single number which we can run backward
+    on.
+
+    Args:
+        module: The module to calculate the integrated gradient of.
+        inputs: The inputs to the module. May or may not include a position dimension.
+        C_out: The truncated interaction rotation matrix for the module's outputs.
+        n_intervals: The number of intervals to use for the integral approximation.
+    """
+    # Ensure that the inputs have requires_grad=True
+    for x in inputs:
+        x.requires_grad_(True)
+
+    interval_size = 1.0 / n_intervals
+    in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
+
+    for alpha in torch.arange(interval_size, 1 + interval_size, interval_size):
+        alpha_inputs = tuple(alpha * x for x in inputs)
+        output = module(*alpha_inputs)
+        outputs = (output,) if isinstance(output, torch.Tensor) else output
+
+        # Concatenate the outputs over the hidden dimension
+        out_acts = torch.cat(outputs, dim=-1)
+
+        f_hat = out_acts @ C_out
+
+        # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
+        # to taking the gradient of each output element separately, but it lets us simply use
+        # backward() instead of more complex (and probably less efficient) vmap operations.
+        f_hat_norm = (f_hat**2).sum()
+
+        # Accumulate the grad of f_hat_norm w.r.t the input tensors
+        f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
+
+        alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
+        if alpha == 1:
+            alpha_in_grads = 0.5 * alpha_in_grads
+
+        in_grads += alpha_in_grads
+
+        for x in alpha_inputs:
+            assert x.grad is not None, "Input grad should not be None."
+            x.grad.zero_()
+
+    in_grads *= interval_size
+
+    return in_grads

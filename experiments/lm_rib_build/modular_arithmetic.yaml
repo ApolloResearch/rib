@@ -3,13 +3,15 @@ seed: 0
 tlens_pretrained: null
 tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
 dataset: modular_arithmetic
-batch_size: 256
-truncation_threshold: 1e-6
-rotate_output: false
-last_pos_module_type: add_resid1  # module type in which to only output the last position index
-dtype: float32
 node_layers:
   - ln1.0
   - ln2.0
   - mlp_out.0
   - unembed
+batch_size: 256
+truncation_threshold: 1e-6
+rotate_output: false
+last_pos_module_type: add_resid1  # module type in which to only output the last position index
+n_intervals: 10
+dtype: float64
+

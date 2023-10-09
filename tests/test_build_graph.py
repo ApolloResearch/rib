@@ -100,16 +100,18 @@ def test_modular_arithmetic_build_graph():
     seed: 0
     tlens_pretrained: null
     tlens_model_path: OVERWRITE/IN/MOCK
+    node_layers:
+      - ln1.0
+      - mlp_in.0
+      - unembed
     dataset: modular_arithmetic
     batch_size: 128
     truncation_threshold: 1e-6
     rotate_output: false
     last_pos_module_type: add_resid1
+    n_intervals: 0
     dtype: float32
-    node_layers:
-      - ln1.0
-      - mlp_in.0
-      - unembed
+
     """
     load_config_path = "experiments.lm_rib_build.lm_build_rib_graph.load_config"
 
@@ -131,7 +133,7 @@ def test_modular_arithmetic_build_graph():
 
 
 @pytest.mark.slow
-def test_mnsit_build_graph():
+def test_mnist_build_graph():
     mock_config = """
     exp_name: test
     mlp_path: OVERWRITE/IN/MOCK
@@ -139,6 +141,7 @@ def test_mnsit_build_graph():
     seed: 0
     truncation_threshold: 1e-6
     rotate_output: false
+    n_intervals: 0
     dtype: float32
     module_names:
         - layers.1

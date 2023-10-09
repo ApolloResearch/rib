@@ -4,6 +4,7 @@ batch_size: 256
 seed: 0
 truncation_threshold: 1e-3
 rotate_output: false
+n_intervals: 0
 dtype: float32
 module_names:
   - layers.1

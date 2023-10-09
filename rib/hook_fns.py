@@ -4,9 +4,12 @@ from typing import Any, Union
 import torch
 from jaxtyping import Float
 from torch import Tensor
-from torch.func import jacrev, vmap
 
-from rib.linalg import edge_norm
+from rib.linalg import (
+    edge_norm,
+    integrated_gradient_trapezoidal_jacobian,
+    integrated_gradient_trapezoidal_norm,
+)
 
 
 def _add_to_hooked_matrix(
@@ -163,6 +166,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     C_out: Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"],
+    n_intervals: int,
     **_: Any,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
@@ -175,6 +179,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
+        n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
+            to taking a point estimate at alpha == 1.
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
@@ -183,48 +189,18 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    # Ensure that the inputs have requires_grad=True
-    for x in inputs:
-        x.requires_grad_(True)
-
-    # Set as 1/2 since we are looking at the derivative of a squared term.
-    integral_step = 0.5  # TODO: Make this configurable or use numerical integration package
-    for alpha in torch.arange(integral_step, 1 + integral_step, integral_step):
-        alpha_inputs = tuple(alpha * x for x in inputs)
-        output = module(*alpha_inputs)
-        outputs = (output,) if isinstance(output, torch.Tensor) else output
-
-        # Concatenate the outputs over the hidden dimension
-        out_acts = torch.cat(outputs, dim=-1)
-
-        f_hat: Union[
-            Float[Tensor, "batch out_hidden_combined_trunc"],
-            Float[Tensor, "batch pos out_hidden_combined_trunc"],
-        ] = (
-            out_acts @ C_out
-        )
-
-        f_hat_norm: Float[Tensor, ""] = (f_hat**2).sum()
-
-        # Accumulate the grad of f_hat_norm w.r.t the input tensors (ignoring all other gradients)
-        f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
+    in_grads = integrated_gradient_trapezoidal_norm(
+        module=module,
+        inputs=inputs,
+        C_out=C_out,
+        n_intervals=n_intervals,
+    )
 
     has_pos = inputs[0].dim() == 3
-    if has_pos:
-        einsum_pattern = "bpj,bpJ->jJ"
-    else:
-        einsum_pattern = "bj,bJ->jJ"
+
+    einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
 
     with torch.inference_mode():
-        in_grads_list: list[Tensor] = []
-        for x in alpha_inputs:
-            assert x.grad is not None, "Input tensor does not have a gradient."
-            in_grads_list.append(x.grad)
-        in_grads: Union[
-            Float[Tensor, "batch in_hidden_combined"],
-            Float[Tensor, "batch pos in_hidden_combined"],
-        ] = torch.cat(in_grads_list, dim=-1)
-
         M_dash = torch.einsum(einsum_pattern, in_grads, in_grads)
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
@@ -246,6 +222,7 @@ def interaction_edge_pre_forward_hook_fn(
     C_in: Float[Tensor, "in_hidden in_hidden_trunc"],
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
+    n_intervals: int,
     **_: Any,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
@@ -253,6 +230,9 @@ def interaction_edge_pre_forward_hook_fn(
     For calculating the Jacobian, we need to run the inputs through the module. Unfortunately,
     this causes an infinite recursion because the module has a hook which runs this function. To
     avoid this, we (hackily) remove the hook before running the module and then add it back after.
+
+    The trapezoidal rule is used to approximate the integrated gradient. If n_intervals == 0, the
+    integrated gradient effectively takes a point estimate for the integral at alpha == 1.
 
     Args:
         module: Module that the hook is attached to.
@@ -264,6 +244,8 @@ def interaction_edge_pre_forward_hook_fn(
         C_in: The C matrix for the current layer (C^l in the paper).
         C_in_pinv: The pseudoinverse of the C matrix for the current layer ((C^l)^+ in the paper).
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
+        n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
+            to taking a point estimate at alpha == 1.
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
@@ -273,41 +255,29 @@ def interaction_edge_pre_forward_hook_fn(
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
     has_pos = inputs[0].dim() == 3
-    if has_pos:
-        # jac_size is (batch, out_hidden_trunc, pos, in_hidden_trunc)
-        jac_size = [inputs[0].shape[0], C_out.shape[1], inputs[0].shape[1], C_in.shape[1]]
-    else:
-        # jac_size is (batch, out_hidden_trunc, in_hidden_trunc)
-        jac_size = [inputs[0].shape[0], C_out.shape[1], C_in.shape[1]]
 
-    jac_out: Union[
-        Float[Tensor, "batch out_hidden_trunc in_hidden_trunc"],
-        Float[Tensor, "batch out_hidden_trunc pos in_hidden_trunc"],
-    ] = torch.zeros(size=jac_size, device=inputs[0].device, dtype=inputs[0].dtype)
     # We first concatenate the inputs over the hidden dimension
     in_acts = torch.cat(inputs, dim=-1)
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
     f_hat = in_acts @ C_in
 
-    integral_step = 1  # TODO: Use numerical integration package or implement trapezoidal rule
-    for alpha in torch.arange(integral_step, 1 + integral_step, integral_step):
-        alpha_input = alpha * f_hat
-        edge_norm_partial = partial(
-            edge_norm,
-            module=module,
-            C_in_pinv=C_in_pinv,
-            C_out=C_out,
-            in_hidden_dims=[x.shape[-1] for x in inputs],
-            has_pos=has_pos,
-        )
-        alpha_jac_out = vmap(jacrev(edge_norm_partial))(alpha_input)
+    # Setup function for calculating the edge norm
+    edge_norm_partial = partial(
+        edge_norm,
+        module=module,
+        C_in_pinv=C_in_pinv,
+        C_out=C_out,
+        in_hidden_dims=[x.shape[-1] for x in inputs],
+        has_pos=has_pos,
+    )
 
-        jac_out += alpha_jac_out
-
-    if has_pos:
-        einsum_pattern = "bipj,bpj->ij"
-    else:
-        einsum_pattern = "bij,bj->ij"
+    jac_out = integrated_gradient_trapezoidal_jacobian(
+        fn=edge_norm_partial,
+        in_tensor=f_hat,
+        n_intervals=n_intervals,
+        fn_out_size=C_out.shape[1],
+    )
+    einsum_pattern = "bipj,bpj->ij" if has_pos else "bij,bj->ij"
 
     with torch.inference_mode():
         E = torch.einsum(einsum_pattern, jac_out, f_hat)

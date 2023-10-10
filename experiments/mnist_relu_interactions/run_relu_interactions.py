@@ -102,7 +102,7 @@ def main(config_path_str: str) -> None:
     distance_matrices = [
         1 - similarity_matrix for similarity_matrix in list(relu_matrices.values())]
     distance_matrix = distance_matrices[0].fill_diagonal_(0)
-    linkage_matrix = linkage(squareform(distance_matrix), method='average')
+    linkage_matrix = linkage(squareform(distance_matrix), method='complete')
     order = leaves_list(linkage_matrix)
     rearranged_distance_matrix = distance_matrix[order, :][:, order]
 

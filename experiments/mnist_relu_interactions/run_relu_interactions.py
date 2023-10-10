@@ -4,9 +4,14 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import fire
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
 import torch
 import yaml
 from pydantic import BaseModel, field_validator
+from scipy.cluster.hierarchy import dendrogram, leaves_list, linkage
+from scipy.spatial.distance import squareform
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -36,7 +41,7 @@ class Config(BaseModel):
         return v
 
 
-def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
+def load_mlp(config_dict: dict, mlp_path: Path, device: str) -> MLP:
     mlp = MLP(
         hidden_sizes=config_dict["model"]["hidden_sizes"],
         input_size=784,
@@ -45,7 +50,8 @@ def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
         bias=config_dict["model"]["bias"],
         fold_bias=config_dict["model"]["fold_bias"],
     )
-    mlp.load_state_dict(torch.load(mlp_path))
+    mlp.load_state_dict(torch.load(
+        mlp_path, map_location=torch.device(device)))
     return mlp
 
 
@@ -72,8 +78,12 @@ def main(config_path_str: str) -> None:
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)
 
+    out_dir = Path(__file__).parent / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    mlp = load_mlp(model_config_dict, config.mlp_path)
+    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+    # print_all_modules(mlp) # Check module names were correctly defined
     mlp.eval()  # Run in inference only
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
@@ -89,7 +99,18 @@ def main(config_path_str: str) -> None:
         device=device,
     )
 
-    print(relu_matrices)
+    distance_matrices = [
+        1 - similarity_matrix for similarity_matrix in list(relu_matrices.values())]
+    distance_matrix = distance_matrices[0].fill_diagonal_(0)
+    linkage_matrix = linkage(squareform(distance_matrix), method='average')
+    order = leaves_list(linkage_matrix)
+    rearranged_distance_matrix = distance_matrix[order, :][:, order]
+
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(rearranged_distance_matrix, annot=False,
+                cmap="YlGnBu", cbar=True, square=True)
+    plt.title("Reordered Similarity Matrix")
+    plt.savefig(out_dir / f"{config.exp_name}_similarity_matrix.png")
 
 
 def load_local_config(config_path_str):
@@ -109,5 +130,4 @@ if __name__ == "__main__":
     #     config = load_local_config(CONFIG_PATH_STR)
     #     mlp = MLP(**config["mlp_config"])
     #     print_all_modules(mlp)
-
-    pass
+    fire.Fire(main)

@@ -41,6 +41,7 @@ def graph_build_test(
 ):
     atol = 1e-5
 
+    results: dict = {}
     Lambda_abs: list[torch.Tensor] = []
 
     def mock_build_sorted_lambda_matrices(Lambda_abs_arg, *args, **kwargs):
@@ -48,16 +49,23 @@ def graph_build_test(
         Lambda_abs.append(Lambda_abs_arg.cpu())
         return build_sorted_lambda_matrices(Lambda_abs_arg, *args, **kwargs)
 
+    def mock_torch_save(collected_results: dict, path: str):
+        """Mock the torch.save function to collect the results instead of saving to file."""
+        nonlocal results
+        results = collected_results
+
     # Create a temporary file and write the mock config to it
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".yaml") as temp_config:
         temp_config.write(mock_config)
         temp_config.flush()
 
-        with patch("torch.save"), patch(load_config_path, side_effect=load_config_mock_fn), patch(
+        with patch("torch.save", side_effect=mock_torch_save), patch(
+            load_config_path, side_effect=load_config_mock_fn
+        ), patch(
             "rib.interaction_algos.build_sorted_lambda_matrices",
             side_effect=mock_build_sorted_lambda_matrices,
         ):
-            results = build_graph_main_fn(temp_config.name)
+            build_graph_main_fn(temp_config.name)
             grams = results["gram_matrices"]
             Cs = results["interaction_rotations"]
             E_hats = results["edges"]

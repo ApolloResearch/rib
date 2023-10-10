@@ -293,9 +293,9 @@ def integrated_gradient_trapezoidal_jacobian(
     ] = torch.zeros(size=jac_size, device=in_tensor.device, dtype=in_tensor.dtype)
 
     alphas = np.array([1]) if n_intervals == 0 else np.arange(0, 1 + interval_size, interval_size)
-    # for alpha in np.arange(interval_size, 1 + interval_size, interval_size):
     for alpha in alphas:
-        alpha_jac_out = vmap(jacrev(fn))(alpha * in_tensor)
+        # Need to detach the output to avoid a memory leak
+        alpha_jac_out = vmap(jacrev(fn))(alpha * in_tensor).detach()
 
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)

@@ -29,7 +29,7 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 import fire
 import torch

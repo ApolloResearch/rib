@@ -69,7 +69,7 @@ def print_all_modules(mlp):
         print(name, ":", module)
 
 
-def main(config_path_str: str) -> None:
+def main(config_path_str: str, relu_metric_type: int) -> None:
     """Test for ReLU interactions (separate to main RIB algorithm)."""
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
@@ -97,20 +97,30 @@ def main(config_path_str: str) -> None:
         data_loader=test_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
+        relu_metric_type=relu_metric_type
     )
 
-    distance_matrices = [
-        1 - similarity_matrix for similarity_matrix in list(relu_matrices.values())]
-    distance_matrix = distance_matrices[0].fill_diagonal_(0)
-    linkage_matrix = linkage(squareform(distance_matrix), method='complete')
-    order = leaves_list(linkage_matrix)
-    rearranged_distance_matrix = distance_matrix[order, :][:, order]
+    for i, similarity_matrix in enumerate(list(relu_matrices.values())):
+        # Use log difference metric for dissimilarity
+        distance_matrix = -torch.log(1 - similarity_matrix)
+        # Deal with zeros on the diagonal
+        ones_mask = (similarity_matrix != 1)
+        max_val = distance_matrix[ones_mask].max()
+        distance_matrix[~ones_mask] = max_val*10
+        distance_matrix = distance_matrix.fill_diagonal_(0)
 
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(rearranged_distance_matrix, annot=False,
-                cmap="YlGnBu", cbar=True, square=True)
-    plt.title("Reordered Similarity Matrix")
-    plt.savefig(out_dir / f"{config.exp_name}_similarity_matrix.png")
+        # Create linkage matrix using clustering algorithm
+        linkage_matrix = linkage(squareform(
+            distance_matrix), method='complete')
+        order = leaves_list(linkage_matrix)
+        rearranged_distance_matrix = distance_matrix[order, :][:, order]
+
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(rearranged_distance_matrix, annot=False,
+                    cmap="YlGnBu", cbar=True, square=True)
+        plt.title("Reordered Similarity Matrix")
+        plt.savefig(
+            out_dir / f"{config.exp_name}_similarity_matrix_{i}_type_{relu_metric_type}.png")
 
 
 def load_local_config(config_path_str):

@@ -74,7 +74,7 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def main(config_path_str: str) -> Optional[dict[str, Any]]:
+def main(config_path_str: str) -> None:
     """Implement the main algorithm and store the graph to disk."""
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
@@ -155,7 +155,6 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     # Save the results (which include torch tensors) to file
     torch.save(results, out_interaction_graph_file)
     logger.info("Saved results to %s", out_interaction_graph_file)
-    return results
 
 
 if __name__ == "__main__":

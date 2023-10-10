@@ -13,7 +13,7 @@ Steps to build the graph:
 7. Calculate the edges of the interaction graph between each node layer.
 
 Usage:
-    python lm_build_rib_graph.py <path/to/config.yaml>
+    python run_lm_rib_build.py <path/to/config.yaml>
 
 The config.yaml should contain the `node_layers` field. This describes the sections of the
 graph that will be built: A graph layer will be built on the inputs to each specified node layer,

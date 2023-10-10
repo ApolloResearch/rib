@@ -3,7 +3,7 @@
 Usage:
     python plot_mnist_graph.py <path/to/results_pt_file>
 
-    The results_pt_file should be the output of the build_interaction_graph.py script.
+    The results_pt_file should be the output of the run_mnist_rib_build.py script.
 """
 from pathlib import Path
 

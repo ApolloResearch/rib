@@ -10,14 +10,13 @@ The process is as follows:
     4. Calculate the edges of the interaction graph between each node layer.
 
 Usage:
-    python build_interaction_graph.py <path/to/yaml_config_file>
+    python run_mnist_rib_build.py <path/to/yaml_config_file>
 
 """
 
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional, Union
 
 import fire
 import torch

@@ -44,7 +44,7 @@ class Config(BaseModel):
     rotate_output: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
-    module_names: list[str]
+    node_layers: list[str]
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -100,7 +100,7 @@ def main(config_path_str: str) -> None:
 
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
-        module_names=config.module_names,
+        module_names=config.node_layers,
         data_loader=test_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
@@ -109,7 +109,7 @@ def main(config_path_str: str) -> None:
 
     Cs, Us = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
-        module_names=config.module_names,
+        module_names=config.node_layers,
         hooked_model=hooked_mlp,
         data_loader=test_loader,
         dtype=TORCH_DTYPES[config.dtype],
@@ -123,7 +123,7 @@ def main(config_path_str: str) -> None:
         Cs=Cs,
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
-        module_names=config.module_names,
+        module_names=config.node_layers,
         data_loader=test_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
@@ -147,7 +147,7 @@ def main(config_path_str: str) -> None:
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(module, E_hats[module].cpu()) for module in config.module_names],
+        "edges": [(module, E_hats[module].cpu()) for module in config.node_layers],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": model_config_dict,
     }

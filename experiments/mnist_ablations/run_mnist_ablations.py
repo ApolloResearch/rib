@@ -97,7 +97,7 @@ def main(config_path_str: str) -> None:
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
     assert set(config.node_layers) <= set(
-        interaction_graph_info["config"]["module_names"]
+        interaction_graph_info["config"]["node_layers"]
     ), "The node layers in the config must be a subset of the node layers in the interaction graph."
 
     device = "cuda" if torch.cuda.is_available() else "cpu"

@@ -29,7 +29,8 @@ def _add_to_hooked_matrix(
 
     """
     # If no data exists, initialize with zeros
-    hooked_data.setdefault(hook_name, {}).setdefault(data_key, torch.zeros_like(hooked_matrix))
+    hooked_data.setdefault(hook_name, {}).setdefault(
+        data_key, torch.zeros_like(hooked_matrix))
     hooked_data[hook_name][data_key] += hooked_matrix
 
 
@@ -38,12 +39,14 @@ def gram_forward_hook_fn(
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
         tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
     ],
     output: Union[
         Float[Tensor, "batch d_hidden"],
         Float[Tensor, "batch pos d_hidden"],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -85,7 +88,8 @@ def gram_pre_forward_hook_fn(
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
         tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -178,7 +182,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
-    assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
+    assert len(
+        data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
     # Remove the pre foward hook to avoid recursion when calculating the jacobian
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
@@ -275,7 +280,8 @@ def interaction_edge_pre_forward_hook_fn(
     has_pos = inputs[0].dim() == 3
     if has_pos:
         # jac_size is (batch, out_hidden_trunc, pos, in_hidden_trunc)
-        jac_size = [inputs[0].shape[0], C_out.shape[1], inputs[0].shape[1], C_in.shape[1]]
+        jac_size = [inputs[0].shape[0], C_out.shape[1],
+                    inputs[0].shape[1], C_in.shape[1]]
     else:
         # jac_size is (batch, out_hidden_trunc, in_hidden_trunc)
         jac_size = [inputs[0].shape[0], C_out.shape[1], C_in.shape[1]]
@@ -320,12 +326,14 @@ def acts_forward_hook_fn(
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
         tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
     ],
     output: Union[
         Float[Tensor, "batch d_hidden"],
         Float[Tensor, "batch pos d_hidden"],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -351,17 +359,19 @@ def acts_forward_hook_fn(
     hooked_data[hook_name] = {data_key: detached_outputs}
 
 
-def relu_interaction_forward_hook_fn(
+def relu_interaction_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
         tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
     ],
     output: Union[
         Float[Tensor, "batch d_hidden"],
         Float[Tensor, "batch pos d_hidden"],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -386,24 +396,26 @@ def relu_interaction_forward_hook_fn(
     # Do not concat over hidden dimension for inputs as inputs are always tuple
     detached_inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
 
-    outputs = output if isinstance(outputm, tuple) else (output,)
+    outputs = output if isinstance(output, tuple) else (output,)
     # Concat outputs over the hidden dimension
     detached_outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
-    operator: Union[Float[Tensor, "batch d_hidden"], Float[Tensor, "batch pos d_hidden_concat"]] = torch.div(detached_outputs, in_acts)
+    operator: Union[Float[Tensor, "batch d_hidden"], Float[Tensor,
+                                                           "batch pos d_hidden_concat"]] = torch.div(detached_outputs, detached_inputs)
 
     # Use reshaping and broadcasting to compare every element to every other element
     if operator.dim() == 2:
-        operator_expanded: Float[Tensor, "batch d_hidden 1"] = operator.unsqueeze(-1)
-        relu_interaction_matrix: Float[Tensor, "batch d_hidden d_hidden"] = (operator_expanded == operator).int()
+        operator_expanded: Float[Tensor,
+                                 "batch d_hidden 1"] = operator.unsqueeze(-1)
+        relu_interaction_matrix: Float[Tensor, "batch d_hidden d_hidden"] = (
+            operator_expanded == operator).int()
     elif operator.dim() == 3:
-        batch, pos, d_hidden_concat = operator.shape
-        operator_expanded_ij: Float[Tensor, "batch pos 1 1 d_hidden_concat"] = operator.unsqueeze(2).unsqueze(3)
-        operator_expanded_kl; Float[Tensor, "batch 1 pos d_hidden_concat 1"] = operator.unsqueeze(1).unsqueeze(4)
+        operator_expanded_ij: Float[Tensor, "batch pos 1 1 d_hidden_concat"] = operator.unsqueeze(
+            2).unsqueze(3)
+        operator_expanded_kl: Float[Tensor, "batch 1 pos d_hidden_concat 1"] = operator.unsqueeze(
+            1).unsqueeze(4)
         # operator_matrix[batch,i,j,k,l] is 1 if operator[i,j] == operator[k,l] and 0 otherwise
-        relu_interacton_matrix: Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"] = (operator_expanded_ij == operator_expanded_kl).int()
+        relu_interacton_matrix: Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"] = (
+            operator_expanded_ij == operator_expanded_kl).int()
 
     # Store operator (ReLU pointwise ratio)
     hooked_data[hook_name] = {data_key: relu_interaction_matrix}
-
-
-

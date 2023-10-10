@@ -1,6 +1,6 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 import torch
 from jaxtyping import Float
@@ -12,7 +12,7 @@ from rib.hook_fns import (
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
-    relu_interaction_pre_hook_fn,
+    relu_interaction_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
 
@@ -67,7 +67,8 @@ def collect_gram_matrices(
     """
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
-        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
     else:
         hook_names = module_names
 
@@ -93,7 +94,8 @@ def collect_gram_matrices(
             )
         )
 
-    run_dataset_through_model(hooked_model, data_loader, gram_hooks, dtype=dtype, device=device)
+    run_dataset_through_model(
+        hooked_model, data_loader, gram_hooks, dtype=dtype, device=device)
 
     gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["gram"]
@@ -156,7 +158,8 @@ def collect_M_dash_and_Lambda_dash(
     )
 
     run_dataset_through_model(
-        hooked_model, data_loader, hooks=[interaction_hook], dtype=dtype, device=device
+        hooked_model, data_loader, hooks=[
+            interaction_hook], dtype=dtype, device=device
     )
 
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
@@ -214,7 +217,8 @@ def collect_interaction_edges(
             )
         )
 
-    run_dataset_through_model(hooked_model, data_loader, edge_hooks, dtype=dtype, device=device)
+    run_dataset_through_model(
+        hooked_model, data_loader, edge_hooks, dtype=dtype, device=device)
 
     edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {
         node_layer_name: hooked_model.hooked_data[node_layer_name]["edge"]
@@ -224,7 +228,8 @@ def collect_interaction_edges(
 
     # Scale the edges by the number of samples in the dataset
     for node_layer_name in edges:
-        edges[node_layer_name] = edges[node_layer_name] / len(data_loader.dataset)  # type: ignore
+        edges[node_layer_name] = edges[node_layer_name] / \
+            len(data_loader.dataset)  # type: ignore
 
     # Ensure that the keys of the edges dict are the same as the node layer names without `output`
     assert set(edges.keys()) == set(
@@ -240,7 +245,7 @@ def collect_relu_interactions(
     dtype: torch.dtype,
     device: str,
     hook_names: Optional[str] = None
-    ) -> dict[str, Float[Tensor, Union[Float[Tensor, "batch d_hidden d_hidden"], Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"]]:
+) -> dict[str, Union[Float[Tensor, "batch d_hidden d_hidden"], Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"]]]:
     """Identify whether ReLUs are synchronising using basic checking of layer operators O(x) only (pointwise evaluations of ratio of input to output).
 
     This currently only works for piecewise linear functions and modules must be activation type modules.
@@ -261,7 +266,8 @@ def collect_relu_interactions(
     """
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
-        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
     else:
         hook_names = module_names
 
@@ -271,20 +277,18 @@ def collect_relu_interactions(
             Hook(
                 name=hook_name,
                 data_key="relu_interaction",
-                fn=relu_interaction_pre_hook_fn,
+                fn=relu_interaction_hook_fn,
                 module_name=module_name
             )
         )
 
-    run_dataset_through_model(hooked_model, dataloader, hooks=relu_interaction_hooks, dtype=dtype, device=device)
+    run_dataset_through_model(
+        hooked_model, data_loader, hooks=relu_interaction_hooks, dtype=dtype, device=device)
 
     # Collect ReLU interaction matrices and scale by size of dataset
-    relu_interaction_matrices: dict[str, Union[Float[Tensor, "batch d_hidden d_hidden"], Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"]] = {
-        hook_name: torch.div(hooked_model.hooked_data[hook_name]["relu_interaction"], len(data_loader.dataset) for hook_name in hooked_model.hooked_data
+    relu_interaction_matrices: dict[str, Union[Float[Tensor, "batch d_hidden d_hidden"], Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"]]] = {
+        hook_name: torch.div(hooked_model.hooked_data[hook_name]["relu_interaction"], len(data_loader.dataset)) for hook_name in hooked_model.hooked_data
     }
     hooked_model.clear_hooked_data()
 
     return relu_interaction_matrices
-
-
-

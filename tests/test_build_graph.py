@@ -25,8 +25,8 @@ ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
 
-from experiments.lm_rib_build.lm_build_rib_graph import main as lm_build_graph_main
-from experiments.mnist_rib_build.build_interaction_graph import (
+from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
+from experiments.mnist_rib_build.run_mnist_rib_build import (
     main as mnist_build_graph_main,
 )
 from rib.interaction_algos import build_sorted_lambda_matrices
@@ -121,7 +121,7 @@ def test_modular_arithmetic_build_graph():
     dtype: float32
 
     """
-    load_config_path = "experiments.lm_rib_build.lm_build_rib_graph.load_config"
+    load_config_path = "experiments.lm_rib_build.run_lm_rib_build.load_config"
 
     def mock_load_config_modular_arithmetic(*args, **kwargs):
         # Load the config as normal but set the mlp_path using a relative path
@@ -155,7 +155,7 @@ def test_mnist_build_graph():
         - layers.1
         - layers.2
     """
-    load_config_path = "experiments.mnist_rib_build.build_interaction_graph.load_config"
+    load_config_path = "experiments.mnist_rib_build.run_mnist_rib_build.load_config"
 
     def mock_load_config_mnist(*args, **kwargs):
         # Load the config as normal but set the mlp_path using a relative path

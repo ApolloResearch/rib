@@ -151,7 +151,7 @@ def test_mnist_build_graph():
     rotate_output: false
     n_intervals: 0
     dtype: float32
-    module_names:
+    node_layers:
         - layers.1
         - layers.2
     """

@@ -44,7 +44,7 @@ Supported experiments:
 - Ablating vectors from the interaction or orthogonal basis: `experiments/lm_ablations/`
 - Building an interaction graph: `experiments/lm_rib_build/`
 
-As can be seen in `experiments/lm_rib_build/lm_build_rib_graph.py`, the process for building a graph
+As can be seen in `experiments/lm_rib_build/run_lm_rib_build.py`, the process for building a graph
 for an LM is as follows:
 
 - Load a pretrained LM (currently only supports some transformer-lens models)
@@ -54,7 +54,7 @@ arbitrary sections of the LM.
 consider all the relevant interactions.
 - Run the RIB algorithm, outlined in the Code Implementation section of [this writeup](https://www.overleaf.com/project/6437d0bde0eaf2e8c7ac3649).
 - Plot the graph using `experiments/lm_rib_build/plot_rib_graph.py`, passing the path to the
-results file generated from `experiments/lm_rib_build/lm_build_rib_graph.py`
+results file generated from `experiments/lm_rib_build/run_lm_rib_build.py`
 
 ## Development
 

@@ -13,7 +13,7 @@ Steps to build the graph:
 7. Calculate the edges of the interaction graph between each node layer.
 
 Usage:
-    python lm_build_rib_graph.py <path/to/config.yaml>
+    python run_lm_rib_build.py <path/to/config.yaml>
 
 The config.yaml should contain the `node_layers` field. This describes the sections of the
 graph that will be built: A graph layer will be built on the inputs to each specified node layer,
@@ -29,7 +29,7 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 import fire
 import torch
@@ -77,6 +77,11 @@ class Config(BaseModel):
         description="Module type in which to only output the last position index.",
     )
 
+    n_intervals: int = Field(
+        ...,
+        description="The number of intervals to use for the integrated gradient approximation.",
+    )
+
     dtype: str = Field(..., description="The dtype to use when building the graph.")
 
     @field_validator("dtype")
@@ -93,7 +98,7 @@ class Config(BaseModel):
         return self
 
 
-def main(config_path_str: str) -> Optional[dict[str, Any]]:
+def main(config_path_str: str):
     """Build the interaction graph and store it on disk."""
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
@@ -160,6 +165,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         data_loader=train_loader,
         dtype=dtype,
         device=device,
+        n_intervals=config.n_intervals,
         truncation_threshold=config.truncation_threshold,
         rotate_output=config.rotate_output,
         hook_names=config.node_layers,
@@ -168,6 +174,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     E_hats = collect_interaction_edges(
         Cs=Cs,
         hooked_model=hooked_model,
+        n_intervals=config.n_intervals,
         module_names=graph_module_names,
         data_loader=train_loader,
         dtype=dtype,
@@ -200,7 +207,6 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     # Save the results (which include torch tensors) to file
     torch.save(results, out_interaction_graph_file)
     logger.info("Saved results to %s", out_interaction_graph_file)
-    return results
 
 
 if __name__ == "__main__":

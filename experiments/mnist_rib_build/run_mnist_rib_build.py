@@ -10,14 +10,13 @@ The process is as follows:
     4. Calculate the edges of the interaction graph between each node layer.
 
 Usage:
-    python build_interaction_graph.py <path/to/yaml_config_file>
+    python run_mnist_rib_build.py <path/to/yaml_config_file>
 
 """
 
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional, Union
 
 import fire
 import torch
@@ -42,8 +41,9 @@ class Config(BaseModel):
     seed: int
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
     rotate_output: bool  # Whether to rotate the output layer to its eigenbasis.
+    n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
-    module_names: list[str]
+    node_layers: list[str]
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -73,7 +73,7 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def main(config_path_str: str) -> Optional[dict[str, Any]]:
+def main(config_path_str: str) -> None:
     """Implement the main algorithm and store the graph to disk."""
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
@@ -99,7 +99,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
 
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
-        module_names=config.module_names,
+        module_names=config.node_layers,
         data_loader=test_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
@@ -110,19 +110,21 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     # Builds sqrt sorted Lambda matrix and its inverse
     Cs, Us = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
-        module_names=config.module_names,
+        module_names=config.node_layers,
         hooked_model=hooked_mlp,
         data_loader=test_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
+        n_intervals=config.n_intervals,
         truncation_threshold=config.truncation_threshold,
         rotate_output=config.rotate_output,
     )
 
     E_hats = collect_interaction_edges(
         Cs=Cs,
-        module_names=config.module_names,
         hooked_model=hooked_mlp,
+        n_intervals=config.n_intervals,
+        module_names=config.node_layers,
         data_loader=test_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
@@ -146,7 +148,7 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(module, E_hats[module].cpu()) for module in config.module_names],
+        "edges": [(module, E_hats[module].cpu()) for module in config.node_layers],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": model_config_dict,
     }
@@ -154,7 +156,6 @@ def main(config_path_str: str) -> Optional[dict[str, Any]]:
     # Save the results (which include torch tensors) to file
     torch.save(results, out_interaction_graph_file)
     logger.info("Saved results to %s", out_interaction_graph_file)
-    return results
 
 
 if __name__ == "__main__":

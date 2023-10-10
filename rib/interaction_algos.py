@@ -89,6 +89,7 @@ def calculate_interaction_rotations(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
+    n_intervals: int,
     truncation_threshold: float = 1e-5,
     rotate_output: bool = True,
     hook_names: Optional[list[str]] = None,
@@ -112,6 +113,7 @@ def calculate_interaction_rotations(
         data_loader: The data loader.
         dtype: The data type to use for model computations.
         device: The device to run the model on.
+        n_intervals: The number of intervals to use for integrated gradients.
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_output: Whether to rotate the output layer to its eigenbasis (which is equivalent
             to its interaction basis).
@@ -164,6 +166,7 @@ def calculate_interaction_rotations(
         M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
             C_out=Cs[-1].C,  # most recently stored interaction matrix
             hooked_model=hooked_model,
+            n_intervals=n_intervals,
             data_loader=data_loader,
             module_name=module_name,
             dtype=dtype,
@@ -178,18 +181,16 @@ def calculate_interaction_rotations(
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
         D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
-        U_D_sqrt_pinv_T_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv.T @ V
+        U_D_sqrt_pinv_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
         Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
-            (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_T_V).diag().abs()
+            (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_V).diag().abs()
         )
 
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
             Lambda_abs, truncation_threshold
         )
 
-        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
-            U_D_sqrt_pinv_T_V @ Lambda_abs_sqrt_trunc
-        )
+        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc
         C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
             Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T
         )

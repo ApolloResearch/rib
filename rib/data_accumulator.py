@@ -120,6 +120,7 @@ def collect_gram_matrices(
 def collect_M_dash_and_Lambda_dash(
     C_out: Float[Tensor, "out_hidden out_hidden"],
     hooked_model: HookedModel,
+    n_intervals: int,
     data_loader: DataLoader,
     module_name: str,
     dtype: torch.dtype,
@@ -134,6 +135,7 @@ def collect_M_dash_and_Lambda_dash(
     Args:
         C_out: The rotation matrix for the next layer.
         hooked_model: The hooked model.
+        n_intervals: The number of integrated gradient intervals to use.
         data_loader: The data loader.
         module_name: The name of the module whose inputs are the node layer we collect the matrices
             M' and Lambda' for.
@@ -154,6 +156,7 @@ def collect_M_dash_and_Lambda_dash(
         module_name=module_name,
         fn_kwargs={
             "C_out": C_out,
+            "n_intervals": n_intervals,
         },
     )
 
@@ -177,6 +180,7 @@ def collect_M_dash_and_Lambda_dash(
 def collect_interaction_edges(
     Cs: list["InteractionRotation"],
     hooked_model: HookedModel,
+    n_intervals: int,
     module_names: list[str],
     data_loader: DataLoader,
     dtype: torch.dtype,
@@ -190,6 +194,7 @@ def collect_interaction_edges(
     Args:
         Cs: The interaction rotation matrix and its pseudoinverse, order by node layer.
         hooked_model: The hooked model.
+        n_intervals: The number of integrated gradient intervals to use.
         module_names: The names of the modules to apply the hooks to.
         data_loader: The pytorch data loader.
         dtype: The data type to use for model computations.
@@ -213,6 +218,7 @@ def collect_interaction_edges(
                     "C_in": C_info.C,  # C from the current node layer
                     "C_in_pinv": C_info.C_pinv,  # C_pinv from the current node layer
                     "C_out": Cs[idx + 1].C,  # C from the next node layer
+                    "n_intervals": n_intervals,
                 },
             )
         )

@@ -86,10 +86,22 @@ def main(config_path_str: str) -> None:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
 
+    out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
+    if out_file.exists() and not overwrite_output(out_file):
+        print("Exiting.")
+        return
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
     set_seed(config.seed)
+    interaction_graph_info = torch.load(config.interaction_graph_path)
+
+    assert set(config.node_layers) <= set(
+        interaction_graph_info["config"]["node_layers"]
+    ), "The node layers in the config must be a subset of the node layers in the interaction graph."
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
-    interaction_graph_info = torch.load(config.interaction_graph_path)
 
     basis_matrices = load_basis_matrices(
         interaction_graph_info=interaction_graph_info,
@@ -98,13 +110,6 @@ def main(config_path_str: str) -> None:
         dtype=dtype,
         device=device,
     )
-
-    out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if out_file.exists() and not overwrite_output(out_file):
-        print("Exiting.")
-        return
-
-    out_file.parent.mkdir(parents=True, exist_ok=True)
 
     mlp = load_mlp(
         config_dict=interaction_graph_info["model_config_dict"],

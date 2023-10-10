@@ -25,8 +25,8 @@ ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
 
-from experiments.lm_rib_build.lm_build_rib_graph import main as lm_build_graph_main
-from experiments.mnist_rib_build.build_interaction_graph import (
+from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
+from experiments.mnist_rib_build.run_mnist_rib_build import (
     main as mnist_build_graph_main,
 )
 from rib.interaction_algos import build_sorted_lambda_matrices
@@ -41,6 +41,7 @@ def graph_build_test(
 ):
     atol = 1e-5
 
+    results: dict = {}
     Lambda_abs: list[torch.Tensor] = []
 
     def mock_build_sorted_lambda_matrices(Lambda_abs_arg, *args, **kwargs):
@@ -48,16 +49,23 @@ def graph_build_test(
         Lambda_abs.append(Lambda_abs_arg.cpu())
         return build_sorted_lambda_matrices(Lambda_abs_arg, *args, **kwargs)
 
+    def mock_torch_save(collected_results: dict, path: str):
+        """Mock the torch.save function to collect the results instead of saving to file."""
+        nonlocal results
+        results = collected_results
+
     # Create a temporary file and write the mock config to it
     with tempfile.NamedTemporaryFile(mode="w+", suffix=".yaml") as temp_config:
         temp_config.write(mock_config)
         temp_config.flush()
 
-        with patch("torch.save"), patch(load_config_path, side_effect=load_config_mock_fn), patch(
+        with patch("torch.save", side_effect=mock_torch_save), patch(
+            load_config_path, side_effect=load_config_mock_fn
+        ), patch(
             "rib.interaction_algos.build_sorted_lambda_matrices",
             side_effect=mock_build_sorted_lambda_matrices,
         ):
-            results = build_graph_main_fn(temp_config.name)
+            build_graph_main_fn(temp_config.name)
             grams = results["gram_matrices"]
             Cs = results["interaction_rotations"]
             E_hats = results["edges"]
@@ -100,18 +108,20 @@ def test_modular_arithmetic_build_graph():
     seed: 0
     tlens_pretrained: null
     tlens_model_path: OVERWRITE/IN/MOCK
+    node_layers:
+      - ln1.0
+      - mlp_in.0
+      - unembed
     dataset: modular_arithmetic
     batch_size: 128
     truncation_threshold: 1e-6
     rotate_output: false
     last_pos_module_type: add_resid1
+    n_intervals: 0
     dtype: float32
-    node_layers:
-      - ln1.0
-      - mlp_in.0
-      - unembed
+
     """
-    load_config_path = "experiments.lm_rib_build.lm_build_rib_graph.load_config"
+    load_config_path = "experiments.lm_rib_build.run_lm_rib_build.load_config"
 
     def mock_load_config_modular_arithmetic(*args, **kwargs):
         # Load the config as normal but set the mlp_path using a relative path
@@ -131,7 +141,7 @@ def test_modular_arithmetic_build_graph():
 
 
 @pytest.mark.slow
-def test_mnsit_build_graph():
+def test_mnist_build_graph():
     mock_config = """
     exp_name: test
     mlp_path: OVERWRITE/IN/MOCK
@@ -139,12 +149,13 @@ def test_mnsit_build_graph():
     seed: 0
     truncation_threshold: 1e-6
     rotate_output: false
+    n_intervals: 0
     dtype: float32
-    module_names:
+    node_layers:
         - layers.1
         - layers.2
     """
-    load_config_path = "experiments.mnist_rib_build.build_interaction_graph.load_config"
+    load_config_path = "experiments.mnist_rib_build.run_mnist_rib_build.load_config"
 
     def mock_load_config_mnist(*args, **kwargs):
         # Load the config as normal but set the mlp_path using a relative path

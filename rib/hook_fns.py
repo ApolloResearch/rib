@@ -1,3 +1,11 @@
+"""Defines hook functions that are used in a HookedModel.
+
+By default, a HookedModel passes in the arguments `hooked_data`, `hook_name`, and `data_key` to
+each hook function. Therefore, these arguments must be included in the signature of each hook.
+
+Otherwise, the hook function operates like a regular pytorch hook function.
+"""
+
 from functools import partial
 from typing import Any, Union
 
@@ -51,7 +59,6 @@ def gram_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    **_: Any,
 ) -> None:
     """Hook function for calculating and updating the gram matrix.
 
@@ -63,7 +70,6 @@ def gram_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
-        **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
     # Output may be tuple of tensors if there are two outputs
@@ -93,7 +99,6 @@ def gram_pre_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    **_: Any,
 ) -> None:
     """Calculate the gram matrix for inputs with positional indices and add it to the global.
 
@@ -107,7 +112,6 @@ def gram_pre_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
-        **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -130,7 +134,9 @@ def rotate_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: tuple[Float[Tensor, "batch d_hidden"]],
     rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
-    **_: Any,
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
 ) -> tuple[Float[Tensor, "batch d_hidden"], ...]:
     """Hook function for rotating the input tensor to a module.
 
@@ -143,7 +149,9 @@ def rotate_pre_forward_hook_fn(
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module that we rotate.
         rotation_matrix: Rotation matrix to apply to the activations.
-        **_: Additional keyword arguments (not used).
+        hooked_data: Dictionary of hook data (not used).
+        hook_name: Name of hook (not used).
+        data_key: Name of data (not used).
 
     Returns:
         Rotated activations.
@@ -167,7 +175,6 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     data_key: Union[str, list[str]],
     C_out: Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"],
     n_intervals: int,
-    **_: Any,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -181,7 +188,6 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 1.
-        **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -223,7 +229,6 @@ def interaction_edge_pre_forward_hook_fn(
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
     n_intervals: int,
-    **_: Any,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -246,7 +251,6 @@ def interaction_edge_pre_forward_hook_fn(
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 1.
-        **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -300,7 +304,6 @@ def acts_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    **_: Any,
 ) -> None:
     """Hook function for storing the output activations.
 
@@ -312,7 +315,6 @@ def acts_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
-        **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
     outputs = output if isinstance(output, tuple) else (output,)

@@ -12,7 +12,7 @@ from rib.hook_fns import (
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
-    relu_interaction_hook_fn,
+    relu_interaction_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
 
@@ -250,13 +250,16 @@ def collect_relu_interactions(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
+    relu_metric_type: int,
     hook_names: Optional[str] = None
-) -> dict[str, Union[Float[Tensor, "batch d_hidden d_hidden"], Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"]]]:
+) -> dict[str, Union[Float[Tensor, "d_hidden d_hidden"], Float[Tensor, "d_hidden_concat d_hidden_concat"]]]:
     """Identify whether ReLUs are synchronising using basic checking of layer operators O(x) only (pointwise evaluations of ratio of input to output).
 
     This currently only works for piecewise linear functions and modules must be activation type modules.
     Recall that the node layers correspond to the positions at the input to each module specified in
     module_names, as well as the output of the final module.
+
+    TODO: change ReLU metric type naming system to Enum rather than having integers floating around.
 
     Args:
         hooked_model: The hooked model.
@@ -283,8 +286,9 @@ def collect_relu_interactions(
             Hook(
                 name=hook_name,
                 data_key="relu_interaction",
-                fn=relu_interaction_hook_fn,
-                module_name=module_name
+                fn=relu_interaction_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={'relu_metric_type': relu_metric_type}
             )
         )
 
@@ -292,8 +296,8 @@ def collect_relu_interactions(
         hooked_model, data_loader, hooks=relu_interaction_hooks, dtype=dtype, device=device)
 
     # Collect ReLU interaction matrices and scale by size of dataset
-    relu_interaction_matrices: dict[str, Union[Float[Tensor, "batch d_hidden d_hidden"], Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"]]] = {
-        hook_name: torch.div(hooked_model.hooked_data[hook_name]["relu_interaction"], len(data_loader.dataset)) for hook_name in hooked_model.hooked_data
+    relu_interaction_matrices: dict[str, Union[Float[Tensor, "d_hidden d_hidden"], Float[Tensor, "d_hidden_concat d_hidden_concat"]]] = {
+        hook_name: torch.div(hooked_model.hooked_data[hook_name]["relu_interaction"], 1) for hook_name in hooked_model.hooked_data
     }
     hooked_model.clear_hooked_data()
 

@@ -10,6 +10,7 @@ from functools import partial
 from typing import Any, Union
 
 import torch
+from einops import rearrange, repeat
 from jaxtyping import Float
 from torch import Tensor
 
@@ -330,7 +331,7 @@ def acts_forward_hook_fn(
     hooked_data[hook_name] = {data_key: detached_outputs}
 
 
-def relu_interaction_hook_fn(
+def relu_interaction_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
@@ -347,18 +348,31 @@ def relu_interaction_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
+    relu_metric_type: int,
     **_: Any,
 ) -> None:
     """Hook function to store pre and post output activations for ReLU operators.
 
+    Note accumulation convention for this function is slightly different to rest of codebase.
+    I sum over each batch and divide batch-wise, so each ReLU matrix per batch is of correct scaling.
+
+    TODO (nonurgent): fix 0/0 cases.
+
     Args:
         module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module (not used).
+        inputs: Inputs to the module.
         output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
             and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        relu_metric_type: Temporary variable that exists for multiple versions of this function while I play
+        around with what works.
+            0: ReLU pointwise ratio. Calculate sum_x (O_i(x) == O_j(x)) = B_ij.
+            1: Commutator without gradients. Scales the method in 0 by the value of the
+            pre-activation itself (applies an importance scaling based on the incoming information).
+            sum_x ( [A^(i,j),O(x)] p(x) )^2 = sum_x ( (O_i(x) - O_j(x)) p(x) )^2 =
+            sum_x (O_i(x) p_j(x) - f_j(x))^2.
         **_: Additional keyword arguments (not used).
     """
     assert isinstance(data_key, str), "data_key must be a string."
@@ -373,20 +387,59 @@ def relu_interaction_hook_fn(
     operator: Union[Float[Tensor, "batch d_hidden"], Float[Tensor,
                                                            "batch pos d_hidden_concat"]] = torch.div(detached_outputs, detached_inputs)
 
-    # Use reshaping and broadcasting to compare every element to every other element
-    if operator.dim() == 2:
-        operator_expanded: Float[Tensor,
-                                 "batch d_hidden 1"] = operator.unsqueeze(-1)
-        relu_interaction_matrix: Float[Tensor, "batch d_hidden d_hidden"] = (
-            operator_expanded == operator).int()
-    elif operator.dim() == 3:
-        operator_expanded_ij: Float[Tensor, "batch pos 1 1 d_hidden_concat"] = operator.unsqueeze(
-            2).unsqueze(3)
-        operator_expanded_kl: Float[Tensor, "batch 1 pos d_hidden_concat 1"] = operator.unsqueeze(
-            1).unsqueeze(4)
-        # operator_matrix[batch,i,j,k,l] is 1 if operator[i,j] == operator[k,l] and 0 otherwise
-        relu_interacton_matrix: Float[Tensor, "batch pos pos d_hidden_concat d_hidden_concat"] = (
-            operator_expanded_ij == operator_expanded_kl).int()
+    match relu_metric_type:
+        case 0:
+            # Use reshaping and broadcasting to compare every element to every other element
+            if operator.dim() == 2:
+                batch_size, d_hidden = operator.shape
 
-    # Store operator (ReLU pointwise ratio)
-    hooked_data[hook_name] = {data_key: relu_interaction_matrix}
+                operator_expanded_i: Float[Tensor, "batch 1 d_hidden"] = operator.unsqueeze(1)
+                operator_expanded_j: Float[Tensor, "batch d_hidden 1"] = operator.unsqueeze(-1)
+
+                relu_interaction_matrix: Float[Tensor, "d_hidden d_hidden"] = torch.div((operator_expanded_i == operator_expanded_j).sum(dim=0), batch_size)
+
+            elif operator.dim() == 3:
+                batch_size, token_len, d_hidden_concat = operator.shape
+
+                operator_expanded_j: Float[Tensor, "batch pos 1 d_hidden_concat"] = operator.unsqueeze(2)
+                operator_expanded_k: Float[Tensor, "batch pos d_hidden_concat 1"] = operator.unsqueeze(3)
+
+                # operator_matrix[batch,i,j,k,] is 1 if operator[i,j] == operator[i,k] and 0 otherwise
+                relu_interaction_matrix: Float[Tensor, "d_hidden_concat d_hidden_concat"] = torch.div((operator_expanded_j == operator_expanded_k).sum(dim=(0, 1)), batch_size*token_len)
+
+            # Store operator (ReLU pointwise ratio)
+            hooked_data[hook_name] = {data_key: relu_interaction_matrix}
+
+        case 1:
+            batch_size, d_hidden = operator.shape # [256, 101]
+            # Element-wise product O_j * p_j
+            diag_values: Float[Tensor, "batch_size, d_hidden"] = operator.mul(detached_inputs)
+            # Repeat diag_values along rows - row_matrix_ij = O_j * p_j
+            row_matrix: Float[Tensor, "batch_size, d_hidden, d_hidden"] = diag_values.unsqueeze(1).repeat(1, d_hidden, 1) # [256, 101, 101]
+            assert (row_matrix[0, 0, :].squeeze() == diag_values[0]).all()
+            assert (row_matrix[:, 5, 7] == operator[:, 7] * detached_inputs[:, 7]).all()
+            denominator: Float[Tensor, "d_hidden d_hidden"] = torch.div(row_matrix.pow(2).sum(dim=0), batch_size)
+
+            # Outer product O_i * p_j
+            outer_product: Float[Tensor, "batch_size d_hidden d_hidden"] = torch.bmm(rearrange(operator, 'b n -> b n 1'), rearrange(detached_inputs, 'b n -> b 1 n'))
+            assert (outer_product[:, 3, 4] == operator[:, 3] * detached_inputs[:, 4]).all()
+            # (O_i * p_j- O_j * p_j)^2 / (O_j * p_j)^2
+            numerator  = torch.div((outer_product - row_matrix).pow(2).sum(dim=0), batch_size)
+
+            denom_mask = denominator == 0
+            denominator[denom_mask] = 1
+            # num_mask = (numerator != 0) & denom_mask
+            # numerator[num_mask] = 100
+
+            commutator_size_matrix = torch.div(numerator, denominator)
+
+            # inf_positions = (commutator_size_matrix == -1).nonzero(as_tuple=True)
+            # print(inf_positions)
+
+            # Store commutator matrix
+            hooked_data[hook_name] = {data_key: commutator_size_matrix}
+
+
+    def plot_mat(matrix):
+        out_dir = Path(__file__).parent / "out"
+        out_dir.mkdir(parents=True, exist_ok=True)

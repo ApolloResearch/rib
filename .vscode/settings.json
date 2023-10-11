@@ -6,7 +6,7 @@
     "files.trimTrailingWhitespace": true,
     "editor.formatOnSaveMode": "file",
     "editor.formatOnSave": true,
-    "python.formatting.provider": "black",
+    "python.formatting.provider": "none",
     "python.formatting.blackArgs": [
         "--line-length",
         "100"
@@ -42,4 +42,7 @@
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.autopep8"
+    },
 }

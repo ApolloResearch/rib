@@ -68,74 +68,47 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
 
 
 def print_all_modules(mlp):
+    """Use for choosing which modules go in config file."""
     for name, module in mlp.named_modules():
         print(name, ":", module)
 
 
-def main(config_path_str: str, relu_metric_type: int, edit_weights: bool) -> None:
-    """Test for ReLU interactions (separate to main RIB algorithm).
+# Weights ========================================================
 
-    TODO: test on high bias - should be entire giant block fit.
-    Histogram
-    """
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
-    set_seed(config.seed)
+def edit_weights_fn(model: HookedModel, layer_name: str) -> None:
+    """Weight matrix dimensions are rows=output, cols=input."""
+    layer = get_nested_attribute(model, layer_name)
 
-    with open(config.mlp_path.parent / "config.yaml", "r") as f:
-        model_config_dict = yaml.safe_load(f)
-
-    out_dir = Path(__file__).parent / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    file_name = f"relu_similarity_matrices_editweights_{edit_weights}"
-    relu_matrices_save_file = Path(__file__).parent / file_name
-
-    if relu_matrices_save_file.exists():
-        with relu_matrices_save_file.open("rb") as f:
-            relu_matrices = pickle.load(f)
-
-    else:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-        print_all_modules(mlp) # Check module names were correctly defined
-        layer_list = ["layers.0.linear", "layers.1.linear"]
-        if edit_weights:
-            for layer in layer_list:
-                edit_weights_fn(mlp, layer)
-        mlp.eval()  # Run in inference only
-        mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-        hooked_mlp = HookedModel(mlp)
-
-        test_loader = load_mnist_dataloader(
-            train=True, batch_size=config.batch_size)
-
-        relu_matrices = collect_relu_interactions(
-            hooked_model=hooked_mlp,
-            module_names=config.module_names,
-            data_loader=test_loader,
-            dtype=TORCH_DTYPES[config.dtype],
-            device=device,
-            relu_metric_type=relu_metric_type
-        )
-
-        with open(relu_matrices_save_file, "wb") as f:
-            pickle.dump(relu_matrices, f)
-
-    plotting(relu_matrices, out_dir, config, relu_metric_type, edit_weights)
+    weights = layer.weight.data.clone()
+    output_neurons, input_neurons = weights.shape
+    weights[:output_neurons//2, -1] = 1e8
+    layer.weight.data.copy_(weights)
 
 
-def plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config, relu_metric_type: int, edit_weights: bool) -> None:
+def get_nested_attribute(obj, attr_name):
+    attrs = attr_name.split('.')
+    current_attr = obj
+    for attr in attrs:
+        current_attr = getattr(current_attr, attr)
+    return current_attr
+
+
+# Helper functions for main ========================================================
+
+def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config, relu_metric_type: int, edit_weights: bool) -> None:
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
-        # Threshold
-        threshold = 1
-        similarity_matrix[similarity_matrix > threshold] = threshold
+        if relu_metric_type == 1: # Threshold before plotting unsorted
+            threshold = 1
+            similarity_matrix[similarity_matrix > threshold] = threshold
+
+        # Plot raw matrix values before clustering
         plt.figure(figsize=(10, 8))
         sns.heatmap(similarity_matrix, annot=False,
                     cmap="YlGnBu", cbar=True, square=True)
         plt.savefig(
             out_dir / f"{config.exp_name}_mat_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
 
+        # Plot histogram
         plt.figure(figsize=(10,8))
         flat_similarity = np.array(similarity_matrix).flatten()
         sns.histplot(flat_similarity, bins=100, kde=False)
@@ -154,7 +127,7 @@ def plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_
                     similarity_matrix, similarity_matrix.T) # Make symmetric
                 # similarity_matrix = rescale(similarity_matrix)
                 distance_matrix = similarity_matrix
-                # Threshold
+                # Threshold distance matrix
                 threshold = 1
                 distance_matrix[distance_matrix > threshold] = threshold
 
@@ -167,6 +140,7 @@ def plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_
         order = leaves_list(linkage_matrix)
         rearranged_similarity_matrix = similarity_matrix[order, :][:, order]
 
+        # Plot sorted similarity matrix via indices obtained from distance matrix
         plt.figure(figsize=(10, 8))
         sns.heatmap(rearranged_similarity_matrix, annot=False,
                     cmap="YlGnBu", cbar=True, square=True)
@@ -186,28 +160,73 @@ def load_local_config(config_path_str: str) -> dict:
     return config
 
 
-def rescale(tensor: torch.Tensor) -> torch.Tensor:
-    """Rescale tensor to [0, 1] range."""
-    return (tensor - tensor.min()) / (tensor.max() - tensor.min())
+def check_and_open_file(file_path: str, get_var_fn: Callable, config_path_str: str) -> Any:
+    """Load information from pickle file into a variable and return it."""
+    if file_path.exists():
+        with file_path.open("rb") as f:
+            var = pickle.load(f)
+    else:
+        var = get_var_fn(config_path_str, file_path)
+
+    return var
 
 
-def edit_weights_fn(model: HookedModel, layer_name: str) -> None:
-    """Weight matrix dimensions are rows=output, cols=input"""
-    layer = get_nested_attribute(model, layer_name)
+def get_relu_similarities(config_path_str: str, file_path: Path) -> list[Float[Tensor, "d_hidden, d_hidden"]]:
+    with open(config.mlp_path.parent / "config.yaml", "r") as f:
+        model_config_dict = yaml.safe_load(f)
 
-    weights = layer.weight.data.clone()
-    output_neurons, input_neurons = weights.shape
-    weights[:output_neurons//2, -1] = 1e8
-    layer.weight.data.copy_(weights)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+    print_all_modules(mlp) # Check module names were correctly defined
+    layer_list = ["layers.0.linear", "layers.1.linear"]
+    if edit_weights:
+        for layer in layer_list:
+            edit_weights_fn(mlp, layer)
+    mlp.eval()  # Run in inference only
+    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_mlp = HookedModel(mlp)
+
+    test_loader = load_mnist_dataloader(
+        train=True, batch_size=config.batch_size)
+
+    relu_matrices = collect_relu_interactions(
+        hooked_model=hooked_mlp,
+        module_names=config.module_names,
+        data_loader=test_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+        relu_metric_type=relu_metric_type
+    )
+
+    with open(file_path, "wb") as f:
+        pickle.dump(relu_matrices, f)
+
+    return relu_matrices
 
 
-def get_nested_attribute(obj, attr_name):
-    attrs = attr_name.split('.')
-    current_attr = obj
-    for attr in attrs:
-        current_attr = getattr(current_attr, attr)
-    return current_attr
+# Main ========================================================
+
+def relu_similarity_main(config_path_str: str, relu_metric_type: int, edit_weights: bool) -> None:
+    """MAIN FUNCTION 1. Test for ReLU interactions (separate to main RIB algorithm)."""
+    config_path = Path(config_path_str)
+    config = load_config(config_path, config_model=Config)
+    set_seed(config.seed)
+
+    out_dir = Path(__file__).parent / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    file_name = f"relu_similarity_matrices_editweights_{edit_weights}"
+    relu_matrices_save_file = Path(__file__).parent / file_name
+
+    relu_matrices = check_and_open_file(
+        file_path=relu_matrices_save_file,
+        get_var_fn=get_relu_similarities,
+        config_path_str=config_path_str
+    )
+
+    relu_plotting(relu_matrices, out_dir, config, relu_metric_type, edit_weights)
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(relu_similarity_main)
+    """Run above: python run_relu_interactions.py relu_interactions.yaml 1 False"""

@@ -6,6 +6,10 @@ truncation_threshold: 1e-3
 n_intervals: 0
 rotate_output: false
 dtype: float32
-module_names:
-  - layers.0.activation
-  - layers.1.activation
+# module_names:
+#   - layers.0.activation
+#   - layers.1.activation
+node_layers:
+  - layers.0
+  - layers.1
+  - layers.2

@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import fire
-import matplotlib.pyplot as plt
 import numpy as np
+import pickle
+import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 import yaml
@@ -70,7 +71,11 @@ def print_all_modules(mlp):
 
 
 def main(config_path_str: str, relu_metric_type: int) -> None:
-    """Test for ReLU interactions (separate to main RIB algorithm)."""
+    """Test for ReLU interactions (separate to main RIB algorithm).
+
+    TODO: test on high bias - should be entire giant block fit.
+    Histogram
+    """
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
@@ -81,46 +86,82 @@ def main(config_path_str: str, relu_metric_type: int) -> None:
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    # print_all_modules(mlp) # Check module names were correctly defined
-    mlp.eval()  # Run in inference only
-    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-    hooked_mlp = HookedModel(mlp)
+    file_name = "relu_similarity_matrices"
+    relu_matrices_save_file = Path(__file__).parent / file_name
 
-    test_loader = load_mnist_dataloader(
-        train=False, batch_size=config.batch_size)
+    if relu_matrices_save_file.exists():
+        with relu_matrices_save_file.open("rb") as f:
+            relu_matrices = pickle.load(f)
 
-    relu_matrices = collect_relu_interactions(
-        hooked_model=hooked_mlp,
-        module_names=config.module_names,
-        data_loader=test_loader,
-        dtype=TORCH_DTYPES[config.dtype],
-        device=device,
-        relu_metric_type=relu_metric_type
-    )
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+        # print_all_modules(mlp) # Check module names were correctly defined
+        mlp.eval()  # Run in inference only
+        mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+        hooked_mlp = HookedModel(mlp)
+
+        test_loader = load_mnist_dataloader(
+            train=True, batch_size=config.batch_size)
+
+        relu_matrices = collect_relu_interactions(
+            hooked_model=hooked_mlp,
+            module_names=config.module_names,
+            data_loader=test_loader,
+            dtype=TORCH_DTYPES[config.dtype],
+            device=device,
+            relu_metric_type=relu_metric_type
+        )
+
+        with open(relu_matrices_save_file, "wb") as f:
+            pickle.dump(relu_matrices, f)
 
     for i, similarity_matrix in enumerate(list(relu_matrices.values())):
-        # Use log difference metric for dissimilarity
-        distance_matrix = -torch.log(1 - similarity_matrix)
+
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(similarity_matrix, annot=False,
+                    cmap="YlGnBu", cbar=True, square=True)
+        plt.savefig(
+            out_dir / f"{config.exp_name}_similarity_matrix_{i}_type_{relu_metric_type}.png")
+
+        plt.figure(figsize=(10,8))
+        flat_similarity = np.array(similarity_matrix).flatten()
+        print(torch.max(similarity_matrix))
+        sns.histplot(flat_similarity, bins=100, kde=False)
+        plt.savefig(
+            out_dir / f"{config.exp_name}_similarity_histogram_{i}_type_{relu_metric_type}.png")
+
+        match relu_metric_type:
+            case 0:
+                # Threshold
+                threshold = 0.95
+                similarity_matrix[similarity_matrix < threshold] = 0
+                # Transform into distance matrix
+                distance_matrix = 1 - similarity_matrix
+            case 1:
+                similarity_matrix = torch.min(
+                    similarity_matrix, similarity_matrix.T) # Make symmetric
+                # similarity_matrix = rescale(similarity_matrix)
+                distance_matrix = similarity_matrix
+                # Threshold
+                threshold = 2
+                distance_matrix[distance_matrix > threshold] = torch.max(distance_matrix)
+
         # Deal with zeros on the diagonal
-        ones_mask = (similarity_matrix != 1)
-        max_val = distance_matrix[ones_mask].max()
-        distance_matrix[~ones_mask] = max_val*10
         distance_matrix = distance_matrix.fill_diagonal_(0)
 
         # Create linkage matrix using clustering algorithm
         linkage_matrix = linkage(squareform(
             distance_matrix), method='complete')
         order = leaves_list(linkage_matrix)
-        rearranged_distance_matrix = distance_matrix[order, :][:, order]
+        rearranged_similarity_matrix = similarity_matrix[order, :][:, order]
 
         plt.figure(figsize=(10, 8))
-        sns.heatmap(rearranged_distance_matrix, annot=False,
+        sns.heatmap(rearranged_similarity_matrix, annot=False,
                     cmap="YlGnBu", cbar=True, square=True)
         plt.title("Reordered Similarity Matrix")
         plt.savefig(
-            out_dir / f"{config.exp_name}_similarity_matrix_{i}_type_{relu_metric_type}.png")
+            out_dir / f"{config.exp_name}_rearranged_similarity_matrix_{i}_type_{relu_metric_type}.png")
 
 
 def load_local_config(config_path_str):
@@ -132,6 +173,11 @@ def load_local_config(config_path_str):
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
     return config
+
+
+def rescale(tensor: torch.Tensor) -> torch.Tensor:
+    """Rescale tensor to [0, 1] range."""
+    return (tensor - tensor.min()) / (tensor.max() - tensor.min())
 
 
 if __name__ == "__main__":

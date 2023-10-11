@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 import yaml
+from jaxtyping import Float
+from torch import Tensor
 from pydantic import BaseModel, field_validator
 from scipy.cluster.hierarchy import dendrogram, leaves_list, linkage
 from scipy.spatial.distance import squareform
@@ -70,7 +72,7 @@ def print_all_modules(mlp):
         print(name, ":", module)
 
 
-def main(config_path_str: str, relu_metric_type: int) -> None:
+def main(config_path_str: str, relu_metric_type: int, edit_weights: bool) -> None:
     """Test for ReLU interactions (separate to main RIB algorithm).
 
     TODO: test on high bias - should be entire giant block fit.
@@ -86,7 +88,7 @@ def main(config_path_str: str, relu_metric_type: int) -> None:
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    file_name = "relu_similarity_matrices"
+    file_name = f"relu_similarity_matrices_editweights_{edit_weights}"
     relu_matrices_save_file = Path(__file__).parent / file_name
 
     if relu_matrices_save_file.exists():
@@ -96,7 +98,11 @@ def main(config_path_str: str, relu_metric_type: int) -> None:
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-        # print_all_modules(mlp) # Check module names were correctly defined
+        print_all_modules(mlp) # Check module names were correctly defined
+        layer_list = ["layers.0.linear", "layers.1.linear"]
+        if edit_weights:
+            for layer in layer_list:
+                edit_weights_fn(mlp, layer)
         mlp.eval()  # Run in inference only
         mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
         hooked_mlp = HookedModel(mlp)
@@ -116,20 +122,25 @@ def main(config_path_str: str, relu_metric_type: int) -> None:
         with open(relu_matrices_save_file, "wb") as f:
             pickle.dump(relu_matrices, f)
 
-    for i, similarity_matrix in enumerate(list(relu_matrices.values())):
+    plotting(relu_matrices, out_dir, config, relu_metric_type, edit_weights)
 
+
+def plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config, relu_metric_type: int, edit_weights: bool) -> None:
+    for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
+        # Threshold
+        threshold = 1
+        similarity_matrix[similarity_matrix > threshold] = threshold
         plt.figure(figsize=(10, 8))
         sns.heatmap(similarity_matrix, annot=False,
                     cmap="YlGnBu", cbar=True, square=True)
         plt.savefig(
-            out_dir / f"{config.exp_name}_similarity_matrix_{i}_type_{relu_metric_type}.png")
+            out_dir / f"{config.exp_name}_mat_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
 
         plt.figure(figsize=(10,8))
         flat_similarity = np.array(similarity_matrix).flatten()
-        print(torch.max(similarity_matrix))
         sns.histplot(flat_similarity, bins=100, kde=False)
         plt.savefig(
-            out_dir / f"{config.exp_name}_similarity_histogram_{i}_type_{relu_metric_type}.png")
+            out_dir / f"{config.exp_name}_hist_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
 
         match relu_metric_type:
             case 0:
@@ -144,8 +155,8 @@ def main(config_path_str: str, relu_metric_type: int) -> None:
                 # similarity_matrix = rescale(similarity_matrix)
                 distance_matrix = similarity_matrix
                 # Threshold
-                threshold = 2
-                distance_matrix[distance_matrix > threshold] = torch.max(distance_matrix)
+                threshold = 1
+                distance_matrix[distance_matrix > threshold] = threshold
 
         # Deal with zeros on the diagonal
         distance_matrix = distance_matrix.fill_diagonal_(0)
@@ -161,15 +172,15 @@ def main(config_path_str: str, relu_metric_type: int) -> None:
                     cmap="YlGnBu", cbar=True, square=True)
         plt.title("Reordered Similarity Matrix")
         plt.savefig(
-            out_dir / f"{config.exp_name}_rearranged_similarity_matrix_{i}_type_{relu_metric_type}.png")
+            out_dir / f"{config.exp_name}_rearr_mat_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
 
 
-def load_local_config(config_path_str):
+def load_local_config(config_path_str: str) -> dict:
     """Load config (specifically, including MLP config) from local config file.
 
     Rest of RIB loads MLP config from FluidStack servers.
     """
-    config_path = Path(config_path_str)
+    config_path = Path(__file__).parent / config_path_str
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
     return config
@@ -180,10 +191,23 @@ def rescale(tensor: torch.Tensor) -> torch.Tensor:
     return (tensor - tensor.min()) / (tensor.max() - tensor.min())
 
 
+def edit_weights_fn(model: HookedModel, layer_name: str) -> None:
+    """Weight matrix dimensions are rows=output, cols=input"""
+    layer = get_nested_attribute(model, layer_name)
+
+    weights = layer.weight.data.clone()
+    output_neurons, input_neurons = weights.shape
+    weights[:output_neurons//2, -1] = 1e8
+    layer.weight.data.copy_(weights)
+
+
+def get_nested_attribute(obj, attr_name):
+    attrs = attr_name.split('.')
+    current_attr = obj
+    for attr in attrs:
+        current_attr = getattr(current_attr, attr)
+    return current_attr
+
+
 if __name__ == "__main__":
-    # Module printing code
-    #     CONFIG_PATH_STR = "experiments/mnist_relu_interactions/relu_interactions.yaml"
-    #     config = load_local_config(CONFIG_PATH_STR)
-    #     mlp = MLP(**config["mlp_config"])
-    #     print_all_modules(mlp)
     fire.Fire(main)

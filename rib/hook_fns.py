@@ -1,5 +1,9 @@
 """Defines hook functions that are used in a HookedModel.
 
+All forward hook functions must contain "forward" in their function names, and all pre-forward
+hook functions must contain "pre_forward" in their function names. This is done to ensure that
+the correct type of hook is registered to the module.
+
 By default, a HookedModel passes in the arguments `hooked_data`, `hook_name`, and `data_key` to
 each hook function. Therefore, these arguments must be included in the signature of each hook.
 

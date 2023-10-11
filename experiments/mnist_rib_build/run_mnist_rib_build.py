@@ -66,11 +66,11 @@ def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
 
 def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
     transform = transforms.ToTensor()
-    test_data = datasets.MNIST(
+    dataset = datasets.MNIST(
         root=REPO_ROOT / ".data", train=train, download=True, transform=transform
     )
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=True)
-    return test_loader
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    return data_loader
 
 
 def main(config_path_str: str) -> None:
@@ -95,12 +95,12 @@ def main(config_path_str: str) -> None:
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
 
-    test_loader = load_mnist_dataloader(train=False, batch_size=config.batch_size)
+    train_loader = load_mnist_dataloader(train=True, batch_size=config.batch_size)
 
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
         module_names=config.node_layers,
-        data_loader=test_loader,
+        data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
         collect_output_gram=True,
@@ -112,7 +112,7 @@ def main(config_path_str: str) -> None:
         gram_matrices=gram_matrices,
         module_names=config.node_layers,
         hooked_model=hooked_mlp,
-        data_loader=test_loader,
+        data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
         n_intervals=config.n_intervals,
@@ -125,7 +125,7 @@ def main(config_path_str: str) -> None:
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
         module_names=config.node_layers,
-        data_loader=test_loader,
+        data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
     )

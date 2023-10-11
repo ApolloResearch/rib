@@ -1,0 +1,98 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "lm rib ablate modadd",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_ablations/run_lm_ablations.py",
+            "args": "${workspaceFolder}/experiments/lm_ablations/rib_modular_arithmetic.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "lm orthog ablate modadd",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_ablations/run_lm_ablations.py",
+            "args": "${workspaceFolder}/experiments/lm_ablations/orthog_modular_arithmetic.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "lm build modadd",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_rib_build/run_lm_rib_build.py",
+            "args": "${workspaceFolder}/experiments/lm_rib_build/modular_arithmetic.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "lm build gpt2",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_rib_build/run_lm_rib_build.py",
+            "args": "${workspaceFolder}/experiments/lm_rib_build/gpt2.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "mnist rib ablate",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/mnist_ablations/run_mnist_ablations.py",
+            "args": "${workspaceFolder}/experiments/mnist_ablations/rib_3-node-layers.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "mnist orthog ablate",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/mnist_ablations/run_mnist_ablations.py",
+            "args": "${workspaceFolder}/experiments/mnist_ablations/orthog_3-node-layers.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "mnist rib build",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/mnist_rib_build/run_mnist_rib_build.py",
+            "args": "${workspaceFolder}/experiments/mnist_rib_build/3-node-layers.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "train modadd",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/train_modular_arithmetic/run_train_modular_arithmetic.py",
+            "args": "${workspaceFolder}/experiments/train_modular_arithmetic/mod_arithmetic_config.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "plot lm rib graph",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_rib_build/plot_lm_graph.py",
+            "args": "${workspaceFolder}/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "plot mnist rib graph",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/mnist_rib_build/plot_mnist_graph.py",
+            "args": "${workspaceFolder}/experiments/mnist_rib_build/out/3-node-layers_interaction_graph.pt",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}

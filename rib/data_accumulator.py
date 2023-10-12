@@ -297,7 +297,7 @@ def collect_relu_interactions(
 
     # Collect ReLU interaction matrices and scale by size of dataset
     relu_interaction_matrices: dict[str, Union[Float[Tensor, "d_hidden d_hidden"], Float[Tensor, "d_hidden_concat d_hidden_concat"]]] = {
-        hook_name: torch.div(hooked_model.hooked_data[hook_name]["relu_interaction"], len(data_loader.dataset)) for hook_name in hooked_model.hooked_data
+        hook_name: torch.div(hooked_model.hooked_data[hook_name]["relu_interaction"], len(data_loader)) for hook_name in hooked_model.hooked_data
     }
     hooked_model.clear_hooked_data()
 

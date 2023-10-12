@@ -97,10 +97,6 @@ def get_nested_attribute(obj, attr_name):
 
 def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, relu_metric_type: int, edit_weights: bool) -> None:
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
-        # if relu_metric_type == 1: # Threshold before plotting unsorted
-        #     threshold = 1
-        #     similarity_matrix[similarity_matrix > threshold] = threshold
-
         # Plot raw matrix values before clustering
         plt.figure(figsize=(10, 8))
         sns.heatmap(similarity_matrix, annot=False,
@@ -123,7 +119,7 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                 # Transform into distance matrix
                 distance_matrix = 1 - similarity_matrix
             case 1:
-                similarity_matrix = torch.max(
+                similarity_matrix = torch.min(
                     similarity_matrix, similarity_matrix.T) # Make symmetric
                 # similarity_matrix = rescale(similarity_matrix)
                 distance_matrix = similarity_matrix
@@ -212,7 +208,7 @@ def get_relu_similarities(config_path_str: str, file_path: Path, relu_metric_typ
 
 def relu_similarity_main(config_path_str: str, relu_metric_type: int, edit_weights: bool) -> None:
     """MAIN FUNCTION 1. Test for ReLU interactions (separate to main RIB algorithm)."""
-    out_dir = Path(__file__).parent / "out"
+    out_dir = Path(__file__).parent / "out_relu_interactions"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     file_name = f"relu_similarity_matrices_editweights_{edit_weights}"

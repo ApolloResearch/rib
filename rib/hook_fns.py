@@ -397,7 +397,7 @@ def relu_interaction_forward_hook_fn(
                 operator_expanded_i: Float[Tensor, "batch 1 d_hidden"] = operator.unsqueeze(1)
                 operator_expanded_j: Float[Tensor, "batch d_hidden 1"] = operator.unsqueeze(-1)
 
-                relu_interaction_matrix: Float[Tensor, "d_hidden d_hidden"] = (operator_expanded_i == operator_expanded_j).sum(dim=0)
+                relu_interaction_matrix: Float[Tensor, "d_hidden d_hidden"] = torch.div((operator_expanded_i == operator_expanded_j).sum(dim=0), batch_size)
 
             elif operator.dim() == 3:
                 batch_size, token_len, d_hidden_concat = operator.shape
@@ -406,7 +406,7 @@ def relu_interaction_forward_hook_fn(
                 operator_expanded_k: Float[Tensor, "batch pos d_hidden_concat 1"] = operator.unsqueeze(3)
 
                 # operator_matrix[batch,i,j,k,] is 1 if operator[i,j] == operator[i,k] and 0 otherwise
-                relu_interaction_matrix: Float[Tensor, "d_hidden_concat d_hidden_concat"] = (operator_expanded_j == operator_expanded_k).sum(dim=(0, 1))
+                relu_interaction_matrix: Float[Tensor, "d_hidden_concat d_hidden_concat"] = torch.div((operator_expanded_j == operator_expanded_k).sum(dim=(0, 1)), batch_size)
 
             # Store operator (ReLU pointwise ratio)
             _add_to_hooked_matrix(hooked_data, hook_name, data_key, commutator_size_matrix)
@@ -419,13 +419,13 @@ def relu_interaction_forward_hook_fn(
             row_matrix: Float[Tensor, "batch_size, d_hidden, d_hidden"] = diag_values.unsqueeze(1).repeat(1, d_hidden, 1) # [256, 101, 101]
             assert (row_matrix[0, 0, :].squeeze() == diag_values[0]).all()
             assert (row_matrix[:, 5, 7] == operator[:, 7] * detached_inputs[:, 7]).all()
-            denominator: Float[Tensor, "d_hidden d_hidden"] = row_matrix.pow(2).sum(dim=0)
+            denominator: Float[Tensor, "d_hidden d_hidden"] = torch.div(row_matrix.pow(2).sum(dim=0), batch_size)
 
             # Outer product O_i * p_j
             outer_product: Float[Tensor, "batch_size d_hidden d_hidden"] = torch.bmm(rearrange(operator, 'b n -> b n 1'), rearrange(detached_inputs, 'b n -> b 1 n'))
             assert (outer_product[:, 3, 4] == operator[:, 3] * detached_inputs[:, 4]).all()
             # (O_i * p_j- O_j * p_j)^2 / (O_j * p_j)^2
-            numerator  = (outer_product - row_matrix).pow(2).sum(dim=0)
+            numerator: Float[Tensor, "d_hidden d_hidden"]  = torch.div((outer_product - row_matrix).pow(2).sum(dim=0), batch_size)
 
             # Handle 0/0 nans
             denom_mask = denominator == 0

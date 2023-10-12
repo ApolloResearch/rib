@@ -187,6 +187,7 @@ def get_rotated_Ws(
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+    mlp.eval()
 
     weights_list = extract_weights(mlp)
     rotated_weights_list = []
@@ -199,8 +200,17 @@ def get_rotated_Ws(
     return rotated_weights_list
 
 
+def get_fhats(
+    config_path_str: str,
+    file_path: str,
+
+)
+
 def check_and_open_file(file_path: Path, get_var_fn: callable, config_path_str: str, **kwargs) -> Union[Any, tuple[Any, ...]]:
-    """Load information from pickle file into a variable and return it."""
+    """Load information from pickle file into a variable and return it.
+
+    Note the return type is overloaded to allow for tuples.
+    """
     if file_path.exists():
         with file_path.open("rb") as f:
             var = pickle.load(f)
@@ -219,6 +229,7 @@ def Cs_Ws_main(config_path_str: str) -> None:
 
     Cs_save_file = Path(__file__).parent / "Cs"
     Ws_save_file = Path(__file__).parent / "Ws"
+    fhats_save_file = Path(__file__).parent / "fhats"
 
     # List of InteractionRotation objects
     C_info_dict: dict[str, list[InteractionRotation]] = check_and_open_file(
@@ -234,6 +245,12 @@ def Cs_Ws_main(config_path_str: str) -> None:
         get_var_fn=get_rotated_Ws,
         config_path_str=config_path_str,
         C_pinv_list=C_pinv_list
+    )
+
+    fhats = check_and_open_file(
+        file_path =fhats_save_file,
+        get_var_fn=get_fhats,
+        config_path_str=config_path_str
     )
 
     plot(C_list, "C", out_dir)

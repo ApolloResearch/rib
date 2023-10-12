@@ -97,9 +97,9 @@ def get_nested_attribute(obj, attr_name):
 
 def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, relu_metric_type: int, edit_weights: bool) -> None:
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
-        if relu_metric_type == 1: # Threshold before plotting unsorted
-            threshold = 1
-            similarity_matrix[similarity_matrix > threshold] = threshold
+        # if relu_metric_type == 1: # Threshold before plotting unsorted
+        #     threshold = 1
+        #     similarity_matrix[similarity_matrix > threshold] = threshold
 
         # Plot raw matrix values before clustering
         plt.figure(figsize=(10, 8))
@@ -123,7 +123,7 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                 # Transform into distance matrix
                 distance_matrix = 1 - similarity_matrix
             case 1:
-                similarity_matrix = torch.min(
+                similarity_matrix = torch.max(
                     similarity_matrix, similarity_matrix.T) # Make symmetric
                 # similarity_matrix = rescale(similarity_matrix)
                 distance_matrix = similarity_matrix
@@ -181,7 +181,7 @@ def get_relu_similarities(config_path_str: str, file_path: Path, relu_metric_typ
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    print_all_modules(mlp) # Check module names were correctly defined
+    # print_all_modules(mlp) # Check module names were correctly defined
     layer_list = ["layers.0.linear", "layers.1.linear"]
     if edit_weights:
         for layer in layer_list:
@@ -190,13 +190,13 @@ def get_relu_similarities(config_path_str: str, file_path: Path, relu_metric_typ
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
 
-    test_loader = load_mnist_dataloader(
+    train_loader = load_mnist_dataloader(
         train=True, batch_size=config.batch_size)
 
     relu_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
         hooked_model=hooked_mlp,
         module_names=config.module_names,
-        data_loader=test_loader,
+        data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
         relu_metric_type=relu_metric_type

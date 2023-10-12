@@ -95,7 +95,7 @@ def get_nested_attribute(obj, attr_name):
 
 # Helper functions for main ========================================================
 
-def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config, relu_metric_type: int, edit_weights: bool) -> None:
+def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, relu_metric_type: int, edit_weights: bool) -> None:
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
         if relu_metric_type == 1: # Threshold before plotting unsorted
             threshold = 1
@@ -106,14 +106,14 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
         sns.heatmap(similarity_matrix, annot=False,
                     cmap="YlGnBu", cbar=True, square=True)
         plt.savefig(
-            out_dir / f"{config.exp_name}_mat_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
+            out_dir / f"mat_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
 
         # Plot histogram
         plt.figure(figsize=(10,8))
         flat_similarity = np.array(similarity_matrix).flatten()
         sns.histplot(flat_similarity, bins=100, kde=False)
         plt.savefig(
-            out_dir / f"{config.exp_name}_hist_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
+            out_dir / f"hist_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
 
         match relu_metric_type:
             case 0:
@@ -146,7 +146,7 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                     cmap="YlGnBu", cbar=True, square=True)
         plt.title("Reordered Similarity Matrix")
         plt.savefig(
-            out_dir / f"{config.exp_name}_rearr_mat_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
+            out_dir / f"rearr_mat_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
 
 
 def load_local_config(config_path_str: str) -> dict:
@@ -160,18 +160,22 @@ def load_local_config(config_path_str: str) -> dict:
     return config
 
 
-def check_and_open_file(file_path: str, get_var_fn: Callable, config_path_str: str) -> Any:
+def check_and_open_file(file_path: str, get_var_fn: callable, config_path_str: str, **kwargs) -> Any:
     """Load information from pickle file into a variable and return it."""
     if file_path.exists():
         with file_path.open("rb") as f:
             var = pickle.load(f)
     else:
-        var = get_var_fn(config_path_str, file_path)
+        var = get_var_fn(config_path_str, file_path, **kwargs)
 
     return var
 
 
-def get_relu_similarities(config_path_str: str, file_path: Path) -> list[Float[Tensor, "d_hidden, d_hidden"]]:
+def get_relu_similarities(config_path_str: str, file_path: Path, relu_metric_type: int, edit_weights: bool) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
+    config_path = Path(config_path_str)
+    config = load_config(config_path, config_model=Config)
+    set_seed(config.seed)
+
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)
 
@@ -189,7 +193,7 @@ def get_relu_similarities(config_path_str: str, file_path: Path) -> list[Float[T
     test_loader = load_mnist_dataloader(
         train=True, batch_size=config.batch_size)
 
-    relu_matrices = collect_relu_interactions(
+    relu_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
         hooked_model=hooked_mlp,
         module_names=config.module_names,
         data_loader=test_loader,
@@ -208,10 +212,6 @@ def get_relu_similarities(config_path_str: str, file_path: Path) -> list[Float[T
 
 def relu_similarity_main(config_path_str: str, relu_metric_type: int, edit_weights: bool) -> None:
     """MAIN FUNCTION 1. Test for ReLU interactions (separate to main RIB algorithm)."""
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
-    set_seed(config.seed)
-
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -221,10 +221,12 @@ def relu_similarity_main(config_path_str: str, relu_metric_type: int, edit_weigh
     relu_matrices = check_and_open_file(
         file_path=relu_matrices_save_file,
         get_var_fn=get_relu_similarities,
-        config_path_str=config_path_str
+        config_path_str=config_path_str,
+        relu_metric_type=relu_metric_type,
+        edit_weights=edit_weights,
     )
 
-    relu_plotting(relu_matrices, out_dir, config, relu_metric_type, edit_weights)
+    relu_plotting(relu_matrices, out_dir, relu_metric_type, edit_weights)
 
 
 if __name__ == "__main__":

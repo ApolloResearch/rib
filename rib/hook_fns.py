@@ -357,10 +357,7 @@ def relu_interaction_forward_hook_fn(
 ) -> None:
     """Hook function to store pre and post output activations for ReLU operators.
 
-    Note accumulation convention for this function is slightly different to rest of codebase.
-    I sum over each batch and divide batch-wise, so each ReLU matrix per batch is of correct scaling.
-
-    TODO (nonurgent): fix 0/0 cases.
+    TODO (nonurgent): fix 0/0 cases in type 0 (type 1 handles infs and nans with duct tape).
 
     Args:
         module: Module that the hook is attached to (not used).
@@ -400,7 +397,7 @@ def relu_interaction_forward_hook_fn(
                 operator_expanded_i: Float[Tensor, "batch 1 d_hidden"] = operator.unsqueeze(1)
                 operator_expanded_j: Float[Tensor, "batch d_hidden 1"] = operator.unsqueeze(-1)
 
-                relu_interaction_matrix: Float[Tensor, "d_hidden d_hidden"] = torch.div((operator_expanded_i == operator_expanded_j).sum(dim=0), batch_size)
+                relu_interaction_matrix: Float[Tensor, "d_hidden d_hidden"] = (operator_expanded_i == operator_expanded_j).sum(dim=0)
 
             elif operator.dim() == 3:
                 batch_size, token_len, d_hidden_concat = operator.shape
@@ -409,10 +406,10 @@ def relu_interaction_forward_hook_fn(
                 operator_expanded_k: Float[Tensor, "batch pos d_hidden_concat 1"] = operator.unsqueeze(3)
 
                 # operator_matrix[batch,i,j,k,] is 1 if operator[i,j] == operator[i,k] and 0 otherwise
-                relu_interaction_matrix: Float[Tensor, "d_hidden_concat d_hidden_concat"] = torch.div((operator_expanded_j == operator_expanded_k).sum(dim=(0, 1)), batch_size*token_len)
+                relu_interaction_matrix: Float[Tensor, "d_hidden_concat d_hidden_concat"] = (operator_expanded_j == operator_expanded_k).sum(dim=(0, 1))
 
             # Store operator (ReLU pointwise ratio)
-            hooked_data[hook_name] = {data_key: relu_interaction_matrix}
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key, commutator_size_matrix)
 
         case 1:
             batch_size, d_hidden = operator.shape # [256, 101]
@@ -422,16 +419,19 @@ def relu_interaction_forward_hook_fn(
             row_matrix: Float[Tensor, "batch_size, d_hidden, d_hidden"] = diag_values.unsqueeze(1).repeat(1, d_hidden, 1) # [256, 101, 101]
             assert (row_matrix[0, 0, :].squeeze() == diag_values[0]).all()
             assert (row_matrix[:, 5, 7] == operator[:, 7] * detached_inputs[:, 7]).all()
-            denominator: Float[Tensor, "d_hidden d_hidden"] = torch.div(row_matrix.pow(2).sum(dim=0), batch_size)
+            denominator: Float[Tensor, "d_hidden d_hidden"] = row_matrix.pow(2).sum(dim=0)
 
             # Outer product O_i * p_j
             outer_product: Float[Tensor, "batch_size d_hidden d_hidden"] = torch.bmm(rearrange(operator, 'b n -> b n 1'), rearrange(detached_inputs, 'b n -> b 1 n'))
             assert (outer_product[:, 3, 4] == operator[:, 3] * detached_inputs[:, 4]).all()
             # (O_i * p_j- O_j * p_j)^2 / (O_j * p_j)^2
-            numerator  = torch.div((outer_product - row_matrix).pow(2).sum(dim=0), batch_size)
+            numerator  = (outer_product - row_matrix).pow(2).sum(dim=0)
 
+            # Handle 0/0 nans
             denom_mask = denominator == 0
             denominator[denom_mask] = 1
+            ## Code below was originally to deal with infs, but it was giving weird results so I didn't use it
+            ## Seems easier to just threshold whatever you're getting out afterwards
             # num_mask = (numerator != 0) & denom_mask
             # numerator[num_mask] = 100
 
@@ -441,9 +441,4 @@ def relu_interaction_forward_hook_fn(
             # print(inf_positions)
 
             # Store commutator matrix
-            hooked_data[hook_name] = {data_key: commutator_size_matrix}
-
-
-    def plot_mat(matrix):
-        out_dir = Path(__file__).parent / "out"
-        out_dir.mkdir(parents=True, exist_ok=True)
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key, commutator_size_matrix)

@@ -60,7 +60,7 @@ class Config(BaseModel):
         return v
 
 
-def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
+def load_mlp(config_dict: dict, mlp_path: Path, device: str) -> MLP:
     mlp = MLP(
         hidden_sizes=config_dict["model"]["hidden_sizes"],
         input_size=784,
@@ -69,7 +69,7 @@ def load_mlp(config_dict: dict, mlp_path: Path) -> MLP:
         bias=config_dict["model"]["bias"],
         fold_bias=config_dict["model"]["fold_bias"],
     )
-    mlp.load_state_dict(torch.load(mlp_path))
+    mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
     return mlp
 
 
@@ -114,6 +114,7 @@ def main(config_path_str: str) -> None:
     mlp = load_mlp(
         config_dict=interaction_graph_info["model_config_dict"],
         mlp_path=interaction_graph_info["config"]["mlp_path"],
+        device=device,
     )
     mlp.eval()
     mlp.to(device)

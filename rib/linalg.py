@@ -50,7 +50,6 @@ def eigendecompose(
 def calc_rotation_matrix(
     vecs: Float[Tensor, "d_hidden d_hidden_trunc"],
     vecs_pinv: Float[Tensor, "d_hidden_trunc d_hidden"],
-    n_zero_vals: int = 0,
     n_ablated_vecs: int = 0,
 ) -> Float[Tensor, "d_hidden d_hidden"]:
     """Calculate the matrix to rotates into and out of a new basis with optional ablations.
@@ -62,18 +61,11 @@ def calc_rotation_matrix(
 
         rotation_matrix = vecs_ablated @ vecs_pinv
 
-    where vecs_ablated is the matrix with the final n_ablated_vecs or n_zero_vals columns set to 0
-
-    If n_ablated_vecs > 0, we ignore the smallest n_ablated_vecs vectors. Cannot have both
-    n_ablated_vecs > 0 and n_zero_vals > 0.
-
-    If n_ablated_vecs == 0 and n_zero_vals > 0, we ignore the last n_zero_vals vectors.
+    where vecs_ablated is the matrix with the final n_ablated_vecs set to 0.
 
     Args:
         vecs: Matrix whose columns are the basis vectors.
         vecs_pinv: Pseudo-inverse of vecs. This will be the transpose if vecs is orthonormal.
-        n_zero_vals: Number of vectors to zero out, starting from the last column. If > 0 and
-        n_ablated_vecs == 0, we ignore the smallest n_zero_vals basis vectors.
         n_ablated_vecs: Number of vectors to ablate, starting from the last column. If > 0, we
         ignore the smallest n_ablated_vecs eigenvectors.
 
@@ -81,17 +73,11 @@ def calc_rotation_matrix(
         The rotation matrix with which to right multiply incoming activations to rotate them
         into the new basis.
     """
-    assert not (
-        n_zero_vals > 0 and n_ablated_vecs > 0
-    ), "Cannot also ignore a given n_zero_vals when ablating basis vectors."
-    assert (
-        n_ablated_vecs <= vecs.shape[1] and n_zero_vals <= vecs.shape[1]
-    ), "Cannot ablate more basis vectors than there are."
-    n_ignore = n_ablated_vecs if n_ablated_vecs > 0 else n_zero_vals
+
     vecs_ablated = vecs.clone().detach()
     # Zero out the final n_ignore vectors
-    if n_ignore > 0:
-        vecs_ablated[:, -n_ignore:] = 0
+    if n_ablated_vecs > 0:
+        vecs_ablated[:, -n_ablated_vecs:] = 0
     return vecs_ablated @ vecs_pinv
 
 

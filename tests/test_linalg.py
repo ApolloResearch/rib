@@ -50,8 +50,8 @@ def test_eigendecompose(descending: bool) -> None:
         assert torch.all(eigenvalues[:-1] <= eigenvalues[1:])
 
 
-@pytest.mark.parametrize("n_zero_vals,n_ablated_vecs", [(0, 0), (2, 0), (0, 2)])
-def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
+@pytest.mark.parametrize("n_ablated_vecs", [0, 2])
+def test_calc_rotation_matrix(n_ablated_vecs: int) -> None:
     """Test the calc_rotation_matrix function.
 
     Checks if the rotation matrix has the correct dimensions and properties.
@@ -62,7 +62,6 @@ def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
         3. Rotating back into the original space
 
     Args:
-        n_zero_vals: Number of zero eigenvalues.
         n_ablated_vecs: Number of eigenvectors to ablate.
     """
     torch.manual_seed(0)
@@ -73,7 +72,7 @@ def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
     _, vecs = eigendecompose(gram)
 
     rotation_matrix = calc_rotation_matrix(
-        vecs=vecs, vecs_pinv=vecs.T, n_zero_vals=n_zero_vals, n_ablated_vecs=n_ablated_vecs
+        vecs=vecs, vecs_pinv=vecs.T, n_ablated_vecs=n_ablated_vecs
     )
 
     # Check the dimensions of the rotation matrix
@@ -91,9 +90,8 @@ def test_calc_rotation_matrix(n_zero_vals: int, n_ablated_vecs: int) -> None:
     # See how this compares with rotating into the eigenspace, zeroing out the last n dimensions,
     # and rotating back
     acts_eigenspace = acts @ vecs
-    n_ignore = n_ablated_vecs if n_ablated_vecs > 0 else n_zero_vals
-    if n_ignore > 0:
-        acts_eigenspace[:, -n_ignore:] = 0
+    if n_ablated_vecs > 0:
+        acts_eigenspace[:, -n_ablated_vecs:] = 0
     rotated_vecs_2 = acts_eigenspace @ vecs.T
     assert torch.allclose(rotated_vecs, rotated_vecs_2, atol=1e-6)
 

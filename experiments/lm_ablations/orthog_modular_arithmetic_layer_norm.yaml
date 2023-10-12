@@ -1,0 +1,13 @@
+exp_name: orthog_eps1e-4_ln_intervals50_modular_arithmetic
+ablation_type: orthogonal
+interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/eps1e-4_ln_intervals50_modular_arithmetic_interaction_graph.pt
+ablate_every_vec_cutoff: 10
+node_layers:  # Rotate the input to these modules into the orthogonal basis
+  - ln1.0
+  - ln2.0
+  - mlp_out.0
+  - unembed
+batch_size: 128
+dtype: float32
+eps: 1e-4
+seed: 0

@@ -19,6 +19,7 @@ def load_sequential_transformer(
     last_pos_module_type: Optional[Literal["add_resid1", "unembed"]],
     tlens_pretrained: Optional[str],
     tlens_model_path: Optional[Path],
+    eps: Optional[float],
     dtype: torch.dtype = torch.float32,
     device: str = "cpu",
 ) -> tuple[SequentialTransformer, dict]:
@@ -35,6 +36,7 @@ def load_sequential_transformer(
             output the last position index.
         tlens_pretrained (Optional[str]): The name of a pretrained transformerlens model.
         tlens_model_path (Optional[Path]): The path to a transformerlens model.
+        eps (Optional[float]): The epsilon value to use for the layernorms in the model.
         dtype (Optional[torch.dtype]): The dtype to use for the model.
         device (Optional[str]): The device to use for the model.
 
@@ -64,9 +66,13 @@ def load_sequential_transformer(
         tlens_model.load_state_dict(torch.load(tlens_model_path, map_location=device))
 
     seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
-    # Set the dtype to the one specified in the config for this script (as opposed to the one used
-    # to train the tlens model)
+
+    # Set the dtype and layernorm epsilon to the one specified in the config for this script (as
+    # opposed to the one used to train the tlens model)
     seq_cfg.dtype = dtype
+    if eps is not None:
+        seq_cfg.eps = eps
+
     seq_model = SequentialTransformer(
         seq_cfg, node_layers, last_pos_module_type=last_pos_module_type
     )

@@ -18,9 +18,10 @@ from scipy.spatial.distance import squareform
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from rib.data_accumulator import collect_relu_interactions, collect_gram_matrices
+from rib.data_accumulator import collect_relu_interactions, collect_gram_matrices, collect_activations_and_rotate
+from rib.hook_fns import acts_forward_hook_fn
 from rib.hook_manager import HookedModel
-from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
+from rib.interaction_algos import InteractionRotation, Eigenvectors, calculate_interaction_rotations
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, load_config, set_seed
@@ -108,12 +109,18 @@ def extract_weights(model: torch.nn.Module) -> list[torch.Tensor]:
 
 # Helper functions for main ========================================================
 
-def get_Cs(config_path_str: str, file_path: str) -> dict[str, list[InteractionRotation]]:
+def get_Cs(
+    config_path_str: str,
+    file_path: str,
+) -> dict[str,
+    Union[list[InteractionRotation],
+    list[Eigenvectors],
+    list[Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"]],
+    list[Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"]]],
+]:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
-
-    print(config)
 
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)
@@ -124,13 +131,13 @@ def get_Cs(config_path_str: str, file_path: str) -> dict[str, list[InteractionRo
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
 
-    test_loader = load_mnist_dataloader(
+    train_loader = load_mnist_dataloader(
         train=True, batch_size=config.batch_size)
 
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
         module_names=config.node_layers,
-        data_loader=test_loader,
+        data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
         collect_output_gram=True,
@@ -138,11 +145,11 @@ def get_Cs(config_path_str: str, file_path: str) -> dict[str, list[InteractionRo
 
     # Calls on collect_M_dash_and_Lambda_dash
     # Builds sqrt sorted Lambda matrix and its inverse
-    Cs, Us = calculate_interaction_rotations(
+    Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
         module_names=config.node_layers,
         hooked_model=hooked_mlp,
-        data_loader=test_loader,
+        data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
         n_intervals=config.n_intervals,
@@ -154,9 +161,9 @@ def get_Cs(config_path_str: str, file_path: str) -> dict[str, list[InteractionRo
     C_pinv_list = [C_info.C_pinv for C_info in Cs]
 
     with open(file_path, "wb") as f:
-        pickle.dump({"C": C_list, "C_pinv": C_pinv_list}, f)
+        pickle.dump({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs}, f)
 
-    return {"C": C_list, "C_pinv": C_pinv_list}
+    return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs}
 
 
 def plot(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_name: str, out_dir: Path) -> None:
@@ -174,7 +181,7 @@ def plot(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_name: str, o
 def get_rotated_Ws(
     config_path_str: str,
     file_path: str,
-    C_pinv_list: list[Float[Tensor, "d_hidden d_hidden"]]
+    C_pinv_list: list[Float[Tensor, "d_hidden d_hidden"]],
 ) -> list[Float[Tensor, "layer_count d_hidden d_hidden"]]:
     """Extract W^l, perform paper-equivalent right multiplication of psuedoinverse
     of C^l."""
@@ -192,19 +199,12 @@ def get_rotated_Ws(
     weights_list = extract_weights(mlp)
     rotated_weights_list = []
     for weight_matrix, C_pinv in zip(weights_list, C_pinv_list):
-        rotated_weights_list.append(C_pinv @ weight_matrix.T)
+        rotated_weights_list.append(weight_matrix @ C_pinv)
 
     with open(file_path, "wb") as f:
         pickle.dump(rotated_weights_list, f)
 
     return rotated_weights_list
-
-
-def get_fhats(
-    config_path_str: str,
-    file_path: str,
-) -> list[Float[Tensor, ""]]:
-    pass
 
 
 def check_and_open_file(file_path: Path, get_var_fn: callable, config_path_str: str, **kwargs) -> Union[Any, tuple[Any, ...]]:
@@ -221,6 +221,43 @@ def check_and_open_file(file_path: Path, get_var_fn: callable, config_path_str: 
     return var
 
 
+def get_f_hats(
+    config_path_str: str,
+    file_path: str,
+    C_list: list[Float[Tensor, "d_hidden d_hidden"]],
+) -> list[Float[Tensor, "batch d_hidden"]]:
+    config_path = Path(config_path_str)
+    config = load_config(config_path, config_model=Config)
+    set_seed(config.seed)
+
+    with open(config.mlp_path.parent / "config.yaml", "r") as f:
+        model_config_dict = yaml.safe_load(f)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+    # print_all_modules(mlp) # Check module names were correctly defined
+    mlp.eval()  # Run in inference only
+    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_mlp = HookedModel(mlp)
+
+    train_loader = load_mnist_dataloader(
+        train=True, batch_size=config.batch_size)
+
+    # Get functions rotated by non rescaled Cs
+    f_hats = collect_activations_and_rotate(
+        Cs=C_list,
+        hooked_model=hooked_mlp,
+        module_names=config.node_layers,
+        data_loader=train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+    )
+
+    with open(file_path, "wb") as f:
+        pickle.dump(f_hats, f)
+
+    return f_hats
+
+
 def Cs_Ws_main(config_path_str: str) -> None:
     """MAIN FUNCTION 2. Check how sparse Cs and rotated Ws are in equation:
     C^{l+1} O(x) W C+^l C^l f(x)
@@ -233,29 +270,39 @@ def Cs_Ws_main(config_path_str: str) -> None:
     fhats_save_file = Path(__file__).parent / "fhats"
 
     # List of InteractionRotation objects
-    C_info_dict: dict[str, list[InteractionRotation]] = check_and_open_file(
+    Cs_and_Lambdas: dict[str, list[InteractionRotation]] = check_and_open_file(
         file_path=Cs_save_file,
         get_var_fn=get_Cs,
         config_path_str=config_path_str
     )
 
-    C_list, C_pinv_list = C_info_dict["C"], C_info_dict["C_pinv"]
+    C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list, U_D_sqrt_pinv_Vs_list, U_D_sqrt_Vs_list = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"], Cs_and_Lambdas["Lambda_abs_sqrts"], Cs_and_Lambdas["Lambda_abs_sqrt_pinvs"], Cs_and_Lambdas["U_D_sqrt_pinv_Vs"], Cs_and_Lambdas["U_D_sqrt_Vs"]
 
+    rescaled_C_list = []
+    rescaled_C_pinv_list = []
+    for C, C_pinv, Lambda_abs_sqrt, Lambda_abs_sqrt_pinv in zip(C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list):
+        rescaled_C_list.append(C @ Lambda_abs_sqrt_pinv)
+        rescaled_C_pinv_list.append(Lambda_abs_sqrt @ C_pinv)
+
+    # Can either use original or rescaled C list in fn below
     W_list = check_and_open_file(
         file_path=Ws_save_file,
         get_var_fn=get_rotated_Ws,
         config_path_str=config_path_str,
-        C_pinv_list=C_pinv_list
+        C_pinv_list=U_D_sqrt_pinv_Vs_list
     )
 
-    fhats = check_and_open_file(
+    f_hats = check_and_open_file(
         file_path=fhats_save_file,
-        get_var_fn=get_fhats,
-        config_path_str=config_path_str
+        get_var_fn=get_f_hats,
+        config_path_str=config_path_str,
+        C_list=U_D_sqrt_pinv_Vs_list
     )
 
-    plot(C_list, "C", out_dir)
+    plot(rescaled_C_list, "C", out_dir)
     plot(W_list, "W", out_dir)
+    plot(U_D_sqrt_Vs_list, "U_D_sqrt_V", out_dir)
+    plot(U_D_sqrt_pinv_Vs_list, "U_D_sqrt_pinv_V", out_dir)
 
 
 if __name__ == "__main__":

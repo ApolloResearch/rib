@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, Optional, Union
 
 import torch
+from einops import repeat, rearrange, reduce
 from jaxtyping import Float
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -13,6 +14,7 @@ from rib.hook_fns import (
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
     relu_interaction_forward_hook_fn,
+    acts_pre_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
 
@@ -302,3 +304,46 @@ def collect_relu_interactions(
     hooked_model.clear_hooked_data()
 
     return relu_interaction_matrices
+
+
+def collect_activations_and_rotate(
+    Cs: list["InteractionRotation"],
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    hook_names: Optional[str] = None
+) -> list[Union[Float[Tensor, "batch d_hidden"], Float[Tensor, "batch pos d_hidden"]]]:
+    """Use hooks to obtain inputs to modules (functions f(x) in that layer) and rotate them by the interaction rotation matrix for that layer."""
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    activation_hooks: list[Hook] = []
+    for module_name, hook_name in zip(module_names, hook_names):
+        activation_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="activation",
+                fn=acts_pre_forward_hook_fn,
+                module_name=module_name,
+            )
+        )
+
+    run_dataset_through_model(hooked_model, data_loader, hooks=activation_hooks, dtype=dtype, device=device)
+
+    # Extra zero index when reading dictionary is because output is always stored as a tuple (useful
+    activations: dict[str, Union[Float[Tensor, "batch d_hidden"], Float[Tensor, "batch pos d_hidden"]]] = {
+        hook_name: hooked_model.hooked_data[hook_name]["activation"] for hook_name in hooked_model.hooked_data
+    }
+
+    rotated_activations_list = []
+    for activation, C in zip(list(activations.values()), Cs):
+        batch_size, d_hidden = activation.shape
+        rotated_activations_list.append(torch.bmm(activation, repeat(C, 'd_hidden1 d_hidden2 -> batch_size d_hidden1 d_hidden2', batch_size=batch_size)))
+
+    return activations

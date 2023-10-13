@@ -1,4 +1,14 @@
-"""This module contains algorithms related to interaction rotations
+"""This module contains algorithms related to interaction rotations.
+
+Main function is `calculate_interaction_rotations', which implements Algorithm 2.
+Iterate backwards through model, peeling back layer by layer. For each layer:
+- Eigendecompose gram matrix.
+- Get M' and Lambda' matrices.
+- Eigendecompose M'.
+- Get sorted absolute square root Lambda matrix (separate function) and its pseudoinverse.
+- Use these to build C and C_pinv.
+
+NOTE CINDY: MAIN FN NOW ALSO RETURNS LAMBDA AND PRE-MULTIPLY BY LAMBDA CS - not compatible with rest of experimental main code.
 """
 
 from dataclasses import dataclass
@@ -147,6 +157,11 @@ def calculate_interaction_rotations(
         )
     Cs.append(InteractionRotation(node_layer_name="output", C=C_output.clone().detach()))
 
+    Lambda_abs_sqrt_pinvs = []
+    Lambda_abs_sqrts = []
+    U_D_sqrt_pinv_Vs = []
+    U_D_sqrt_Vs = []
+
     for module_name, hook_name in zip(module_names[::-1], hook_names[::-1]):
         D_dash, U_dash = eigendecompose(gram_matrices[hook_name])
 
@@ -180,8 +195,14 @@ def calculate_interaction_rotations(
 
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
+        U_D_sqrt_Vs.append(U_D_sqrt_V)
+        print(f"U_D_sqrt_V shape for {hook_name}: {U_D_sqrt_V.shape}")
+
         D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
         U_D_sqrt_pinv_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
+        U_D_sqrt_pinv_Vs.append(U_D_sqrt_pinv_V)
+        print(f"U_D_sqrt_pinv_V shape for {hook_name}: {U_D_sqrt_pinv_V.shape}")
+
         Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
             (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_V).diag().abs()
         )
@@ -189,15 +210,22 @@ def calculate_interaction_rotations(
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
             Lambda_abs, truncation_threshold
         )
+        Lambda_abs_sqrts.append(Lambda_abs_sqrt_trunc)
+        Lambda_abs_sqrt_pinvs.append(Lambda_abs_sqrt_trunc_pinv)
 
+        print(f"Lambda shape for {hook_name}: {Lambda_abs_sqrt_trunc.shape}")
+        print(f"Lambda pinv shape for {hook_name}: {Lambda_abs_sqrt_trunc_pinv.shape}")
         C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc
         C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
             Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T
         )
+
+        print(f"C shape for {hook_name}: {C.shape}")
+
         Cs.append(
             InteractionRotation(
                 node_layer_name=hook_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()
             )
         )
 
-    return Cs[::-1], Us[::-1]
+    return Cs[::-1], Us[::-1], Lambda_abs_sqrts[::-1], Lambda_abs_sqrt_pinvs[::-1], U_D_sqrt_pinv_Vs[::-1], U_D_sqrt_Vs[::-1]

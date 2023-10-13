@@ -49,6 +49,7 @@ def load_sequential_transformer(
         tlens_model = HookedTransformer.from_pretrained(tlens_pretrained)
         # Create a SequentialTransformerConfig from the HookedTransformerConfig
         tlens_cfg_dict = tlens_model.cfg.to_dict()
+
     elif tlens_model_path is not None:
         tlens_model_path = (
             Path(tlens_model_path) if isinstance(tlens_model_path, str) else tlens_model_path
@@ -64,6 +65,7 @@ def load_sequential_transformer(
         tlens_model.load_state_dict(torch.load(tlens_model_path, map_location=device))
 
     seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
+
     # Set the dtype to the one specified in the config for this script (as opposed to the one used
     # to train the tlens model)
     seq_cfg.dtype = dtype
@@ -72,7 +74,11 @@ def load_sequential_transformer(
     )
 
     # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(list(seq_model.state_dict().keys()), tlens_model)
+    state_dict = convert_tlens_weights(
+        seq_param_names=list(seq_model.state_dict().keys()),
+        tlens_model=tlens_model,
+        positional_embedding_type=seq_cfg.positional_embedding_type,
+    )
     seq_model.load_state_dict(state_dict)
 
     return seq_model, tlens_cfg_dict

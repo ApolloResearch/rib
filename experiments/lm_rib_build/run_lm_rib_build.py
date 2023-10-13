@@ -50,7 +50,7 @@ from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_se
 class Config(BaseModel):
     exp_name: str = Field(..., description="The name of the experiment")
     seed: int = Field(..., description="The random seed value for reproducibility")
-    tlens_pretrained: Optional[Literal["gpt2"]] = Field(
+    tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."
     )
     tlens_model_path: Optional[Path] = Field(
@@ -111,10 +111,6 @@ def main(config_path_str: str):
         logger.info("Exiting.")
         return None
 
-    assert (
-        config.tlens_pretrained is None and config.tlens_model_path is not None
-    ), "Currently can't build graphs for pretrained models due to memory limits."
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
@@ -131,6 +127,9 @@ def main(config_path_str: str):
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
+    assert (
+        config.tlens_pretrained is None and config.tlens_model_path is not None
+    ), "Currently can't build graphs for pretrained models due to memory limits."
     assert config.dataset == "modular_arithmetic", "Currently only supports modular arithmetic."
 
     # Importantly, use the same dataset as was used for training

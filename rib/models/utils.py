@@ -195,15 +195,16 @@ def fold_mlp_in(
     if act_fn == "relu":
         # relu(1) = 1
         root_one = 1.0
-    elif act_fn == "gelu_new":
+    elif act_fn in ["gelu", "gelu_new"]:
+        gelu_fn = gelu_new if act_fn == "gelu_new" else torch.nn.functional.gelu  # type: ignore
         # Find the value of x such that act_fn(x) = 1
         root_one = find_root(
-            lambda x: gelu_new(x) - 1.0,
+            lambda x: gelu_fn(x) - 1.0,  # type: ignore
             xmin=torch.tensor(-1.0),
             xmax=torch.tensor(4.0),
             tol=1e-11,
-            max_iter=1000,
-        )
+            max_iter=500,
+        ).to(weight.dtype)
     else:
         raise ValueError(f"Unsupported activation function: {act_fn} for bias folding.")
 

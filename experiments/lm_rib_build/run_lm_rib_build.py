@@ -84,6 +84,11 @@ class Config(BaseModel):
 
     dtype: str = Field(..., description="The dtype to use when building the graph.")
 
+    eps: float = Field(
+        1e-5,
+        description="The epsilon value to use for numerical stability in layernorm layers.",
+    )
+
     @field_validator("dtype")
     def dtype_validator(cls, v):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
@@ -119,6 +124,7 @@ def main(config_path_str: str):
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
+        eps=config.eps,
         dtype=dtype,
         device=device,
     )

@@ -47,6 +47,7 @@ class Config(BaseModel):
     node_layers: list[str]
     batch_size: int
     dtype: str
+    eps: Optional[float] = 1e-5
     seed: int
 
     @field_validator("dtype")
@@ -96,6 +97,7 @@ def main(config_path_str: str) -> None:
         last_pos_module_type=interaction_graph_info["config"]["last_pos_module_type"],
         tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
         tlens_model_path=tlens_model_path,
+        eps=config.eps,
         dtype=dtype,
         device=device,
     )

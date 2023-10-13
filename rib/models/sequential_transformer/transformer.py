@@ -11,6 +11,8 @@ from torch import Tensor, nn
 
 from rib.models.sequential_transformer.components import (
     SEQUENTIAL_COMPONENT_REGISTRY,
+    DualLayerNormPre,
+    DualLayerNormPreFolded,
     IdentitySplit,
     LayerNormPre,
     LayerNormPreFolded,
@@ -41,6 +43,8 @@ class MultiSequential(nn.Sequential):
 
 class SequentialTransformer(nn.Module):
     """Transformer whose modules are organised into a hierarchy based on the desired RIB graph.
+
+    The order of modules in the graph is set out in the `create_module_name_sections` method.
 
     If the first node_layer is not "embed", we will have a pre-section of modules from embed to
     the first node_layer. This pre-section will not be part of the graph but needs to be run
@@ -81,20 +85,6 @@ class SequentialTransformer(nn.Module):
         )
     """
 
-    embed_module_names: list[str] = ["embed", "pos_embed", "add_embed"]
-    block_module_names: list[str] = [
-        "ln1",
-        "attn",
-        "add_resid1",
-        "ln2",
-        "mlp_in",
-        "mlp_act",
-        "mlp_out",
-        "add_resid2",
-    ]
-    ln_final_name: str = "ln_final"
-    unembed_module_name: str = "unembed"
-
     def __init__(
         self,
         cfg: SequentialTransformerConfig,
@@ -108,7 +98,9 @@ class SequentialTransformer(nn.Module):
         self.has_folded_bias = False
 
         assert len(node_layers) > 1, "Must have at least 2 node layers"
-        self.module_name_sections = self.create_module_name_sections(cfg.n_layers, node_layers)
+        self.module_name_sections = self.create_module_name_sections(
+            cfg.n_layers, node_layers, positional_embedding_type=cfg.positional_embedding_type
+        )
 
         assert cfg.normalization_type in [None, "LNPre"], (
             f"Normalization type {cfg.normalization_type} not supported. "
@@ -129,12 +121,20 @@ class SequentialTransformer(nn.Module):
                 module_class: Type[nn.Module]
                 kwargs = {}
                 if module_type == last_pos_module_type:
+                    # Used for modular addition where we only care about the last position index
                     kwargs["last_pos_only"] = True
+                if module_type == "embed" and cfg.positional_embedding_type == "rotary":
+                    kwargs["return_tokens"] = False
+                if module_type == "add_resid1" and cfg.parallel_attn_mlp:
+                    kwargs["return_residual"] = True
                 if module_type in ["ln1", "ln2", "ln_final"]:
                     if cfg.normalization_type == "LNPre":
-                        module_class = LayerNormPre
-                        # ln1 and ln2 need to output both the residual and normed residual
-                        kwargs["return_residual"] = module_type in ["ln1", "ln2"]
+                        if cfg.parallel_attn_mlp and module_type == "ln2":
+                            module_class = DualLayerNormPre
+                        else:
+                            module_class = LayerNormPre
+                            # ln1 and ln2 need to output both the residual and normed residual
+                            kwargs["return_residual"] = module_type in ["ln1", "ln2"]
                     else:
                         module_class = nn.Identity if module_type == "ln_final" else IdentitySplit
                 else:
@@ -145,7 +145,11 @@ class SequentialTransformer(nn.Module):
         self.sections: nn.ModuleDict = nn.ModuleDict(sections)
 
     @staticmethod
-    def create_module_name_sections(n_blocks: int, node_layers: list[str]) -> list[list[str]]:
+    def create_module_name_sections(
+        n_blocks: int,
+        node_layers: list[str],
+        positional_embedding_type: Literal["rotary", "standard"],
+    ) -> list[list[str]]:
         """Create ordered groups of module names.
 
         Each group will be a section of a RIB graph, with the exception that, if the first
@@ -162,17 +166,33 @@ class SequentialTransformer(nn.Module):
         Args:
             n_blocks: The number of layers/blocks in the model.
             node_layers: The names of the node layers to build the graph with.
+            positional_embedding_type: The type of positional embedding to use.
 
         Returns:
             A list of lists of module names, where each list is a graph section.
         """
-        all_layers = SequentialTransformer.embed_module_names.copy()
+        embed_module_names: list[str] = ["embed"]
+        if positional_embedding_type == "standard":
+            embed_module_names.extend(["pos_embed", "add_embed"])
+
+        block_module_names: list[str] = [
+            "ln1",
+            "attn",
+            "add_resid1",
+            "ln2",
+            "mlp_in",
+            "mlp_act",
+            "mlp_out",
+            "add_resid2",
+        ]
+        ln_final_name: str = "ln_final"
+        unembed_module_name: str = "unembed"
+
+        all_layers = embed_module_names.copy()
         for i in range(n_blocks):
-            all_layers.extend(
-                [f"{module_name}.{i}" for module_name in SequentialTransformer.block_module_names]
-            )
-        all_layers.append(SequentialTransformer.ln_final_name)
-        all_layers.append(SequentialTransformer.unembed_module_name)
+            all_layers.extend([f"{module_name}.{i}" for module_name in block_module_names])
+        all_layers.append(ln_final_name)
+        all_layers.append(unembed_module_name)
 
         module_name_sections = create_list_partitions(all_layers, node_layers)
         return module_name_sections
@@ -188,8 +208,13 @@ class SequentialTransformer(nn.Module):
         if self.has_folded_bias:
             raise ValueError("Model already has folded bias")
 
+        # If using rotary, we don't have a later positional embedding to concat 1s to, so we must
+        # concat the 1s to the token embeddings
+        token_embed_fold_fn = (
+            concat_ones if self.cfg.positional_embedding_type == "rotary" else concat_zeros
+        )
         fold_fns: dict[str, Callable] = {
-            "W_E": concat_zeros,
+            "W_E": token_embed_fold_fn,
             "W_pos": concat_ones,
             "W_Q": fold_attn_QKV,
             "W_K": fold_attn_QKV,
@@ -201,17 +226,17 @@ class SequentialTransformer(nn.Module):
         }
 
         # Get the parameter keys of the model
-        seq_tf_keys = list(self.state_dict().keys())
-        for seq_tf_key in seq_tf_keys:
-            sections, section_name, module_idx, param_name = seq_tf_key.split(".")
+        seq_param_names = list(self.state_dict().keys())
+        for seq_param_name in seq_param_names:
+            sections, section_name, module_idx, param_name = seq_param_name.split(".")
             if param_name[:2] == "W_":
                 if param_name not in fold_fns:
                     # No folding needed for this weight parameter
                     continue
                 # It's a weight parameter. Get it's corresponding bias if it has one
                 bias_key = f"{sections}.{section_name}.{module_idx}.b_{param_name[2:]}"
-                bias_param = get_model_attr(self, bias_key) if bias_key in seq_tf_keys else None
-                weight_param = get_model_attr(self, seq_tf_key)
+                bias_param = get_model_attr(self, bias_key) if bias_key in seq_param_names else None
+                weight_param = get_model_attr(self, seq_param_name)
                 args = (weight_param,) if bias_param is None else (weight_param, bias_param)
                 fold_fn = fold_fns[param_name]
                 fold_fn(*args)
@@ -223,10 +248,13 @@ class SequentialTransformer(nn.Module):
         for section_name, section in self.sections.items():
             for module_idx, module in enumerate(section):  # type: ignore
                 if isinstance(module, LayerNormPre):
-                    modified_module = LayerNormPreFolded(
+                    self.sections[section_name][module_idx] = LayerNormPreFolded(
                         lnpre_folded_cfg, return_residual=module.return_residual
                     )
-                    self.sections[section_name][module_idx] = modified_module
+                elif isinstance(module, DualLayerNormPre):
+                    self.sections[section_name][module_idx] = DualLayerNormPreFolded(
+                        lnpre_folded_cfg
+                    )
 
         self.has_folded_bias = True
 

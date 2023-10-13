@@ -159,7 +159,11 @@ def find_root(
     max_iter: int = 100,
 ):
     """Find the root of a function using bisection."""
-
+    # gelu requires higher precision to converge, and operates on tensors.
+    if isinstance(xmin, torch.Tensor):
+        xmin = xmin.double()
+    if isinstance(xmax, torch.Tensor):
+        xmax = xmax.double()
     # check that func(xmin) and func(xmax) have opposite signs
     assert func(xmin) * func(xmax) < 0, "func(xmin) and func(xmax) must have opposite signs"
 

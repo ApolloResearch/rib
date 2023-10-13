@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import torch
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -26,7 +26,11 @@ class SequentialTransformerConfig(BaseModel):
         dtype: The dtype to use for the model.
         use_attn_scale: Whether to scale the attention scores by sqrt(d_head).
         use_split_qkv_input: Whether to split the input into separate q, k, and v inputs (less
-            memory efficient but easier for analysis)
+            memory efficient but easier for analysis).
+        positional_embedding_type: The type of positional embedding to use ("rotary" for pythia,
+            "standard" for gpt2).
+        parallel_attn_mlp: Whether to parallelize the attention and MLP computations (as done in
+            pythia).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -44,6 +48,10 @@ class SequentialTransformerConfig(BaseModel):
     dtype: torch.dtype
     use_attn_scale: bool
     use_split_qkv_input: bool
+    positional_embedding_type: Literal["rotary", "standard"]
+    rotary_dim: Optional[int]
+    parallel_attn_mlp: bool
+    original_architecture: Optional[str]
 
     @field_validator("dtype")
     @classmethod

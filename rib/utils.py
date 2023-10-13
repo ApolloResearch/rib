@@ -193,10 +193,3 @@ def train_test_split(dataset: Dataset, frac_train: float, seed: int) -> tuple[Da
         dataset, [train_size, test_size], generator=generator
     )
     return train_dataset, test_dataset
-
-
-def multi_bmm_einsum(matrices: list[Float[Tensor, "...ij"]]):
-    equation = '...ij,...jk'  # This covers the multiplication of two matrices
-    for _ in range(len(matrices) - 2):
-        equation += ',...kl'
-    return torch.einsum(equation, *matrices)

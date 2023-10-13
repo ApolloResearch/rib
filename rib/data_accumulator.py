@@ -3,18 +3,19 @@
 from typing import TYPE_CHECKING, Optional, Union
 
 import torch
-from einops import repeat, rearrange, reduce
+from einops import rearrange, reduce, repeat
 from jaxtyping import Float
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
+    acts_pre_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
     relu_interaction_forward_hook_fn,
-    acts_pre_forward_hook_fn,
+    test_edges_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
 
@@ -242,7 +243,7 @@ def collect_interaction_edges(
     # Ensure that the keys of the edges dict are the same as the node layer names without `output`
     assert set(edges.keys()) == set(
         [C.node_layer_name for C in Cs[:-1]]
-    ), f"Edge keys not the same as node layer names. "
+    ), f"Edge keys not the same as node layer names."
     return edges
 
 
@@ -336,10 +337,10 @@ def collect_activations_and_rotate(
 
     run_dataset_through_model(hooked_model, data_loader, hooks=activation_hooks, dtype=dtype, device=device)
 
-    # Extra zero index when reading dictionary is because output is always stored as a tuple (useful
     activations: dict[str, Union[Float[Tensor, "batch d_hidden"], Float[Tensor, "batch pos d_hidden"]]] = {
         hook_name: hooked_model.hooked_data[hook_name]["activation"] for hook_name in hooked_model.hooked_data
     }
+    hooked_model.clear_hooked_data()
 
     rotated_activations_list = []
     for activation, C in zip(list(activations.values()), Cs):
@@ -347,3 +348,51 @@ def collect_activations_and_rotate(
         rotated_activations_list.append(torch.bmm(activation, repeat(C, 'd_hidden1 d_hidden2 -> batch_size d_hidden1 d_hidden2', batch_size=batch_size)))
 
     return activations
+
+
+def collect_test_edges(
+    Cs_unscaled: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    W_hats: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    hook_names: Optional[str] = None,
+) -> Float[Tensor, ""]:
+    """Collect test edge interactions with the C matrix between W and f edited to remove scaling."""
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    test_edges_hooks = []
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        if i == len(module_names) - 2: # Can't collect test edges for output layer
+            break
+        test_edges_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="activation",
+                fn=test_edges_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={
+                    'C_unscaled': Cs_unscaled[i],
+                    'C': Cs[i],
+                    'C_next_layer': Cs[i+1],
+                    'W_hat': W_hats[i]
+                }
+            )
+        )
+
+    run_dataset_through_model(hooked_model, data_loader, hooks=test_edges_hooks, dtype=dtype, device=device)
+
+    edges = {
+        hook_name: torch.div(hooked_model.hooked_data[hook_name]["activation"], len(data_loader)) for hook_name in hooked_model.hooked_data
+    }
+    hooked_model.clear_hooked_data()
+
+    return edges

@@ -1,27 +1,35 @@
 import json
+import pickle
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional, Union
 
 import fire
-import numpy as np
-import pickle
 import matplotlib.pyplot as plt
+import numpy as np
 import seaborn as sns
 import torch
 import yaml
 from jaxtyping import Float
-from torch import Tensor
 from pydantic import BaseModel, field_validator
 from scipy.cluster.hierarchy import dendrogram, leaves_list, linkage
 from scipy.spatial.distance import squareform
+from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from rib.data_accumulator import collect_relu_interactions, collect_gram_matrices, collect_activations_and_rotate
+from rib.data_accumulator import (
+    collect_activations_and_rotate,
+    collect_gram_matrices,
+    collect_test_edges,
+)
 from rib.hook_fns import acts_forward_hook_fn
 from rib.hook_manager import HookedModel
-from rib.interaction_algos import InteractionRotation, Eigenvectors, calculate_interaction_rotations
+from rib.interaction_algos import (
+    Eigenvectors,
+    InteractionRotation,
+    calculate_interaction_rotations,
+)
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, load_config, set_seed
@@ -181,7 +189,7 @@ def plot(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_name: str, o
 def get_rotated_Ws(
     config_path_str: str,
     file_path: str,
-    C_pinv_list: list[Float[Tensor, "d_hidden d_hidden"]],
+    C_pinv_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> list[Float[Tensor, "layer_count d_hidden d_hidden"]]:
     """Extract W^l, perform paper-equivalent right multiplication of psuedoinverse
     of C^l."""
@@ -224,7 +232,7 @@ def check_and_open_file(file_path: Path, get_var_fn: callable, config_path_str: 
 def get_f_hats(
     config_path_str: str,
     file_path: str,
-    C_list: list[Float[Tensor, "d_hidden d_hidden"]],
+    Cs_list: list[Float[Tensor, "d_hidden d_hidden"]],
 ) -> list[Float[Tensor, "batch d_hidden"]]:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
@@ -244,7 +252,7 @@ def get_f_hats(
 
     # Get functions rotated by non rescaled Cs
     f_hats = collect_activations_and_rotate(
-        Cs=C_list,
+        Cs=Cs_list,
         hooked_model=hooked_mlp,
         module_names=config.node_layers,
         data_loader=train_loader,
@@ -258,6 +266,46 @@ def get_f_hats(
     return f_hats
 
 
+def get_edges(
+    config_path_str: str,
+    file_path: str,
+    Cs_list: list[Float[Tensor, "d_hidden d_hidden"]],
+    Cs_unscaled_list: list[Float[Tensor, "d_hidden d_hidden"]],
+    W_hat_list: list[Float[Tensor, "d_hidden d_hidden"]],
+) -> list[Float[Tensor, ""]]:
+    config_path = Path(config_path_str)
+    config = load_config(config_path, config_model=Config)
+    set_seed(config.seed)
+
+    with open(config.mlp_path.parent / "config.yaml", "r") as f:
+        model_config_dict = yaml.safe_load(f)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+    # print_all_modules(mlp) # Check module names were correctly defined
+    mlp.eval()  # Run in inference only
+    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_mlp = HookedModel(mlp)
+
+    train_loader = load_mnist_dataloader(
+        train=True, batch_size=config.batch_size)
+
+    edges = collect_test_edges(
+        Cs_unscaled=Cs_unscaled_list,
+        Cs=Cs_list,
+        W_hats=W_hat_list,
+        hooked_model=hooked_mlp,
+        module_names=config.node_layers,
+        data_loader=train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+    )
+
+    with open(file_path, "wb") as f:
+        pickle.dump(edges, f)
+
+    return edges
+
+
 def Cs_Ws_main(config_path_str: str) -> None:
     """MAIN FUNCTION 2. Check how sparse Cs and rotated Ws are in equation:
     C^{l+1} O(x) W C+^l C^l f(x)
@@ -268,6 +316,7 @@ def Cs_Ws_main(config_path_str: str) -> None:
     Cs_save_file = Path(__file__).parent / "Cs"
     Ws_save_file = Path(__file__).parent / "Ws"
     fhats_save_file = Path(__file__).parent / "fhats"
+    edges_save_file = Path(__file__).parent / "edges"
 
     # List of InteractionRotation objects
     Cs_and_Lambdas: dict[str, list[InteractionRotation]] = check_and_open_file(
@@ -292,17 +341,20 @@ def Cs_Ws_main(config_path_str: str) -> None:
         C_pinv_list=U_D_sqrt_pinv_Vs_list
     )
 
-    f_hats = check_and_open_file(
-        file_path=fhats_save_file,
-        get_var_fn=get_f_hats,
+    edges = check_and_open_file(
+        file_path=edges_save_file,
+        get_var_fn=get_edges,
         config_path_str=config_path_str,
-        C_list=U_D_sqrt_pinv_Vs_list
+        Cs_list=C_list,
+        Cs_unscaled_list=U_D_sqrt_pinv_Vs_list,
+        W_hat_list=W_list,
     )
 
     plot(rescaled_C_list, "C", out_dir)
     plot(W_list, "W", out_dir)
     plot(U_D_sqrt_Vs_list, "U_D_sqrt_V", out_dir)
     plot(U_D_sqrt_pinv_Vs_list, "U_D_sqrt_pinv_V", out_dir)
+    plot(edges, "edges", out_dir)
 
 
 if __name__ == "__main__":

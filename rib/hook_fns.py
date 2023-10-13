@@ -414,47 +414,42 @@ def relu_interaction_forward_hook_fn(
     outputs = output if isinstance(output, tuple) else (output,)
     # Concat outputs over the hidden dimension
     detached_outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
-    operator: Union[Float[Tensor, "batch d_hidden"], Float[Tensor,
-                                                           "batch pos d_hidden_concat"]] = torch.div(detached_outputs, detached_inputs)
+    operator = torch.div(detached_outputs, detached_inputs)
 
     match relu_metric_type:
         case 0:
             # Use reshaping and broadcasting to compare every element to every other element
             if operator.dim() == 2:
                 batch_size, d_hidden = operator.shape
-
-                operator_expanded_i: Float[Tensor, "batch 1 d_hidden"] = operator.unsqueeze(1)
-                operator_expanded_j: Float[Tensor, "batch d_hidden 1"] = operator.unsqueeze(-1)
-
-                relu_interaction_matrix: Float[Tensor, "d_hidden d_hidden"] = torch.div((operator_expanded_i == operator_expanded_j).sum(dim=0), batch_size)
+                operator_expanded_i: Float[Tensor, "batch 1 d_hidden"] = rearrange(operator, 'b d -> b 1 d')
+                operator_expanded_j: Float[Tensor, "batch d_hidden 1"] = rearrange(operator, 'b d -> b d 1')
+                relu_interaction_matrix = torch.einsum('bik->ik', operator_expanded_i == operator_expanded_j) / batch_size
 
             elif operator.dim() == 3:
                 batch_size, token_len, d_hidden_concat = operator.shape
-
-                operator_expanded_j: Float[Tensor, "batch pos 1 d_hidden_concat"] = operator.unsqueeze(2)
-                operator_expanded_k: Float[Tensor, "batch pos d_hidden_concat 1"] = operator.unsqueeze(3)
-
+                operator_expanded_j = rearrange(operator, 'b p d -> b p 1 d')
+                operator_expanded_k = rearrange(operator, 'b p d -> b p d 1')
                 # operator_matrix[batch,i,j,k,] is 1 if operator[i,j] == operator[i,k] and 0 otherwise
-                relu_interaction_matrix: Float[Tensor, "d_hidden_concat d_hidden_concat"] = torch.div((operator_expanded_j == operator_expanded_k).sum(dim=(0, 1)), batch_size)
+                relu_interaction_matrix = torch.einsum('bpik->ik', operator_expanded_j == operator_expanded_k) / batch_size
 
             # Store operator (ReLU pointwise ratio)
-            _add_to_hooked_matrix(hooked_data, hook_name, data_key, commutator_size_matrix)
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key, relu_interaction_matrix)
 
         case 1:
             batch_size, d_hidden = operator.shape # [256, 101]
             # Element-wise product O_j * p_j
             diag_values: Float[Tensor, "batch_size, d_hidden"] = operator.mul(detached_inputs)
             # Repeat diag_values along rows - row_matrix_ij = O_j * p_j
-            row_matrix: Float[Tensor, "batch_size, d_hidden, d_hidden"] = diag_values.unsqueeze(1).repeat(1, d_hidden, 1) # [256, 101, 101]
+            row_matrix = repeat(diag_values, 'b d -> b d d_hidden', d_hidden=d_hidden) # [256, 101, 101]
             assert (row_matrix[0, 0, :].squeeze() == diag_values[0]).all()
             assert (row_matrix[:, 5, 7] == operator[:, 7] * detached_inputs[:, 7]).all()
-            denominator: Float[Tensor, "d_hidden d_hidden"] = torch.div(row_matrix.pow(2).sum(dim=0), batch_size)
+            denominator = torch.einsum('bik->ik', row_matrix.pow(2)) / batch_size
 
             # Outer product O_i * p_j
             outer_product: Float[Tensor, "batch_size d_hidden d_hidden"] = torch.bmm(rearrange(operator, 'b n -> b n 1'), rearrange(detached_inputs, 'b n -> b 1 n'))
             assert (outer_product[:, 3, 4] == operator[:, 3] * detached_inputs[:, 4]).all()
-            # (O_i * p_j- O_j * p_j)^2 / (O_j * p_j)^2
-            numerator: Float[Tensor, "d_hidden d_hidden"]  = torch.div((outer_product - row_matrix).pow(2).sum(dim=0), batch_size)
+            # 1/|X| sum_x [ (O_i * p_j- O_j * p_j)^2 / (O_j * p_j)^2 ]
+            numerator = torch.einsum('bik->ik', (outer_product - row_matrix).pow(2) ) / batch_size
 
             # Handle 0/0 nans
             denom_mask = denominator == 0
@@ -512,10 +507,7 @@ def relu_operator_forward_hook_fn(
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, diag_operator_matrix)
 
 
-def test_connections_pre_forward_hook_fn(
-    C_unscaled: Float[Tensor, "d_hidden d_hidden"],
-    C_scaled_next_layer: Float[Tensor, "d_hidden d_hidden"],
-    W_hat: Float[Tensor, "d_hidden d_hiddden"],
+def get_relu_operator_only_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
@@ -533,6 +525,47 @@ def test_connections_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     **_: Any,
+) -> None:
+    assert isinstance(data_key, str), "data_key must be a string."
+
+    # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
+    # Do not concat over hidden dimension for inputs as inputs are always tuple
+    detached_inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+
+    outputs = output if isinstance(output, tuple) else (output,)
+    # Concat outputs over the hidden dimension
+    detached_outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+    operator: Union[Float[Tensor, "batch d_hidden"], Float[Tensor, "batch pos d_hidden_concat"]] = torch.div(detached_outputs, detached_inputs)
+
+    if operator.dim() == 2:
+        diag_operator_matrix = torch.diag_embed(operator)
+    elif operator.dim() == 3:
+        print("oopsie woopsie, case not handled yet")
+
+    return operator
+
+
+def test_edges_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    output: Union[
+        Float[Tensor, "batch d_hidden"],
+        Float[Tensor, "batch pos d_hidden"],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    C_unscaled: Float[Tensor, "d_hidden1 d_hidden2"],
+    C: Float[Tensor, "d_hidden1 d_hidden2"],
+    C_next_layer: Float[Tensor, "d_hidden1 d_hidden2"],
+    W_hat: Float[Tensor, "d_hidden1 d_hiddden2"],
 ) -> None:
     """Calculates C^l+1_scaled O^l W_hat^l f_hat^l.
 
@@ -552,7 +585,6 @@ def test_connections_pre_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
-    detached_inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
     # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
     # Do not concat over hidden dimension for inputs as inputs are always tuple
     detached_inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
@@ -568,7 +600,10 @@ def test_connections_pre_forward_hook_fn(
         print("oopsie woopsie, case not handled yet")
 
     batch_size = detached_inputs.shape[0]
-    C_O_W_hat = C_scaled_next_layer @ diag_operator_matrix @ W_hat @ C_unscaled
-    edge_matrix = torch.bmm(C_O_W_hat.repeat('d_hidden d_hidden -> batch_size d_hidden d_hidden', batch_size=batch_size))
+    f_hats = detached_inputs @ repeat(C, 'd_hidden1 d_hidden2 -> batch_size d_hidden1 d_hidden2', batch_size=batch_size)
+    # Get whole load of matrices to left of f in euation
+    C_O_W_hat = C_next_layer @ diag_operator_matrix @ W_hat
+    # Elementwise multiply by f_hat and sum over batch
+    edge_matrix = (C_O_W_hat * f_hats).sum(dim=0)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, edge_matrix)

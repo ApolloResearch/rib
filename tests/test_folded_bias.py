@@ -1,6 +1,7 @@
 """Test that folding in the bias works for Sequential Transformer."""
 
 from dataclasses import asdict
+from typing import Literal
 
 import pytest
 import torch
@@ -39,6 +40,7 @@ def _folded_bias_comparison(
             assert vA.shape == vB.shape, f"shape mismatch for {k}: {vA.shape} vs {vB.shape}"
 
             assert torch.allclose(vA, vB, atol=atol), f"WARNING: mismatched values for {k}"
+
     for outA, outB in zip(outputA, outputB):
         assert torch.allclose(outA, outB, atol=atol), "WARNING: mismatched output values"
 
@@ -73,9 +75,9 @@ def test_modular_arithmetic_folded_bias() -> None:
     model_raw.eval()
     # Manually set all bias vectors to random values (to avoid the default of 0)
 
-    seq_tf_keys = list(model_raw.state_dict().keys())
+    seq_param_names = list(model_raw.state_dict().keys())
     # Initialise all params to random values
-    for key in seq_tf_keys:
+    for key in seq_param_names:
         module = get_model_attr(model_raw, key)
         if module.dtype != torch.bool:  # Ignore the preset boolean mask tensor
             # Use kaiming normal initialisation for weights
@@ -89,27 +91,58 @@ def test_modular_arithmetic_folded_bias() -> None:
     _folded_bias_comparison(model_raw, model_folded, atol=atol)
 
 
-@pytest.mark.slow()
-def test_gpt2_folded_bias() -> None:
-    """Test that the folded bias trick works for GPT2.
+def pretrained_lm_folded_bias_comparison(
+    model_str: str,
+    node_layers: list[str],
+    positional_embedding_type: Literal["standard", "rotary"],
+    atol: float = 1e-6,
+) -> None:
+    """Test that the folded bias trick works for a pretrained language model.
 
     Uses float64 to avoid floating point errors.
     """
-    set_seed(42)
-    tlens_model = HookedTransformer.from_pretrained("gpt2")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    tlens_model = HookedTransformer.from_pretrained(model_str)
     cfg = SequentialTransformerConfig(**asdict(tlens_model.cfg))
-
-    node_layers = ["attn.0", "mlp_act.0"]
     model_raw = SequentialTransformer(cfg, node_layers)
     # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(list(model_raw.state_dict().keys()), tlens_model)
+    state_dict = convert_tlens_weights(
+        seq_param_names=list(model_raw.state_dict().keys()),
+        tlens_model=tlens_model,
+        positional_embedding_type=positional_embedding_type,
+    )
     model_raw.load_state_dict(state_dict)
     model_raw.to(torch.float64)
+    model_raw.to(device=device)
     model_raw.eval()
     model_folded = SequentialTransformer(cfg, node_layers)
     model_folded.load_state_dict(state_dict)
     model_folded.fold_bias()
     model_folded.to(torch.float64)
+    model_folded.to(device=device)
     model_folded.eval()
 
-    _folded_bias_comparison(model_raw, model_folded, atol=1e-6)
+    _folded_bias_comparison(model_raw, model_folded, atol=atol)
+
+
+@pytest.mark.slow()
+def test_gpt2_folded_bias() -> None:
+    """Test that the folded bias trick works for GPT2."""
+    set_seed(42)
+    node_layers = ["attn.0", "mlp_act.0"]
+    pretrained_lm_folded_bias_comparison(
+        model_str="gpt2", node_layers=node_layers, positional_embedding_type="standard", atol=1e-6
+    )
+
+
+@pytest.mark.slow()
+def test_pythia_folded_bias() -> None:
+    """Test that the folded bias trick works for Pythia."""
+    set_seed(42)
+    node_layers = ["mlp_in.1", "add_resid2.3"]
+    pretrained_lm_folded_bias_comparison(
+        model_str="pythia-14m",
+        node_layers=node_layers,
+        positional_embedding_type="rotary",
+        atol=1e-5,
+    )

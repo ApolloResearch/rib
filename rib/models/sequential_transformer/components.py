@@ -14,28 +14,39 @@ from rib.models.utils import gelu_new, layer_norm
 
 
 class Embed(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: SequentialTransformerConfig, return_tokens: bool = True):
         super().__init__()
         self.cfg = cfg
         self.W_E: Float[Tensor, "d_vocab d_model"] = nn.Parameter(
             torch.empty(self.cfg.d_vocab, self.cfg.d_model, dtype=cfg.dtype)
         )
+        self.return_tokens = return_tokens
 
     def forward(
         self, tokens: Int[Tensor, "..."]
-    ) -> tuple[Int[Tensor, "d_vocab d_model"], Float[Tensor, "... d_model"]]:
+    ) -> Union[
+        tuple[Int[Tensor, "d_vocab d_model"], Float[Tensor, "... d_model"]],
+        Float[Tensor, "... d_model"],
+    ]:
         """Calculate token embeddings of the input tokens.
+
+        For models with rotary embeddings, we don't need to return the raw tokens as the positional
+        embeddings are handled in the attention layer and not added to the raw residual stream.
 
         Args:
             tokens: The input tokens, typically (batch, pos)
 
         Returns:
-            - The input tokens
+            - The input tokens (if return_tokens is True)
             - The token embeddings
         """
         # If A has shape [a, b] and B has shape [c, d], then A[:, B] has shape [a, c, d]
         # B acts as a tensor of indices into the second dimension (so >=0 and <b)
-        return tokens, self.W_E[tokens, :]
+        token_embeddings: Float[Tensor, "... d_model"] = self.W_E[tokens, :]
+        if self.return_tokens:
+            return tokens, token_embeddings
+        else:
+            return token_embeddings
 
 
 class PosEmbed(nn.Module):
@@ -102,24 +113,45 @@ class Unembed(nn.Module):
 
 
 class Add(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig, last_pos_only: bool = False):
+    """Add the residual stream to the output stream of the previous module.
+
+    If last_pos_only is True, only the last position index is returned.
+
+    If return_residual is True, the residual stream is returned as well as the output stream. This
+    is needed for add_resid1 when we have parallel attention and mlp streams (as in pythia).
+    """
+
+    def __init__(
+        self,
+        cfg: SequentialTransformerConfig,
+        last_pos_only: bool = False,
+        return_residual: bool = False,
+    ):
         super().__init__()
         self.cfg = cfg
         self.last_pos_only = last_pos_only
+        self.return_residual = return_residual
 
     def forward(
-        self, x: Float[Tensor, "#dims"], y: Float[Tensor, "#dims"]
-    ) -> Float[Tensor, "#dims"]:
-        summed = x + y
+        self, residual: Float[Tensor, "#dims"], y: Float[Tensor, "#dims"]
+    ) -> Union[tuple[Float[Tensor, "#dims"], Float[Tensor, "#dims"]], Float[Tensor, "#dims"]]:
+        summed = residual + y
         if self.last_pos_only:
             if summed.dim() == 3:
                 summed = summed[:, -1:, :]
+                if self.return_residual:
+                    residual = residual[:, -1:, :]
             elif summed.dim() == 2:
                 # No batch dimension (e.g. due to vmap)
                 summed = summed[-1:, :]
+                if self.return_residual:
+                    residual = residual[-1:, :]
             else:
                 raise ValueError(f"summed should have dim 2 or 3, but has dim {summed.dim()}")
-        return summed
+        if self.return_residual:
+            return residual, summed
+        else:
+            return summed
 
 
 class Attention(nn.Module):
@@ -130,7 +162,13 @@ class Attention(nn.Module):
     ):
         """Attention Block - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
-        Convention: All attention pattern-style matrices have shape [..., head_index, query_pos, key_pos]
+        Convention: All attention pattern-style matrices have shape [..., head_index, query_pos,
+        key_pos]
+
+        Supports rotary attention.
+
+        This code was taken mostly verbatim from:
+        https://github.com/neelnanda-io/TransformerLens/blob/main/transformer_lens/components.py
 
         Args:
             cfg (SequentialTransformerConfig): Config
@@ -173,6 +211,17 @@ class Attention(nn.Module):
             self.attn_scale = np.sqrt(self.cfg.d_head)
         else:
             self.attn_scale = 1.0
+
+        if self.cfg.positional_embedding_type == "rotary":
+            assert (
+                self.cfg.rotary_dim is not None
+            ), "rotary_dim must be specified for rotary attention"
+            # Applies a rotation to each two-element chunk of keys and queries pre dot producting to bake in relative position. See HookedTransformerConfig for details
+            sin, cos = self.calculate_sin_cos_rotary(
+                self.cfg.rotary_dim, self.cfg.n_ctx, dtype=self.cfg.dtype
+            )
+            self.register_buffer("rotary_sin", sin)
+            self.register_buffer("rotary_cos", cos)
 
     def forward(
         self,
@@ -239,6 +288,9 @@ class Attention(nn.Module):
         )
         # [..., pos, head_index, d_head]
 
+        if self.cfg.positional_embedding_type == "rotary":
+            q, k = self.rotary_rotate_qk(q, k)
+
         if in_dtype not in [torch.float32, torch.float64]:
             # If using 16 bits, increase the precision to avoid numerical instabilities
             q = q.to(torch.float32)
@@ -298,6 +350,85 @@ class Attention(nn.Module):
             attn_scores,
             cast(Tensor, self.IGNORE),
         )
+
+    def calculate_sin_cos_rotary(
+        self,
+        rotary_dim: int,
+        n_ctx: int,
+        base: int = 10000,
+        dtype: torch.dtype = torch.float32,
+    ) -> tuple[Float[torch.Tensor, "n_ctx rotary_dim"], Float[torch.Tensor, "n_ctx rotary_dim"]]:
+        """
+        Calculate the sine and cosine waves to use in a rotary embedding. See https://blog.eleuther.ai/rotary-embeddings/ for details
+
+        Note: For some inexplicable reason, in GPT-J each ADJACENT pair of elements in k and q are rotated, in GPT-NeoX the pair of elements at k and k+n//2 are rotated (ie folding the full length in half, and then looking at pairs accordingly). I have absolutely no clue why, it should be completely equivalent.
+        To resolve this, I've coded it to default to the GPT-J mode, but to explicitly check whether it's GPT-NeoX and then do the GPT-NeoX thing if it is.
+        """
+        high_precision = torch.float32 if dtype != torch.float64 else torch.float64
+        pos = torch.arange(n_ctx, dtype=high_precision)
+        dim = torch.arange(rotary_dim // 2, dtype=high_precision)
+
+        # A set of frequencies evenly spaced in log space
+        freq = base ** (dim / (rotary_dim / 2))
+        if self.cfg.original_architecture in ["GPTNeoXForCausalLM", "LlamaForCausalLM"]:
+            freq = einops.repeat(freq, "d -> (2 d)")
+        else:
+            freq = einops.repeat(freq, "d -> (d 2)")
+        # Create a n_ctx x rotary_dim tensor, where each column is an arithmetic sequence of angles in that frequency
+        angles = pos[:, None] / freq[None, :]
+        return torch.sin(angles).to(dtype), torch.cos(angles).to(dtype)
+
+    def rotary_rotate_qk(
+        self,
+        q: Float[torch.Tensor, "batch q_pos head_index d_head"],
+        k: Float[torch.Tensor, "batch k_pos head_index d_head"],
+    ) -> tuple[
+        Float[torch.Tensor, "batch q_pos head_index d_head"],
+        Float[torch.Tensor, "batch k_pos head_index d_head"],
+    ]:
+        # We first apply standard q and k calculation
+        q = self.apply_rotary(q)
+        k = self.apply_rotary(k)
+        return q, k
+
+    def rotate_every_two(
+        self, x: Float[torch.Tensor, "... rotary_dim"]
+    ) -> Float[torch.Tensor, "... rotary_dim"]:
+        """
+        Rotary helper function, splits x into blocks of size 2 along the final axis and maps [x0, x1] to [-x1, x0]
+
+        The final axis of x must have even length.
+
+        GPT-NeoX and GPT-J do rotary subtly differently, see calculate_sin_cos_rotary for details.
+        """
+        rot_x = x.clone()
+        if self.cfg.original_architecture in ["GPTNeoXForCausalLM", "LlamaForCausalLM"]:
+            n = x.size(-1) // 2
+            rot_x[..., :n] = -x[..., n:]
+            rot_x[..., n:] = x[..., :n]
+        else:
+            rot_x[..., ::2] = -x[..., 1::2]
+            rot_x[..., 1::2] = x[..., ::2]
+
+        return rot_x
+
+    def apply_rotary(
+        self,
+        x: Float[torch.Tensor, "batch pos head_index d_head"],
+        past_kv_pos_offset=0,
+    ) -> Float[torch.Tensor, "batch pos head_index d_head"]:
+        # Only apply rotary to first rotary_dim dimensions (eg, if rotary_dim=64 and d_head=256, only apply to first 1/4 of dimensions)
+        x_pos = x.size(1)
+        x_rot = x[..., : self.cfg.rotary_dim]
+        x_pass = x[..., self.cfg.rotary_dim :]
+        x_flip = self.rotate_every_two(x_rot)
+        rotary_cos = cast(Tensor, self.rotary_cos)
+        rotary_sin = cast(Tensor, self.rotary_sin)
+        x_rotated = (
+            x_rot * rotary_cos[past_kv_pos_offset : past_kv_pos_offset + x_pos, None, :]
+            + x_flip * rotary_sin[past_kv_pos_offset : past_kv_pos_offset + x_pos, None, :]
+        )
+        return torch.cat([x_rotated, x_pass], dim=-1)
 
 
 class MLPIn(nn.Module):
@@ -389,6 +520,37 @@ class LayerNormPre(torch.nn.Module):
             return out
 
 
+class DualLayerNormPre(torch.nn.Module):
+    """A version of LayerNormPre that handles two inputs.
+
+    Simply passes through the second input as the new residual. This is used for models like pythia
+    that use parallel attention and mlp blocks.
+    """
+
+    def __init__(self, cfg: SequentialTransformerConfig):
+        super().__init__()
+        self.cfg = cfg
+
+    def forward(
+        self,
+        residual: Float[Tensor, "... d_model"],
+        attn_resid: Float[Tensor, "... d_model"],
+    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+        """Forward through the module.
+
+        Args:
+            residual: The raw residual stream.
+            attn_resid: The residual stream after adding the attention block.
+
+        Returns:
+            - The residual stream after adding the attention block. This will be considered the
+                "new" residual stream in the subsequent (MLP) layers.
+            - The application of layer norm to the raw residual stream.
+        """
+        out = layer_norm(residual.clone(), self.cfg.eps)
+        return attn_resid, out
+
+
 class LayerNormPreFolded(torch.nn.Module):
     """A version of LayerNormPre where we assume the input has a constant final dimension."""
 
@@ -412,6 +574,36 @@ class LayerNormPreFolded(torch.nn.Module):
             return residual, out
         else:
             return out
+
+
+class DualLayerNormPreFolded(torch.nn.Module):
+    """A version of LayerNormPreFolded that handles two inputs."""
+
+    def __init__(self, cfg: SequentialTransformerConfig):
+        super().__init__()
+        self.cfg = cfg
+
+    def forward(
+        self,
+        residual: Float[Tensor, "... d_model"],
+        attn_resid: Float[Tensor, "... d_model"],
+    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+        """Forward through the module.
+
+        Args:
+            residual: The raw residual stream.
+            attn_resid: The residual stream after adding the attention block.
+
+        Returns:
+            - The residual stream after adding the attention block. This will be considered the
+                "new" residual stream in the subsequent (MLP) layers.
+            - The application of layer norm to the raw residual stream.
+        """
+        x0 = residual[..., :-1].clone()  # [..., length-1]
+
+        x0_out = layer_norm(x0, self.cfg.eps)
+        out = torch.cat([x0_out, residual[..., -1:]], dim=-1)
+        return attn_resid, out
 
 
 class IdentitySplit(torch.nn.Module):

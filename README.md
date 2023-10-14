@@ -4,7 +4,7 @@ This repository contains the core functionality and experiments related to Rotat
 Interaction Basis.
 
 For a formal introduction to the method, see
-[this writeup](https://www.overleaf.com/project/6437d0bde0eaf2e8c7ac3649).
+[this writeup](https://www.overleaf.com/project/6516ddc99f52dd99cab58d8d).
 
 ## Installation
 

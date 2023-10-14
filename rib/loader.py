@@ -11,6 +11,7 @@ from transformer_lens import HookedTransformer
 from rib.data import ModularArithmeticDataset
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
+from rib.types import DATASET_TYPES
 from rib.utils import train_test_split
 
 
@@ -141,7 +142,7 @@ def create_modular_arithmetic_dataset(
 
 @overload
 def load_dataset(
-    dataset_type: Literal["modular_arithmetic", "wikitext"],
+    dataset_type: DATASET_TYPES,
     return_set: Literal["train", "test", "all"],
     tlens_model_path: Optional[Path] = None,
     **kwargs,
@@ -151,7 +152,7 @@ def load_dataset(
 
 @overload
 def load_dataset(
-    dataset_type: Literal["modular_arithmetic", "wikitext"],
+    dataset_type: DATASET_TYPES,
     return_set: Literal["both"],
     tlens_model_path: Optional[Path] = None,
     **kwargs,
@@ -160,7 +161,7 @@ def load_dataset(
 
 
 def load_dataset(
-    dataset_type: Literal["modular_arithmetic", "wikitext"],
+    dataset_type: DATASET_TYPES,
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
     tlens_model_path: Optional[Path] = None,
     **kwargs,

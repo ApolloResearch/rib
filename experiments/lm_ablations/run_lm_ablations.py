@@ -29,7 +29,7 @@ from rib.ablations import load_basis_matrices, run_ablations
 from rib.hook_manager import HookedModel
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
-from rib.types import TORCH_DTYPES
+from rib.types import DATASET_TYPES, TORCH_DTYPES
 from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
 
 
@@ -41,7 +41,7 @@ class Config(BaseModel):
         None,
         description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
     )
-    dataset: Literal["modular_arithmetic", "wikitext"]
+    dataset: DATASET_TYPES
     node_layers: list[str]
     batch_size: int
     dtype: str

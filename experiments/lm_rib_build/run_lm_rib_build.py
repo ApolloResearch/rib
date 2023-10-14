@@ -40,7 +40,7 @@ from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
-from rib.types import TORCH_DTYPES
+from rib.types import DATASET_TYPES, TORCH_DTYPES
 from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
 
 
@@ -56,7 +56,7 @@ class Config(BaseModel):
     node_layers: list[str] = Field(
         ..., description="Names of the node layers to build the graph with."
     )
-    dataset: Literal["modular_arithmetic", "wikitext"] = Field(
+    dataset: DATASET_TYPES = Field(
         ...,
         description="The dataset to use to build the graph.",
     )

@@ -6,8 +6,11 @@
     "files.trimTrailingWhitespace": true,
     "editor.formatOnSaveMode": "file",
     "editor.formatOnSave": true,
-    "python.formatting.provider": "black",
-    "python.formatting.blackArgs": [
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true
+    },
+    "black-formatter.args": [
         "--line-length",
         "100"
     ],
@@ -28,10 +31,6 @@
         "plaintext": false,
         "markdown": true
     },
-    "jupyter.runStartupCommands": [
-        "%load_ext autoreload",
-        "%autoreload 2"
-    ],
     "notebook.output.textLineLimit": 3000, // Prevent long output from being truncated
     "jupyter.interactiveWindow.creationMode": "perFile",
     "notebook.formatOnSave.enabled": true,

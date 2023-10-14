@@ -27,10 +27,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from rib.ablations import load_basis_matrices, run_ablations
 from rib.hook_manager import HookedModel
-from rib.loader import (
-    create_modular_arithmetic_data_loader,
-    load_sequential_transformer,
-)
+from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.types import TORCH_DTYPES
 from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
@@ -44,6 +41,7 @@ class Config(BaseModel):
         None,
         description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
     )
+    dataset: Literal["modular_arithmetic", "wikitext"]
     node_layers: list[str]
     batch_size: int
     dtype: str
@@ -111,14 +109,14 @@ def main(config_path_str: str) -> None:
         interaction_graph_info["config"]["dataset"] == "modular_arithmetic"
     ), "Currently only supports modular arithmetic."
 
-    data_loader = create_modular_arithmetic_data_loader(
-        shuffle=True,
+    dataset = load_dataset(
+        dataset_type=config.dataset,
         return_set="test",
         tlens_model_path=tlens_model_path,
-        batch_size=config.batch_size,
         seed=config.seed,
         frac_train=0.5,  # Take a random 50% split of the dataset
     )
+    data_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
     # Test model accuracy before ablation
     accuracy = eval_model_accuracy(hooked_model, data_loader, dtype=dtype, device=device)

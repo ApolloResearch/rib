@@ -248,6 +248,7 @@ def test_run_modular_arithmetic_rib_ablations():
     ablation_type: rib
     interaction_graph_path: OVERWRITE/IN/MOCK
     ablate_every_vec_cutoff: 2
+    dataset: modular_arithmetic
     node_layers:
         - ln1.0
         - unembed
@@ -275,6 +276,7 @@ def test_run_modular_arithmetic_orthog_ablations():
     ablation_type: orthogonal
     interaction_graph_path: OVERWRITE/IN/MOCK
     ablate_every_vec_cutoff: 10
+    dataset: modular_arithmetic
     node_layers:
         - ln1.0
         - unembed

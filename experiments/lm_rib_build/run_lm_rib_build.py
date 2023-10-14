@@ -38,10 +38,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
-from rib.loader import (
-    create_modular_arithmetic_data_loader,
-    load_sequential_transformer,
-)
+from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.types import TORCH_DTYPES
 from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
@@ -139,12 +136,12 @@ def main(config_path_str: str):
     assert config.dataset == "modular_arithmetic", "Currently only supports modular arithmetic."
 
     # Importantly, use the same dataset as was used for training
-    train_loader = create_modular_arithmetic_data_loader(
-        shuffle=True,
+    dataset = load_dataset(
+        dataset_type=config.dataset,
         return_set="train",
         tlens_model_path=config.tlens_model_path,
-        batch_size=config.batch_size,
     )
+    train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
     # Test model accuracy before graph building, ta be sure
     accuracy = eval_model_accuracy(hooked_model, train_loader, dtype=dtype, device=device)

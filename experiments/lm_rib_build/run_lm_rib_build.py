@@ -65,6 +65,12 @@ class Config(BaseModel):
         ...,
         description="Remove eigenvectors with eigenvalues below this threshold.",
     )
+    collect_logits: bool = Field(
+        ...,
+        description="Whether to collect the output logits (i.e. the output of the final model "
+        " section). If true, the final node layer will be the logits rather than the inputs to the "
+        "final node layer in the config.",
+    )
     rotate_output: bool = Field(
         ...,
         description="Whether to rotate the output layer to its eigenbasis.",
@@ -156,7 +162,7 @@ def main(config_path_str: str):
         data_loader=train_loader,
         dtype=dtype,
         device=device,
-        collect_output_gram=True,
+        collect_output_gram=config.collect_logits,
         hook_names=config.node_layers,
     )
 
@@ -201,7 +207,7 @@ def main(config_path_str: str):
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in config.node_layers],
+        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
     }

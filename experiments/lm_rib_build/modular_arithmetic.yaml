@@ -10,6 +10,7 @@ node_layers:
   - unembed
 batch_size: 256
 truncation_threshold: 1e-6
+collect_logits: true
 rotate_output: false
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
 n_intervals: 0

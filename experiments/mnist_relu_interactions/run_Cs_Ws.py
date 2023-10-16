@@ -10,6 +10,7 @@ import numpy as np
 import seaborn as sns
 import torch
 import yaml
+from einops import rearrange
 from jaxtyping import Float
 from pydantic import BaseModel, field_validator
 from scipy.cluster.hierarchy import dendrogram, leaves_list, linkage
@@ -93,7 +94,7 @@ def edit_weights_fn(model: HookedModel, layer_name: str) -> None:
     layer.weight.data.copy_(weights)
 
 
-def get_nested_attribute(obj, attr_name):
+def get_nested_attribute(obj: Any, attr_name: str)-> Any:
     attrs = attr_name.split('.')
     current_attr = obj
     for attr in attrs:
@@ -108,7 +109,23 @@ def extract_weights(model: torch.nn.Module) -> list[torch.Tensor]:
     for name, layer in model.named_children():
         if hasattr(layer, 'weight'):
             weights = get_nested_attribute(model, name + '.weight').data.clone()
+
+            if weights.dim() == 2:
+                batch_size, d_hidden = weights.shape
+            elif weights.dim() == 3:
+                batch_size, pos, d_hidden = weights.shape
+
+            # Create vector with last element 1
+            to_append_weights = torch.zeros(d_hidden)
+            to_append_weights[-1] = 1
+            # Append as row of W (dims output, input)
+            # N.B. will tranpose weights later for multiplication
+            # Since canonical code form will be (input, output)
+            weights = torch.cat([weights, rearrange(to_append_weights, 'd -> 1 d')], dim=0)
+            assert weights[-1, -1] == 1
+
             weights_list.append(weights)
+
         # Recursively extract weights from nested children
         weights_list.extend(extract_weights(layer))
 
@@ -229,40 +246,40 @@ def check_and_open_file(file_path: Path, get_var_fn: callable, config_path_str: 
     return var
 
 
-def get_f_hats(
-    config_path_str: str,
-    file_path: str,
-    Cs_list: list[Float[Tensor, "d_hidden d_hidden"]],
-) -> list[Float[Tensor, "batch d_hidden"]]:
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
-    set_seed(config.seed)
+# def get_f_hats(
+#     config_path_str: str,
+#     file_path: str,
+#     Cs_list: list[Float[Tensor, "d_hidden d_hidden"]],
+# ) -> list[Float[Tensor, "batch d_hidden"]]:
+#     config_path = Path(config_path_str)
+#     config = load_config(config_path, config_model=Config)
+#     set_seed(config.seed)
 
-    with open(config.mlp_path.parent / "config.yaml", "r") as f:
-        model_config_dict = yaml.safe_load(f)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    mlp.eval()  # Run in inference only
-    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-    hooked_mlp = HookedModel(mlp)
+#     with open(config.mlp_path.parent / "config.yaml", "r") as f:
+#         model_config_dict = yaml.safe_load(f)
+#     device = "cuda" if torch.cuda.is_available() else "cpu"
+#     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+#     mlp.eval()  # Run in inference only
+#     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+#     hooked_mlp = HookedModel(mlp)
 
-    train_loader = load_mnist_dataloader(
-        train=True, batch_size=config.batch_size)
+#     train_loader = load_mnist_dataloader(
+#         train=True, batch_size=config.batch_size)
 
-    # Get functions rotated by non rescaled Cs
-    f_hats = collect_activations_and_rotate(
-        Cs=Cs_list,
-        hooked_model=hooked_mlp,
-        module_names=config.node_layers,
-        data_loader=train_loader,
-        dtype=TORCH_DTYPES[config.dtype],
-        device=device,
-    )
+#     # Get functions rotated by non rescaled Cs
+#     f_hats = collect_activations_and_rotate(
+#         Cs=Cs_list,
+#         hooked_model=hooked_mlp,
+#         module_names=config.node_layers,
+#         data_loader=train_loader,
+#         dtype=TORCH_DTYPES[config.dtype],
+#         device=device,
+#     )
 
-    with open(file_path, "wb") as f:
-        pickle.dump(f_hats, f)
+#     with open(file_path, "wb") as f:
+#         pickle.dump(f_hats, f)
 
-    return f_hats
+#     return f_hats
 
 
 def get_edges(
@@ -287,7 +304,7 @@ def get_edges(
     train_loader = load_mnist_dataloader(
         train=True, batch_size=config.batch_size)
 
-    edges = collect_test_edges(
+    edges: dict[str, Float[Tensor, "d_hidden_trunc_1 d_hiddn_trunc_2"]] = collect_test_edges(
         Cs_unscaled=Cs_unscaled_list,
         Cs=Cs_list,
         W_hats=W_hat_list,
@@ -297,11 +314,12 @@ def get_edges(
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
     )
+    edges_list = list(edges.values())
 
     with open(file_path, "wb") as f:
-        pickle.dump(edges, f)
+        pickle.dump(edges_list, f)
 
-    return edges
+    return edges_list
 
 
 def Cs_Ws_main(config_path_str: str) -> None:

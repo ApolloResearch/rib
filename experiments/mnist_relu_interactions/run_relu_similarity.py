@@ -120,7 +120,7 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                 # Transform into distance matrix
                 distance_matrix = 1 - similarity_matrix
             case 1:
-                similarity_matrix = torch.min(
+                similarity_matrix = torch.max(
                     similarity_matrix, similarity_matrix.T) # Make symmetric
                 # similarity_matrix = rescale(similarity_matrix)
                 distance_matrix = similarity_matrix

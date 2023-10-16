@@ -255,8 +255,8 @@ def collect_relu_interactions(
     device: str,
     relu_metric_type: int,
     hook_names: Optional[str] = None
-) -> dict[str, Union[Float[Tensor, "d_hidden d_hidden"], Float[Tensor, "d_hidden_concat d_hidden_concat"]]]:
-    """Identify whether ReLUs are synchronising using basic checking of layer operators O(x) only (pointwise evaluations of ratio of input to output).
+) -> tuple[dict[str, Union[Float[Tensor, "d_hidden d_hidden"], Float[Tensor, "d_hidden_concat d_hidden_concat"]]], ...]:
+    """Identify whether ReLUs are synchronising.
 
     This currently only works for piecewise linear functions and modules must be activation type modules.
     Recall that the node layers correspond to the positions at the input to each module specified in
@@ -288,7 +288,7 @@ def collect_relu_interactions(
         relu_interaction_hooks.append(
             Hook(
                 name=hook_name,
-                data_key="relu_interaction",
+                data_key=["relu_num", "relu_denom"],
                 fn=relu_interaction_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={'relu_metric_type': relu_metric_type}
@@ -298,13 +298,17 @@ def collect_relu_interactions(
     run_dataset_through_model(
         hooked_model, data_loader, hooks=relu_interaction_hooks, dtype=dtype, device=device)
 
-    # Collect ReLU interaction matrices and scale by size of dataset
-    relu_interaction_matrices: dict[str, Union[Float[Tensor, "d_hidden d_hidden"], Float[Tensor, "d_hidden_concat d_hidden_concat"]]] = {
-        hook_name: torch.div(hooked_model.hooked_data[hook_name]["relu_interaction"], len(data_loader)) for hook_name in hooked_model.hooked_data
+    # Collect ReLU interaction matrices and divide by dataset size
+    relu_similarity_matrices: dict[str, Union[Float[Tensor, "d_hidden d_hidden"], Float[Tensor, "d_hidden_concat d_hidden_concat"]]] = {
+        hook_name: torch.div(
+            torch.div(hooked_model.hooked_data[hook_name]["relu_num"], len(data_loader.dataset)),
+            torch.div(hooked_model.hooked_data[hook_name]["relu_denom"], len(data_loader.dataset))
+            )
+        for hook_name in hooked_model.hooked_data
     }
     hooked_model.clear_hooked_data()
 
-    return relu_interaction_matrices
+    return relu_similarity_matrices
 
 
 def collect_activations_and_rotate(
@@ -371,17 +375,16 @@ def collect_test_edges(
 
     test_edges_hooks = []
     for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
-        if i == len(module_names) - 2: # Can't collect test edges for output layer
+        if i == len(module_names) - 1: # Can't collect test edges for output layer
             break
         test_edges_hooks.append(
             Hook(
                 name=hook_name,
-                data_key="activation",
+                data_key="test_edge",
                 fn=test_edges_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={
                     'C_unscaled': Cs_unscaled[i],
-                    'C': Cs[i],
                     'C_next_layer': Cs[i+1],
                     'W_hat': W_hats[i]
                 }
@@ -391,7 +394,7 @@ def collect_test_edges(
     run_dataset_through_model(hooked_model, data_loader, hooks=test_edges_hooks, dtype=dtype, device=device)
 
     edges = {
-        hook_name: torch.div(hooked_model.hooked_data[hook_name]["activation"], len(data_loader)) for hook_name in hooked_model.hooked_data
+        hook_name: torch.div(hooked_model.hooked_data[hook_name]["test_edge"], len(data_loader.dataset)) for hook_name in hooked_model.hooked_data
     }
     hooked_model.clear_hooked_data()
 

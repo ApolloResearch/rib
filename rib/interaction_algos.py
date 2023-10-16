@@ -29,7 +29,7 @@ class Eigenvectors:
     """Dataclass storing the eigenvectors of a node layer."""
 
     node_layer_name: str
-    U: Float[Tensor, "d_hidden d_hidden"]
+    U: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
 
 
 def build_sorted_lambda_matrices(
@@ -138,18 +138,19 @@ def calculate_interaction_rotations(
     # The interaction rotation for the final layer is simply the eigenvectors U (or an identity
     # matrix if rotate_output is False)
     out_key = "output" if "output" in gram_matrices else hook_names[-1]
-    _, U_output = eigendecompose(gram_matrices[out_key])
-
-    Us.append(Eigenvectors(node_layer_name=out_key, U=U_output.detach().cpu()))
 
     if rotate_output:
+        _, U_output = eigendecompose(gram_matrices[out_key])
         C_output: Float[Tensor, "d_hidden d_hidden"] = U_output
     else:
+        U_output = None
         C_output = torch.eye(
             gram_matrices[out_key].shape[0],
             device=gram_matrices[out_key].device,
             dtype=gram_matrices[out_key].dtype,
         )
+    U_output = U_output.detach().cpu() if U_output else None
+    Us.append(Eigenvectors(node_layer_name=out_key, U=U_output))
     Cs.append(InteractionRotation(node_layer_name=out_key, C=C_output.clone().detach()))
 
     module_and_hook_names = (

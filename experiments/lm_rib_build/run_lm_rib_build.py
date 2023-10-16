@@ -29,7 +29,7 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Union, cast
 
 import fire
 import torch
@@ -140,10 +140,11 @@ def main(config_path_str: str):
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    # Importantly, use the same dataset as was used for training
+    # This script doesn't need both train and test sets
+    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
-        return_set="train",
+        return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
 

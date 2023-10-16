@@ -193,10 +193,7 @@ def main(config_path_str: str) -> tuple[float, float]:
     if not config.train.save_dir:
         config.train.save_dir = Path(__file__).parent / ".checkpoints" / "modular_arithmetic"
 
-    datasets = load_dataset(
-        dataset_config=config.dataset,
-        return_set="both",
-    )
+    datasets = load_dataset(dataset_config=config.dataset, return_set=config.dataset.return_set)
     train_loader, test_loader = create_data_loader(
         datasets, shuffle=True, batch_size=config.train.batch_size
     )

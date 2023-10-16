@@ -29,6 +29,7 @@ model:
   normalization_type: null
 dataset:
   name: modular_arithmetic
+  return_set: both
   modulus: 113
   frac_train: .30
   fn_name: add

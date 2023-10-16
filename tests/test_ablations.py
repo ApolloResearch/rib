@@ -250,6 +250,7 @@ def test_run_modular_arithmetic_rib_ablations():
     ablate_every_vec_cutoff: 2
     dataset:
         name: modular_arithmetic
+        return_set: test
     node_layers:
         - ln1.0
         - unembed
@@ -279,6 +280,7 @@ def test_run_modular_arithmetic_orthog_ablations():
     ablate_every_vec_cutoff: 10
     dataset:
         name: modular_arithmetic
+        return_set: test
     node_layers:
         - ln1.0
         - unembed

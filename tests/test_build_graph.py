@@ -114,6 +114,7 @@ def test_modular_arithmetic_build_graph():
         - unembed
     dataset:
         name: modular_arithmetic
+        return_set: train
     batch_size: 128
     truncation_threshold: 1e-6
     logits_node_layer: false

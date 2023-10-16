@@ -108,7 +108,6 @@ def create_modular_arithmetic_dataset(
     Args:
         dataset_config(ModularArithmeticDatasetConfig): The dataset config (overrides the config
             loaded from the tlens model).
-        return_set (str): What part of the dataset to return.
         tlens_model_path (Optional[Path]): The path to the tlens model (if applicable).
     """
     modulus, fn_name, frac_train, seed = None, None, None, None
@@ -156,15 +155,16 @@ def load_wikitext(
 
     Args:
         dataset_config (WikitextConfig): The dataset config.
-        return_set (str): What part of the dataset to return.
-    """
-    assert return_set in ["train", "test"], "Only train and test sets are supported for now"
-    assert "pythia" in dataset_config.tokenizer_name, "Only pythia models are supported for now"
-    n_ctx = 1024 if "gpt2" in dataset_config.tokenizer_name else 2048
+        return_set (Literal["train", "test", "all"]): The dataset to return.
 
+    """
+    assert "pythia" in dataset_config.tokenizer_name, "Only pythia models are supported for now"
+    assert return_set in ["train", "test", "all"], "Currently only supports train, test, and all"
     assert not (
         dataset_config.return_set_frac and dataset_config.return_set_n_samples
     ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
+
+    n_ctx = 1024 if "gpt2" in dataset_config.tokenizer_name else 2048
 
     if dataset_config.return_set_frac:
         data_split = f"{return_set}[:{int(dataset_config.return_set_frac * 100)}%]"
@@ -222,7 +222,6 @@ def load_dataset(
     Load a dataset based on the provided type and arguments.
 
     Args:
-        return_set (str): What part of the dataset to return.
         dataset_config (Union[ModularArithmeticDatasetConfig, WikitextConfig]): The dataset config.
         tlens_model_path (Optional[Path]): The path to the tlens model (if applicable).
         **kwargs: Additional arguments needed for specific dataset types.

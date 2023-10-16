@@ -19,7 +19,7 @@ Usage:
 
 import json
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Union, cast
 
 import fire
 import torch
@@ -110,9 +110,11 @@ def main(config_path_str: str) -> None:
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
+    # This script doesn't need both train and test sets
+    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
-        return_set="test",
+        return_set=return_set,
         tlens_model_path=tlens_model_path,
     )
     data_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)

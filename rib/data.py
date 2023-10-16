@@ -13,6 +13,7 @@ class WikitextConfig(BaseModel):
     tokenizer_name: str = Field(
         ..., description="The name of the model for fetching the tokenizer."
     )
+    return_set: Literal["train", "test"] = Field(..., description="The dataset to return.")
     return_set_frac: Optional[float] = Field(
         None,
         description="The fraction of the returned dataset (train/test/all/both) to use. Cannot be"
@@ -33,6 +34,11 @@ class ModularArithmeticDatasetConfig(BaseModel):
     """
 
     name: Literal["modular_arithmetic"]
+    return_set: Literal["train", "test", "all", "both"] = Field(
+        ...,
+        description="The dataset to return. If 'both', returns both the train and test datasets."
+        "If 'all', returns the combined train and test datasets.",
+    )
     modulus: Optional[int] = Field(None, description="The modulus to use for the dataset.")
     fn_name: Optional[Literal["add", "subtract", "x2xyy2"]] = Field(
         None,

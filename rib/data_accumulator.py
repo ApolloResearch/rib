@@ -115,13 +115,13 @@ def collect_gram_matrices(
     if collect_output_gram:
         assert set(gram_matrices.keys()) == set(hook_names + ["output"])
     else:
-        assert set(gram_matrices.keys()) == set(module_names)
+        assert set(gram_matrices.keys()) == set(hook_names)
 
     return gram_matrices
 
 
 def collect_M_dash_and_Lambda_dash(
-    C_out: Float[Tensor, "out_hidden out_hidden"],
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden"]],
     hooked_model: HookedModel,
     n_intervals: int,
     data_loader: DataLoader,
@@ -194,6 +194,10 @@ def collect_interaction_edges(
     Recall that the node layers correspond to the positions at the input to each module specified in
     module_names, as well as the output of the final module.
 
+    Note that there is no edge weight that uses the position of the final interaction matrix as a
+    starting node. This means that, if we did not collect the output logits, we don't apply any
+    hooks to the final module list in module_names.
+
     Args:
         Cs: The interaction rotation matrix and its pseudoinverse, order by node layer.
         hooked_model: The hooked model.
@@ -208,9 +212,9 @@ def collect_interaction_edges(
         through.
     """
 
-    assert Cs[-1].node_layer_name == "output", "The last node layer name must be 'output'."
+    edge_modules = module_names if Cs[-1].node_layer_name == "output" else module_names[:-1]
     edge_hooks: list[Hook] = []
-    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], module_names)):
+    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
         edge_hooks.append(
             Hook(
                 name=C_info.node_layer_name,

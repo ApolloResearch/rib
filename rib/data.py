@@ -1,4 +1,5 @@
 """Define custom datasets."""
+from typing import Literal
 
 import torch
 from jaxtyping import Int
@@ -12,7 +13,7 @@ class ModularArithmeticDataset(Dataset):
     def __init__(
         self,
         modulus: int,
-        fn_name: str = "add",
+        fn_name: Literal["add", "subtract", "x2xyy2"] = "add",
     ):
         self.modulus = modulus
         self.fn_name = fn_name

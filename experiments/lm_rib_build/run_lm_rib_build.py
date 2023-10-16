@@ -38,28 +38,33 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
-from rib.loader import (
-    create_modular_arithmetic_data_loader,
-    load_sequential_transformer,
-)
+from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
-from rib.types import TORCH_DTYPES
+from rib.types import DATASET_TYPES, TORCH_DTYPES
 from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
 
 
 class Config(BaseModel):
     exp_name: str = Field(..., description="The name of the experiment")
     seed: int = Field(..., description="The random seed value for reproducibility")
-    tlens_pretrained: Optional[Literal["gpt2"]] = Field(
+    tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."
     )
     tlens_model_path: Optional[Path] = Field(
         None, description="Path to saved transformer lens model."
     )
     node_layers: list[str] = Field(
-        ..., description="Names of the node layers to build the graph with."
+        ..., description="Names of the modules whose inputs correspond to node layers in the graph."
     )
-    dataset: Literal["modular_arithmetic", "wikitext"] = Field(
+    logits_node_layer: bool = Field(
+        ...,
+        description="Whether to build an extra output node layer for the logits.",
+    )
+    rotate_final_node_layer: bool = Field(
+        ...,
+        description="Whether to rotate the final node layer to its eigenbasis or not.",
+    )
+    dataset: DATASET_TYPES = Field(
         ...,
         description="The dataset to use to build the graph.",
     )
@@ -67,10 +72,6 @@ class Config(BaseModel):
     truncation_threshold: float = Field(
         ...,
         description="Remove eigenvectors with eigenvalues below this threshold.",
-    )
-    rotate_output: bool = Field(
-        ...,
-        description="Whether to rotate the output layer to its eigenbasis.",
     )
     last_pos_module_type: Optional[Literal["add_resid1", "unembed"]] = Field(
         None,
@@ -83,6 +84,11 @@ class Config(BaseModel):
     )
 
     dtype: str = Field(..., description="The dtype to use when building the graph.")
+
+    eps: float = Field(
+        1e-5,
+        description="The epsilon value to use for numerical stability in layernorm layers.",
+    )
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -111,10 +117,6 @@ def main(config_path_str: str):
         logger.info("Exiting.")
         return None
 
-    assert (
-        config.tlens_pretrained is None and config.tlens_model_path is not None
-    ), "Currently can't build graphs for pretrained models due to memory limits."
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
@@ -123,6 +125,7 @@ def main(config_path_str: str):
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
+        eps=config.eps,
         dtype=dtype,
         device=device,
     )
@@ -131,15 +134,18 @@ def main(config_path_str: str):
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
+    assert (
+        config.tlens_pretrained is None and config.tlens_model_path is not None
+    ), "Currently can't build graphs for pretrained models due to memory limits."
     assert config.dataset == "modular_arithmetic", "Currently only supports modular arithmetic."
 
     # Importantly, use the same dataset as was used for training
-    train_loader = create_modular_arithmetic_data_loader(
-        shuffle=True,
+    dataset = load_dataset(
+        dataset_type=config.dataset,
         return_set="train",
         tlens_model_path=config.tlens_model_path,
-        batch_size=config.batch_size,
     )
+    train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
     # Test model accuracy before graph building, ta be sure
     accuracy = eval_model_accuracy(hooked_model, train_loader, dtype=dtype, device=device)
@@ -148,13 +154,16 @@ def main(config_path_str: str):
     # Don't build the graph for the section of the model before the first node layer
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
+    # Only need gram matrix for logits if we're rotating the final node layer
+    collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_model,
         module_names=graph_module_names,
         data_loader=train_loader,
         dtype=dtype,
         device=device,
-        collect_output_gram=True,
+        collect_output_gram=collect_output_gram,
         hook_names=config.node_layers,
     )
 
@@ -166,8 +175,9 @@ def main(config_path_str: str):
         dtype=dtype,
         device=device,
         n_intervals=config.n_intervals,
+        logits_node_layer=config.logits_node_layer,
         truncation_threshold=config.truncation_threshold,
-        rotate_output=config.rotate_output,
+        rotate_final_node_layer=config.rotate_final_node_layer,
         hook_names=config.node_layers,
     )
 
@@ -185,11 +195,8 @@ def main(config_path_str: str):
     interaction_rotations = []
     for C_info in Cs:
         info_dict = asdict(C_info)
-        info_dict["C"] = info_dict["C"].cpu()
-        if info_dict["C_pinv"] is not None:
-            info_dict["C_pinv"] = info_dict["C_pinv"].cpu()
-        else:
-            info_dict["C_pinv"] = None
+        info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
+        info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
         interaction_rotations.append(info_dict)
 
     eigenvectors = [asdict(U_info) for U_info in Us]
@@ -199,7 +206,7 @@ def main(config_path_str: str):
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in config.node_layers],
+        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
     }

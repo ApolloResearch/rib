@@ -29,18 +29,19 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import fire
 import torch
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from rib.data import ModularArithmeticDatasetConfig, WikitextConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
-from rib.types import DATASET_TYPES, TORCH_DTYPES
+from rib.types import TORCH_DTYPES
 from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
 
 
@@ -64,8 +65,9 @@ class Config(BaseModel):
         ...,
         description="Whether to rotate the final node layer to its eigenbasis or not.",
     )
-    dataset: DATASET_TYPES = Field(
+    dataset: Union[ModularArithmeticDatasetConfig, WikitextConfig] = Field(
         ...,
+        discriminator="name",
         description="The dataset to use to build the graph.",
     )
     batch_size: int = Field(..., description="The batch size to use when building the graph.")
@@ -88,6 +90,10 @@ class Config(BaseModel):
     eps: float = Field(
         1e-5,
         description="The epsilon value to use for numerical stability in layernorm layers.",
+    )
+    calculate_edges: bool = Field(
+        True,
+        description="Whether to calculate the edges of the interaction graph.",
     )
 
     @field_validator("dtype")
@@ -134,17 +140,13 @@ def main(config_path_str: str):
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    assert (
-        config.tlens_pretrained is None and config.tlens_model_path is not None
-    ), "Currently can't build graphs for pretrained models due to memory limits."
-    assert config.dataset == "modular_arithmetic", "Currently only supports modular arithmetic."
-
     # Importantly, use the same dataset as was used for training
     dataset = load_dataset(
-        dataset_type=config.dataset,
+        dataset_config=config.dataset,
         return_set="train",
         tlens_model_path=config.tlens_model_path,
     )
+
     train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
     # Test model accuracy before graph building, ta be sure
@@ -181,15 +183,20 @@ def main(config_path_str: str):
         hook_names=config.node_layers,
     )
 
-    E_hats = collect_interaction_edges(
-        Cs=Cs,
-        hooked_model=hooked_model,
-        n_intervals=config.n_intervals,
-        module_names=graph_module_names,
-        data_loader=train_loader,
-        dtype=dtype,
-        device=device,
-    )
+    if not config.calculate_edges:
+        logger.info("Skipping edge calculation.")
+        E_hats = {}
+    else:
+        logger.info("Calculating edges.")
+        E_hats = collect_interaction_edges(
+            Cs=Cs,
+            hooked_model=hooked_model,
+            n_intervals=config.n_intervals,
+            module_names=graph_module_names,
+            data_loader=train_loader,
+            dtype=dtype,
+            device=device,
+        )
 
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []

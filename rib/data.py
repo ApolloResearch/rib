@@ -1,10 +1,47 @@
 """Define custom datasets."""
-from typing import Literal
+from typing import Literal, Optional
 
 import torch
 from jaxtyping import Int
+from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.utils.data import Dataset
+
+
+class WikitextConfig(BaseModel):
+    name: Literal["wikitext"]
+    tokenizer_name: str = Field(
+        ..., description="The name of the model for fetching the tokenizer."
+    )
+    return_set_frac: Optional[float] = Field(
+        None,
+        description="The fraction of the returned dataset (train/test/all/both) to use. Cannot be"
+        "used with return_set_n_samples.",
+    )
+    return_set_n_samples: Optional[int] = Field(
+        None,
+        description="The number of raw samples to return from the dataset (train/test/all/both). "
+        "Cannot be used with return_set_frac.",
+    )
+
+
+class ModularArithmeticDatasetConfig(BaseModel):
+    """Config for the modular arithmetic dataset.
+
+    We set fields to optional so that we have the option of loading them in from a pre-saved config
+    file (see `rib/loader.create_modular_arithmetic_dataset`)
+    """
+
+    name: Literal["modular_arithmetic"]
+    modulus: Optional[int] = Field(None, description="The modulus to use for the dataset.")
+    fn_name: Optional[Literal["add", "subtract", "x2xyy2"]] = Field(
+        None,
+        description="The function to use for the dataset. One of 'add', 'subtract', or 'x2xyy2'.",
+    )
+    frac_train: Optional[float] = Field(
+        None, description="Fraction of the dataset to use for training."
+    )
+    seed: Optional[int] = Field(None, description="The random seed value for reproducibility.")
 
 
 class ModularArithmeticDataset(Dataset):

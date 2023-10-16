@@ -8,7 +8,7 @@ Usage:
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Optional
 
 import fire
 import torch
@@ -21,6 +21,7 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
+from rib.data import ModularArithmeticDatasetConfig
 from rib.loader import create_data_loader, load_dataset
 from rib.log import logger
 from rib.models.utils import save_model
@@ -40,9 +41,6 @@ class ModelConfig(BaseModel):
 
 
 class TrainConfig(BaseModel):
-    modulus: int
-    frac_train: float
-    fn_name: Literal["add", "subtract", "x2xyy2"]
     learning_rate: float
     batch_size: int  # Set to max(batch_size, <number of samples in dataset>)
     epochs: int
@@ -60,6 +58,7 @@ class Config(BaseModel):
     seed: int
     model: ModelConfig
     train: TrainConfig
+    dataset: ModularArithmeticDatasetConfig
     wandb: Optional[WandbConfig]
 
 
@@ -195,12 +194,8 @@ def main(config_path_str: str) -> tuple[float, float]:
         config.train.save_dir = Path(__file__).parent / ".checkpoints" / "modular_arithmetic"
 
     datasets = load_dataset(
-        dataset_type="modular_arithmetic",
+        dataset_config=config.dataset,
         return_set="both",
-        fn_name=config.train.fn_name,
-        modulus=config.train.modulus,
-        seed=config.seed,
-        frac_train=config.train.frac_train,
     )
     train_loader, test_loader = create_data_loader(
         datasets, shuffle=True, batch_size=config.train.batch_size

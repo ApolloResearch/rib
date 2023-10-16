@@ -109,10 +109,11 @@ def test_modular_arithmetic_build_graph():
     tlens_pretrained: null
     tlens_model_path: OVERWRITE/IN/MOCK
     node_layers:
-      - ln1.0
-      - mlp_in.0
-      - unembed
-    dataset: modular_arithmetic
+        - ln1.0
+        - mlp_in.0
+        - unembed
+    dataset:
+        name: modular_arithmetic
     batch_size: 128
     truncation_threshold: 1e-6
     logits_node_layer: false

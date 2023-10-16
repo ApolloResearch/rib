@@ -2,7 +2,8 @@ exp_name: orthog_modular_arithmetic
 ablation_type: orthogonal
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt
 ablate_every_vec_cutoff: 10
-dataset: modular_arithmetic
+dataset:
+  name: modular_arithmetic
 node_layers:  # Rotate the input to these modules into the orthogonal basis
   - ln1.0
   - ln2.0

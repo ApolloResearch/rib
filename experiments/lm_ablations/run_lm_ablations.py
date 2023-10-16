@@ -19,17 +19,18 @@ Usage:
 
 import json
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import fire
 import torch
 from pydantic import BaseModel, Field, field_validator
 
 from rib.ablations import load_basis_matrices, run_ablations
+from rib.data import ModularArithmeticDatasetConfig, WikitextConfig
 from rib.hook_manager import HookedModel
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
-from rib.types import DATASET_TYPES, TORCH_DTYPES
+from rib.types import TORCH_DTYPES
 from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
 
 
@@ -41,7 +42,11 @@ class Config(BaseModel):
         None,
         description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
     )
-    dataset: DATASET_TYPES
+    dataset: Union[ModularArithmeticDatasetConfig, WikitextConfig] = Field(
+        ...,
+        discriminator="name",
+        description="The dataset to use to build the graph.",
+    )
     node_layers: list[str]
     batch_size: int
     dtype: str
@@ -105,16 +110,10 @@ def main(config_path_str: str) -> None:
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    assert (
-        interaction_graph_info["config"]["dataset"] == "modular_arithmetic"
-    ), "Currently only supports modular arithmetic."
-
     dataset = load_dataset(
-        dataset_type=config.dataset,
+        dataset_config=config.dataset,
         return_set="test",
         tlens_model_path=tlens_model_path,
-        seed=config.seed,
-        frac_train=0.5,  # Take a random 50% split of the dataset
     )
     data_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 

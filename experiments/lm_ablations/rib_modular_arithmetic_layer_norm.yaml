@@ -2,8 +2,9 @@ exp_name: rib_eps1e-4_ln_intervals50_modular_arithmetic
 ablation_type: rib
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/eps1e-4_ln_intervals50_modular_arithmetic_interaction_graph.pt
 ablate_every_vec_cutoff: 10
-dataset: modular_arithmetic
-node_layers:  # Rotate the input to these modules into the orthogonal basis
+dataset:
+  name: modular_arithmetic
+node_layers:  # Rotate the input to these modules into the interaction basis
   - ln1.0
   - ln2.0
   - mlp_out.0

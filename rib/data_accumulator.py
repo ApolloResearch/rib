@@ -388,8 +388,8 @@ def collect_test_edges(
                 fn=test_edges_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={
-                    'C_unscaled': Cs_unscaled[i],
-                    'C_next_layer': Cs[i+1],
+                    'C_unscaled': Cs_unscaled[i].detach().cpu(),
+                    'C_next_layer': Cs[i+1].detach().cpu(),
                     'W_hat': W_hats[i]
                 }
             )

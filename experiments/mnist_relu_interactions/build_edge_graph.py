@@ -32,6 +32,7 @@ def main(results_file: str) -> None:
         exp_name=results["exp_name"],
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,
+        layer_names=['layers.0', 'layers.1', 'layers.2']
     )
 
 

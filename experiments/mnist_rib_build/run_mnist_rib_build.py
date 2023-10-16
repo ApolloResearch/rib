@@ -111,9 +111,7 @@ def main(config_path_str: str) -> None:
         collect_output_gram=collect_output_gram,
     )
 
-    # Calls on collect_M_dash_and_Lambda_dash
-    # Builds sqrt sorted Lambda matrix and its inverse
-    Cs, Us = calculate_interaction_rotations(
+    Cs, Us, _, _, _, _, = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
         module_names=config.node_layers,
         hooked_model=hooked_mlp,

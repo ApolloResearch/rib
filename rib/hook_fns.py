@@ -533,6 +533,8 @@ def test_edges_forward_hook_fn(
     # Get whole load of matrices to left of f in equation
     unsqueezed_C_next_layer = repeat(C_next_layer, 'd_hidden_out d_hidden_trunc_next -> batch_size d_hidden_out d_hidden_trunc_next', batch_size=batch_size)
     unsqueezed_W_hat_transpose = repeat(W_hat.T, 'd_hidden_out d_hidden_trunc_in -> batch_size d_hidden_out d_hidden_trunc_in', batch_size=batch_size)
+    # print(f"W_hat_transpose {unsqueezed_W_hat_transpose.shape}")
+    # print(f"C next layer {unsqueezed_C_next_layer.shape}")
     C_O_W_hat: Float[Tensor, "batch d_hidden_trunc_curr d_hidden_trunc_next"] = unsqueezed_W_hat_transpose @ diag_operator_matrix @ unsqueezed_C_next_layer
 
     batch_size, d_hidden_trunc_curr, d_hidden_trunc_next = C_O_W_hat.shape

@@ -44,7 +44,8 @@ class Config(BaseModel):
     batch_size: int
     seed: int
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
-    rotate_output: bool  # Whether to rotate the output layer to its eigenbasis.
+    logits_node_layer: bool  # Whether to build an extra output node layer for the logits.
+    rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
     node_layers: list[str]
@@ -110,7 +111,7 @@ def extract_weights(model: torch.nn.Module) -> list[torch.Tensor]:
 
     for name, layer in model.named_children():
         if hasattr(layer, 'weight'):
-            weights = get_nested_attribute(model, name + '.weight').data.clone()
+            weights = get_nested_attribute(model, name + '.weight').data.clone().cpu()
 
             if weights.dim() == 2:
                 batch_size, d_hidden = weights.shape
@@ -142,7 +143,7 @@ def plot(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_name: str, o
         nrows, ncols = matrix.shape
         figsize = (int(ncols * 0.1), int(nrows * 0.1))
         plt.figure(figsize=figsize)
-        sns.heatmap(matrix, annot=False,
+        sns.heatmap(matrix.detach().cpu(), annot=False,
                     cmap="YlGnBu", cbar=True, square=True)
         plt.savefig(
             out_dir / f"{var_name}_{i}.png")
@@ -158,7 +159,8 @@ def get_Cs(
     list[Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"]],
     list[Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"]]],
 ]:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
     model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_model = HookedModel(model)
 
@@ -185,7 +187,7 @@ def get_Cs(
         device=device,
         n_intervals=config.n_intervals,
         truncation_threshold=config.truncation_threshold,
-        rotate_output=config.rotate_output,
+        rotate_final_node_layer=config.rotate_final_node_layer,
     )
 
     C_list = [C_info.C for C_info in Cs]
@@ -208,7 +210,7 @@ def get_rotated_Ws(
     weights_list = extract_weights(model)
     rotated_weights_list = []
     for weight_matrix, C_pinv in zip(weights_list, C_pinv_list):
-        rotated_weights_list.append(weight_matrix @ C_pinv)
+        rotated_weights_list.append(weight_matrix @ C_pinv.detach().cpu())
 
     with open(file_path, "wb") as f:
         pickle.dump(rotated_weights_list, f)
@@ -224,7 +226,8 @@ def get_edges(
     Cs_unscaled_list: list[Float[Tensor, "d_hidden d_hidden"]],
     W_hat_list: list[Float[Tensor, "d_hidden d_hidden"]],
 ) -> dict[str, Float[Tensor, "d_hidden_trunc_curr d_hidden_trunc_next"]]:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
     model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_model = HookedModel(model)
 
@@ -317,7 +320,7 @@ def Cs_Ws_main(config_path_str: str) -> None:
         get_var_fn=get_rotated_Ws,
         config=config,
         model=model,
-        C_pinv_list=U_D_sqrt_pinv_Vs_list
+        C_pinv_list=U_D_sqrt_Vs_list
     )
 
     edges_dict = check_and_open_file(
@@ -341,7 +344,8 @@ def Cs_Ws_main(config_path_str: str) -> None:
     interaction_rotations = []
     for C_info in Cs:
         info_dict = asdict(C_info)
-        info_dict["C"] = info_dict["C"].cpu()
+        print(f"C info {C_info}")
+        info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
         if info_dict["C_pinv"] is not None:
             info_dict["C_pinv"] = info_dict["C_pinv"].cpu()
         else:

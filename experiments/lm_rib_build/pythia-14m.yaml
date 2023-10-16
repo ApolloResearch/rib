@@ -8,6 +8,7 @@ node_layers:
   - unembed
 batch_size: 16
 truncation_threshold: 1e-6
-rotate_output: false
+logits_node_layer: true
+rotate_final_node_layer: false
 n_intervals: 0
 dtype: float32

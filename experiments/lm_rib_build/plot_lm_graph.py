@@ -15,11 +15,7 @@ from rib.utils import overwrite_output
 
 
 def main(results_file: str) -> None:
-    """Plot an interaction graph given a results file contain the graph edges.
-
-    TODO: Handle showing a different number of nodes per layer as opposed to the same n_nodes in
-    all layers after the first one.
-    """
+    """Plot an interaction graph given a results file contain the graph edges."""
     results = torch.load(results_file)
     out_dir = Path(__file__).parent / "out"
     out_file = out_dir / f"{results['exp_name']}_interaction_graph.png"
@@ -31,8 +27,13 @@ def main(results_file: str) -> None:
     # Set all layers to have the same number of nodes
     nodes_per_layer = 40
 
+    layer_names = results["config"]["node_layers"]
+    if results["config"]["collect_logits"]:
+        layer_names.append("logits")
+
     plot_interaction_graph(
         raw_edges=results["edges"],
+        layer_names=layer_names,
         exp_name=results["exp_name"],
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,

@@ -29,7 +29,7 @@ class Eigenvectors:
     """Dataclass storing the eigenvectors of a node layer."""
 
     node_layer_name: str
-    U: Float[Tensor, "d_hidden d_hidden"]
+    U: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
 
 
 def build_sorted_lambda_matrices(
@@ -96,18 +96,18 @@ def calculate_interaction_rotations(
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
-    This function implements Algorithm 1 of the paper. We name the variables as they are named in
-    the paper.
-
-    Recall that we have one more node layer than module layer, as we have a node layer for the
-    output of the final module.
+    This function implements Algorithm 2 (Pseudocode for RIB in transformers) of the paper. We name
+    the variables as they are named in the paper.
 
     We collect the interaction rotation matrices from the output layer backwards, as we need the
-    next layer's rotation to compute the current layer's rotation. We reverse the list at the end.
+    next layer's rotation to compute the current layer's rotation. We reverse the resulting Cs and
+    Us back to the original node order before returning.
+
+    The output layer will either be the logits or the inputs to the final node_layer in the config,
+    depending on whether collect_logits in the config is True or False, respectively.
 
     Args:
-        gram_matrices: The gram matrices for each layer, keyed by layer name. Must include
-            an `output` key for the output layer.
+        gram_matrices: The gram matrices for each layer, keyed by layer name.
         module_names: The names of the modules to build the graph from, in order of appearance.
         hooked_model: The hooked model.
         data_loader: The data loader.
@@ -125,29 +125,40 @@ def calculate_interaction_rotations(
         - A list of objects containing the eigenvectors of each node layer, ordered by node layer
         appearance in model.
     """
-    assert "output" in gram_matrices, "Gram matrices must include an `output` key."
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
     else:
         hook_names = module_names
 
-    _, U_output = eigendecompose(gram_matrices["output"])
-    Us: list[Eigenvectors] = [Eigenvectors(node_layer_name="output", U=U_output.detach().cpu())]
-
     # We start appending Us and Cs from the output layer and work our way backwards
+    Us: list[Eigenvectors] = []
     Cs: list[InteractionRotation] = []
+
+    # The interaction rotation for the final layer is simply the eigenvectors U (or an identity
+    # matrix if rotate_output is False)
+    out_key = "output" if "output" in gram_matrices else hook_names[-1]
+
     if rotate_output:
+        _, U_output = eigendecompose(gram_matrices[out_key])
         C_output: Float[Tensor, "d_hidden d_hidden"] = U_output
     else:
+        U_output = None
         C_output = torch.eye(
-            gram_matrices["output"].shape[0],
-            device=gram_matrices["output"].device,
-            dtype=gram_matrices["output"].dtype,
+            gram_matrices[out_key].shape[0],
+            device=gram_matrices[out_key].device,
+            dtype=gram_matrices[out_key].dtype,
         )
-    Cs.append(InteractionRotation(node_layer_name="output", C=C_output.clone().detach()))
+    U_output = U_output.detach().cpu() if U_output else None
+    Us.append(Eigenvectors(node_layer_name=out_key, U=U_output))
+    Cs.append(InteractionRotation(node_layer_name=out_key, C=C_output.clone().detach()))
 
-    for module_name, hook_name in zip(module_names[::-1], hook_names[::-1]):
+    module_and_hook_names = (
+        zip(module_names[::-1], hook_names[::-1])
+        if out_key == "output"
+        else zip(module_names[:-1][::-1], hook_names[:-1][::-1])
+    )
+    for module_name, hook_name in module_and_hook_names:
         D_dash, U_dash = eigendecompose(gram_matrices[hook_name])
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())

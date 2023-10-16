@@ -1,12 +1,14 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union, overload
+from typing import Literal, Optional, Union, cast, overload
 
 import torch
 import yaml
-from torch.utils.data import DataLoader, Dataset
+from datasets import load_dataset as hf_load_dataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 from transformer_lens import HookedTransformer
+from transformers import AutoTokenizer
 
 from rib.data import ModularArithmeticDataset
 from rib.models import SequentialTransformer, SequentialTransformerConfig
@@ -97,6 +99,7 @@ def create_modular_arithmetic_dataset(
     modulus: Optional[int] = None,
     seed: Optional[int] = None,
     frac_train: Optional[float] = None,
+    **_kwargs,
 ) -> Union[Dataset, tuple[Dataset, Dataset]]:
     """Create a ModularArithmeticDataset from the provided arguments.
 
@@ -109,7 +112,8 @@ def create_modular_arithmetic_dataset(
         fn_name (Optional[Literal["add", "subtract", "x2xyy2"]]): The name of the function to use.
         modulus (Optional[int]): The modulus to use.
         seed (Optional[int]): The seed to use.
-        frac_train (Optional[float]): The fraction of the dataset to use for training."""
+        frac_train (Optional[float]): The fraction of the dataset to use for training.
+    """
     if tlens_model_path:
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
             cfg = yaml.safe_load(f)
@@ -138,6 +142,60 @@ def create_modular_arithmetic_dataset(
         else:
             assert return_set == "both"
             return train_dataset, test_dataset
+
+
+def load_wikitext(
+    return_set: Literal["train", "test", "all", "both"],
+    return_set_frac: Optional[float] = None,
+    return_set_n_samples: Optional[int] = None,
+    model_str: str = "pythia-14m",
+    **_kwargs,
+):
+    """Load the wikitext dataset.
+
+    Args:
+        return_set (str): What part of the dataset to return.
+        return_set_frac (Optional[float]): The fraction of the dataset to return. If specified,
+            `return_set_n_samples` should not be specified.
+        return_set_n_samples (Optional[int]): The number of raw dataset samples to return. If
+            specified, `return_set_frac` should not be specified.
+        model_str (str): The name of the model to used to load the correct tokenizer.
+    """
+    assert return_set in ["train", "test"], "Only train and test sets are supported for now"
+    assert "pythia" in model_str, "Only pythia models are supported for now"
+    n_ctx = 1024 if "gpt2" in model_str else 2048
+
+    assert not (
+        return_set_frac and return_set_n_samples
+    ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
+
+    if return_set_frac:
+        data_split = f"{return_set}[:{int(return_set_frac * 100)}%]"
+    elif return_set_n_samples:
+        data_split = f"{return_set}[:{return_set_n_samples}]"
+
+    dataset = hf_load_dataset("wikitext", "wikitext-103-raw-v1", split=data_split)
+
+    tokenizer = AutoTokenizer.from_pretrained(f"EleutherAI/{model_str}")
+    tokenizer.pad_token = tokenizer.eos_token
+
+    # Remove empty data points
+    dataset = dataset.filter(lambda example: len(example["text"]) > 0)
+
+    tokenized_dataset = dataset.map(
+        lambda examples: tokenizer(
+            examples["text"], truncation=True, padding="max_length", max_length=n_ctx
+        ),
+        batched=True,
+    )
+
+    input_ids = torch.tensor(tokenized_dataset["input_ids"], dtype=torch.long)
+
+    # Create labels by shifting input_ids by 1
+    labels = input_ids.clone()
+    labels[:, :-1] = input_ids[:, 1:]
+    labels[:, -1] = tokenizer.pad_token_id
+    return TensorDataset(input_ids, labels)
 
 
 @overload
@@ -182,6 +240,8 @@ def load_dataset(
         return create_modular_arithmetic_dataset(
             tlens_model_path=tlens_model_path, return_set=return_set, **kwargs
         )
+    elif dataset_type == "wikitext":
+        return load_wikitext(return_set=return_set, **kwargs)
     # Add more dataset loading logic here as needed
     else:
         raise ValueError(f"Unsupported dataset type: {dataset_type}")

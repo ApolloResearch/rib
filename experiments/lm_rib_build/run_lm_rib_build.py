@@ -136,17 +136,17 @@ def main(config_path_str: str):
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    assert (
-        config.tlens_pretrained is None and config.tlens_model_path is not None
-    ), "Currently can't build graphs for pretrained models due to memory limits."
-    assert config.dataset == "modular_arithmetic", "Currently only supports modular arithmetic."
-
+    # TODO: Remove this temp hack that uses the test set
     # Importantly, use the same dataset as was used for training
     dataset = load_dataset(
         dataset_type=config.dataset,
         return_set="train",
         tlens_model_path=config.tlens_model_path,
+        model_str=config.tlens_pretrained,
+        # return_set_frac=0.01,
+        return_set_n_samples=100,
     )
+
     train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
     # Test model accuracy before graph building, ta be sure

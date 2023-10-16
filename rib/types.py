@@ -8,4 +8,4 @@ TORCH_DTYPES = {
     "bfloat16": torch.bfloat16,
 }
 
-DATASET_TYPES = Literal["modular_arithmetic"]
+DATASET_TYPES = Literal["modular_arithmetic", "wikitext"]

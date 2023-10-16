@@ -57,15 +57,19 @@ def eval_model_accuracy(
             assert len(raw_output) == 1, "Only one output is supported."
             # Check if the pos is 1, if so, squeeze it out. (This is the case for modular addition)
             output: Float[Tensor, "... d_vocab"] = raw_output[0]
-            if output.ndim == 3:
+            if output.ndim == 3 and output.shape[1] == 1:
                 output = output[:, -1, :]
         else:
             output = raw_output
 
         # Assuming output is raw logits and labels are class indices.
-        predicted_labels: Int[Tensor, "batch"] = output.argmax(dim=-1)
+        predicted_labels: Union[Int[Tensor, "batch"], Int[Tensor, "batch pos"]] = output.argmax(
+            dim=-1
+        )
         correct_predictions += (predicted_labels == labels).sum().item()
-        total_predictions += labels.shape[0]
+        total_predictions += (
+            labels.shape[0] * labels.shape[1] if labels.ndim == 2 else labels.shape[0]
+        )
 
     accuracy: float = correct_predictions / total_predictions
     return accuracy

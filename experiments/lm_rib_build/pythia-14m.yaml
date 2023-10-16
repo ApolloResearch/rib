@@ -6,7 +6,7 @@ dataset: wikitext
 node_layers:
   - ln2.1
   - unembed
-batch_size: 16
+batch_size: 2
 truncation_threshold: 1e-6
 rotate_output: false
 n_intervals: 0

@@ -28,7 +28,7 @@ def run_dataset_through_model(
 ) -> None:
     """Simply pass all batches through a hooked model."""
     assert len(hooks) > 0, "Hooks have not been applied to this model."
-    for batch in dataloader:
+    for i, batch in enumerate(dataloader):
         data, _ = batch
         data = data.to(device=device)
         # Change the dtype unless the inputs are integers (e.g. like they are for LMs)
@@ -38,6 +38,7 @@ def run_dataset_through_model(
         hooked_model(data, hooks=hooks)
 
 
+@torch.inference_mode()
 def collect_gram_matrices(
     hooked_model: HookedModel,
     module_names: list[str],

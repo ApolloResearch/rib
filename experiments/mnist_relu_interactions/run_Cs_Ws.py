@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 import torch
+import torch.nn as nn
 import yaml
 from einops import rearrange
 from jaxtyping import Float
@@ -31,6 +32,7 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
+from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, load_config, set_seed
@@ -134,63 +136,6 @@ def extract_weights(model: torch.nn.Module) -> list[torch.Tensor]:
 
 # Helper functions for main ========================================================
 
-def get_Cs(
-    config_path_str: str,
-    file_path: str,
-) -> dict[str,
-    Union[list[InteractionRotation],
-    list[Eigenvectors],
-    list[Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"]],
-    list[Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"]]],
-]:
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
-    set_seed(config.seed)
-
-    with open(config.mlp_path.parent / "config.yaml", "r") as f:
-        model_config_dict = yaml.safe_load(f)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    print_all_modules(mlp) # Check module names were correctly defined
-    mlp.eval()  # Run in inference only
-    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-    hooked_mlp = HookedModel(mlp)
-
-    train_loader = load_mnist_dataloader(
-        train=True, batch_size=config.batch_size)
-
-    gram_matrices = collect_gram_matrices(
-        hooked_model=hooked_mlp,
-        module_names=config.node_layers,
-        data_loader=train_loader,
-        dtype=TORCH_DTYPES[config.dtype],
-        device=device,
-        collect_output_gram=True,
-    )
-
-    # Calls on collect_M_dash_and_Lambda_dash
-    # Builds sqrt sorted Lambda matrix and its inverse
-    Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs = calculate_interaction_rotations(
-        gram_matrices=gram_matrices,
-        module_names=config.node_layers,
-        hooked_model=hooked_mlp,
-        data_loader=train_loader,
-        dtype=TORCH_DTYPES[config.dtype],
-        device=device,
-        n_intervals=config.n_intervals,
-        truncation_threshold=config.truncation_threshold,
-        rotate_output=config.rotate_output,
-    )
-
-    C_list = [C_info.C for C_info in Cs]
-    C_pinv_list = [C_info.C_pinv for C_info in Cs]
-
-    with open(file_path, "wb") as f:
-        pickle.dump({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs}, f)
-
-    return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs}
-
-
 def plot(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_name: str, out_dir: Path) -> None:
     for i, matrix in enumerate(list(matrix_list)):
         # Calculate figsize based on matrix dimensions and the given figsize_per_unit
@@ -203,25 +148,64 @@ def plot(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_name: str, o
             out_dir / f"{var_name}_{i}.png")
 
 
+def get_Cs(
+    model: nn.Module,
+    config: Config,
+    file_path: str,
+) -> dict[str,
+    Union[list[InteractionRotation],
+    list[Eigenvectors],
+    list[Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"]],
+    list[Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"]]],
+]:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_model = HookedModel(model)
+
+    train_loader = load_mnist_dataloader(
+        train=True, batch_size=config.batch_size)
+
+    gram_matrices = collect_gram_matrices(
+        hooked_model=hooked_model,
+        module_names=config.node_layers,
+        data_loader=train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+        collect_output_gram=True,
+    )
+
+    # Calls on collect_M_dash_and_Lambda_dash
+    # Builds sqrt sorted Lambda matrix and its inverse
+    Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs = calculate_interaction_rotations(
+        gram_matrices=gram_matrices,
+        module_names=config.node_layers,
+        hooked_model=hooked_model,
+        data_loader=train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+        n_intervals=config.n_intervals,
+        truncation_threshold=config.truncation_threshold,
+        rotate_output=config.rotate_output,
+    )
+
+    C_list = [C_info.C for C_info in Cs]
+    C_pinv_list = [C_info.C_pinv for C_info in Cs]
+
+    with open(file_path, "wb") as f:
+        pickle.dump({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}, f)
+
+    return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}
+
+
 def get_rotated_Ws(
-    config_path_str: str,
+    model: nn.Module,
+    config: Config,
     file_path: str,
     C_pinv_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> list[Float[Tensor, "layer_count d_hidden d_hidden"]]:
     """Extract W^l, perform paper-equivalent right multiplication of psuedoinverse
     of C^l."""
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
-    set_seed(config.seed)
-
-    with open(config.mlp_path.parent / "config.yaml", "r") as f:
-        model_config_dict = yaml.safe_load(f)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    mlp.eval()
-
-    weights_list = extract_weights(mlp)
+    weights_list = extract_weights(model)
     rotated_weights_list = []
     for weight_matrix, C_pinv in zip(weights_list, C_pinv_list):
         rotated_weights_list.append(weight_matrix @ C_pinv)
@@ -232,7 +216,45 @@ def get_rotated_Ws(
     return rotated_weights_list
 
 
-def check_and_open_file(file_path: Path, get_var_fn: callable, config_path_str: str, **kwargs) -> Union[Any, tuple[Any, ...]]:
+def get_edges(
+    model: nn.Module,
+    config: Config,
+    file_path: str,
+    Cs_list: list[Float[Tensor, "d_hidden d_hidden"]],
+    Cs_unscaled_list: list[Float[Tensor, "d_hidden d_hidden"]],
+    W_hat_list: list[Float[Tensor, "d_hidden d_hidden"]],
+) -> dict[str, Float[Tensor, "d_hidden_trunc_curr d_hidden_trunc_next"]]:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_model = HookedModel(model)
+
+    train_loader = load_mnist_dataloader(
+        train=True, batch_size=config.batch_size)
+
+    edges_dict: dict[str, Float[Tensor, "d_hidden_trunc_1 d_hiddn_trunc_2"]] = collect_test_edges(
+        Cs_unscaled=Cs_unscaled_list,
+        Cs=Cs_list,
+        W_hats=W_hat_list,
+        hooked_model=hooked_model,
+        module_names=config.node_layers,
+        data_loader=train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+    )
+
+    with open(file_path, "wb") as f:
+        pickle.dump(edges_dict, f)
+
+    return edges_dict
+
+
+def check_and_open_file(
+    file_path: Path,
+    get_var_fn: callable,
+    model: nn.Module,
+    config: Config,
+    **kwargs
+) -> Union[Any, tuple[Any, ...]]:
     """Load information from pickle file into a variable and return it.
 
     Note the return type is overloaded to allow for tuples.
@@ -241,107 +263,47 @@ def check_and_open_file(file_path: Path, get_var_fn: callable, config_path_str: 
         with file_path.open("rb") as f:
             var = pickle.load(f)
     else:
-        var = get_var_fn(config_path_str, file_path, **kwargs)
+        var = get_var_fn(model, config, file_path, **kwargs)
 
     return var
-
-
-# def get_f_hats(
-#     config_path_str: str,
-#     file_path: str,
-#     Cs_list: list[Float[Tensor, "d_hidden d_hidden"]],
-# ) -> list[Float[Tensor, "batch d_hidden"]]:
-#     config_path = Path(config_path_str)
-#     config = load_config(config_path, config_model=Config)
-#     set_seed(config.seed)
-
-#     with open(config.mlp_path.parent / "config.yaml", "r") as f:
-#         model_config_dict = yaml.safe_load(f)
-#     device = "cuda" if torch.cuda.is_available() else "cpu"
-#     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-#     mlp.eval()  # Run in inference only
-#     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-#     hooked_mlp = HookedModel(mlp)
-
-#     train_loader = load_mnist_dataloader(
-#         train=True, batch_size=config.batch_size)
-
-#     # Get functions rotated by non rescaled Cs
-#     f_hats = collect_activations_and_rotate(
-#         Cs=Cs_list,
-#         hooked_model=hooked_mlp,
-#         module_names=config.node_layers,
-#         data_loader=train_loader,
-#         dtype=TORCH_DTYPES[config.dtype],
-#         device=device,
-#     )
-
-#     with open(file_path, "wb") as f:
-#         pickle.dump(f_hats, f)
-
-#     return f_hats
-
-
-def get_edges(
-    config_path_str: str,
-    file_path: str,
-    Cs_list: list[Float[Tensor, "d_hidden d_hidden"]],
-    Cs_unscaled_list: list[Float[Tensor, "d_hidden d_hidden"]],
-    W_hat_list: list[Float[Tensor, "d_hidden d_hidden"]],
-) -> list[Float[Tensor, ""]]:
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
-    set_seed(config.seed)
-
-    with open(config.mlp_path.parent / "config.yaml", "r") as f:
-        model_config_dict = yaml.safe_load(f)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    mlp.eval()  # Run in inference only
-    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-    hooked_mlp = HookedModel(mlp)
-
-    train_loader = load_mnist_dataloader(
-        train=True, batch_size=config.batch_size)
-
-    edges: dict[str, Float[Tensor, "d_hidden_trunc_1 d_hiddn_trunc_2"]] = collect_test_edges(
-        Cs_unscaled=Cs_unscaled_list,
-        Cs=Cs_list,
-        W_hats=W_hat_list,
-        hooked_model=hooked_mlp,
-        module_names=config.node_layers,
-        data_loader=train_loader,
-        dtype=TORCH_DTYPES[config.dtype],
-        device=device,
-    )
-    edges_list = list(edges.values())
-
-    with open(file_path, "wb") as f:
-        pickle.dump(edges_list, f)
-
-    return edges_list
 
 
 def Cs_Ws_main(config_path_str: str) -> None:
     """MAIN FUNCTION 2. Check how sparse Cs and rotated Ws are in equation:
     C^{l+1} O(x) W C+^l C^l f(x)
     """
-    out_dir = Path(__file__).parent / "out_Cs_Ws"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     Cs_save_file = Path(__file__).parent / "Cs"
     Ws_save_file = Path(__file__).parent / "Ws"
     fhats_save_file = Path(__file__).parent / "fhats"
     edges_save_file = Path(__file__).parent / "edges"
 
+    config_path = Path(config_path_str)
+    config = load_config(config_path, config_model=Config)
+    set_seed(config.seed)
+
+    out_dir = Path(__file__).parent / "out_Cs_Ws"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
+    # if out_interaction_graph_file.exists() and not overwrite_output(out_interaction_graph_file):
+    #     logger.info("Exiting.")
+    #     return None
+
+    with open(config.mlp_path.parent / "config.yaml", "r") as f:
+        model_config_dict = yaml.safe_load(f)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = load_mlp(model_config_dict, config.mlp_path, device=device)
+    print_all_modules(model) # Check module names were correctly defined
+    model.eval()  # Run in inference only
+
     # List of InteractionRotation objects
     Cs_and_Lambdas: dict[str, list[InteractionRotation]] = check_and_open_file(
         file_path=Cs_save_file,
         get_var_fn=get_Cs,
-        config_path_str=config_path_str
+        config=config,
+        model=model,
     )
 
-    C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list, U_D_sqrt_pinv_Vs_list, U_D_sqrt_Vs_list = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"], Cs_and_Lambdas["Lambda_abs_sqrts"], Cs_and_Lambdas["Lambda_abs_sqrt_pinvs"], Cs_and_Lambdas["U_D_sqrt_pinv_Vs"], Cs_and_Lambdas["U_D_sqrt_Vs"]
+    C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list, U_D_sqrt_pinv_Vs_list, U_D_sqrt_Vs_list, Cs, Us, gram_matrices = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"], Cs_and_Lambdas["Lambda_abs_sqrts"], Cs_and_Lambdas["Lambda_abs_sqrt_pinvs"], Cs_and_Lambdas["U_D_sqrt_pinv_Vs"], Cs_and_Lambdas["U_D_sqrt_Vs"], Cs_and_Lambdas["Cs raw"], Cs_and_Lambdas["Us raw"], Cs_and_Lambdas["gram matrices"]
 
     rescaled_C_list = []
     rescaled_C_pinv_list = []
@@ -353,24 +315,54 @@ def Cs_Ws_main(config_path_str: str) -> None:
     W_list = check_and_open_file(
         file_path=Ws_save_file,
         get_var_fn=get_rotated_Ws,
-        config_path_str=config_path_str,
+        config=config,
+        model=model,
         C_pinv_list=U_D_sqrt_pinv_Vs_list
     )
 
-    edges = check_and_open_file(
+    edges_dict = check_and_open_file(
         file_path=edges_save_file,
         get_var_fn=get_edges,
-        config_path_str=config_path_str,
+        config=config,
+        model=model,
         Cs_list=C_list,
         Cs_unscaled_list=U_D_sqrt_pinv_Vs_list,
         W_hat_list=W_list,
     )
+    edges = list(edges_dict.values())
 
     plot(rescaled_C_list, "C", out_dir)
     plot(W_list, "W", out_dir)
     plot(U_D_sqrt_Vs_list, "U_D_sqrt_V", out_dir)
     plot(U_D_sqrt_pinv_Vs_list, "U_D_sqrt_pinv_V", out_dir)
     plot(edges, "edges", out_dir)
+
+    # Move interaction matrices to the cpu and store in dict
+    interaction_rotations = []
+    for C_info in Cs:
+        info_dict = asdict(C_info)
+        info_dict["C"] = info_dict["C"].cpu()
+        if info_dict["C_pinv"] is not None:
+            info_dict["C_pinv"] = info_dict["C_pinv"].cpu()
+        else:
+            info_dict["C_pinv"] = None
+        interaction_rotations.append(info_dict)
+
+    eigenvectors = [asdict(U_info) for U_info in Us]
+
+    results = {
+        "exp_name": config.exp_name,
+        "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
+        "interaction_rotations": interaction_rotations,
+        "eigenvectors": eigenvectors,
+        "edges": [(module, edges_dict[module].cpu()) for module in config.node_layers[:-1]],
+        "config": json.loads(config.model_dump_json()),
+        "model_config_dict": model_config_dict,
+    }
+
+    # Save the results (which include torch tensors) to file
+    torch.save(results, out_interaction_graph_file)
+    logger.info("Saved results to %s", out_interaction_graph_file)
 
 
 if __name__ == "__main__":

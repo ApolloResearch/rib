@@ -536,27 +536,13 @@ def test_edges_forward_hook_fn(
     unsqueezed_W_hat_transpose = repeat(W_hat.T, 'd_hidden_out d_hidden_trunc_in -> batch_size d_hidden_out d_hidden_trunc_in', batch_size=batch_size)
     C_O_W_hat: Float[Tensor, "batch d_hidden_trunc_curr d_hidden_trunc_next"] = unsqueezed_W_hat_transpose @ diag_operator_matrix @ unsqueezed_C_next_layer
 
-    # print(f"Input shape {detached_inputs.shape}")
-    # print(f"Output shape {detached_outputs.shape}")
-
-    # print(f"Operator matrix shape {diag_operator_matrix.shape}")
-    # print(f"C next layer shape {C_next_layer.shape}")
-    # print(f"W_hat shape {W_hat.shape}")
-
-    # print(f"f hats shape {f_hats.shape}")
-    # print(f"f next layer hats shape {f_next_layer_hats.shape}")
-
-    # print(f"unsqueezed C shape {unsqueezed_C_next_layer.shape}")
-    # print(f"unsqueezed W shape {unsqueezed_W_hat_transpose.shape}")
-    # print(f"C_O_W_hat shape {C_O_W_hat.shape}")
-
     batch_size, d_hidden_trunc_curr, d_hidden_trunc_next = C_O_W_hat.shape
     rows_f_next_layer_hats = repeat(f_next_layer_hats, 'b d_hidden_trunc_next -> b d d_hidden_trunc_next', d=d_hidden_trunc_curr)
     cols_f_hats = repeat(f_hats, 'b d_hidden_trunc_curr -> b d_hidden_trunc_curr d', d=d_hidden_trunc_next)
     # E_ij = hat{f^{l+1}_i} * C_O_W_hat_ij * hat{f^l_j} where * denotes scalar product
     # Equivalent to Hadamard product of hat{f^{l+1}_i} repeated along rows with C_O_W_hat
     # Then Hadamard product with hat{f^l_j} repeated along columns
-    # Finally, sum over batch dimension
+    # Finally, sum over batch dimension (don't forget divison by dataset size in accumulator function)
     edge_matrix = torch.einsum('bij -> ij', rows_f_next_layer_hats * C_O_W_hat * cols_f_hats)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, edge_matrix.detach())

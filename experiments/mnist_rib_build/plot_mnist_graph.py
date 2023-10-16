@@ -27,8 +27,11 @@ def main(results_file: str) -> None:
     # Input layer is much larger so include more nodes in it
     nodes_per_layer = [40, 10, 10, 10]
 
+    layer_names = results["config"]["node_layers"] + ["output"]
+
     plot_interaction_graph(
         raw_edges=results["edges"],
+        layer_names=layer_names,
         exp_name=results["exp_name"],
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,

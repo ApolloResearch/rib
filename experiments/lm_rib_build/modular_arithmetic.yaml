@@ -8,9 +8,10 @@ node_layers:
   - ln2.0
   - mlp_out.0
   - unembed
+logits_node_layer: true
+rotate_final_node_layer: false
 batch_size: 256
 truncation_threshold: 1e-6
-rotate_output: false
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
 n_intervals: 0
 dtype: float32

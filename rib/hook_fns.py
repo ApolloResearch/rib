@@ -11,7 +11,7 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 """
 
 from functools import partial
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import torch
 from einops import rearrange, repeat
@@ -182,7 +182,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    C_out: Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"],
+    C_out: Optional[Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"]],
     n_intervals: int,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
@@ -237,7 +237,7 @@ def interaction_edge_pre_forward_hook_fn(
     data_key: Union[str, list[str]],
     C_in: Float[Tensor, "in_hidden in_hidden_trunc"],
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
-    C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
@@ -289,7 +289,6 @@ def interaction_edge_pre_forward_hook_fn(
         fn=edge_norm_partial,
         in_tensor=f_hat,
         n_intervals=n_intervals,
-        fn_out_size=C_out.shape[1],
     )
     einsum_pattern = "bipj,bpj->ij" if has_pos else "bij,bj->ij"
 

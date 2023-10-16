@@ -29,7 +29,7 @@ class InteractionRotation:
     """Dataclass storing the interaction rotation matrix and its inverse for a node layer."""
 
     node_layer_name: str
-    C: Float[Tensor, "d_hidden d_hidden_trunc"]
+    C: Optional[Float[Tensor, "d_hidden d_hidden_trunc"]] = None
     # pseudoinverse of C, not needed for the output node layer
     C_pinv: Optional[Float[Tensor, "d_hidden_trunc d_hidden"]] = None
 
@@ -39,7 +39,7 @@ class Eigenvectors:
     """Dataclass storing the eigenvectors of a node layer."""
 
     node_layer_name: str
-    U: Float[Tensor, "d_hidden d_hidden"]
+    U: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
 
 
 def build_sorted_lambda_matrices(
@@ -62,10 +62,12 @@ def build_sorted_lambda_matrices(
 
     """
     # Get the sort indices in descending order
-    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(Lambda_abs, descending=True)
+    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(
+        Lambda_abs, descending=True)
 
     # Get the number of values we will truncate
-    n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
+    n_small_lambdas: int = int(
+        torch.sum(Lambda_abs < truncation_threshold).item())
 
     truncated_idxs: Int[Tensor, "d_hidden_extra_trunc"] = (
         idxs[:-n_small_lambdas] if n_small_lambdas > 0 else idxs
@@ -81,12 +83,14 @@ def build_sorted_lambda_matrices(
         Lambda_abs_sqrt.reciprocal()
     )[truncated_idxs, :]
 
-    assert not torch.any(torch.isnan(lambda_matrix_pinv)), "NaNs in the pseudoinverse."
+    assert not torch.any(torch.isnan(lambda_matrix_pinv)
+                         ), "NaNs in the pseudoinverse."
     # (lambda_matrix @ lambda_matrix_pinv).diag() should contain d_hidden_extra_trunc 1s and
     # d_hidden_trunc - d_hidden_extra_trunc 0s
     assert torch.allclose(
         (lambda_matrix @ lambda_matrix_pinv).diag().sum(),
-        torch.tensor(lambda_matrix.shape[0] - n_small_lambdas, dtype=lambda_matrix.dtype),
+        torch.tensor(
+            lambda_matrix.shape[0] - n_small_lambdas, dtype=lambda_matrix.dtype),
     )
 
     return lambda_matrix, lambda_matrix_pinv
@@ -100,24 +104,25 @@ def calculate_interaction_rotations(
     dtype: torch.dtype,
     device: str,
     n_intervals: int,
+    logits_node_layer: bool = True,
     truncation_threshold: float = 1e-5,
-    rotate_output: bool = True,
+    rotate_final_node_layer: bool = True,
     hook_names: Optional[list[str]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
-    This function implements Algorithm 1 of the paper. We name the variables as they are named in
-    the paper.
-
-    Recall that we have one more node layer than module layer, as we have a node layer for the
-    output of the final module.
+    This function implements Algorithm 2 (Pseudocode for RIB in transformers) of the paper. We name
+    the variables as they are named in the paper.
 
     We collect the interaction rotation matrices from the output layer backwards, as we need the
-    next layer's rotation to compute the current layer's rotation. We reverse the list at the end.
+    next layer's rotation to compute the current layer's rotation. We reverse the resulting Cs and
+    Us back to the original node order before returning.
+
+    The output layer will either be the logits or the inputs to the final node_layer in the config,
+    depending on whether collect_logits in the config is True or False, respectively.
 
     Args:
-        gram_matrices: The gram matrices for each layer, keyed by layer name. Must include
-            an `output` key for the output layer.
+        gram_matrices: The gram matrices for each layer, keyed by layer name.
         module_names: The names of the modules to build the graph from, in order of appearance.
         hooked_model: The hooked model.
         data_loader: The data loader.
@@ -125,8 +130,9 @@ def calculate_interaction_rotations(
         device: The device to run the model on.
         n_intervals: The number of intervals to use for integrated gradients.
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
-        rotate_output: Whether to rotate the output layer to its eigenbasis (which is equivalent
-            to its interaction basis).
+        logits_node_layer: Whether to build an extra output node layer for the logits.
+        rotate_final_node_layer: Whether to rotate the output layer to its eigenbasis (which is
+            equivalent to its interaction basis). Defaults to True.
         hook_names: Used to store the interaction rotation matrices in the hooked model.
 
     Returns:
@@ -135,37 +141,49 @@ def calculate_interaction_rotations(
         - A list of objects containing the eigenvectors of each node layer, ordered by node layer
         appearance in model.
     """
-    assert "output" in gram_matrices, "Gram matrices must include an `output` key."
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
-        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
     else:
         hook_names = module_names
 
-    _, U_output = eigendecompose(gram_matrices["output"])
-    Us: list[Eigenvectors] = [Eigenvectors(node_layer_name="output", U=U_output.detach().cpu())]
-
     # We start appending Us and Cs from the output layer and work our way backwards
+    Us: list[Eigenvectors] = []
     Cs: list[InteractionRotation] = []
-    if rotate_output:
-        C_output: Float[Tensor, "d_hidden d_hidden"] = U_output
-    else:
-        C_output = torch.eye(
-            gram_matrices["output"].shape[0],
-            device=gram_matrices["output"].device,
-            dtype=gram_matrices["output"].dtype,
-        )
-    Cs.append(InteractionRotation(node_layer_name="output", C=C_output.clone().detach()))
 
     Lambda_abs_sqrt_pinvs = []
     Lambda_abs_sqrts = []
     U_D_sqrt_pinv_Vs = []
     U_D_sqrt_Vs = []
 
-    for module_name, hook_name in zip(module_names[::-1], hook_names[::-1]):
+    # The C matrix for the final layer is either the eigenvectors U if rotate_final_node_layer is
+    # True, and None otherwise
+    final_node_layer = "output" if logits_node_layer else hook_names[-1]
+
+    # If not rotating the final layer, we don't need U or C
+    U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = (
+        eigendecompose(gram_matrices[final_node_layer])[
+            1] if rotate_final_node_layer else None
+    )
+    C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = (
+        U_output.clone().detach() if U_output is not None else None
+    )
+    U_output = U_output.detach().cpu() if U_output is not None else None
+    Us.append(Eigenvectors(node_layer_name=final_node_layer, U=U_output))
+    Cs.append(InteractionRotation(
+        node_layer_name=final_node_layer, C=C_output))
+
+    module_and_hook_names = (
+        zip(module_names[::-1], hook_names[::-1])
+        if logits_node_layer
+        else zip(module_names[:-1][::-1], hook_names[:-1][::-1])
+    )
+    for module_name, hook_name in module_and_hook_names:
         D_dash, U_dash = eigendecompose(gram_matrices[hook_name])
 
-        n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
+        n_small_eigenvals: int = int(
+            torch.sum(D_dash < truncation_threshold).item())
         # Truncate the D matrix to remove small eigenvalues
         D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
             torch.diag(D_dash)[:-n_small_eigenvals, :-n_small_eigenvals]
@@ -198,8 +216,10 @@ def calculate_interaction_rotations(
         U_D_sqrt_Vs.append(U_D_sqrt_V)
         # print(f"U_D_sqrt_V shape for {hook_name}: {U_D_sqrt_V.shape}")
 
-        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
-        U_D_sqrt_pinv_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
+        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(
+            D.sqrt())
+        U_D_sqrt_pinv_V: Float[Tensor,
+                               "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
         U_D_sqrt_pinv_Vs.append(U_D_sqrt_pinv_V)
         # print(f"U_D_sqrt_pinv_V shape for {hook_name}: {U_D_sqrt_pinv_V.shape}")
 

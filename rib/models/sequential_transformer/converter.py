@@ -1,13 +1,17 @@
+from typing import Literal
+
 import torch
 from transformer_lens import HookedTransformer
 
 
 def convert_tlens_weights(
-    seq_tf_keys: list[str], tlens_model: HookedTransformer
+    seq_param_names: list[str],
+    tlens_model: HookedTransformer,
+    positional_embedding_type: Literal["standard", "rotary"],
 ) -> dict[str, torch.Tensor]:
     """Converts the weights from a transformer lens model to a sequential transformer state dict.
 
-    Note that this algorithm assumes that the seq_tf_keys are ordered by section number, which
+    Note that this algorithm assumes that the seq_param_names are ordered by section number, which
     will be the case if pulled from SequentialTransformer.state_dict().
     """
 
@@ -23,37 +27,48 @@ def convert_tlens_weights(
         "IGNORE",
         "mask",
     ]
+    if positional_embedding_type == "rotary":
+        attn_names += ["rotary_sin", "rotary_cos"]
+
     mlp_names: list[str] = ["W_in", "b_in", "W_out", "b_out"]
 
-    state_dict: dict[str, torch.Tensor] = {}
-    assert "sections.pre.0.W_E" in seq_tf_keys and "sections.pre.1.W_pos" in seq_tf_keys, (
-        "We currently only support the token and positional embeddings in the `pre` section."
-        "This will occur if the first element of node_layers is not in embed_module_names"
-    )
-    assert set([key.split(".")[-1] for key in seq_tf_keys]) == set(
-        attn_names + mlp_names + ["W_E", "W_pos", "W_U", "b_U"]
-    ), "All params in the seq_tf_keys must be in attn_names, mlp_names, W_E, W_pos, W_U, b_U"
+    if positional_embedding_type == "standard":
+        embed_names = ["W_E", "W_pos"]
+        expected_embedding_names = ["sections.pre.0.W_E", "sections.pre.1.W_pos"]
+    elif positional_embedding_type == "rotary":
+        embed_names = ["W_E"]
+        expected_embedding_names = ["sections.pre.0.W_E"]
+    assert all(
+        [param_name in seq_param_names for param_name in expected_embedding_names]
+    ), "The embedding layers must be in the 'pre' section of the model"
+
+    expected_param_names = attn_names + mlp_names + embed_names + ["W_U", "b_U"]
+
+    assert set([key.split(".")[-1] for key in seq_param_names]) == set(
+        expected_param_names
+    ), f"seq_param_names has params not in {seq_param_names}"
 
     # The current block number in the tlens model
     block_num: int = 0
     # The names of all params in the current block
     tlens_block_names = set(attn_names + mlp_names)
-    for seq_tf_key in seq_tf_keys:
+    state_dict: dict[str, torch.Tensor] = {}
+    for seq_param_name in seq_param_names:
         # Check if tlens_block_names is empty and if so, increment block_num and reset
         if len(tlens_block_names) == 0:
             block_num += 1
             tlens_block_names = set(attn_names + mlp_names)
 
-        param_name = seq_tf_key.split(".")[-1]
+        param_name = seq_param_name.split(".")[-1]
 
         if param_name == "W_E":
-            state_dict[seq_tf_key] = tlens_model.embed.W_E
+            state_dict[seq_param_name] = tlens_model.embed.W_E
         elif param_name == "W_pos":
-            state_dict[seq_tf_key] = tlens_model.pos_embed.W_pos
+            state_dict[seq_param_name] = tlens_model.pos_embed.W_pos
         elif param_name == "W_U":
-            state_dict[seq_tf_key] = tlens_model.unembed.W_U
+            state_dict[seq_param_name] = tlens_model.unembed.W_U
         elif param_name == "b_U":
-            state_dict[seq_tf_key] = tlens_model.unembed.b_U
+            state_dict[seq_param_name] = tlens_model.unembed.b_U
         else:
             tlens_block_names.remove(param_name)
             if param_name in attn_names:
@@ -64,6 +79,6 @@ def convert_tlens_weights(
                 raise ValueError(
                     f"Param name not an embed, unembed, attn or mlp param: {param_name}"
                 )
-            state_dict[seq_tf_key] = tlens_param_val
+            state_dict[seq_param_name] = tlens_param_val
 
     return state_dict

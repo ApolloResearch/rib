@@ -1,0 +1,14 @@
+exp_name: pythia-14m
+seed: 0
+tlens_pretrained: pythia-14m
+tlens_model_path: null
+dataset: wikitext
+node_layers:
+  - ln2.1
+  - unembed
+batch_size: 16
+truncation_threshold: 1e-6
+logits_node_layer: true
+rotate_final_node_layer: false
+n_intervals: 0
+dtype: float32

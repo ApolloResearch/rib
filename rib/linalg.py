@@ -1,4 +1,4 @@
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 
 import numpy as np
 import torch
@@ -129,7 +129,7 @@ def edge_norm(
     f_in_hat: Float[Tensor, "... in_hidden_combined"],
     module: torch.nn.Module,
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
-    C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     in_hidden_dims: list[int],
     has_pos: bool = False,
 ) -> Float[Tensor, "batch pos in_hidden_combined_trunc out_hidden_combined_trunc"]:
@@ -160,7 +160,9 @@ def edge_norm(
     # Concatenate the outputs over the hidden dimension
     out_acts = torch.cat(outputs, dim=-1)
 
-    f_out_hat: Float[Tensor, "... out_hidden_combined_trunc"] = out_acts @ C_out
+    f_out_hat: Float[Tensor, "... out_hidden_combined_trunc"] = (
+        out_acts @ C_out if C_out is not None else out_acts
+    )
 
     # Calculate the square and sum over the pos dimension if it exists.
     f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = f_out_hat**2
@@ -181,7 +183,7 @@ def integrated_gradient_trapezoidal_norm(
         tuple[Float[Tensor, "batch in_hidden"]],
         tuple[Float[Tensor, "batch pos _"], ...],
     ],
-    C_out: Float[Tensor, "out_hidden out_hidden_trunc"],
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
 ) -> Float[Tensor, "... in_hidden_combined"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs.
@@ -218,7 +220,7 @@ def integrated_gradient_trapezoidal_norm(
         # Concatenate the outputs over the hidden dimension
         out_acts = torch.cat(outputs, dim=-1)
 
-        f_hat = out_acts @ C_out
+        f_hat = out_acts @ C_out if C_out is not None else out_acts
 
         # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
         # to taking the gradient of each output element separately, but it lets us simply use
@@ -249,7 +251,6 @@ def integrated_gradient_trapezoidal_jacobian(
     fn: Callable[[Float[Tensor, "... in_hidden"]], Float[Tensor, "... out_hidden"]],
     in_tensor: Float[Tensor, "... in_hidden"],
     n_intervals: int,
-    fn_out_size: int,
 ) -> Float[Tensor, "... in_hidden out_hidden"]:
     """Calculate the integrated gradient of the batched jacobian of a function w.r.t its input.
 
@@ -259,25 +260,17 @@ def integrated_gradient_trapezoidal_jacobian(
         fn: The function to calculate the integrated gradient of.
         in_tensor: The input to the function.
         n_intervals: The number of intervals to use for the integral approximation.
-        fn_out_size: The size of the final dimension of the output of `fn`.
     """
-
-    has_pos = in_tensor.dim() == 3
-    if has_pos:
-        # jac_size is (batch, out_hidden_trunc, pos, in_hidden_trunc)
-        jac_size = [in_tensor.shape[0], fn_out_size, in_tensor.shape[1], in_tensor.shape[2]]
-    else:
-        # jac_size is (batch, out_hidden_trunc, in_hidden_trunc)
-        jac_size = [in_tensor.shape[0], fn_out_size, in_tensor.shape[1]]
 
     # Use an interval size of 1/n_intervals (unless n_intervals == 0, in which case we use 1 so
     # that our multiplication by interval_size below doesn't change the result)
     interval_size = 1.0 / max(n_intervals, 1)
-    jac_out: Union[
-        Float[Tensor, "batch out_hidden_trunc in_hidden_trunc"],
-        Float[Tensor, "batch out_hidden_trunc pos in_hidden_trunc"],
-    ] = torch.zeros(size=jac_size, device=in_tensor.device, dtype=in_tensor.dtype)
-
+    jac_out: Optional[
+        Union[
+            Float[Tensor, "batch out_hidden_trunc in_hidden_trunc"],
+            Float[Tensor, "batch out_hidden_trunc pos in_hidden_trunc"],
+        ]
+    ] = None
     alphas = np.array([1]) if n_intervals == 0 else np.arange(0, 1 + interval_size, interval_size)
     for alpha in alphas:
         # Need to detach the output to avoid a memory leak
@@ -288,8 +281,12 @@ def integrated_gradient_trapezoidal_jacobian(
         if alpha == 0 or (alpha == 1 and n_intervals > 0):
             alpha_jac_out = 0.5 * alpha_jac_out
 
-        jac_out += alpha_jac_out
+        if jac_out is None:
+            jac_out = alpha_jac_out
+        else:
+            jac_out += alpha_jac_out
 
+    assert jac_out is not None, "jac_out should not be None."
     jac_out *= interval_size
 
     return jac_out

@@ -83,7 +83,11 @@ def test_modular_arithmetic_conversion() -> None:
     seq_model_raw = SequentialTransformer(cfg, node_layers).to(torch.float64)
     seq_model_raw.eval()
     # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(list(seq_model_raw.state_dict().keys()), tlens_model)
+    state_dict = convert_tlens_weights(
+        seq_param_names=list(seq_model_raw.state_dict().keys()),
+        tlens_model=tlens_model,
+        positional_embedding_type=cfg.positional_embedding_type,
+    )
     seq_model_raw.load_state_dict(state_dict)
     seq_model = HookedModel(seq_model_raw)
 
@@ -118,69 +122,18 @@ def test_modular_arithmetic_conversion() -> None:
         ), f"Activations are not equal for mapping index {i}"
 
 
-@pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
-@pytest.mark.slow()
-def test_gpt2_conversion():
-    """Test that gpt2 in tlens and SequentialTransformer give the same outputs and internal
-    activations.
+def pretrained_lm_comparison(
+    model_str: str, mappings: dict[str, dict[str, str]], atol: float
+) -> None:
+    """Test that a pretrained lm in tlens and SequentialTransformer give the same outputs and
+    internal activations.
 
-    The SequentialTransformer with node layer node_layers = ["ln2.1", "unembed"] has the
-    following architecture:
-    HookedModel(
-        (model): SequentialTransformer(
-            (sections): ModuleDict(
-            (pre): MultiSequential(
-                (0): Embed()
-                (1): PosEmbed()
-                (2): Add()
-                (3): LayerNormPre()
-                (4): Attention()
-                (5): Add()
-                (6): LayerNormPre()
-                (7): MLPIn()
-                (8): MLPAct()
-                (9): MLPOut()
-                (10): Add()
-                (11): LayerNormPre()
-                (12): Attention()
-                (13): Add()
-                (14): LayerNormPre()
-            )
-            (section_0): MultiSequential(
-                (0): MLPIn()
-                (1): MLPAct()
-                ...
-                (85): LayerNormPre()
-            )
-            (section_1): MultiSequential(
-                (0): Unembed()
-            )
-            )
-        )
-    )
-
-    Floating point errors heavily accumulate here with float32 or less, so we use float64.
+    Args:
+        model_str: The model to test.
+        mappings: A mapping from some tlens cache keys to SequentialTransformer cache keys.
+        atol: The absolute tolerance to use for torch.allclose.
     """
-    set_seed(42)
-    # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
-    atol = 1e-8
-    # Mapping from some tlens cache keys to SequentialTransformer cache keys
-    # The tuple_idx is the index of the module's output to use
-    mappings = {
-        "blocks.0.hook_resid_pre": {
-            "seq_key": "sections.pre.2",
-            "tuple_idx": 0,
-        },
-        "blocks.3.hook_resid_mid": {
-            "seq_key": "sections.section_0.15",
-            "tuple_idx": 0,
-        },
-        "blocks.8.hook_resid_post": {
-            "seq_key": "sections.section_0.60",
-            "tuple_idx": 0,
-        },
-    }
-    tlens_model = HookedTransformer.from_pretrained("gpt2")
+    tlens_model = HookedTransformer.from_pretrained(model_str)
     tlens_model.to(torch.float64)
     tlens_model.to("cpu")
     tlens_model.eval()
@@ -190,7 +143,11 @@ def test_gpt2_conversion():
     seq_model_raw = SequentialTransformer(seq_cfg, node_layers).to(torch.float64)
     seq_model_raw.eval()
     # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(list(seq_model_raw.state_dict().keys()), tlens_model)
+    state_dict = convert_tlens_weights(
+        seq_param_names=list(seq_model_raw.state_dict().keys()),
+        tlens_model=tlens_model,
+        positional_embedding_type=seq_cfg.positional_embedding_type,
+    )
     seq_model_raw.load_state_dict(state_dict)
     seq_model = HookedModel(seq_model_raw)
 
@@ -225,3 +182,131 @@ def test_gpt2_conversion():
         assert torch.allclose(
             tlens_act, seq_act, atol=atol
         ), f"Activations are not equal for mapping index {i}"
+
+
+@pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
+@pytest.mark.slow()
+def test_gpt2_conversion():
+    """Test that gpt2 in tlens and SequentialTransformer give the same outputs and internal
+    activations.
+
+    The SequentialTransformer with node layer node_layers = ["ln2.1", "unembed"] has the
+    following architecture:
+    HookedModel(
+        (model): SequentialTransformer(
+            (sections): ModuleDict(
+                (pre): MultiSequential(
+                    (0): Embed()
+                    (1): PosEmbed()
+                    (2): Add()
+                    (3): LayerNormPre()
+                    (4): Attention()
+                    (5): Add()
+                    (6): LayerNormPre()
+                    (7): MLPIn()
+                    (8): MLPAct()
+                    (9): MLPOut()
+                    (10): Add()
+                    (11): LayerNormPre()
+                    (12): Attention()
+                    (13): Add()
+                )
+                (section_0): MultiSequential(
+                    (0): LayerNormPre()
+                    (1): MLPIn()
+                    (2): MLPAct()
+                    ...
+                    (84): LayerNormPre()
+                )
+                (section_1): MultiSequential(
+                    (0): Unembed()
+                )
+            )
+        )
+    )
+
+    Floating point errors heavily accumulate here with float32 or less, so we use float64.
+    """
+    set_seed(42)
+    # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
+    atol = 1e-8
+    # Mapping from some tlens cache keys to SequentialTransformer cache keys
+    # The tuple_idx is the index of the module's output to use
+    mappings = {
+        "blocks.0.hook_resid_pre": {
+            "seq_key": "sections.pre.2",
+            "tuple_idx": 0,
+        },
+        "blocks.3.hook_resid_mid": {
+            "seq_key": "sections.section_0.15",
+            "tuple_idx": 0,
+        },
+        "blocks.8.hook_resid_post": {
+            "seq_key": "sections.section_0.60",
+            "tuple_idx": 0,
+        },
+    }
+    pretrained_lm_comparison("gpt2", mappings, atol)
+
+
+@pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
+@pytest.mark.slow()
+def test_pythia_conversion():
+    """Test that pythia-14m in tlens and SequentialTransformer give the same outputs and internal
+    activations.
+
+    The SequentialTransformer with node layer node_layers = ["ln2.1", "unembed"] has the
+    following architecture:
+    HookedModel(
+        (model): SequentialTransformer(
+            (sections): ModuleDict(
+                (pre): MultiSequential(
+                    (0): Embed()
+                    (1): LayerNormPre()
+                    (2): Attention()
+                    (3): Add()
+                    (4): DualLayerNormPre()
+                    (5): MLPIn()
+                    (6): MLPAct()
+                    (7): MLPOut()
+                    (8): Add()
+                    (9): LayerNormPre()
+                    (10): Attention()
+                    (11): Add()
+                )
+                (section_0): MultiSequential(
+                    (0): DualLayerNormPre()
+                    (1): MLPIn()
+                    (2): MLPAct()
+                    ...
+                    (37): LayerNormPre()
+                )
+                (section_1): MultiSequential(
+                    (0): Unembed()
+                )
+            )
+        )
+    )
+
+    Floating point errors heavily accumulate here with float32 or less, so we use float64.
+    """
+    set_seed(42)
+    # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
+    atol = 1e-8
+    # Mapping from some tlens cache keys to SequentialTransformer cache keys
+    # The tuple_idx is the index of the module's output to use
+    mappings = {
+        "blocks.0.hook_resid_pre": {
+            "seq_key": "sections.pre.0",
+            "tuple_idx": 0,
+        },
+        "blocks.3.hook_mlp_out": {
+            "seq_key": "sections.section_0.19",
+            "tuple_idx": 1,
+        },
+        "blocks.4.hook_resid_post": {
+            "seq_key": "sections.section_0.28",
+            "tuple_idx": 0,
+        },
+    }
+    pretrained_lm_comparison("pythia-14m", mappings, atol)

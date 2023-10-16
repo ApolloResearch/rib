@@ -94,6 +94,7 @@ def _prepare_edges_for_plotting(
 
 def plot_interaction_graph(
     raw_edges: list[tuple[str, torch.Tensor]],
+    layer_names: list[str],
     exp_name: str,
     nodes_per_layer: Union[int, list[int]],
     out_file: Path,
@@ -103,6 +104,8 @@ def plot_interaction_graph(
     Args:
         raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
             (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
+        layer_names (list[str]): The names of the layers. These should correspond to the first
+            element of each tuple in raw_edges, but also include a name for the output layer.
         exp_name (str): The name of the experiment.
         nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
             all layers have the same number of nodes. If list, then the number of nodes in each
@@ -118,8 +121,10 @@ def plot_interaction_graph(
 
     edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
 
-    # The graph contains a final layer corresponding to the output of the network
-    layer_names = [module_name for module_name, _ in raw_edges] + ["output"]
+    # Verify that the layer names match the edge names
+    edge_names = [edge_info[0] for edge_info in raw_edges]
+    for edge_name, layer_name in zip(edge_names, layer_names[:-1]):
+        assert edge_name == layer_name, "The layer names must match the edge names."
 
     # Create the undirected graph
     graph = nx.Graph()

@@ -75,11 +75,11 @@ def graph_build_test(
                 torch.sort(Lambda_abs, descending=True).values for Lambda_abs in Lambda_abs[::-1]
             ]
 
-            # Check that the output layer rotation is an identity matrix
-            assert torch.allclose(
-                Cs[-1]["C"],
-                torch.eye(Cs[-1]["C"].shape[0], device=Cs[-1]["C"].device, dtype=Cs[-1]["C"].dtype),
-            )
+            # The output interaction matrix should be None if rotate_final_node_layer is False
+            if not results["config"]["rotate_final_node_layer"]:
+                assert (
+                    Cs[-1]["C"] is None
+                ), "The output interaction matrix should be None if rotate_final_node_layer is False"
 
             for i, module_name in enumerate(edge_info[0] for edge_info in E_hats):
                 # Check that the size of the sum of activations in the interaction basis is equal
@@ -115,7 +115,8 @@ def test_modular_arithmetic_build_graph():
     dataset: modular_arithmetic
     batch_size: 128
     truncation_threshold: 1e-6
-    rotate_output: false
+    logits_node_layer: false
+    rotate_final_node_layer: false
     last_pos_module_type: add_resid1
     n_intervals: 0
     dtype: float32
@@ -148,7 +149,8 @@ def test_mnist_build_graph():
     batch_size: 64
     seed: 0
     truncation_threshold: 1e-6
-    rotate_output: false
+    logits_node_layer: true
+    rotate_final_node_layer: false
     n_intervals: 0
     dtype: float32
     node_layers:

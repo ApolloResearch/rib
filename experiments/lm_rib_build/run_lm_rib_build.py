@@ -54,7 +54,15 @@ class Config(BaseModel):
         None, description="Path to saved transformer lens model."
     )
     node_layers: list[str] = Field(
-        ..., description="Names of the node layers to build the graph with."
+        ..., description="Names of the modules whose inputs correspond to node layers in the graph."
+    )
+    logits_node_layer: bool = Field(
+        ...,
+        description="Whether to build an extra output node layer for the logits.",
+    )
+    rotate_final_node_layer: bool = Field(
+        ...,
+        description="Whether to rotate the final node layer to its eigenbasis or not.",
     )
     dataset: DATASET_TYPES = Field(
         ...,
@@ -64,16 +72,6 @@ class Config(BaseModel):
     truncation_threshold: float = Field(
         ...,
         description="Remove eigenvectors with eigenvalues below this threshold.",
-    )
-    collect_logits: bool = Field(
-        ...,
-        description="Whether to collect the output logits (i.e. the output of the final model "
-        " section). If true, the final node layer will be the logits rather than the inputs to the "
-        "final node layer in the config.",
-    )
-    rotate_output: bool = Field(
-        ...,
-        description="Whether to rotate the output layer to its eigenbasis.",
     )
     last_pos_module_type: Optional[Literal["add_resid1", "unembed"]] = Field(
         None,
@@ -156,13 +154,16 @@ def main(config_path_str: str):
     # Don't build the graph for the section of the model before the first node layer
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
+    # Only need gram matrix for logits if we're rotating the final node layer
+    collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_model,
         module_names=graph_module_names,
         data_loader=train_loader,
         dtype=dtype,
         device=device,
-        collect_output_gram=config.collect_logits,
+        collect_output_gram=collect_output_gram,
         hook_names=config.node_layers,
     )
 
@@ -174,8 +175,9 @@ def main(config_path_str: str):
         dtype=dtype,
         device=device,
         n_intervals=config.n_intervals,
+        logits_node_layer=config.logits_node_layer,
         truncation_threshold=config.truncation_threshold,
-        rotate_output=config.rotate_output,
+        rotate_final_node_layer=config.rotate_final_node_layer,
         hook_names=config.node_layers,
     )
 
@@ -193,11 +195,8 @@ def main(config_path_str: str):
     interaction_rotations = []
     for C_info in Cs:
         info_dict = asdict(C_info)
-        info_dict["C"] = info_dict["C"].cpu()
-        if info_dict["C_pinv"] is not None:
-            info_dict["C_pinv"] = info_dict["C_pinv"].cpu()
-        else:
-            info_dict["C_pinv"] = None
+        info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
+        info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
         interaction_rotations.append(info_dict)
 
     eigenvectors = [asdict(U_info) for U_info in Us]

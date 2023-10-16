@@ -134,7 +134,7 @@ def get_Cs(
         model_config_dict = yaml.safe_load(f)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    # print_all_modules(mlp) # Check module names were correctly defined
+    print_all_modules(mlp) # Check module names were correctly defined
     mlp.eval()  # Run in inference only
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
@@ -242,7 +242,6 @@ def get_f_hats(
         model_config_dict = yaml.safe_load(f)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    # print_all_modules(mlp) # Check module names were correctly defined
     mlp.eval()  # Run in inference only
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
@@ -281,7 +280,6 @@ def get_edges(
         model_config_dict = yaml.safe_load(f)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    # print_all_modules(mlp) # Check module names were correctly defined
     mlp.eval()  # Run in inference only
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)

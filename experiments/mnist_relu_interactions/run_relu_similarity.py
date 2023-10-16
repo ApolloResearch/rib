@@ -80,6 +80,7 @@ def edit_weights_fn(model: HookedModel, layer_name: str) -> None:
     layer = get_nested_attribute(model, layer_name)
 
     weights = layer.weight.data.clone()
+    print(f"Weights shape{weights.shape}")
     output_neurons, input_neurons = weights.shape
     weights[:output_neurons//2, -1] = 1e8
     layer.weight.data.copy_(weights)
@@ -189,7 +190,7 @@ def get_relu_similarities(config_path_str: str, file_path: Path, relu_metric_typ
     train_loader = load_mnist_dataloader(
         train=True, batch_size=config.batch_size)
 
-    relu_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
+    relu_similarity_matrix: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
         hooked_model=hooked_mlp,
         module_names=config.module_names,
         data_loader=train_loader,
@@ -199,9 +200,9 @@ def get_relu_similarities(config_path_str: str, file_path: Path, relu_metric_typ
     )
 
     with open(file_path, "wb") as f:
-        pickle.dump(relu_matrices, f)
+        pickle.dump(relu_similarity_matrix, f)
 
-    return relu_matrices
+    return relu_similarity_matrix
 
 
 # Main ========================================================

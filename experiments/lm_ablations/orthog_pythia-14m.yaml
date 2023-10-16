@@ -1,5 +1,5 @@
-exp_name: rib_pythia-14m
-ablation_type: rib
+exp_name: orthog_pythia-14m
+ablation_type: orthogonal
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/pythia-14m_interaction_graph.pt
 ablate_every_vec_cutoff: 10
 dataset:

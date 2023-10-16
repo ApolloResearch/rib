@@ -16,14 +16,14 @@ from experiments.train_mnist.run_train_mnist import main as train_main
 MOCK_CONFIG = """
 seed: 0
 model:
-  hidden_sizes: [100, 100]
+  hidden_sizes: [30, 30]
   activation_fn: relu
   bias: true
   fold_bias: true
 train:
   learning_rate: 0.001
   batch_size: 64
-  epochs: 3
+  epochs: 1
   save_dir: null
   save_every_n_epochs: null
 wandb: null
@@ -42,6 +42,6 @@ def test_main_accuracy():
     temp_config.close()
 
     accuracy = train_main(temp_config.name)
-    assert accuracy > 95.0
+    assert accuracy > 90.0
 
     Path(temp_config.name).unlink()

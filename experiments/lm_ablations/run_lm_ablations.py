@@ -73,11 +73,6 @@ def main(config_path_str: str) -> None:
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
-    assert (
-        interaction_graph_info["config"]["tlens_pretrained"] is None
-        and interaction_graph_info["config"]["tlens_model_path"] is not None
-    ), "Currently can't build graphs for pretrained models due to memory limits."
-
     assert set(config.node_layers) <= set(
         interaction_graph_info["config"]["node_layers"]
     ), "The node layers in the config must be a subset of the node layers in the interaction graph."
@@ -93,7 +88,11 @@ def main(config_path_str: str) -> None:
         device=device,
     )
 
-    tlens_model_path = Path(interaction_graph_info["config"]["tlens_model_path"])
+    tlens_model_path = (
+        Path(interaction_graph_info["config"]["tlens_model_path"])
+        if interaction_graph_info["config"]["tlens_model_path"] is not None
+        else None
+    )
 
     seq_model, _ = load_sequential_transformer(
         node_layers=config.node_layers,

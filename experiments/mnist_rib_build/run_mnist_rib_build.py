@@ -40,7 +40,8 @@ class Config(BaseModel):
     batch_size: int
     seed: int
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
-    rotate_output: bool  # Whether to rotate the output layer to its eigenbasis.
+    logits_node_layer: bool  # Whether to build an extra output node layer for the logits.
+    rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
     node_layers: list[str]
@@ -90,6 +91,7 @@ def main(config_path_str: str) -> None:
         return None
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[config.dtype]
     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
     mlp.eval()
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
@@ -97,13 +99,16 @@ def main(config_path_str: str) -> None:
 
     train_loader = load_mnist_dataloader(train=True, batch_size=config.batch_size)
 
+    # Only need gram matrix for logits if we're rotating the final node layer
+    collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
         module_names=config.node_layers,
         data_loader=train_loader,
-        dtype=TORCH_DTYPES[config.dtype],
+        dtype=dtype,
         device=device,
-        collect_output_gram=True,
+        collect_output_gram=collect_output_gram,
     )
 
     Cs, Us = calculate_interaction_rotations(
@@ -111,11 +116,11 @@ def main(config_path_str: str) -> None:
         module_names=config.node_layers,
         hooked_model=hooked_mlp,
         data_loader=train_loader,
-        dtype=TORCH_DTYPES[config.dtype],
+        dtype=dtype,
         device=device,
         n_intervals=config.n_intervals,
         truncation_threshold=config.truncation_threshold,
-        rotate_output=config.rotate_output,
+        rotate_final_node_layer=config.rotate_final_node_layer,
     )
 
     E_hats = collect_interaction_edges(
@@ -124,7 +129,7 @@ def main(config_path_str: str) -> None:
         n_intervals=config.n_intervals,
         module_names=config.node_layers,
         data_loader=train_loader,
-        dtype=TORCH_DTYPES[config.dtype],
+        dtype=dtype,
         device=device,
     )
 
@@ -132,11 +137,8 @@ def main(config_path_str: str) -> None:
     interaction_rotations = []
     for C_info in Cs:
         info_dict = asdict(C_info)
-        info_dict["C"] = info_dict["C"].cpu()
-        if info_dict["C_pinv"] is not None:
-            info_dict["C_pinv"] = info_dict["C_pinv"].cpu()
-        else:
-            info_dict["C_pinv"] = None
+        info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
+        info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
         interaction_rotations.append(info_dict)
 
     eigenvectors = [asdict(U_info) for U_info in Us]

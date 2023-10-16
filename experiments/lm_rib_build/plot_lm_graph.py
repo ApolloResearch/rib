@@ -28,7 +28,7 @@ def main(results_file: str) -> None:
     nodes_per_layer = 40
 
     layer_names = results["config"]["node_layers"]
-    if results["config"]["collect_logits"]:
+    if results["config"]["logits_node_layer"]:
         layer_names.append("logits")
 
     plot_interaction_graph(

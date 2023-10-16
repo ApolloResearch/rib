@@ -115,7 +115,7 @@ def collect_gram_matrices(
 
 
 def collect_M_dash_and_Lambda_dash(
-    C_out: Float[Tensor, "out_hidden out_hidden"],
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden"]],
     hooked_model: HookedModel,
     n_intervals: int,
     data_loader: DataLoader,

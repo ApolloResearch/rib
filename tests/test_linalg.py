@@ -228,13 +228,19 @@ def test_integrated_gradient_trapezoidal_jacobian_linear():
     linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
 
     result_point_estimate = integrated_gradient_trapezoidal_jacobian(
-        fn=linear, in_tensor=in_tensor, n_intervals=0, fn_out_size=out_hidden
+        fn=linear,
+        in_tensor=in_tensor,
+        n_intervals=0,
     )
     result_1 = integrated_gradient_trapezoidal_jacobian(
-        fn=linear, in_tensor=in_tensor, n_intervals=1, fn_out_size=out_hidden
+        fn=linear,
+        in_tensor=in_tensor,
+        n_intervals=1,
     )
     result_5 = integrated_gradient_trapezoidal_jacobian(
-        fn=linear, in_tensor=in_tensor, n_intervals=2, fn_out_size=out_hidden
+        fn=linear,
+        in_tensor=in_tensor,
+        n_intervals=2,
     )
 
     # Check that all results are close

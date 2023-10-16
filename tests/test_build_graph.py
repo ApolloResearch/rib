@@ -115,6 +115,7 @@ def test_modular_arithmetic_build_graph():
     dataset: modular_arithmetic
     batch_size: 128
     truncation_threshold: 1e-6
+    collect_logits: true
     rotate_output: false
     last_pos_module_type: add_resid1
     n_intervals: 0

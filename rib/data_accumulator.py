@@ -258,8 +258,9 @@ def collect_relu_interactions(
     dtype: torch.dtype,
     device: str,
     relu_metric_type: int,
-    hook_names: Optional[str] = None
-) -> tuple[dict[str, Union[Float[Tensor, "d_hidden d_hidden"], Float[Tensor, "d_hidden_concat d_hidden_concat"]]], ...]:
+    Cs: list[Float[Tensor, "d_hidden1 d_hidden1"]],
+    hook_names: Optional[str] = None,
+) -> tuple[dict[str, Float[Tensor, "d_hidden d_hidden"]], ...]:
     """Identify whether ReLUs are synchronising.
 
     This currently only works for piecewise linear functions and modules must be activation type modules.
@@ -274,8 +275,9 @@ def collect_relu_interactions(
         data_loader: The pytorch data loader.
         device: The device to run the model on.
         dtype: The data type to use for model computations.
-        collect_output_gram: Whether to collect the gram matrix for the output of the final module.
+        relu_metric_type: Type of metric used to check whether ReLUs are synchronising.
         hook_names: Used to store the gram matrices in the hooked model.
+        Cs: list of basis rotation matrices used only for metric type 2.
 
     Returns:
         A dictionary of ReLU interaction matrices, where the keys are the hook names (a.k.a. node layer names)
@@ -287,75 +289,44 @@ def collect_relu_interactions(
     else:
         hook_names = module_names
 
+    match relu_metric_type:
+        case 0:
+            data_key = ["relu_similarity"]
+        case 1 | 2:
+            data_key = ["relu_num", "relu_denom"]
+
     relu_interaction_hooks: list[Hook] = []
-    for module_name, hook_name in zip(module_names, hook_names):
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
         relu_interaction_hooks.append(
             Hook(
                 name=hook_name,
-                data_key=["relu_num", "relu_denom"],
+                data_key=data_key,
                 fn=relu_interaction_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={'relu_metric_type': relu_metric_type}
+                fn_kwargs={"relu_metric_type": relu_metric_type, "C_next_layer": Cs[i+1]}
             )
         )
 
     run_dataset_through_model(
         hooked_model, data_loader, hooks=relu_interaction_hooks, dtype=dtype, device=device)
 
-    # Collect ReLU interaction matrices and divide by dataset size
-    relu_similarity_matrices: dict[str, Union[Float[Tensor, "d_hidden d_hidden"], Float[Tensor, "d_hidden_concat d_hidden_concat"]]] = {
-        hook_name: torch.div(
-            torch.div(hooked_model.hooked_data[hook_name]["relu_num"], len(data_loader.dataset)),
-            torch.div(hooked_model.hooked_data[hook_name]["relu_denom"], len(data_loader.dataset))
-            )
-        for hook_name in hooked_model.hooked_data
-    }
+    match relu_metric_type:
+        case 0:
+            relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
+                hook_name: hooked_model.hooked_data[data_key[0]]
+            }
+        case (1,2):
+            # Collect ReLU interaction matrices and divide by dataset size
+            relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
+                hook_name: torch.div(
+                    torch.div(hooked_model.hooked_data[hook_name][data_key[0]], len(data_loader.dataset)),
+                    torch.div(hooked_model.hooked_data[hook_name][data_key[1]], len(data_loader.dataset))
+                    )
+                for hook_name in hooked_model.hooked_data
+            }
     hooked_model.clear_hooked_data()
 
     return relu_similarity_matrices
-
-
-def collect_activations_and_rotate(
-    Cs: list["InteractionRotation"],
-    hooked_model: HookedModel,
-    module_names: list[str],
-    data_loader: DataLoader,
-    dtype: torch.dtype,
-    device: str,
-    hook_names: Optional[str] = None
-) -> list[Union[Float[Tensor, "batch d_hidden"], Float[Tensor, "batch pos d_hidden"]]]:
-    """Use hooks to obtain inputs to modules (functions f(x) in that layer) and rotate them by the interaction rotation matrix for that layer."""
-    assert len(module_names) > 0, "No modules specified."
-    if hook_names is not None:
-        assert len(hook_names) == len(
-            module_names), "Must specify a hook name for each module."
-    else:
-        hook_names = module_names
-
-    activation_hooks: list[Hook] = []
-    for module_name, hook_name in zip(module_names, hook_names):
-        activation_hooks.append(
-            Hook(
-                name=hook_name,
-                data_key="activation",
-                fn=acts_pre_forward_hook_fn,
-                module_name=module_name,
-            )
-        )
-
-    run_dataset_through_model(hooked_model, data_loader, hooks=activation_hooks, dtype=dtype, device=device)
-
-    activations: dict[str, Union[Float[Tensor, "batch d_hidden"], Float[Tensor, "batch pos d_hidden"]]] = {
-        hook_name: hooked_model.hooked_data[hook_name]["activation"] for hook_name in hooked_model.hooked_data
-    }
-    hooked_model.clear_hooked_data()
-
-    rotated_activations_list = []
-    for activation, C in zip(list(activations.values()), Cs):
-        batch_size, d_hidden = activation.shape
-        rotated_activations_list.append(torch.bmm(activation, repeat(C, 'd_hidden1 d_hidden2 -> batch_size d_hidden1 d_hidden2', batch_size=batch_size)))
-
-    return activations
 
 
 def collect_test_edges(

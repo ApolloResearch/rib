@@ -8,3 +8,5 @@ dtype: float32
 module_names:
   - layers.0.activation
   - layers.1.activation
+relu_metric_type: 2
+edit_weights: False

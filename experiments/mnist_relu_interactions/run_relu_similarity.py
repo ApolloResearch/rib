@@ -9,6 +9,7 @@ import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
+import torch.nn as nn
 import yaml
 from jaxtyping import Float
 from torch import Tensor
@@ -20,6 +21,11 @@ from torchvision import datasets, transforms
 
 from rib.data_accumulator import collect_relu_interactions
 from rib.hook_manager import HookedModel
+from rib.interaction_algos import (
+    Eigenvectors,
+    InteractionRotation,
+    calculate_interaction_rotations,
+)
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, load_config, set_seed
@@ -37,6 +43,8 @@ class Config(BaseModel):
     # Data type of all tensors (except those overriden in certain functions).
     dtype: str
     module_names: list[str]
+    relu_metric_type: int
+    edit_weights: bool
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -96,21 +104,21 @@ def get_nested_attribute(obj, attr_name):
 
 # Helper functions for main ========================================================
 
-def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, relu_metric_type: int, edit_weights: bool) -> None:
+def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config) -> None:
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
         # Plot raw matrix values before clustering
         plt.figure(figsize=(10, 8))
         sns.heatmap(similarity_matrix, annot=False,
                     cmap="YlGnBu", cbar=True, square=True)
         plt.savefig(
-            out_dir / f"mat_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
+            out_dir / f"mat_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
 
         # Plot histogram
         plt.figure(figsize=(10,8))
         flat_similarity = np.array(similarity_matrix).flatten()
         sns.histplot(flat_similarity, bins=100, kde=False)
         plt.savefig(
-            out_dir / f"hist_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
+            out_dir / f"hist_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
 
         match relu_metric_type:
             case 0:
@@ -128,7 +136,7 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                 threshold = 1
                 distance_matrix[distance_matrix > threshold] = threshold
 
-        # Deal with zeros on the diagonal
+        # Deal with zeros on diagonal
         distance_matrix = distance_matrix.fill_diagonal_(0)
 
         # Create linkage matrix using clustering algorithm
@@ -157,35 +165,72 @@ def load_local_config(config_path_str: str) -> dict:
     return config
 
 
-def check_and_open_file(file_path: str, get_var_fn: callable, config_path_str: str, **kwargs) -> Any:
-    """Load information from pickle file into a variable and return it."""
-    if file_path.exists():
-        with file_path.open("rb") as f:
-            var = pickle.load(f)
-    else:
-        var = get_var_fn(config_path_str, file_path, **kwargs)
+def get_Cs(
+    model: nn.Module,
+    config: Config,
+    file_path: str,
+) -> dict[str,
+    Union[list[InteractionRotation],
+    list[Eigenvectors],
+    list[Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"]],
+    list[Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"]]],
+]:
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
+    model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_model = HookedModel(model)
 
-    return var
+    train_loader = load_mnist_dataloader(
+        train=True, batch_size=config.batch_size)
+
+    gram_matrices = collect_gram_matrices(
+        hooked_model=hooked_model,
+        module_names=config.node_layers,
+        data_loader=train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+        collect_output_gram=True,
+    )
+
+    # Calls on collect_M_dash_and_Lambda_dash
+    # Builds sqrt sorted Lambda matrix and its inverse
+    Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs = calculate_interaction_rotations(
+        gram_matrices=gram_matrices,
+        module_names=config.node_layers,
+        hooked_model=hooked_model,
+        data_loader=train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+        n_intervals=config.n_intervals,
+        truncation_threshold=config.truncation_threshold,
+        rotate_final_node_layer=config.rotate_final_node_layer,
+    )
+
+    C_list = [C_info.C for C_info in Cs]
+    C_pinv_list = [C_info.C_pinv for C_info in Cs]
+
+    with open(file_path, "wb") as f:
+        pickle.dump({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}, f)
+
+    return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}
 
 
-def get_relu_similarities(config_path_str: str, file_path: Path, relu_metric_type: int, edit_weights: bool) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
-    set_seed(config.seed)
+def get_relu_similarities(
+    model: nn.Module,
+    config: Config,
+    file_path: Path,
+    Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
 
-    with open(config.mlp_path.parent / "config.yaml", "r") as f:
-        model_config_dict = yaml.safe_load(f)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    # print_all_modules(mlp) # Check module names were correctly defined
+    # print_all_modules(model) # Check module names were correctly defined
     layer_list = ["layers.0.linear", "layers.1.linear"]
-    if edit_weights:
+    if config.edit_weights:
         for layer in layer_list:
-            edit_weights_fn(mlp, layer)
-    mlp.eval()  # Run in inference only
-    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-    hooked_mlp = HookedModel(mlp)
+            edit_weights_fn(model, layer)
+    model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_mlp = HookedModel(model)
 
     train_loader = load_mnist_dataloader(
         train=True, batch_size=config.batch_size)
@@ -196,7 +241,8 @@ def get_relu_similarities(config_path_str: str, file_path: Path, relu_metric_typ
         data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
-        relu_metric_type=relu_metric_type
+        relu_metric_type=config.relu_metric_type,
+        Cs=Cs
     )
 
     with open(file_path, "wb") as f:
@@ -205,25 +251,64 @@ def get_relu_similarities(config_path_str: str, file_path: Path, relu_metric_typ
     return relu_similarity_matrix
 
 
+def check_and_open_file(
+    file_path: Path,
+    get_var_fn: callable,
+    model: nn.Module,
+    config: Config,
+    **kwargs
+) -> Union[Any, tuple[Any, ...]]:
+    """Load information from pickle file into a variable and return it.
+
+    Note the return type is overloaded to allow for tuples.
+    """
+    if file_path.exists():
+        with file_path.open("rb") as f:
+            var = pickle.load(f)
+    else:
+        var = get_var_fn(model, config, file_path, **kwargs)
+
+    return var
+
+
 # Main ========================================================
 
-def relu_similarity_main(config_path_str: str, relu_metric_type: int, edit_weights: bool) -> None:
+def relu_similarity_main(config_path_str: str) -> None:
     """MAIN FUNCTION 1. Test for ReLU interactions (separate to main RIB algorithm)."""
+    config_path = Path(config_path_str)
+    config = load_config(config_path, config_model=Config)
+    set_seed(config.seed)
+
+    relu_matrices_save_file = Path(__file__).parent / f"relu_similarity_matrices_editweights_{config.edit_weights}"
+    Cs_save_file = Path(__file__).parent / "Cs"
+
     out_dir = Path(__file__).parent / "out_relu_interactions"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    file_name = f"relu_similarity_matrices_editweights_{edit_weights}"
-    relu_matrices_save_file = Path(__file__).parent / file_name
+    with open(config.mlp_path.parent / "config.yaml", "r") as f:
+        model_config_dict = yaml.safe_load(f)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = load_mlp(model_config_dict, config.mlp_path, device=device)
+    print_all_modules(model) # Check module names were correctly defined
+    model.eval()  # Run in inference only
+
+    # List of InteractionRotation objects
+    Cs_and_Lambdas: dict[str, list[InteractionRotation]] = check_and_open_file(
+        file_path=Cs_save_file,
+        get_var_fn=get_Cs,
+        config=config,
+        model=model,
+    )
 
     relu_matrices = check_and_open_file(
         file_path=relu_matrices_save_file,
         get_var_fn=get_relu_similarities,
-        config_path_str=config_path_str,
-        relu_metric_type=relu_metric_type,
-        edit_weights=edit_weights,
+        config=config,
+        model=model,
+        Cs=Cs_and_Lambdas["C"]
     )
 
-    relu_plotting(relu_matrices, out_dir, relu_metric_type, edit_weights)
+    relu_plotting(relu_matrices, out_dir, config)
 
 
 if __name__ == "__main__":

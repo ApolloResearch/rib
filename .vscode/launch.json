@@ -111,6 +111,15 @@
             "args": "${workspaceFolder}/experiments/mnist_relu_interactions/Cs_Ws.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
-        }
+        },
+        {
+            "name": "relu similarities",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/mnist_relu_interactions/run_relu_similarity.py",
+            "args": "${workspaceFolder}/experiments/mnist_relu_interactions/relu_interactions.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
     ]
 }

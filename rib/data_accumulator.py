@@ -303,7 +303,7 @@ def collect_relu_interactions(
                 data_key=data_key,
                 fn=relu_interaction_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"relu_metric_type": relu_metric_type, "C_next_layer": Cs[i+1]}
+                fn_kwargs={"relu_metric_type": relu_metric_type, "C_next_layer": Cs[i+1].to(device)}
             )
         )
 
@@ -313,15 +313,15 @@ def collect_relu_interactions(
     match relu_metric_type:
         case 0:
             relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
-                hook_name: hooked_model.hooked_data[data_key[0]]
+                hook_name: hooked_model.hooked_data[data_key[0]].to("cpu") for hook_name in hooked_model.hooked_data
             }
-        case (1,2):
+        case 1 | 2:
             # Collect ReLU interaction matrices and divide by dataset size
             relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
                 hook_name: torch.div(
                     torch.div(hooked_model.hooked_data[hook_name][data_key[0]], len(data_loader.dataset)),
                     torch.div(hooked_model.hooked_data[hook_name][data_key[1]], len(data_loader.dataset))
-                    )
+                    ).to("cpu")
                 for hook_name in hooked_model.hooked_data
             }
     hooked_model.clear_hooked_data()

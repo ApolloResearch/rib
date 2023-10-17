@@ -330,9 +330,9 @@ def acts_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
     outputs = output if isinstance(output, tuple) else (output,)
-    detached_outputs = [x.detach().cpu() for x in outputs]
+    outputs = [x.detach().cpu() for x in outputs]
     # Store the output activations
-    hooked_data[hook_name] = {data_key: detached_outputs}
+    hooked_data[hook_name] = {data_key: outputs}
 
 
 def acts_pre_forward_hook_fn(
@@ -359,9 +359,9 @@ def acts_pre_forward_hook_fn(
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
     """
     assert isinstance(data_key, str), "data_key must be a string."
-    detached_inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+    inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
     # Store the output activations
-    hooked_data[hook_name] = {data_key: detached_inputs}
+    hooked_data[hook_name] = {data_key: inputs}
 
 
 @torch.no_grad()
@@ -413,11 +413,11 @@ def relu_interaction_forward_hook_fn(
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
     # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
     # Inputs always tuple
-    detached_inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+    inputs = torch.cat([x for x in inputs], dim=-1)
 
     outputs = output if isinstance(output, tuple) else (output,)
-    detached_outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1) # Concat over hidden dimension
-    operator: Float[Tensor, "batch d_hidden_out"] = torch.div(detached_outputs, detached_inputs)
+    outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
+    operator: Float[Tensor, "batch d_hidden_out"] = torch.div(outputs, inputs)
 
     match relu_metric_type:
         case 0:
@@ -441,16 +441,16 @@ def relu_interaction_forward_hook_fn(
         case 1:
             batch_size, d_hidden = operator.shape # [256, 101]
             # Element-wise product O_j * p_j
-            diag_values: Float[Tensor, "batch d_hidden"] = operator.mul(detached_inputs)
+            diag_values: Float[Tensor, "batch d_hidden"] = operator.mul(inputs)
             # Repeat diag_values along rows - row_matrix_ij = O_j * p_j
             row_matrix = repeat(diag_values, 'b d -> b d_hidden d', d_hidden=d_hidden) # [256, 101, 101]
             assert (row_matrix[0, 0, :].squeeze() == diag_values[0]).all()
-            assert (row_matrix[:, 5, 7] == operator[:, 7] * detached_inputs[:, 7]).all()
+            assert (row_matrix[:, 5, 7] == operator[:, 7] * inputs[:, 7]).all()
             denominator = torch.einsum('bik -> ik', row_matrix.pow(2))
 
             # Outer product O_i * p_j
-            outer_product: Float[Tensor, "batch d_hidden d_hidden"] = torch.bmm(rearrange(operator, 'b n -> b n 1'), rearrange(detached_inputs, 'b n -> b 1 n'))
-            assert (outer_product[:, 3, 4] == operator[:, 3] * detached_inputs[:, 4]).all()
+            outer_product: Float[Tensor, "batch d_hidden d_hidden"] = torch.bmm(rearrange(operator, 'b n -> b n 1'), rearrange(inputs, 'b n -> b 1 n'))
+            assert (outer_product[:, 3, 4] == operator[:, 3] * inputs[:, 4]).all()
             # 1/|X| sum_x [ (O_i * p_j- O_j * p_j)^2 / 1/|X| sum_x (O_j * p_j)^2 ] is final expression
             # Accumulate numerator and denominator separately
             numerator = torch.einsum('bik -> ik', (outer_product - row_matrix).pow(2) )
@@ -462,31 +462,32 @@ def relu_interaction_forward_hook_fn(
         case 2:
             batch_size, d_hidden = operator.shape
             # Denominator is l2 norm of functions - i.e. output of this ReLU layer
-            denominator = torch.einsum('bi -> ', detached_outputs)
+            denominator = torch.einsum('bi -> ', outputs)
 
-            f_next_layer_hats: Float[Tensor, "batch d_hidden_trunc_next"] = detached_outputs @ C_next_layer # E.g. [256, 89]
-            diag_operator: Float[Tensor, "batch d_hidden d_hidden"] = torch.diag_embed(operator)
-
-            numerator = torch.zeros((d_hidden, d_hidden))
-
-            diag_operator_expanded = repeat(diag_operator, 'b d1 d2 -> b d3 d4 d1 d2', d3=d_hidden, d4=d_hidden).clone()
+            f_next_layer_hats: Float[Tensor, "batch d_hidden_trunc_next"] = outputs @ C_next_layer # E.g. [256, 89]
+            operator_expanded = repeat(operator, 'b d1 -> b d2 d3 d1', d2=d_hidden, d3=d_hidden).clone()
 
             for m in range(d_hidden):
-                expanded_operator = repeat(operator, 'b d1 -> b d1 d2', d2=d_hidden)
-                diag_operator_expanded[:, :, :, m, m] = expanded_operator
+                operator_expanded[:, m, :, m] = operator
+            assert operator_expanded[0, 3, 7, 3] == operator[0, 7]
 
             C_next_layer_repeated = repeat(C_next_layer, 'd1 d2 -> b d3 d4 d1 d2' , b=batch_size, d3=d_hidden, d4=d_hidden)
-            p_repeated = repeat(detached_inputs, 'b d1 -> b d2 d3 1 d1', d2=d_hidden, d3=d_hidden)
-            C_O_p = (p_repeated @ diag_operator_expanded @ C_next_layer_repeated).squeeze(-2)
-            squared_diff = (f_next_layer_hats - C_O_p).pow(2)
-            numerator = torch.einsum('b d2 d3 d1 -> d1 d3', squared_diff)
+            p_repeated = repeat(inputs, 'b d1 -> b d2 d3 d1', d2=d_hidden, d3=d_hidden)
+            O_p = p_repeated * operator_expanded
+            # Need to unsqueeze and then squeeze to avoid issues with PyTorch auto-broadcasting
+            C_O_p = ( O_p.unsqueeze(-2) @ C_next_layer_repeated).squeeze(-2)
+            f_next_layer_hats_unsqueezed = repeat(f_next_layer_hats, "b d1 -> b d2 d3 d1", d2=d_hidden, d3=d_hidden)
+            squared_diff = (f_next_layer_hats_unsqueezed - C_O_p).pow(2)
+            # Sum over batch dimension
+            numerator = torch.einsum('bijk -> ij', squared_diff)
 
-            ## Really cursed code that takes forever to run
+            ## Really cursed double for loop code that takes forever to run
+            # numerator = torch.zeros((d_hidden, d_hidden))
             # for m in range(d_hidden):
             #     for n in range(d_hidden):
             #         diag_operator_edited = diag_operator.clone()
             #         diag_operator_edited[:, m, m] = operator[:, n]
-            #         C_O_p: Float[Tensor, "batch d_out"] = rearrange(detached_inputs, 'b d_hidden -> b () d_hidden') @ diag_operator_edited @ repeat(C_next_layer, 'd1 d2 -> b d1 d2', b=batch_size)
+            #         C_O_p: Float[Tensor, "batch d_out"] = rearrange(inputs, 'b d_hidden -> b () d_hidden') @ diag_operator_edited @ repeat(C_next_layer, 'd1 d2 -> b d1 d2', b=batch_size)
 
             #         squared_diff = (f_next_layer_hats - C_O_p.squeeze(1)).pow(2)
             #         numerator[m, n] = torch.einsum('bi -> ', squared_diff)
@@ -544,22 +545,22 @@ def test_edges_forward_hook_fn(
 
     # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
     # Inputs are always tuple
-    detached_inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
-    batch_size = detached_inputs.shape[0]
+    inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+    batch_size = inputs.shape[0]
 
     # Make outputs standard tuple and concat over hidden dimension
     outputs = output if isinstance(output, tuple) else (output,)
-    detached_outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+    outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
-    next_layer_preactivations = module.linear(detached_inputs)
-    operator: Union[Float[Tensor, "batch d_hidden_out"], Float[Tensor, "batch pos d_hidden_out_concat"]] = torch.div(detached_outputs, next_layer_preactivations)
+    next_layer_preactivations = module.linear(inputs)
+    operator: Union[Float[Tensor, "batch d_hidden_out"], Float[Tensor, "batch pos d_hidden_out_concat"]] = torch.div(outputs, next_layer_preactivations)
     if operator.dim() == 2:
         diag_operator_matrix: Float[Tensor, "batch d_hidden_out d_hidden_out"] = torch.diag_embed(operator)
     elif operator.dim() == 3:
         print("oopsie woopsie, case not handled yet")
 
-    f_hats: Float[Tensor, "batch d_hidden_trunc_curr"] = detached_inputs @ C_unscaled # E.g. [256, 488]
-    f_next_layer_hats: Float[Tensor, "batch d_hidden_trunc_next"] = detached_outputs @ C_next_layer # E.g. [256, 89]
+    f_hats: Float[Tensor, "batch d_hidden_trunc_curr"] = inputs @ C_unscaled # E.g. [256, 488]
+    f_next_layer_hats: Float[Tensor, "batch d_hidden_trunc_next"] = outputs @ C_next_layer # E.g. [256, 89]
 
     # Get whole load of matrices to left of f in equation
     C_next_layer_unsqueezed = repeat(C_next_layer, 'd_hidden_out d_hidden_trunc_next -> batch_size d_hidden_out d_hidden_trunc_next', batch_size=batch_size)

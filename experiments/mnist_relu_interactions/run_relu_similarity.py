@@ -19,7 +19,7 @@ from scipy.spatial.distance import squareform
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from rib.data_accumulator import collect_relu_interactions
+from rib.data_accumulator import collect_relu_interactions, collect_gram_matrices
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,
@@ -36,13 +36,13 @@ class Config(BaseModel):
     mlp_path: Path
     batch_size: int
     seed: int
-    # Remove eigenvectors with eigenvalues below this threshold.
-    truncation_threshold: float
-    # Whether to rotate the output layer to its eigenbasis.
-    rotate_output: bool
-    # Data type of all tensors (except those overriden in certain functions).
-    dtype: str
+    truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
+    logits_node_layer: bool  # Whether to build an extra output node layer for the logits.
+    rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
+    n_intervals: int  # The number of intervals to use for integrated gradients.
+    dtype: str  # Data type of all tensors (except those overriden in certain functions).
     module_names: list[str]
+    node_layers: list[str]
     relu_metric_type: int
     edit_weights: bool
 
@@ -106,6 +106,7 @@ def get_nested_attribute(obj, attr_name):
 
 def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config) -> None:
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
+        print(similarity_matrix)
         # Plot raw matrix values before clustering
         plt.figure(figsize=(10, 8))
         sns.heatmap(similarity_matrix, annot=False,
@@ -120,20 +121,19 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
         plt.savefig(
             out_dir / f"hist_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
 
-        match relu_metric_type:
+        match config.relu_metric_type:
             case 0:
                 # Threshold
                 threshold = 0.95
                 similarity_matrix[similarity_matrix < threshold] = 0
                 # Transform into distance matrix
                 distance_matrix = 1 - similarity_matrix
-            case 1:
-                similarity_matrix = torch.max(
-                    similarity_matrix, similarity_matrix.T) # Make symmetric
+            case 1 | 2:
+                similarity_matrix = torch.max(similarity_matrix, similarity_matrix.T) # Make symmetric
                 # similarity_matrix = rescale(similarity_matrix)
                 distance_matrix = similarity_matrix
                 # Threshold distance matrix
-                threshold = 1
+                threshold = 5
                 distance_matrix[distance_matrix > threshold] = threshold
 
         # Deal with zeros on diagonal
@@ -151,7 +151,7 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                     cmap="YlGnBu", cbar=True, square=True)
         plt.title("Reordered Similarity Matrix")
         plt.savefig(
-            out_dir / f"rearr_mat_{i}_type_{relu_metric_type}_editweights_{edit_weights}.png")
+            out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
 
 
 def load_local_config(config_path_str: str) -> dict:
@@ -175,13 +175,15 @@ def get_Cs(
     list[Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"]],
     list[Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"]]],
 ]:
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_model = HookedModel(model)
 
     train_loader = load_mnist_dataloader(
         train=True, batch_size=config.batch_size)
+
+    # Only need gram matrix for logits if we're rotating the final node layer
+    collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
 
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_model,
@@ -189,7 +191,7 @@ def get_Cs(
         data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
-        collect_output_gram=True,
+        collect_output_gram=collect_output_gram,
     )
 
     # Calls on collect_M_dash_and_Lambda_dash
@@ -221,8 +223,7 @@ def get_relu_similarities(
     file_path: Path,
     Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # print_all_modules(model) # Check module names were correctly defined
     layer_list = ["layers.0.linear", "layers.1.linear"]
@@ -235,7 +236,7 @@ def get_relu_similarities(
     train_loader = load_mnist_dataloader(
         train=True, batch_size=config.batch_size)
 
-    relu_similarity_matrix: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
+    relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
         hooked_model=hooked_mlp,
         module_names=config.module_names,
         data_loader=train_loader,
@@ -246,9 +247,9 @@ def get_relu_similarities(
     )
 
     with open(file_path, "wb") as f:
-        pickle.dump(relu_similarity_matrix, f)
+        pickle.dump(relu_similarity_matrices, f)
 
-    return relu_similarity_matrix
+    return relu_similarity_matrices
 
 
 def check_and_open_file(
@@ -279,7 +280,7 @@ def relu_similarity_main(config_path_str: str) -> None:
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
-    relu_matrices_save_file = Path(__file__).parent / f"relu_similarity_matrices_editweights_{config.edit_weights}"
+    relu_matrices_save_file = Path(__file__).parent / f"relu_similarity_type_{config.relu_metric_type}_editweights_{config.edit_weights}"
     Cs_save_file = Path(__file__).parent / "Cs"
 
     out_dir = Path(__file__).parent / "out_relu_interactions"

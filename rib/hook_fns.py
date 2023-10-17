@@ -460,34 +460,36 @@ def relu_interaction_forward_hook_fn(
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], denominator)
 
         case 2:
-            # TODO: be more explicit about dimension sizes in docstring
             batch_size, d_hidden = operator.shape
             # Denominator is l2 norm of functions - i.e. output of this ReLU layer
             denominator = torch.einsum('bi -> ', detached_outputs)
 
-            # Expand twice for m, n (k, k and batch dimensions get summed over, leaves 2d matrix)
-            # d1=d2=d_hidden (einops doesn't allow repeated dim names on LHS)
-
-            diag_operator_expanded = repeat(torch.diag_embed(operator), 'b d1 d2 -> b d3 d4 d1
-            d2', d3=d_hidden, d4=d_hidden)
-            # diag_operator_expanded = torch.diag_embed(operator).unsqueeze(1).unsqueeze(2).expand(-1, d_hidden, d_hidden, -1, -1)
-
-            m_indices, n_indices = torch.meshgrid(torch.arange(d_hidden), torch.arange(d_hidden))
-            print("Not killed after meshgrid")
-            # Use advanced indexing to expand RHS
-            diag_operator_expanded_clone = diag_operator_expanded.clone()
-            print("Not killed after cloning")
-            diag_operator_expanded_clone[:, m_indices, n_indices, m_indices, :] = (repeat(operator, 'b d_out -> b d2 d3 d_out', d2=d_hidden, d3=d_hidden))[:, n_indices, m_indices]
-            # Do matrix multiplication, broadcasting C_next_layer and p
-            # d1 =/= d2
-            print("Not killed after assignment")
-            repeated_C_next_layer = repeat(C_next_layer, 'd1 d2 -> b d3 d4 d1 d2', b=batch_size, d3=d_hidden, d4=d_hidden)
-            repeated_p = repeat(detached_inputs, 'b d_out -> b d1 d2 d_out', d1=d_hidden, d2=d_hidden)
-            C_O_p: Float[Tensor, "batch d_hidden d_hidden d_out"] = repeated_C_next_layer @ diag_operator_expanded_clone @ repeated_p
-
             f_next_layer_hats: Float[Tensor, "batch d_hidden_trunc_next"] = detached_outputs @ C_next_layer # E.g. [256, 89]
-            squared_diff = (repeat(f_next_layer_hats, 'b d_hidden_trunc_next -> b d d d_hidden_trunc_next', d=d_hidden) - C_O_p).pow(2)
-            numerator = torch.einsum('bijkl -> jkl', squared_diff)
+            diag_operator: Float[Tensor, "batch d_hidden d_hidden"] = torch.diag_embed(operator)
+
+            numerator = torch.zeros((d_hidden, d_hidden))
+
+            diag_operator_expanded = repeat(diag_operator, 'b d1 d2 -> b d3 d4 d1 d2', d3=d_hidden, d4=d_hidden).clone()
+
+            for m in range(d_hidden):
+                expanded_operator = repeat(operator, 'b d1 -> b d1 d2', d2=d_hidden)
+                diag_operator_expanded[:, :, :, m, m] = expanded_operator
+
+            C_next_layer_repeated = repeat(C_next_layer, 'd1 d2 -> b d3 d4 d1 d2' , b=batch_size, d3=d_hidden, d4=d_hidden)
+            p_repeated = repeat(detached_inputs, 'b d1 -> b d2 d3 1 d1', d2=d_hidden, d3=d_hidden)
+            C_O_p = (p_repeated @ diag_operator_expanded @ C_next_layer_repeated).squeeze(-2)
+            squared_diff = (f_next_layer_hats - C_O_p).pow(2)
+            numerator = torch.einsum('b d2 d3 d1 -> d1 d3', squared_diff)
+
+            ## Really cursed code that takes forever to run
+            # for m in range(d_hidden):
+            #     for n in range(d_hidden):
+            #         diag_operator_edited = diag_operator.clone()
+            #         diag_operator_edited[:, m, m] = operator[:, n]
+            #         C_O_p: Float[Tensor, "batch d_out"] = rearrange(detached_inputs, 'b d_hidden -> b () d_hidden') @ diag_operator_edited @ repeat(C_next_layer, 'd1 d2 -> b d1 d2', b=batch_size)
+
+            #         squared_diff = (f_next_layer_hats - C_O_p.squeeze(1)).pow(2)
+            #         numerator[m, n] = torch.einsum('bi -> ', squared_diff)
 
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], numerator)
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], denominator)

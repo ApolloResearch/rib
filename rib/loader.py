@@ -176,22 +176,33 @@ def load_wikitext(
     tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
     tokenizer.pad_token = tokenizer.eos_token
 
-    # Remove empty data points
-    dataset = dataset.filter(lambda example: len(example["text"]) > 0)
+    # Tokenize all samples and merge them together
+    all_tokens = []
+    for example in dataset:
+        tokens = tokenizer.encode(example["text"], add_special_tokens=False)
+        all_tokens.extend(tokens)
 
-    tokenized_dataset = dataset.map(
-        lambda examples: tokenizer(
-            examples["text"], truncation=True, padding="max_length", max_length=n_ctx
-        ),
-        batched=True,
-    )
+    # Split the merged tokens into chunks that fit the context length
+    chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
 
-    input_ids = torch.tensor(tokenized_dataset["input_ids"], dtype=torch.long)
+    # Convert chunks to input_ids and labels
+    input_ids_list = []
+    labels_list = []
+    for chunk in chunks:
+        input_id = chunk
+        label = input_id[1:] + [tokenizer.pad_token_id]
 
-    # Create labels by shifting input_ids by 1
-    labels = input_ids.clone()
-    labels[:, :-1] = input_ids[:, 1:]
-    labels[:, -1] = tokenizer.pad_token_id
+        input_ids_list.append(input_id)
+        labels_list.append(label)
+
+    # Ignore the last chunk if it's shorter than the context length
+    if len(input_ids_list[-1]) < n_ctx:
+        input_ids_list = input_ids_list[:-1]
+        labels_list = labels_list[:-1]
+
+    input_ids = torch.tensor(input_ids_list, dtype=torch.long)
+    labels = torch.tensor(labels_list, dtype=torch.long)
+
     return TensorDataset(input_ids, labels)
 
 

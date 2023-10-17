@@ -188,6 +188,7 @@ def test_run_mnist_orthog_ablations():
         - layers.2
     batch_size: 64
     seed: 0
+    eval_type: accuracy
     """
 
     ablation_mock_run(
@@ -227,6 +228,7 @@ def test_run_mnist_rib_ablations():
         - layers.2
     batch_size: 64
     seed: 0
+    eval_type: accuracy
     """
 
     ablation_mock_run(
@@ -257,6 +259,7 @@ def test_run_modular_arithmetic_rib_ablations():
     batch_size: 64
     dtype: float32
     seed: 0
+    eval_type: accuracy
     """
 
     ablation_mock_run(
@@ -287,6 +290,7 @@ def test_run_modular_arithmetic_orthog_ablations():
     batch_size: 64
     dtype: float32
     seed: 0
+    eval_type: accuracy
     """
 
     ablation_mock_run(

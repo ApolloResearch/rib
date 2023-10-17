@@ -12,4 +12,5 @@ node_layers:  # Rotate the input to these modules into the orthogonal basis
   - unembed
 batch_size: 128
 dtype: float32
+eval_type: accuracy
 seed: 0

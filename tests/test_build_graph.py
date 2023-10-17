@@ -131,6 +131,7 @@ def test_modular_arithmetic_build_graph():
     last_pos_module_type: add_resid1
     n_intervals: 0
     dtype: float32
+    eval_type: accuracy
 
     """
     load_config_path = "experiments.lm_rib_build.run_lm_rib_build.load_config"
@@ -175,6 +176,7 @@ def test_pythia_14m_build_graph():
     n_intervals: 0
     dtype: float32
     calculate_edges: false
+    eval_type: ce_loss
     """
     load_config_path = "experiments.lm_rib_build.run_lm_rib_build.load_config"
     graph_build_test(

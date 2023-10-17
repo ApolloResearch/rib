@@ -3,8 +3,8 @@
 plot_rib_graph:
     - Plot an interaction graph given a results file contain the graph edges.
 
-plot_ablation_accuracies:
-    - Plot accuracy vs number of remaining basis vectors.
+plot_ablation_results:
+    - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
 from pathlib import Path
@@ -174,32 +174,35 @@ def plot_interaction_graph(
     plt.savefig(out_file)
 
 
-def plot_ablation_accuracies(
-    accuracies: list[dict[str, dict[str, float]]],
+def plot_ablation_results(
+    results: list[dict[str, dict[str, float]]],
     out_file: Path,
     exp_names: list[str],
+    eval_type: Literal["accuracy", "ce_loss"],
     ablation_types: list[Literal["orthogonal", "rib"]],
     log_scale: bool = False,
-    xmax: Optional[int] = None,
+    xlim: Optional[tuple[float, float]] = None,
+    ylim: Optional[tuple[float, float]] = None,
 ) -> None:
-    """Plot accuracy vs number of remaining basis vectors.
+    """Plot accuracy/loss vs number of remaining basis vectors.
 
     Args:
-        accuracies: A list of dictionares mapping node layers to an inner dictionary that maps the
-            number of basis vectors remaining to the accuracy.
+        results: A list of dictionares mapping node layers to an inner dictionary that maps the
+            number of basis vectors remaining to the accuracy/loss.
         out_file: The file to save the plot to.
         exp_names: The names of the experiments.
         ablation_types: The type of ablation performed for each experiment ("orthogonal" or "rib").
         log_scale: Whether to use a log scale for the x-axis. Defaults to False.
-        xmax: The maximum value for the x-axis. Defaults to None.
+        xlim: The limits for the x-axis. Defaults to None.
+        ylim: The limits for the y-axis. Defaults to None.
     """
-    # Verify that all accuracies have the same node layers
-    node_layers_per_exp = [set(accuracy.keys()) for accuracy in accuracies]
+    # Verify that all results have the same node layers
+    node_layers_per_exp = [set(result.keys()) for result in results]
     assert all(
         node_layers == node_layers_per_exp[0] for node_layers in node_layers_per_exp[1:]
-    ), "All accuracies must have the same node layers."
+    ), "All results must have the same node layers."
 
-    node_layers = accuracies[0].keys()
+    node_layers = results[0].keys()
     n_plots = len(node_layers)
     _, axs = plt.subplots(n_plots, 1, figsize=(15, 4 * n_plots), dpi=140)
 
@@ -207,17 +210,18 @@ def plot_ablation_accuracies(
         axs = [axs]
 
     for i, node_layer in enumerate(node_layers):
-        for exp_name, ablation_type, exp_accuracies in zip(exp_names, ablation_types, accuracies):
-            n_vecs_remaining = sorted(list(int(k) for k in exp_accuracies[node_layer]))
-            y_values = [exp_accuracies[node_layer][str(i)] for i in n_vecs_remaining]
+        for exp_name, ablation_type, exp_results in zip(exp_names, ablation_types, results):
+            n_vecs_remaining = sorted(list(int(k) for k in exp_results[node_layer]))
+            y_values = [exp_results[node_layer][str(i)] for i in n_vecs_remaining]
             axs[i].plot(n_vecs_remaining, y_values, "-o", label=exp_name)
 
-            axs[i].set_title(f"acc vs n_remaining_basis_vecs for input to {node_layer}")
+            axs[i].set_title(f"{eval_type} vs n_remaining_basis_vecs for input to {node_layer}")
             axs[i].set_xlabel("Number of remaining basis vecs")
-            if xmax is not None:
-                axs[i].set_xlim(0, xmax)
-            axs[i].set_ylabel("Accuracy")
-            axs[i].set_ylim(0, 1)
+            axs[i].set_ylabel(eval_type)
+            if xlim is not None:
+                axs[i].set_xlim(*xlim)
+            if ylim is not None:
+                axs[i].set_ylim(*ylim)
 
             if log_scale:
                 axs[i].set_xscale("log")

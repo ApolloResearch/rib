@@ -5,8 +5,8 @@ The process is as follows:
     2. For each number of ablated nodes `n`, create a rotation matrix that has the effect of
     rotating to and from the new basis with `n` fewer basis vectors.
     3. Run the test set through the model, applying the above rotations at each node layer, and
-    calculate the resulting accuracy.
-    5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies.
+    calculate the resulting accuracy/loss.
+    5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies/losses.
 
 A node layer is positioned at the input of each module specified in `node_layers` in the config.
 In this script, we don't create a node layer at the output of the final module, as ablating nodes in
@@ -18,8 +18,9 @@ Usage:
 """
 
 import json
+import time
 from pathlib import Path
-from typing import Literal, Optional, Union, cast
+from typing import Callable, Literal, Optional, Union, cast
 
 import fire
 import torch
@@ -31,7 +32,13 @@ from rib.hook_manager import HookedModel
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.types import TORCH_DTYPES
-from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
+from rib.utils import (
+    eval_cross_entropy_loss,
+    eval_model_accuracy,
+    load_config,
+    overwrite_output,
+    set_seed,
+)
 
 
 class Config(BaseModel):
@@ -42,6 +49,7 @@ class Config(BaseModel):
         None,
         description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
     )
+    exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
     dataset: Union[ModularArithmeticDatasetConfig, WikitextConfig] = Field(
         ...,
         discriminator="name",
@@ -52,6 +60,10 @@ class Config(BaseModel):
     dtype: str
     eps: Optional[float] = 1e-5
     seed: int
+    eval_type: Literal["accuracy", "ce_loss"] = Field(
+        ...,
+        description="The type of evaluation to perform on the model before building the graph.",
+    )
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -60,6 +72,7 @@ class Config(BaseModel):
 
 
 def main(config_path_str: str) -> None:
+    start_time = time.time()
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
 
@@ -118,30 +131,36 @@ def main(config_path_str: str) -> None:
     )
     data_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
-    # Test model accuracy before ablation
-    accuracy = eval_model_accuracy(hooked_model, data_loader, dtype=dtype, device=device)
-    logger.info("Accuracy before ablation: %.2f%%", accuracy * 100)
+    # Test model accuracy/loss before graph building, ta be sure
+    eval_fn: Callable = (
+        eval_model_accuracy if config.eval_type == "accuracy" else eval_cross_entropy_loss
+    )
+    eval_results = eval_fn(hooked_model, data_loader, dtype=dtype, device=device)
+    logger.info("Model %s on dataset: %.2f", config.eval_type, eval_results)
 
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
-    accuracies: dict[str, dict[int, float]] = run_ablations(
+    ablation_results: dict[str, dict[int, float]] = run_ablations(
         basis_matrices=basis_matrices,
         node_layers=config.node_layers,
         hooked_model=hooked_model,
         data_loader=data_loader,
+        eval_fn=eval_fn,
         graph_module_names=graph_module_names,
         ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
+        exp_base=config.exp_base,
         device=device,
     )
 
     if config.exp_name is not None:
         results = {
             "config": json.loads(config.model_dump_json()),
-            "accuracies": accuracies,
+            "results": ablation_results,
         }
         with open(out_file, "w") as f:
             json.dump(results, f)
         logger.info("Wrote results to %s", out_file)
+    logger.info("Finished in %.2f seconds.", time.time() - start_time)
 
 
 if __name__ == "__main__":

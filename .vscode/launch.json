@@ -14,6 +14,15 @@
             "justMyCode": true
         },
         {
+            "name": "lm rib ablate pythia-14m",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_ablations/run_lm_ablations.py",
+            "args": "${workspaceFolder}/experiments/lm_ablations/rib_pythia-14m.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "lm orthog ablate modadd",
             "type": "python",
             "request": "launch",

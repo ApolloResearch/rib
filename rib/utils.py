@@ -75,6 +75,52 @@ def eval_model_accuracy(
     return accuracy
 
 
+@torch.inference_mode()
+def eval_cross_entropy_loss(
+    hooked_model: "HookedModel",
+    dataloader: DataLoader,
+    hooks: Optional[list["Hook"]] = None,
+    dtype: Optional[torch.dtype] = None,
+    device: str = "cuda",
+) -> float:
+    """Run the model on the dataset and return the per-token cross entropy loss.
+
+    Assumes that we have a regular language model with outputs for each position dimension.
+
+    Args:
+        hooked_model: The model to evaluate.
+        dataloader: The dataloader for the dataset.
+        hooks: The hooks to use.
+        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
+        device: The device to run the model on.
+
+    Returns:
+        The cross entropy loss of the model on the dataset.
+    """
+    n_batches = len(dataloader)
+    loss: float = 0.0
+
+    for batch in dataloader:
+        data, labels = batch
+        data, labels = data.to(device=device), labels.to(device)
+        # Change the dtype unless the inputs are integers (e.g. like they are for LMs)
+        if data.dtype not in [torch.int64, torch.int32] and dtype is not None:
+            data = data.to(dtype=dtype)
+        output: Float[Tensor, "batch pos d_vocab"] = hooked_model(data, hooks=hooks)[0]
+        assert output.ndim == 3, "Output must have a position dimension."
+        assert output.shape[1] == labels.shape[1], "Output and labels must have the same length."
+        n_tokens = output.shape[0] * output.shape[1]
+        # Reshape the output and labels to be 2D.
+        output = output.reshape(n_tokens, -1)
+        labels = labels.reshape(-1)
+        # Assuming output is raw logits and labels are class indices.
+        batch_loss = torch.nn.functional.cross_entropy(output, labels, reduction="sum").item()
+        # Update the per-token loss
+        loss += batch_loss / n_tokens
+
+    return loss / n_batches
+
+
 def load_config(config_path: Path, config_model: Type[T]) -> T:
     """Load the config from a YAML file into a Pydantic model."""
     assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."
@@ -92,8 +138,7 @@ def overwrite_output(out_file: Path) -> bool:
 
 
 def calc_ablation_schedule(
-    ablate_every_vec_cutoff: Optional[int],
-    n_vecs: int,
+    ablate_every_vec_cutoff: Optional[int], n_vecs: int, exp_base: Optional[float] = 2.0
 ) -> list[int]:
     """Create a schedule for the number of vectors to ablate.
 
@@ -105,6 +150,7 @@ def calc_ablation_schedule(
         ablate_every_vec_cutoff: The point in which we ablate every vector. If None, we ablate
         every vector in the schedule individually (i.e. no exponential schedule).
         n_vecs: Total number of vectors.
+        exp_base: The base of the exponential schedule.
 
     Returns:
         The schedule for the number of vectors to ablate.
@@ -121,6 +167,8 @@ def calc_ablation_schedule(
         >>> calc_ablation_schedule(3, 24)
         [24, 23, 22, 21, 20, 18, 14, 6, 0]
     """
+    if exp_base is None:
+        exp_base = 2.0
     if ablate_every_vec_cutoff is None:
         return list(range(n_vecs, -1, -1))
 
@@ -132,7 +180,7 @@ def calc_ablation_schedule(
     ablate_exponential: list[int] = []
     prev_val = ablate_every_vecs[-1]
     for x in range(n_vecs):
-        exp_val = prev_val - 2**x
+        exp_val = int(prev_val - exp_base**x)
         if exp_val > 0:
             ablate_exponential.append(exp_val)
             prev_val = exp_val

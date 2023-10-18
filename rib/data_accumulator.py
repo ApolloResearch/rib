@@ -32,15 +32,16 @@ def plot_temp(matrix: Float[Tensor, "d1 d2"], title: str) -> None:
 
 
     if matrix.dim() == 1:
-        aspect_ratio = 5 / matrix.shape[0]
+        aspect_ratio = 20 / matrix.shape[0]
         matrix = matrix.unsqueeze(-1)
     else:
-        matrix.shape[1] / matrix.shape[0]
+        aspect_ratio = matrix.shape[1] / matrix.shape[0]
     # Set the vertical size, and let the horizontal size adjust based on the aspect ratio
-    vertical_size = 8
+    vertical_size = 7
     horizontal_size = vertical_size * aspect_ratio
     plt.figure(figsize=(horizontal_size, vertical_size))
     sns.heatmap(matrix.detach().cpu(), annot=False, cmap="YlGnBu", cbar=True, square=True)
+    plt.tight_layout()
     plt.savefig(out_dir / f"{title}.png")
     plt.close()
 
@@ -169,7 +170,7 @@ def collect_M_dash_and_Lambda_dash(
         hook_name: The name of the hook to use to store the matrices in the hooked model.
 
     Returns:
-        A tuple containing M' and Lambda'.
+        A tuple containing M' and Lambda', as well as the integrated gradient term g_j.
     """
     if hook_name is None:
         hook_name = module_name
@@ -192,6 +193,7 @@ def collect_M_dash_and_Lambda_dash(
 
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
     Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
+    g_j = torch.div(hooked_model.hooked_data[hook_name]["g_j"], len(data_loader))
     hooked_model.clear_hooked_data()
 
     # Scale the matrices by the number of samples in the dataset.
@@ -199,7 +201,7 @@ def collect_M_dash_and_Lambda_dash(
     M_dash = M_dash / len_dataset
     Lambda_dash = Lambda_dash / len_dataset
 
-    return M_dash, Lambda_dash
+    return M_dash, Lambda_dash, g_j
 
 
 def collect_interaction_edges(
@@ -280,7 +282,9 @@ def collect_relu_interactions(
     dtype: torch.dtype,
     device: str,
     relu_metric_type: int,
-    Cs: list[Float[Tensor, "d_hidden1 d_hidden1"]],
+    Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    Lambda_dashes: list[Float[Tensor, "d_hidden d_hidden"]],
+    g_js: list[Float[Tensor, "d_hidden"]],
     hook_names: Optional[str] = None,
 ) -> tuple[dict[str, Float[Tensor, "d_hidden d_hidden"]], ...]:
     """Identify whether ReLUs are synchronising.
@@ -300,6 +304,7 @@ def collect_relu_interactions(
         relu_metric_type: Type of metric used to check whether ReLUs are synchronising.
         hook_names: Used to store the gram matrices in the hooked model.
         Cs: list of basis rotation matrices used only for metric type 2.
+        Lambda_dash: Now pass in Lambda dashes as the first term in numerator for metric type 3.
 
     Returns:
         A dictionary of ReLU interaction matrices, where the keys are the hook names (a.k.a. node layer names)
@@ -314,7 +319,7 @@ def collect_relu_interactions(
     match relu_metric_type:
         case 0:
             data_key = ["relu_similarity"]
-        case 1 | 2:
+        case 1 | 2 | 3:
             data_key = ["relu_num", "relu_denom"]
 
     relu_interaction_hooks: list[Hook] = []
@@ -325,7 +330,7 @@ def collect_relu_interactions(
                 data_key=data_key,
                 fn=relu_interaction_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"relu_metric_type": relu_metric_type, "C_next_layer": Cs[i+1].to(device)}
+                fn_kwargs={"relu_metric_type": relu_metric_type, "C_next_layer": Cs[i+1].to(device), "g_j_next_layer": g_js[i+1].to(device)}
             )
         )
 
@@ -340,20 +345,33 @@ def collect_relu_interactions(
         case 1 | 2:
             # Collect ReLU interaction matrices and divide by dataset size
             relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
-                hook_name: torch.div(
-                    torch.div(hooked_model.hooked_data[hook_name][data_key[0]].cpu(), len(data_loader.dataset)),
-                    torch.div(hooked_model.hooked_data[hook_name][data_key[1]].cpu(), len(data_loader.dataset))
-                    )
+                hook_name: torch.div(hooked_model.hooked_data[hook_name]["relu_num"].cpu(), hooked_model.hooked_data[hook_name]["relu_denom"].cpu())
                 for hook_name in hooked_model.hooked_data
             }
             preactivations = {
                 hook_name: torch.div(hooked_model.hooked_data[hook_name]["preactivations"], len(data_loader))
                 for hook_name in hooked_model.hooked_data
             }
-    hooked_model.clear_hooked_data()
+            for hook_name, mat in preactivations.items():
+                plot_temp(mat, f"preact_{hook_name}")
+        case 3:
+            relu_similarity_matrices = {}
+            keys = list(hooked_model.hooked_data.keys())
+            for i in range(len(keys)-1):
+                vectorised_Lambda_dash = torch.diag(Lambda_dashes[i+1])
+                numerator_term_2: Float[Tensor, "d_hidden d_hidden"] = hooked_model.hooked_data[keys[i]]["relu_num"].cpu()
+                shape_list = [hooked_model.hooked_data[hook_name]["relu_num"].shape for hook_name in hooked_model.hooked_data]
+                print(f"shapes list {shape_list}")
+                d_hidden = vectorised_Lambda_dash.shape[0]
+                # Matrix with columns as vectorised Lambda dash terms
+                numerator_term_1 = repeat(vectorised_Lambda_dash, 'd1 -> d1 d2', d2=d_hidden).cpu()
+                print(f"numerator term 1 {numerator_term_1.shape}")
+                print(f"numerator term 2 {numerator_term_2.shape}")
+                denominator = hooked_model.hooked_data[keys[i+1]]["relu_denom"].cpu()
+                matrix = (numerator_term_1 - numerator_term_2) / denominator
+                relu_similarity_matrices[keys[i]] = matrix
 
-    for hook_name, mat in preactivations.items():
-        plot_temp(mat, f"preact_{hook_name}")
+    hooked_model.clear_hooked_data()
 
     return relu_similarity_matrices
 

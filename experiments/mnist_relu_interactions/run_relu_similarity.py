@@ -133,7 +133,7 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                 # similarity_matrix = rescale(similarity_matrix)
                 distance_matrix = similarity_matrix
                 # Threshold distance matrix
-                threshold = 5
+                threshold = 15
                 distance_matrix[distance_matrix > threshold] = threshold
 
         # Deal with zeros on diagonal
@@ -196,7 +196,7 @@ def get_Cs(
 
     # Calls on collect_M_dash_and_Lambda_dash
     # Builds sqrt sorted Lambda matrix and its inverse
-    Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs = calculate_interaction_rotations(
+    Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs, Lambda_dashes, g_js = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
         module_names=config.node_layers,
         hooked_model=hooked_model,
@@ -212,9 +212,9 @@ def get_Cs(
     C_pinv_list = [C_info.C_pinv for C_info in Cs]
 
     with open(file_path, "wb") as f:
-        pickle.dump({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}, f)
+        pickle.dump({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "g_js": g_js, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices,}, f)
 
-    return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}
+    return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "g_js": g_js, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}
 
 
 def get_relu_similarities(
@@ -222,6 +222,8 @@ def get_relu_similarities(
     config: Config,
     file_path: Path,
     Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    Lambda_dashes: list[Float[Tensor, "d_hidden d_hidden"]],
+    g_js: list[Float, Tensor, "d_hidden"],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -243,7 +245,9 @@ def get_relu_similarities(
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
         relu_metric_type=config.relu_metric_type,
-        Cs=Cs
+        Cs=Cs,
+        Lambda_dashes=Lambda_dashes,
+        g_js=g_js,
     )
 
     with open(file_path, "wb") as f:
@@ -293,8 +297,8 @@ def relu_similarity_main(config_path_str: str) -> None:
     print_all_modules(model) # Check module names were correctly defined
     model.eval()  # Run in inference only
 
-    # List of InteractionRotation objects
-    Cs_and_Lambdas: dict[str, list[InteractionRotation]] = check_and_open_file(
+    # dict of InteractionRotation objects or Tensors
+    Cs_and_Lambdas: dict[str, list[Union[InteractionRotation, Float[Tensor, ...]]]] = check_and_open_file(
         file_path=Cs_save_file,
         get_var_fn=get_Cs,
         config=config,
@@ -306,7 +310,9 @@ def relu_similarity_main(config_path_str: str) -> None:
         get_var_fn=get_relu_similarities,
         config=config,
         model=model,
-        Cs=Cs_and_Lambdas["C"]
+        Cs=Cs_and_Lambdas["C"],
+        Lambda_dashes=Cs_and_Lambdas["Lambda_dashes"],
+        g_js=Cs_and_Lambdas["g_js"],
     )
 
     relu_plotting(relu_matrices, out_dir, config)
@@ -314,4 +320,6 @@ def relu_similarity_main(config_path_str: str) -> None:
 
 if __name__ == "__main__":
     fire.Fire(relu_similarity_main)
-    """Run above: python run_relu_interactions.py relu_interactions.yaml 1 False"""
+    """Run above: python run_relu_interactions.py relu_interactions.yaml
+    Check ReLU metric used and whether weights are edited in yaml file
+    """

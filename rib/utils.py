@@ -138,7 +138,7 @@ def overwrite_output(out_file: Path) -> bool:
 
 
 def calc_ablation_schedule(
-    ablate_every_vec_cutoff: Optional[int], n_vecs: int, exp_base: Optional[float] = 2.0
+    ablate_every_vec_cutoff: Optional[int], n_vecs: int, exp_base: Optional[float] = None
 ) -> list[int]:
     """Create a schedule for the number of vectors to ablate.
 

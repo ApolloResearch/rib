@@ -16,6 +16,7 @@ from rib.hook_fns import (
     interaction_edge_pre_forward_hook_fn,
     relu_interaction_forward_hook_fn,
     test_edges_forward_hook_fn,
+    function_size_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
 
@@ -349,7 +350,7 @@ def collect_relu_interactions(
                 for hook_name in hooked_model.hooked_data
             }
             preactivations = {
-                hook_name: torch.div(hooked_model.hooked_data[hook_name]["preactivations"], len(data_loader))
+                hook_name: torch.div(hooked_model.hooked_data[hook_name]["preactivations"], len(data_loader.dataset))
                 for hook_name in hooked_model.hooked_data
             }
             for hook_name, mat in preactivations.items():
@@ -360,13 +361,15 @@ def collect_relu_interactions(
             for i in range(len(keys)-1):
                 vectorised_Lambda_dash = torch.diag(Lambda_dashes[i+1])
                 numerator_term_2: Float[Tensor, "d_hidden d_hidden"] = hooked_model.hooked_data[keys[i]]["relu_num"].cpu()
-                shape_list = [hooked_model.hooked_data[hook_name]["relu_num"].shape for hook_name in hooked_model.hooked_data]
-                print(f"shapes list {shape_list}")
+                numerator_shapes_list = [hooked_model.hooked_data[hook_name]["relu_num"].shape for hook_name in hooked_model.hooked_data]
+                denominator_list = [hooked_model.hooked_data[hook_name]["fn_size"] for hook_name in hooked_model.hooked_data]
+                Lambda_dash_shapes_list = [Lambda_dash.shape for Lambda_dash in Lambda_dashes]
+                print(f"numerator shapes list {numerator_shapes_list}")
+                print(f"denominator list {denominator_list}")
+                print(f"L-dash shapes list {Lambda_dash_shapes_list}")
                 d_hidden = vectorised_Lambda_dash.shape[0]
                 # Matrix with columns as vectorised Lambda dash terms
                 numerator_term_1 = repeat(vectorised_Lambda_dash, 'd1 -> d1 d2', d2=d_hidden).cpu()
-                print(f"numerator term 1 {numerator_term_1.shape}")
-                print(f"numerator term 2 {numerator_term_2.shape}")
                 denominator = hooked_model.hooked_data[keys[i+1]]["relu_denom"].cpu()
                 matrix = (numerator_term_1 - numerator_term_2) / denominator
                 relu_similarity_matrices[keys[i]] = matrix
@@ -374,6 +377,18 @@ def collect_relu_interactions(
     hooked_model.clear_hooked_data()
 
     return relu_similarity_matrices
+
+
+def collect_function_sizes(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    relu_metric_type: int,
+    hook_names: Optional[str] = None,
+) -> None:
+    pass
 
 
 def collect_test_edges(

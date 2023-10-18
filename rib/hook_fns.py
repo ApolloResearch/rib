@@ -360,7 +360,7 @@ def acts_pre_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
     inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
-    # Store the output activations
+    # Store the input activations
     hooked_data[hook_name] = {data_key: inputs}
 
 
@@ -492,11 +492,7 @@ def relu_interaction_forward_hook_fn(
 
         case 3:
             """Note when running for any given metric, we are in layer l-1 for the lth layer metric!
-            This is so we can hook the correct O^l(x) and p^l(x).
-            This also means we don't divide the numerator calculated from the same hook by the
-            denominator calculated from the same hook. Instead, the denominator index is shifted
-            forwards by 1.
-            """
+            This is so we can hook the correct O^l(x) and p^l(x)."""
             batch_size, d_hidden = operator.shape
             # Denominator is l2 norm of functions - i.e. output of this ReLU layer
             denominator = torch.einsum('bi -> ', outputs)
@@ -509,7 +505,30 @@ def relu_interaction_forward_hook_fn(
             numerator_term_2: Float[Tensor, "d_hidden d_hidden"] = torch.einsum('bij -> ij', cols_g_j_hadamard_p * rows_operators)
 
             _add_to_hooked_matrix(hooked_data, hook_name, "relu_num", numerator_term_2)
-            _add_to_hooked_matrix(hooked_data, hook_name, "relu_denom", denominator)
+
+
+def function_size_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    output: Union[
+        Float[Tensor, "batch d_hidden"],
+        Float[Tensor, "batch pos d_hidden"],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+) -> None:
+    assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
+    outputs = output if isinstance(output, tuple) else (output,)
+    outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
+    _add_to_hooked_matrix(hooked_data, hook_name, "fn_size", torch.einsum('bi -> ', outputs))
 
 
 def test_edges_forward_hook_fn(

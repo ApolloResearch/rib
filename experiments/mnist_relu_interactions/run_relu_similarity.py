@@ -128,7 +128,7 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                 similarity_matrix[similarity_matrix < threshold] = 0
                 # Transform into distance matrix
                 distance_matrix = 1 - similarity_matrix
-            case 1 | 2:
+            case 1 | 2 | 3:
                 similarity_matrix = torch.max(similarity_matrix, similarity_matrix.T) # Make symmetric
                 # similarity_matrix = rescale(similarity_matrix)
                 distance_matrix = similarity_matrix
@@ -136,22 +136,23 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                 threshold = 15
                 distance_matrix[distance_matrix > threshold] = threshold
 
-        # Deal with zeros on diagonal
-        distance_matrix = distance_matrix.fill_diagonal_(0)
+        if config.relu_metric_type in (0,1,2):
+            # Deal with zeros on diagonal
+            distance_matrix = distance_matrix.fill_diagonal_(0)
 
-        # Create linkage matrix using clustering algorithm
-        linkage_matrix = linkage(squareform(
-            distance_matrix), method='complete')
-        order = leaves_list(linkage_matrix)
-        rearranged_similarity_matrix = similarity_matrix[order, :][:, order]
+            # Create linkage matrix using clustering algorithm
+            linkage_matrix = linkage(squareform(
+                distance_matrix), method='complete')
+            order = leaves_list(linkage_matrix)
+            rearranged_similarity_matrix = similarity_matrix[order, :][:, order]
 
-        # Plot sorted similarity matrix via indices obtained from distance matrix
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(rearranged_similarity_matrix, annot=False,
-                    cmap="YlGnBu", cbar=True, square=True)
-        plt.title("Reordered Similarity Matrix")
-        plt.savefig(
-            out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
+            # Plot sorted similarity matrix via indices obtained from distance matrix
+            plt.figure(figsize=(10, 8))
+            sns.heatmap(rearranged_similarity_matrix, annot=False,
+                        cmap="YlGnBu", cbar=True, square=True)
+            plt.title("Reordered Similarity Matrix")
+            plt.savefig(
+                out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
 
 
 def load_local_config(config_path_str: str) -> dict:

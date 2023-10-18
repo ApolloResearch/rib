@@ -11,8 +11,8 @@ dataset:
   return_set_n_samples: null
   return_set_portion: first
 node_layers:
-  - ln1.1
-  - mlp_out.1
+  - ln1.0
+  - mlp_out.0
   - ln2.3
   - mlp_out.3
   - ln1.5
@@ -22,7 +22,7 @@ gram_batch_size: 80  #  A100 can handle 80
 truncation_threshold: 1e-6
 logits_node_layer: true
 rotate_final_node_layer: false
-n_intervals: 0
+n_intervals: 10
 dtype: float32
 calculate_edges: false
 eval_type: null

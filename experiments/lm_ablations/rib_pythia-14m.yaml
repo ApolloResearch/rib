@@ -12,8 +12,8 @@ dataset:
   return_set_n_samples: null
   return_set_portion: last
 node_layers:
-  - ln1.1
-  - mlp_out.1
+  - ln1.0
+  - mlp_out.0
   - ln2.3
   - mlp_out.3
   - ln1.5
@@ -22,3 +22,4 @@ batch_size: 60  # A100 can handle 60
 dtype: float32
 eval_type: ce_loss
 seed: 0
+early_stopping_threshold: 1.5

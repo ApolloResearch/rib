@@ -1,11 +1,12 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 import torch
 from jaxtyping import Float
 from torch import Tensor
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
@@ -25,10 +26,17 @@ def run_dataset_through_model(
     hooks: list[Hook],
     dtype: torch.dtype,
     device: str = "cuda",
+    use_tqdm: bool = False,
 ) -> None:
     """Simply pass all batches through a hooked model."""
     assert len(hooks) > 0, "Hooks have not been applied to this model."
-    for batch in dataloader:
+    loader: Union[tqdm, DataLoader]
+    if use_tqdm:
+        loader = tqdm(dataloader, total=len(dataloader), desc="Passing data through model")
+    else:
+        loader = dataloader
+
+    for batch in loader:
         data, _ = batch
         data = data.to(device=device)
         # Change the dtype unless the inputs are integers (e.g. like they are for LMs)
@@ -159,7 +167,12 @@ def collect_M_dash_and_Lambda_dash(
     )
 
     run_dataset_through_model(
-        hooked_model, data_loader, hooks=[interaction_hook], dtype=dtype, device=device
+        hooked_model,
+        data_loader,
+        hooks=[interaction_hook],
+        dtype=dtype,
+        device=device,
+        use_tqdm=True,
     )
 
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]

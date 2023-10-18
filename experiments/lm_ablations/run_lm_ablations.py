@@ -64,6 +64,11 @@ class Config(BaseModel):
         ...,
         description="The type of evaluation to perform on the model before building the graph.",
     )
+    early_stopping_threshold: Optional[float] = Field(
+        None,
+        description="The threshold to use for stopping the ablation calculations early. If None,"
+        "we don't use early stopping.",
+    )
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -129,14 +134,14 @@ def main(config_path_str: str) -> None:
         return_set=return_set,
         tlens_model_path=tlens_model_path,
     )
-    data_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    data_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size)
 
     # Test model accuracy/loss before graph building, ta be sure
     eval_fn: Callable = (
         eval_model_accuracy if config.eval_type == "accuracy" else eval_cross_entropy_loss
     )
     eval_results = eval_fn(hooked_model, data_loader, dtype=dtype, device=device)
-    logger.info("Model %s on dataset: %.2f", config.eval_type, eval_results)
+    logger.info("Model %s on dataset: %.4f", config.eval_type, eval_results)
 
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
@@ -150,6 +155,7 @@ def main(config_path_str: str) -> None:
         ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
         exp_base=config.exp_base,
         device=device,
+        early_stopping_threshold=config.early_stopping_threshold,
     )
 
     if config.exp_name is not None:

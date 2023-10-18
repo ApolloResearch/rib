@@ -28,6 +28,7 @@ model:
   act_fn: relu
   normalization_type: null
 dataset:
+  source: custom
   name: modular_arithmetic
   return_set: both
   modulus: 113

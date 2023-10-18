@@ -122,6 +122,7 @@ def test_modular_arithmetic_build_graph():
         - mlp_in.0
         - unembed
     dataset:
+        source: custom
         name: modular_arithmetic
         return_set: train
     batch_size: 128
@@ -161,11 +162,13 @@ def test_pythia_14m_build_graph():
     tlens_pretrained: pythia-14m
     tlens_model_path: null
     dataset:
-      name: wikitext
+      source: huggingface
+      name: NeelNanda/pile-10k
       tokenizer_name: EleutherAI/pythia-14m
       return_set: train
       return_set_frac: null
       return_set_n_samples: 50
+      return_set_portion: first
     node_layers:
         - ln2.1
         - unembed

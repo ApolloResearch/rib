@@ -3,6 +3,7 @@ seed: 0
 tlens_pretrained: null
 tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
 dataset:
+  source: custom
   name: modular_arithmetic
   return_set: train
 node_layers:

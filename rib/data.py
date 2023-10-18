@@ -8,8 +8,11 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 
-class WikitextConfig(BaseModel):
-    name: Literal["wikitext"]
+class HFDatasetConfig(BaseModel):
+    source: Literal["huggingface"]
+    name: str = Field(
+        ..., description="The name of the dataset to load from the HuggingFace datasets library."
+    )
     tokenizer_name: str = Field(
         ..., description="The name of the model for fetching the tokenizer."
     )
@@ -24,6 +27,9 @@ class WikitextConfig(BaseModel):
         description="The number of raw samples to return from the dataset (train/test/all/both). "
         "Cannot be used with return_set_frac.",
     )
+    return_set_portion: Literal["first", "last"] = Field(
+        "first", description="Whether to load the first or last portion of the return_set."
+    )
 
 
 class ModularArithmeticDatasetConfig(BaseModel):
@@ -33,6 +39,7 @@ class ModularArithmeticDatasetConfig(BaseModel):
     file (see `rib/loader.create_modular_arithmetic_dataset`)
     """
 
+    source: Literal["custom"]
     name: Literal["modular_arithmetic"]
     return_set: Literal["train", "test", "all", "both"] = Field(
         ...,

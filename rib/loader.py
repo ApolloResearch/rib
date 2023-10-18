@@ -1,7 +1,7 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union, cast, overload
+from typing import Literal, Optional, Union, overload
 
 import torch
 import yaml
@@ -11,9 +11,9 @@ from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
 
 from rib.data import (
+    HFDatasetConfig,
     ModularArithmeticDataset,
     ModularArithmeticDatasetConfig,
-    WikitextConfig,
 )
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
@@ -147,39 +147,29 @@ def create_modular_arithmetic_dataset(
             return train_dataset, test_dataset
 
 
-def load_wikitext(
-    dataset_config: WikitextConfig,
-    return_set: Literal["train", "test", "all", "both"],
-):
-    """Load the wikitext dataset.
+def tokenize_dataset(
+    dataset: Dataset,
+    tokenizer: AutoTokenizer,
+    n_ctx: int,
+) -> TensorDataset:
+    """Tokenize a dataset using the provided tokenizer.
+
+    Tokenizes the dataset and splits it into chunks that fit the context length. The labels are
+    the input_ids shifted by one position.
 
     Args:
-        dataset_config (WikitextConfig): The dataset config.
-        return_set (Literal["train", "test", "all"]): The dataset to return.
+        raw_dataset (Union[DatasetDict, Dataset, IterableDatasetDict, IterableDataset]): The raw
+            dataset to tokenize. Created from `hf_load_dataset`.
+        tokenizer (AutoTokenizer): The tokenizer to use.
+        n_ctx (int): The context length to use.
 
+    Returns:
+        TensorDataset: The tokenized dataset.
     """
-    assert "pythia" in dataset_config.tokenizer_name, "Only pythia models are supported for now"
-    assert return_set in ["train", "test", "all"], "Currently only supports train, test, and all"
-    assert not (
-        dataset_config.return_set_frac and dataset_config.return_set_n_samples
-    ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
-
-    n_ctx = 1024 if "gpt2" in dataset_config.tokenizer_name else 2048
-
-    if dataset_config.return_set_frac:
-        data_split = f"{return_set}[:{int(dataset_config.return_set_frac * 100)}%]"
-    elif dataset_config.return_set_n_samples:
-        data_split = f"{return_set}[:{dataset_config.return_set_n_samples}]"
-
-    dataset = hf_load_dataset("wikitext", "wikitext-103-raw-v1", split=data_split)
-
-    tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
-    tokenizer.pad_token = tokenizer.eos_token
-
     # Tokenize all samples and merge them together
     all_tokens = []
-    for example in dataset:
-        tokens = tokenizer.encode(example["text"], add_special_tokens=False)
+    for example in dataset:  # type: ignore
+        tokens = tokenizer(example["text"])["input_ids"]
         all_tokens.extend(tokens)
 
     # Split the merged tokens into chunks that fit the context length
@@ -208,7 +198,7 @@ def load_wikitext(
 
 @overload
 def load_dataset(
-    dataset_config: Union[ModularArithmeticDatasetConfig, WikitextConfig],
+    dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig],
     return_set: Literal["train", "test", "all"],
     tlens_model_path: Optional[Path] = None,
 ) -> Dataset:
@@ -217,7 +207,7 @@ def load_dataset(
 
 @overload
 def load_dataset(
-    dataset_config: Union[ModularArithmeticDatasetConfig, WikitextConfig],
+    dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig],
     return_set: Literal["both"],
     tlens_model_path: Optional[Path] = None,
 ) -> tuple[Dataset, Dataset]:
@@ -225,30 +215,70 @@ def load_dataset(
 
 
 def load_dataset(
-    dataset_config: Union[ModularArithmeticDatasetConfig, WikitextConfig],
+    dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig],
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
     tlens_model_path: Optional[Path] = None,
 ) -> Union[Dataset, tuple[Dataset, Dataset]]:
     """
     Load a dataset based on the provided type and arguments.
 
+    Useful hugginface datasets (credit to TransformerLens authors for creating/collecting these):
+        - stas/openwebtext-10k (approx the GPT-2 training data
+            https://huggingface.co/datasets/openwebtext)
+        - NeelNanda/pile-10k (The Pile, a big mess of tons of diverse data
+            https://pile.eleuther.ai/)
+        - NeelNanda/c4-10k (Colossal, Cleaned, Common Crawl - basically openwebtext but bigger
+            https://huggingface.co/datasets/c4)
+        - NeelNanda/code-10k (Codeparrot Clean, a Python code dataset
+            https://huggingface.co/datasets/codeparrot/codeparrot-clean)
+        - NeelNanda/c4-code-20k (c4 + code - the 20K data points from c4-10k and code-10k. This is
+            the mix of datasets used to train my interpretability-friendly models, though note that
+            they are *not* in the correct ratio! There's 10K texts for each, but about 22M tokens of
+            code and 5M tokens of C4)
+        - NeelNanda/wiki-10k (Wikipedia, generated from the 20220301.en split of
+            https://huggingface.co/datasets/wikipedia)
+
     Args:
-        dataset_config (Union[ModularArithmeticDatasetConfig, WikitextConfig]): The dataset config.
-        tlens_model_path (Optional[Path]): The path to the tlens model (if applicable).
-        **kwargs: Additional arguments needed for specific dataset types.
+        dataset_config (Union[ModularArithmeticDatasetConfig, HFDatasetConfig]): The dataset config.
+        return_set (Union[Literal["train", "test", "all"], Literal["both"]]): The dataset to return.
+        tlens_model_path (Optional[Path]): The path to the tlens model. Used for collecting config
+            for the modular arithmetic dataset used to train the model.
 
     Returns:
         The loaded dataset or a tuple of datasets (train and test).
+
     """
-    if dataset_config.name == "modular_arithmetic":
+    if isinstance(dataset_config, ModularArithmeticDatasetConfig):
         return create_modular_arithmetic_dataset(
             dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
         )
-    elif dataset_config.name == "wikitext":
-        return load_wikitext(dataset_config=dataset_config, return_set=return_set)
-    # Add more dataset loading logic here as needed
     else:
-        raise ValueError(f"Unsupported dataset type: {dataset_config.name}")
+        # Load dataset from huggingface
+        assert return_set in ["train", "test"], "Can only load train or test sets from HF"
+        assert not (
+            dataset_config.return_set_frac and dataset_config.return_set_n_samples
+        ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
+
+        n_ctx = 1024 if "gpt2" in dataset_config.tokenizer_name else 2048
+
+        if dataset_config.return_set_frac:
+            percent = int(dataset_config.return_set_frac * 100)
+            if dataset_config.return_set_portion == "first":
+                data_split = f"{return_set}[:{percent}%]"
+            elif dataset_config.return_set_portion == "last":
+                data_split = f"{return_set}[-{percent}%:]"
+        elif dataset_config.return_set_n_samples:
+            if dataset_config.return_set_portion == "first":
+                data_split = f"{return_set}[:{dataset_config.return_set_n_samples}]"
+            elif dataset_config.return_set_portion == "last":
+                data_split = f"{return_set}[-{dataset_config.return_set_n_samples}:]"
+
+        raw_dataset = hf_load_dataset(dataset_config.name, split=data_split)
+
+        tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
+        tokenizer.pad_token = tokenizer.eos_token
+        dataset = tokenize_dataset(dataset=raw_dataset, tokenizer=tokenizer, n_ctx=n_ctx)
+        return dataset
 
 
 @overload

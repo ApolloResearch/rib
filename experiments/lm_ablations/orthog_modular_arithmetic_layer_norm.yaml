@@ -3,6 +3,7 @@ ablation_type: orthogonal
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/eps1e-4_ln_intervals50_modular_arithmetic_interaction_graph.pt
 ablate_every_vec_cutoff: 10
 dataset:
+  source: custom
   name: modular_arithmetic
   return_set: test
 node_layers:  # Rotate the input to these modules into the orthogonal basis

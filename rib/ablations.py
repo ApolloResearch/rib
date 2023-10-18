@@ -26,8 +26,13 @@ def ablate_and_test(
     device: str,
     dtype: Optional[torch.dtype] = None,
     hook_name: Optional[str] = None,
+    early_stopping_threshold: Optional[float] = None,
 ) -> dict[int, float]:
     """Ablate eigenvectors and test the model accuracy/loss.
+
+    We start by ablating zero vectors, measuring the ce_loss/accuracy, and continue ablating vectors
+    until the absolute value of result is `early_stopping_threshold` different than the original
+    ce_loss/accuracy.
 
     Args:
         hooked_model: The hooked model.
@@ -41,6 +46,8 @@ def ablate_and_test(
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
         hook_name: The name of the hook point to use. If None, defaults to `module_name`.
+        early_stopping_threshold: The threshold to use for early stopping. If None, we don't use
+            early stopping.
 
     Returns:
         Dictionary mapping the number of basis vectors remaining and the resulting accuracy.
@@ -49,12 +56,16 @@ def ablate_and_test(
     if hook_name is None:
         hook_name = module_name
 
+    base_result: Optional[float] = None
+
     eval_results: dict[int, float] = {}
-    # Iterate through possible number of ablated vectors.
-    for n_ablated_vecs in tqdm(
-        ablation_schedule,
-        total=len(ablation_schedule),
-        desc=f"Ablating {module_name}",
+    # Iterate through possible number of ablated vectors, starting from no ablated vectors
+    for i, n_ablated_vecs in enumerate(
+        tqdm(
+            ablation_schedule[::-1],
+            total=len(ablation_schedule),
+            desc=f"Ablating {module_name}",
+        )
     ):
         n_vecs_remaining = basis_vecs.shape[1] - n_ablated_vecs
 
@@ -65,6 +76,7 @@ def ablate_and_test(
             vecs_pinv=basis_vecs_pinv,
             n_ablated_vecs=n_ablated_vecs,
         )
+
         rotation_hook = Hook(
             name=hook_name,
             data_key="rotation",
@@ -77,6 +89,15 @@ def ablate_and_test(
             hooked_model, test_loader, hooks=[rotation_hook], dtype=dtype, device=device
         )
         eval_results[n_vecs_remaining] = eval_results_ablated
+
+        if early_stopping_threshold is not None:
+            if i == 0:
+                base_result = eval_results_ablated
+            else:
+                # If the result is more than `early_stopping_threshold` different than the base result,
+                # then we stop ablating vectors.
+                if abs(eval_results_ablated - base_result) > early_stopping_threshold:
+                    break
 
     return eval_results
 
@@ -93,6 +114,7 @@ def run_ablations(
     exp_base: Optional[float],
     device: str,
     dtype: Optional[torch.dtype] = None,
+    early_stopping_threshold: Optional[float] = None,
 ) -> dict[str, dict[int, float]]:
     """Rotate to and from a truncated basis and compare ablation accuracies/losses.
 
@@ -107,6 +129,9 @@ def run_ablations(
         ablate_every_vec_cutoff: The point in the ablation schedule to start ablating every vector.
         exp_base: The base of the exponential schedule.
         device: The device to run the model on.
+        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
+        early_stopping_threshold: The threshold to use for early stopping. If None, we don't use
+            early stopping.
 
     Returns:
         A dictionary mapping node layers to ablation accuracies/losses.
@@ -131,6 +156,7 @@ def run_ablations(
             device=device,
             dtype=dtype,
             hook_name=hook_name,
+            early_stopping_threshold=early_stopping_threshold,
         )
         results[hook_name] = ablation_eval_results
 

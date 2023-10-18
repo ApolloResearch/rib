@@ -62,7 +62,7 @@ def main(*results_files: str) -> None:
         ablation_types=ablation_types,
         log_scale=False,
         xlim=(0.0, 20.0) if eval_type == "accuracy" else None,
-        ylim=(0.0, 1.0) if eval_type == "accuracy" else (4.8, 7.0),
+        ylim=(0.0, 1.0) if eval_type == "accuracy" else (3.2, 5),
     )
 
     logger.info(f"Saved plot to {out_file}")

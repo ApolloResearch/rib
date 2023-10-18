@@ -82,18 +82,22 @@ def mock_torch_load(*args, **kwargs):
     return interaction_graph_info
 
 
-def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1):
+def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool = False) -> bool:
     """
     Check if a list is roughly sorted within a tolerance of k out-of-order pairs.
 
     Args:
-        - The list to check.
-        - The number of out-of-order pairs to tolerate.
+        lst: The list to check.
+        k: The number of out-of-order pairs to tolerate.
+        reverse: If True, check that the list is roughly sorted in descending order.
+
 
     Returns:
         - True if the list is roughly sorted, otherwise False.
     """
 
+    if reverse:
+        lst = lst[::-1]
     count_out_of_order = 0
     for i in range(len(lst) - 1):
         if lst[i] > lst[i + 1]:
@@ -161,17 +165,17 @@ def ablation_mock_run(
                 accuracy_vals = list(accuracies[layer_key].values())
 
                 # Check that the accuracies are ordered by their number of ablated vectors
-                assert vecs_remaining == sorted(vecs_remaining)
+                assert vecs_remaining == sorted(vecs_remaining, reverse=True)
 
                 # Check that ablating 0 vectors gives at least max_accuracy_threshold
-                assert accuracy_vals[-1] >= max_accuracy_threshold
+                assert accuracy_vals[0] >= max_accuracy_threshold
 
                 # Check that ablating all vectors gives less than 50% accuracy (arbitrarily chosen)
-                assert accuracy_vals[0] < 0.5
+                assert accuracy_vals[-1] < 0.5
 
                 # Check that the accuracies are sorted in descending order of the number of ablated
                 # vectors
-                assert _is_roughly_sorted(accuracy_vals, k=sort_tolerance)
+                assert _is_roughly_sorted(accuracy_vals, k=sort_tolerance, reverse=True)
 
 
 @pytest.mark.slow

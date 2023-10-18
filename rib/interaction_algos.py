@@ -8,6 +8,7 @@ import torch
 from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
@@ -157,7 +158,11 @@ def calculate_interaction_rotations(
         if logits_node_layer
         else zip(module_names[:-1][::-1], hook_names[:-1][::-1])
     )
-    for module_name, hook_name in module_and_hook_names:
+    for module_name, hook_name in tqdm(
+        module_and_hook_names,
+        total=len(module_names),
+        desc="Interaction rotations",
+    ):
         D_dash, U_dash = eigendecompose(gram_matrices[hook_name])
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())

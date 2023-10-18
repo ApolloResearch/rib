@@ -251,6 +251,7 @@ def test_run_modular_arithmetic_rib_ablations():
     interaction_graph_path: OVERWRITE/IN/MOCK
     ablate_every_vec_cutoff: 2
     dataset:
+        source: custom
         name: modular_arithmetic
         return_set: test
     node_layers:
@@ -282,6 +283,7 @@ def test_run_modular_arithmetic_orthog_ablations():
     interaction_graph_path: OVERWRITE/IN/MOCK
     ablate_every_vec_cutoff: 10
     dataset:
+        source: custom
         name: modular_arithmetic
         return_set: test
     node_layers:

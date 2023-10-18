@@ -27,7 +27,7 @@ import torch
 from pydantic import BaseModel, Field, field_validator
 
 from rib.ablations import load_basis_matrices, run_ablations
-from rib.data import ModularArithmeticDatasetConfig, WikitextConfig
+from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.hook_manager import HookedModel
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
@@ -50,9 +50,9 @@ class Config(BaseModel):
         description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
     )
     exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
-    dataset: Union[ModularArithmeticDatasetConfig, WikitextConfig] = Field(
+    dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig] = Field(
         ...,
-        discriminator="name",
+        discriminator="source",
         description="The dataset to use to build the graph.",
     )
     node_layers: list[str]

@@ -9,6 +9,13 @@ model:
   n_ctx: 3
   act_fn: relu
   normalization_type: null
+dataset:
+  name: modular_arithmetic
+  modulus: 113  # 'p' in the paper and code
+  frac_train: .30
+  fn_name: add
+  return_set: both
+  seed: 0
 train:
   modulus: 113  # 'p' in the paper and code
   frac_train: .30

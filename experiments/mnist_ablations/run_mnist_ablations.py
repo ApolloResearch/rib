@@ -49,6 +49,7 @@ class Config(BaseModel):
         None,
         description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
     )
+    exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
     dtype: str
     node_layers: list[str]
     batch_size: int
@@ -134,6 +135,8 @@ def main(config_path_str: str) -> None:
         data_loader=test_loader,
         graph_module_names=config.node_layers,
         ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
+        eval_fn=eval_model_accuracy,
+        exp_base=config.exp_base,
         device=device,
         dtype=dtype,
     )

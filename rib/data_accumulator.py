@@ -38,6 +38,7 @@ def run_dataset_through_model(
         hooked_model(data, hooks=hooks)
 
 
+@torch.inference_mode()
 def collect_gram_matrices(
     hooked_model: HookedModel,
     module_names: list[str],

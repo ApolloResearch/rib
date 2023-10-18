@@ -23,6 +23,28 @@ if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
 
 
+def plot_temp(matrix: Float[Tensor, "d1 d2"], title: str) -> None:
+    from pathlib import Path
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    out_dir = Path(__file__).parent / "relu_temp_debug"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+
+    if matrix.dim() == 1:
+        aspect_ratio = 5 / matrix.shape[0]
+        matrix = matrix.unsqueeze(-1)
+    else:
+        matrix.shape[1] / matrix.shape[0]
+    # Set the vertical size, and let the horizontal size adjust based on the aspect ratio
+    vertical_size = 8
+    horizontal_size = vertical_size * aspect_ratio
+    plt.figure(figsize=(horizontal_size, vertical_size))
+    sns.heatmap(matrix.detach().cpu(), annot=False, cmap="YlGnBu", cbar=True, square=True)
+    plt.savefig(out_dir / f"{title}.png")
+    plt.close()
+
+
 def run_dataset_through_model(
     hooked_model: HookedModel,
     dataloader: DataLoader,
@@ -319,12 +341,19 @@ def collect_relu_interactions(
             # Collect ReLU interaction matrices and divide by dataset size
             relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
                 hook_name: torch.div(
-                    torch.div(hooked_model.hooked_data[hook_name][data_key[0]], len(data_loader.dataset)),
-                    torch.div(hooked_model.hooked_data[hook_name][data_key[1]], len(data_loader.dataset))
-                    ).to("cpu")
+                    torch.div(hooked_model.hooked_data[hook_name][data_key[0]].cpu(), len(data_loader.dataset)),
+                    torch.div(hooked_model.hooked_data[hook_name][data_key[1]].cpu(), len(data_loader.dataset))
+                    )
+                for hook_name in hooked_model.hooked_data
+            }
+            preactivations = {
+                hook_name: torch.div(hooked_model.hooked_data[hook_name]["preactivations"], len(data_loader))
                 for hook_name in hooked_model.hooked_data
             }
     hooked_model.clear_hooked_data()
+
+    for hook_name, mat in preactivations.items():
+        plot_temp(mat, f"preact_{hook_name}")
 
     return relu_similarity_matrices
 

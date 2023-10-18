@@ -9,7 +9,6 @@ each hook function. Therefore, these arguments must be included in the signature
 
 Otherwise, the hook function operates like a regular pytorch hook function.
 """
-
 from functools import partial
 from typing import Any, Optional, Union
 
@@ -465,6 +464,7 @@ def relu_interaction_forward_hook_fn(
             denominator = torch.einsum('bi -> ', outputs)
 
             f_next_layer_hats: Float[Tensor, "batch d_hidden_trunc_next"] = outputs @ C_next_layer # E.g. [256, 89]
+            # Expand twice for m, n dimensions of final matrix, keeping last dim d1 as vector dimension
             operator_expanded = repeat(operator, 'b d1 -> b d2 d3 d1', d2=d_hidden, d3=d_hidden).clone()
 
             for m in range(d_hidden):
@@ -481,19 +481,9 @@ def relu_interaction_forward_hook_fn(
             # Sum over batch dimension
             numerator = torch.einsum('bijk -> ij', squared_diff)
 
-            ## Really cursed double for loop code that takes forever to run
-            # numerator = torch.zeros((d_hidden, d_hidden))
-            # for m in range(d_hidden):
-            #     for n in range(d_hidden):
-            #         diag_operator_edited = diag_operator.clone()
-            #         diag_operator_edited[:, m, m] = operator[:, n]
-            #         C_O_p: Float[Tensor, "batch d_out"] = rearrange(inputs, 'b d_hidden -> b () d_hidden') @ diag_operator_edited @ repeat(C_next_layer, 'd1 d2 -> b d1 d2', b=batch_size)
-
-            #         squared_diff = (f_next_layer_hats - C_O_p.squeeze(1)).pow(2)
-            #         numerator[m, n] = torch.einsum('bi -> ', squared_diff)
-
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], numerator)
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], denominator)
+            _add_to_hooked_matrix(hooked_data, hook_name, "preactivations", inputs.sum(dim=0))
 
 
 def test_edges_forward_hook_fn(

@@ -1,17 +1,22 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union, overload
+from typing import Literal, Optional, Union, cast, overload
 
 import torch
 import yaml
-from torch.utils.data import DataLoader, Dataset
+from datasets import load_dataset as hf_load_dataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 from transformer_lens import HookedTransformer
+from transformers import AutoTokenizer
 
-from rib.data import ModularArithmeticDataset
+from rib.data import (
+    ModularArithmeticDataset,
+    ModularArithmeticDatasetConfig,
+    WikitextConfig,
+)
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
-from rib.types import DATASET_TYPES
 from rib.utils import train_test_split
 
 
@@ -91,12 +96,9 @@ def load_sequential_transformer(
 
 
 def create_modular_arithmetic_dataset(
+    dataset_config: ModularArithmeticDatasetConfig,
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
     tlens_model_path: Optional[Path] = None,
-    fn_name: Optional[Literal["add", "subtract", "x2xyy2"]] = None,
-    modulus: Optional[int] = None,
-    seed: Optional[int] = None,
-    frac_train: Optional[float] = None,
 ) -> Union[Dataset, tuple[Dataset, Dataset]]:
     """Create a ModularArithmeticDataset from the provided arguments.
 
@@ -104,19 +106,24 @@ def create_modular_arithmetic_dataset(
     which override the arguments in the trained model's config.
 
     Args:
-        return_set (str): What part of the dataset to return.
+        dataset_config(ModularArithmeticDatasetConfig): The dataset config (overrides the config
+            loaded from the tlens model).
         tlens_model_path (Optional[Path]): The path to the tlens model (if applicable).
-        fn_name (Optional[Literal["add", "subtract", "x2xyy2"]]): The name of the function to use.
-        modulus (Optional[int]): The modulus to use.
-        seed (Optional[int]): The seed to use.
-        frac_train (Optional[float]): The fraction of the dataset to use for training."""
+    """
+    modulus, fn_name, frac_train, seed = None, None, None, None
     if tlens_model_path:
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
             cfg = yaml.safe_load(f)
-        modulus = modulus or cfg["train"]["modulus"]
-        fn_name = fn_name or cfg["train"]["fn_name"]
-        frac_train = frac_train or cfg["train"]["frac_train"]
-        seed = seed or cfg["seed"]
+
+        modulus = cfg["train"]["modulus"]
+        fn_name = cfg["train"]["fn_name"]
+        frac_train = cfg["train"]["frac_train"]
+        seed = cfg["seed"]
+
+    modulus = dataset_config.modulus or modulus
+    fn_name = dataset_config.fn_name or fn_name
+    frac_train = dataset_config.frac_train if dataset_config.frac_train is not None else frac_train
+    seed = dataset_config.seed if dataset_config.seed is not None else seed
 
     assert modulus is not None, "Modulus not provided and not found in tlens model config."
     assert fn_name is not None, "Function name not provided and not found in tlens model config."
@@ -140,51 +147,108 @@ def create_modular_arithmetic_dataset(
             return train_dataset, test_dataset
 
 
+def load_wikitext(
+    dataset_config: WikitextConfig,
+    return_set: Literal["train", "test", "all", "both"],
+):
+    """Load the wikitext dataset.
+
+    Args:
+        dataset_config (WikitextConfig): The dataset config.
+        return_set (Literal["train", "test", "all"]): The dataset to return.
+
+    """
+    assert "pythia" in dataset_config.tokenizer_name, "Only pythia models are supported for now"
+    assert return_set in ["train", "test", "all"], "Currently only supports train, test, and all"
+    assert not (
+        dataset_config.return_set_frac and dataset_config.return_set_n_samples
+    ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
+
+    n_ctx = 1024 if "gpt2" in dataset_config.tokenizer_name else 2048
+
+    if dataset_config.return_set_frac:
+        data_split = f"{return_set}[:{int(dataset_config.return_set_frac * 100)}%]"
+    elif dataset_config.return_set_n_samples:
+        data_split = f"{return_set}[:{dataset_config.return_set_n_samples}]"
+
+    dataset = hf_load_dataset("wikitext", "wikitext-103-raw-v1", split=data_split)
+
+    tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
+    tokenizer.pad_token = tokenizer.eos_token
+
+    # Tokenize all samples and merge them together
+    all_tokens = []
+    for example in dataset:
+        tokens = tokenizer.encode(example["text"], add_special_tokens=False)
+        all_tokens.extend(tokens)
+
+    # Split the merged tokens into chunks that fit the context length
+    chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
+
+    # Convert chunks to input_ids and labels
+    input_ids_list = []
+    labels_list = []
+    for chunk in chunks:
+        input_id = chunk
+        label = input_id[1:] + [tokenizer.pad_token_id]
+
+        input_ids_list.append(input_id)
+        labels_list.append(label)
+
+    # Ignore the last chunk if it's shorter than the context length
+    if len(input_ids_list[-1]) < n_ctx:
+        input_ids_list = input_ids_list[:-1]
+        labels_list = labels_list[:-1]
+
+    input_ids = torch.tensor(input_ids_list, dtype=torch.long)
+    labels = torch.tensor(labels_list, dtype=torch.long)
+
+    return TensorDataset(input_ids, labels)
+
+
 @overload
 def load_dataset(
-    dataset_type: DATASET_TYPES,
+    dataset_config: Union[ModularArithmeticDatasetConfig, WikitextConfig],
     return_set: Literal["train", "test", "all"],
     tlens_model_path: Optional[Path] = None,
-    **kwargs,
 ) -> Dataset:
     ...
 
 
 @overload
 def load_dataset(
-    dataset_type: DATASET_TYPES,
+    dataset_config: Union[ModularArithmeticDatasetConfig, WikitextConfig],
     return_set: Literal["both"],
     tlens_model_path: Optional[Path] = None,
-    **kwargs,
 ) -> tuple[Dataset, Dataset]:
     ...
 
 
 def load_dataset(
-    dataset_type: DATASET_TYPES,
+    dataset_config: Union[ModularArithmeticDatasetConfig, WikitextConfig],
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
     tlens_model_path: Optional[Path] = None,
-    **kwargs,
 ) -> Union[Dataset, tuple[Dataset, Dataset]]:
     """
     Load a dataset based on the provided type and arguments.
 
     Args:
-        dataset_type (str): The type of dataset to create.
-        return_set (str): What part of the dataset to return.
+        dataset_config (Union[ModularArithmeticDatasetConfig, WikitextConfig]): The dataset config.
         tlens_model_path (Optional[Path]): The path to the tlens model (if applicable).
         **kwargs: Additional arguments needed for specific dataset types.
 
     Returns:
         The loaded dataset or a tuple of datasets (train and test).
     """
-    if dataset_type == "modular_arithmetic":
+    if dataset_config.name == "modular_arithmetic":
         return create_modular_arithmetic_dataset(
-            tlens_model_path=tlens_model_path, return_set=return_set, **kwargs
+            dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
         )
+    elif dataset_config.name == "wikitext":
+        return load_wikitext(dataset_config=dataset_config, return_set=return_set)
     # Add more dataset loading logic here as needed
     else:
-        raise ValueError(f"Unsupported dataset type: {dataset_type}")
+        raise ValueError(f"Unsupported dataset type: {dataset_config.name}")
 
 
 @overload

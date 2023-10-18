@@ -414,11 +414,16 @@ class Attention(nn.Module):
 
     def apply_rotary(
         self,
-        x: Float[torch.Tensor, "batch pos head_index d_head"],
+        x: Float[torch.Tensor, "... head_index d_head"],
         past_kv_pos_offset=0,
-    ) -> Float[torch.Tensor, "batch pos head_index d_head"]:
-        # Only apply rotary to first rotary_dim dimensions (eg, if rotary_dim=64 and d_head=256, only apply to first 1/4 of dimensions)
-        x_pos = x.size(1)
+    ) -> Float[torch.Tensor, "... head_index d_head"]:
+        """Apply rotary embeddings to the input x.
+
+        Note that x may or may not have a batch dimension (e.g. no batch dimension if using vmap).
+        """
+        # Only apply rotary to first rotary_dim dimensions (eg, if rotary_dim=64 and d_head=256,
+        # only apply to first 1/4 of dimensions)
+        x_pos = x.size(1) if x.dim() == 4 else x.size(0)
         x_rot = x[..., : self.cfg.rotary_dim]
         x_pass = x[..., self.cfg.rotary_dim :]
         x_flip = self.rotate_every_two(x_rot)

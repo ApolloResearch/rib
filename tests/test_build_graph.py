@@ -81,19 +81,28 @@ def graph_build_test(
                     Cs[-1]["C"] is None
                 ), "The output interaction matrix should be None if rotate_final_node_layer is False"
 
-            for i, module_name in enumerate(edge_info[0] for edge_info in E_hats):
+            comparison_layers = results["config"]["node_layers"]
+            # If we don't have a logit node layer, then we don't have edges or lambdas for the final
+            # layer in node_layers
+            if not results["config"]["logits_node_layer"]:
+                comparison_layers = comparison_layers[:-1]
+            for i, module_name in enumerate(comparison_layers):
+                # Get the module names from the grams
                 # Check that the size of the sum of activations in the interaction basis is equal
                 # to the outgoing edges of a node
                 act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
-                edge_size = E_hats[i][1].sum(0).abs()
-                assert torch.allclose(
-                    act_size / act_size.abs().max(), edge_size / edge_size.abs().max(), atol=atol
-                ), f"act_size not equal to edge_size for {module_name}"
+                if E_hats:
+                    edge_size = E_hats[i][1].sum(0).abs()
+                    assert torch.allclose(
+                        act_size / act_size.abs().max(),
+                        edge_size / edge_size.abs().max(),
+                        atol=atol,
+                    ), f"act_size not equal to edge_size for {module_name}"
 
                 # Check that the Lambdas are also the same as the act_size and edge_size
-                # Note that the Lambdas need to be truncated to the same size as the edge_size (this
-                # happens in `rib.interaction_algos.build_sort_lambda_matrix)
-                Lambdas_trunc = Lambdas[i][: len(edge_size)]
+                # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
+                # `rib.interaction_algos.build_sort_lambda_matrix)
+                Lambdas_trunc = Lambdas[i][: len(act_size)]
                 assert torch.allclose(
                     act_size / act_size.abs().max(),
                     Lambdas_trunc / Lambdas_trunc.max(),
@@ -109,10 +118,12 @@ def test_modular_arithmetic_build_graph():
     tlens_pretrained: null
     tlens_model_path: OVERWRITE/IN/MOCK
     node_layers:
-      - ln1.0
-      - mlp_in.0
-      - unembed
-    dataset: modular_arithmetic
+        - ln1.0
+        - mlp_in.0
+        - unembed
+    dataset:
+        name: modular_arithmetic
+        return_set: train
     batch_size: 128
     truncation_threshold: 1e-6
     logits_node_layer: false
@@ -120,6 +131,7 @@ def test_modular_arithmetic_build_graph():
     last_pos_module_type: add_resid1
     n_intervals: 0
     dtype: float32
+    eval_type: accuracy
 
     """
     load_config_path = "experiments.lm_rib_build.run_lm_rib_build.load_config"
@@ -136,6 +148,40 @@ def test_modular_arithmetic_build_graph():
     graph_build_test(
         mock_config=mock_config,
         load_config_mock_fn=mock_load_config_modular_arithmetic,
+        load_config_path=load_config_path,
+        build_graph_main_fn=lm_build_graph_main,
+    )
+
+
+@pytest.mark.slow
+def test_pythia_14m_build_graph():
+    mock_config = """
+    exp_name: test
+    seed: 0
+    tlens_pretrained: pythia-14m
+    tlens_model_path: null
+    dataset:
+      name: wikitext
+      tokenizer_name: EleutherAI/pythia-14m
+      return_set: train
+      return_set_frac: null
+      return_set_n_samples: 50
+    node_layers:
+        - ln2.1
+        - unembed
+    batch_size: 2
+    truncation_threshold: 1e-6
+    logits_node_layer: false
+    rotate_final_node_layer: false
+    n_intervals: 0
+    dtype: float32
+    calculate_edges: false
+    eval_type: ce_loss
+    """
+    load_config_path = "experiments.lm_rib_build.run_lm_rib_build.load_config"
+    graph_build_test(
+        mock_config=mock_config,
+        load_config_mock_fn=load_config,
         load_config_path=load_config_path,
         build_graph_main_fn=lm_build_graph_main,
     )

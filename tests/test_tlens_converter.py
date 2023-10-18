@@ -123,17 +123,17 @@ def test_modular_arithmetic_conversion() -> None:
 
 
 def pretrained_lm_comparison(
-    model_str: str, mappings: dict[str, dict[str, str]], atol: float
+    hf_model_str: str, mappings: dict[str, dict[str, str]], atol: float
 ) -> None:
     """Test that a pretrained lm in tlens and SequentialTransformer give the same outputs and
     internal activations.
 
     Args:
-        model_str: The model to test.
+        hf_model_str: The model to test.
         mappings: A mapping from some tlens cache keys to SequentialTransformer cache keys.
         atol: The absolute tolerance to use for torch.allclose.
     """
-    tlens_model = HookedTransformer.from_pretrained(model_str)
+    tlens_model = HookedTransformer.from_pretrained(hf_model_str)
     tlens_model.to(torch.float64)
     tlens_model.to("cpu")
     tlens_model.eval()

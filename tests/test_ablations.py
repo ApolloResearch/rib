@@ -188,6 +188,7 @@ def test_run_mnist_orthog_ablations():
         - layers.2
     batch_size: 64
     seed: 0
+    eval_type: accuracy
     """
 
     ablation_mock_run(
@@ -227,6 +228,7 @@ def test_run_mnist_rib_ablations():
         - layers.2
     batch_size: 64
     seed: 0
+    eval_type: accuracy
     """
 
     ablation_mock_run(
@@ -248,13 +250,16 @@ def test_run_modular_arithmetic_rib_ablations():
     ablation_type: rib
     interaction_graph_path: OVERWRITE/IN/MOCK
     ablate_every_vec_cutoff: 2
-    dataset: modular_arithmetic
+    dataset:
+        name: modular_arithmetic
+        return_set: test
     node_layers:
         - ln1.0
         - unembed
     batch_size: 64
     dtype: float32
     seed: 0
+    eval_type: accuracy
     """
 
     ablation_mock_run(
@@ -276,13 +281,16 @@ def test_run_modular_arithmetic_orthog_ablations():
     ablation_type: orthogonal
     interaction_graph_path: OVERWRITE/IN/MOCK
     ablate_every_vec_cutoff: 10
-    dataset: modular_arithmetic
+    dataset:
+        name: modular_arithmetic
+        return_set: test
     node_layers:
         - ln1.0
         - unembed
     batch_size: 64
     dtype: float32
     seed: 0
+    eval_type: accuracy
     """
 
     ablation_mock_run(

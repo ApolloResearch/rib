@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Union
+from typing import Callable, Literal, Optional, Union
 
 import torch
 from jaxtyping import Float
@@ -9,7 +9,7 @@ from tqdm import tqdm
 from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix
-from rib.utils import calc_ablation_schedule, eval_model_accuracy
+from rib.utils import calc_ablation_schedule
 
 BasisVecs = Union[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden d_hidden"]]
 BasisVecsPinv = Union[Float[Tensor, "d_hidden_trunc d_hidden"], Float[Tensor, "d_hidden d_hidden"]]
@@ -21,12 +21,13 @@ def ablate_and_test(
     basis_vecs: BasisVecs,
     basis_vecs_pinv: BasisVecsPinv,
     test_loader: DataLoader,
+    eval_fn: Callable,
     ablation_schedule: list[int],
     device: str,
     dtype: Optional[torch.dtype] = None,
     hook_name: Optional[str] = None,
 ) -> dict[int, float]:
-    """Ablate eigenvectors and test the model accuracy.
+    """Ablate eigenvectors and test the model accuracy/loss.
 
     Args:
         hooked_model: The hooked model.
@@ -35,6 +36,7 @@ def ablate_and_test(
         basis_vecs_pinv: The pseudo-inverse of the basis_vecs matrix.
         hook_config: The config for the hook point.
         test_loader: The DataLoader for the test data.
+        eval_fn: The function to use to evaluate the model.
         ablation_schedule: A list of the number of vectors to ablate at each step.
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
@@ -47,7 +49,7 @@ def ablate_and_test(
     if hook_name is None:
         hook_name = module_name
 
-    accuracies: dict[int, float] = {}
+    eval_results: dict[int, float] = {}
     # Iterate through possible number of ablated vectors.
     for n_ablated_vecs in tqdm(
         ablation_schedule,
@@ -71,12 +73,12 @@ def ablate_and_test(
             fn_kwargs={"rotation_matrix": rotation_matrix},
         )
 
-        accuracy_ablated = eval_model_accuracy(
+        eval_results_ablated = eval_fn(
             hooked_model, test_loader, hooks=[rotation_hook], dtype=dtype, device=device
         )
-        accuracies[n_vecs_remaining] = accuracy_ablated
+        eval_results[n_vecs_remaining] = eval_results_ablated
 
-    return accuracies
+    return eval_results
 
 
 @torch.inference_mode()
@@ -85,12 +87,14 @@ def run_ablations(
     node_layers: list[str],
     hooked_model: HookedModel,
     data_loader: DataLoader,
+    eval_fn: Callable,
     graph_module_names: list[str],
     ablate_every_vec_cutoff: Optional[int],
+    exp_base: Optional[float],
     device: str,
     dtype: Optional[torch.dtype] = None,
 ) -> dict[str, dict[int, float]]:
-    """Rotate to and from a truncated basis and compare ablation accuracies.
+    """Rotate to and from a truncated basis and compare ablation accuracies/losses.
 
     Args:
         basis_matrices: List of basis vector matrices and their pseudoinverses. In the orthogonal
@@ -98,12 +102,14 @@ def run_ablations(
         node_layers: The names of the node layers to build the graph with.
         hooked_model: The hooked model.
         data_loader: The data loader to use for testing.
+        eval_fn: The function to use to evaluate the model.
         graph_module_names: The names of the modules we want to build the graph around.
         ablate_every_vec_cutoff: The point in the ablation schedule to start ablating every vector.
+        exp_base: The base of the exponential schedule.
         device: The device to run the model on.
 
     Returns:
-        A dictionary mapping node layers to ablation accuracies.
+        A dictionary mapping node layers to ablation accuracies/losses.
     """
     results: dict[str, dict[int, float]] = {}
     for hook_name, module_name, (basis_vecs, basis_vecs_pinv) in zip(
@@ -112,19 +118,21 @@ def run_ablations(
         ablation_schedule = calc_ablation_schedule(
             ablate_every_vec_cutoff=ablate_every_vec_cutoff,
             n_vecs=basis_vecs.shape[1],
+            exp_base=exp_base,
         )
-        module_accuracies: dict[int, float] = ablate_and_test(
+        ablation_eval_results: dict[int, float] = ablate_and_test(
             hooked_model=hooked_model,
             module_name=module_name,
             basis_vecs=basis_vecs,
             basis_vecs_pinv=basis_vecs_pinv,
             test_loader=data_loader,
+            eval_fn=eval_fn,
             ablation_schedule=ablation_schedule,
             device=device,
             dtype=dtype,
             hook_name=hook_name,
         )
-        results[hook_name] = module_accuracies
+        results[hook_name] = ablation_eval_results
 
     return results
 

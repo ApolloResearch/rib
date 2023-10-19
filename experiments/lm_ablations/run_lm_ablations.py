@@ -26,7 +26,12 @@ import fire
 import torch
 from pydantic import BaseModel, Field, field_validator
 
-from rib.ablations import load_basis_matrices, run_ablations
+from rib.ablations import (
+    ExponentialScheduleConfig,
+    LinearScheduleConfig,
+    load_basis_matrices,
+    run_ablations,
+)
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.hook_manager import HookedModel
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
@@ -45,11 +50,11 @@ class Config(BaseModel):
     exp_name: Optional[str]
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
-    ablate_every_vec_cutoff: Optional[int] = Field(
-        None,
-        description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
+    schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
+        ...,
+        discriminator="schedule_type",
+        description="The schedule to use for ablations.",
     )
-    exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
     dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig] = Field(
         ...,
         discriminator="source",
@@ -64,14 +69,10 @@ class Config(BaseModel):
         ...,
         description="The type of evaluation to perform on the model before building the graph.",
     )
-    early_stopping_threshold: Optional[float] = Field(
-        None,
-        description="The threshold to use for stopping the ablation calculations early. If None,"
-        "we don't use early stopping.",
-    )
 
     @field_validator("dtype")
-    def dtype_validator(cls, v):
+    @classmethod
+    def dtype_validator(cls, v: str):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
         return v
 
@@ -127,7 +128,7 @@ def main(config_path_str: str) -> None:
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    # This script doesn't need both train and test sets
+    # This script doesn't need train and test sets (i.e. the "both" argument)
     return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
@@ -152,10 +153,8 @@ def main(config_path_str: str) -> None:
         data_loader=data_loader,
         eval_fn=eval_fn,
         graph_module_names=graph_module_names,
-        ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
-        exp_base=config.exp_base,
+        schedule_config=config.schedule,
         device=device,
-        early_stopping_threshold=config.early_stopping_threshold,
     )
 
     if config.exp_name is not None:

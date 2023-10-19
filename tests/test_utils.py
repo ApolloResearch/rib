@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 from rib.models import MLP, Layer
 from rib.models.utils import gelu_new, get_model_attr
-from rib.utils import calc_ablation_schedule, eval_model_accuracy, find_root
+from rib.utils import calc_exponential_ablation_schedule, eval_model_accuracy, find_root
 
 
 def test_get_model_attr() -> None:
@@ -91,12 +91,14 @@ def test_eval_model_accuracy() -> None:
         (3, 24, [24, 23, 22, 21, 20, 18, 14, 6, 0]),
     ],
 )
-def test_calc_ablation_schedule(
+def test_calc_exponential_ablation_schedule(
     ablate_every_vec_cutoff: Optional[int],
     n_eigenvecs: int,
     expected: list[int],
 ):
-    schedule = calc_ablation_schedule(ablate_every_vec_cutoff, n_eigenvecs)
+    schedule = calc_exponential_ablation_schedule(
+        n_eigenvecs, exp_base=2.0, ablate_every_vec_cutoff=ablate_every_vec_cutoff
+    )
     assert schedule == expected
 
 

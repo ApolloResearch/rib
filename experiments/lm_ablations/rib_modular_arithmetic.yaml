@@ -1,7 +1,11 @@
 exp_name: rib_modular_arithmetic
 ablation_type: rib
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt
-ablate_every_vec_cutoff: 10
+schedule:
+  schedule_type: exponential
+  early_stopping_threshold: null
+  ablate_every_vec_cutoff: 10
+  exp_base: 2.0
 dataset:
   source: custom
   name: modular_arithmetic

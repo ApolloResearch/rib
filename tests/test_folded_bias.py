@@ -92,7 +92,7 @@ def test_modular_arithmetic_folded_bias() -> None:
 
 
 def pretrained_lm_folded_bias_comparison(
-    model_str: str,
+    hf_model_str: str,
     node_layers: list[str],
     positional_embedding_type: Literal["standard", "rotary"],
     atol: float = 1e-6,
@@ -102,7 +102,7 @@ def pretrained_lm_folded_bias_comparison(
     Uses float64 to avoid floating point errors.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tlens_model = HookedTransformer.from_pretrained(model_str)
+    tlens_model = HookedTransformer.from_pretrained(hf_model_str)
     cfg = SequentialTransformerConfig(**asdict(tlens_model.cfg))
     model_raw = SequentialTransformer(cfg, node_layers)
     # Load the transformer-lens weights into the sequential transformer model
@@ -131,7 +131,10 @@ def test_gpt2_folded_bias() -> None:
     set_seed(42)
     node_layers = ["attn.0", "mlp_act.0"]
     pretrained_lm_folded_bias_comparison(
-        model_str="gpt2", node_layers=node_layers, positional_embedding_type="standard", atol=1e-6
+        hf_model_str="gpt2",
+        node_layers=node_layers,
+        positional_embedding_type="standard",
+        atol=1e-6,
     )
 
 
@@ -141,7 +144,7 @@ def test_pythia_folded_bias() -> None:
     set_seed(42)
     node_layers = ["mlp_in.1", "add_resid2.3"]
     pretrained_lm_folded_bias_comparison(
-        model_str="pythia-14m",
+        hf_model_str="pythia-14m",
         node_layers=node_layers,
         positional_embedding_type="rotary",
         atol=1e-5,

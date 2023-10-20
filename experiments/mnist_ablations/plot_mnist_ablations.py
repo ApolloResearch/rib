@@ -16,7 +16,7 @@ from pathlib import Path
 import fire
 
 from rib.log import logger
-from rib.plotting import plot_ablation_accuracies
+from rib.plotting import plot_ablation_results
 from rib.utils import overwrite_output
 
 
@@ -44,10 +44,11 @@ def main(*results_files: str) -> None:
         print("Exiting.")
         return
 
-    plot_ablation_accuracies(
-        accuracies=accuracies_list,
+    plot_ablation_results(
+        results=accuracies_list,
         out_file=out_file,
         exp_names=[f"{exp_name} MLP MNIST" for exp_name in exp_names],
+        eval_type="accuracy",
         ablation_types=ablation_types,
     )
 

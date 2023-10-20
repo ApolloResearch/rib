@@ -27,24 +27,33 @@ as well as the output of the final node layer. For example, if `node_layers` is 
     output of "mlp_act.0".
 """
 import json
+import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union, cast
 
 import fire
 import torch
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
-from rib.types import DATASET_TYPES, TORCH_DTYPES
-from rib.utils import eval_model_accuracy, load_config, overwrite_output, set_seed
+from rib.types import TORCH_DTYPES
+from rib.utils import (
+    eval_cross_entropy_loss,
+    eval_model_accuracy,
+    load_config,
+    overwrite_output,
+    set_seed,
+)
 
 
 class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     exp_name: str = Field(..., description="The name of the experiment")
     seed: int = Field(..., description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
@@ -64,11 +73,17 @@ class Config(BaseModel):
         ...,
         description="Whether to rotate the final node layer to its eigenbasis or not.",
     )
-    dataset: DATASET_TYPES = Field(
+    dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig] = Field(
         ...,
+        discriminator="source",
         description="The dataset to use to build the graph.",
     )
     batch_size: int = Field(..., description="The batch size to use when building the graph.")
+    gram_batch_size: Optional[int] = Field(
+        None,
+        description="The batch size to use when calculating the gram matrices. If None, use the same"
+        "batch size as the one used to build the graph.",
+    )
     truncation_threshold: float = Field(
         ...,
         description="Remove eigenvectors with eigenvalues below this threshold.",
@@ -88,6 +103,15 @@ class Config(BaseModel):
     eps: float = Field(
         1e-5,
         description="The epsilon value to use for numerical stability in layernorm layers.",
+    )
+    calculate_edges: bool = Field(
+        True,
+        description="Whether to calculate the edges of the interaction graph.",
+    )
+    eval_type: Optional[Literal["accuracy", "ce_loss"]] = Field(
+        None,
+        description="The type of evaluation to perform on the model before building the graph."
+        "If None, skip evaluation.",
     )
 
     @field_validator("dtype")
@@ -120,6 +144,8 @@ def main(config_path_str: str):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
+    # Time each stage
+    start_time = time.time()
     seq_model, tlens_cfg_dict = load_sequential_transformer(
         node_layers=config.node_layers,
         last_pos_module_type=config.last_pos_module_type,
@@ -134,22 +160,30 @@ def main(config_path_str: str):
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    assert (
-        config.tlens_pretrained is None and config.tlens_model_path is not None
-    ), "Currently can't build graphs for pretrained models due to memory limits."
-    assert config.dataset == "modular_arithmetic", "Currently only supports modular arithmetic."
-
-    # Importantly, use the same dataset as was used for training
+    # This script doesn't need both train and test sets
+    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
-        dataset_type=config.dataset,
-        return_set="train",
+        dataset_config=config.dataset,
+        return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
-    train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
-    # Test model accuracy before graph building, ta be sure
-    accuracy = eval_model_accuracy(hooked_model, train_loader, dtype=dtype, device=device)
-    logger.info("Model accuracy on dataset: %.2f%%", accuracy * 100)
+    gram_train_loader = create_data_loader(
+        dataset, shuffle=True, batch_size=config.gram_batch_size or config.batch_size
+    )
+    logger.info("Time to load model and dataset: %.2f", time.time() - start_time)
+    if config.eval_type is not None:
+        # Test model accuracy/loss before graph building, ta be sure
+        if config.eval_type == "accuracy":
+            accuracy = eval_model_accuracy(
+                hooked_model, gram_train_loader, dtype=dtype, device=device
+            )
+            logger.info("Model accuracy on dataset: %.2f%%", accuracy * 100)
+        elif config.eval_type == "ce_loss":
+            loss = eval_cross_entropy_loss(
+                hooked_model, gram_train_loader, dtype=dtype, device=device
+            )
+            logger.info("Model per-token loss on dataset: %.2f", loss)
 
     # Don't build the graph for the section of the model before the first node layer
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
@@ -157,21 +191,28 @@ def main(config_path_str: str):
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
 
+    start_time = time.time()
+    logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_model,
         module_names=graph_module_names,
-        data_loader=train_loader,
+        data_loader=gram_train_loader,
         dtype=dtype,
         device=device,
         collect_output_gram=collect_output_gram,
         hook_names=config.node_layers,
     )
 
+    logger.info("Time to collect gram matrices: %.2f", time.time() - start_time)
+
+    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    start_time = time.time()
+    logger.info("Calculating interaction rotations.")
     Cs, Us = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
         module_names=graph_module_names,
         hooked_model=hooked_model,
-        data_loader=train_loader,
+        data_loader=graph_train_loader,
         dtype=dtype,
         device=device,
         n_intervals=config.n_intervals,
@@ -181,15 +222,23 @@ def main(config_path_str: str):
         hook_names=config.node_layers,
     )
 
-    E_hats = collect_interaction_edges(
-        Cs=Cs,
-        hooked_model=hooked_model,
-        n_intervals=config.n_intervals,
-        module_names=graph_module_names,
-        data_loader=train_loader,
-        dtype=dtype,
-        device=device,
-    )
+    logger.info("Time to calculate interaction rotations: %.2f", time.time() - start_time)
+    if not config.calculate_edges:
+        logger.info("Skipping edge calculation.")
+        E_hats = {}
+    else:
+        logger.info("Calculating edges.")
+        start_time = time.time()
+        E_hats = collect_interaction_edges(
+            Cs=Cs,
+            hooked_model=hooked_model,
+            n_intervals=config.n_intervals,
+            module_names=graph_module_names,
+            data_loader=graph_train_loader,
+            dtype=dtype,
+            device=device,
+        )
+        logger.info("Time to calculate edges: %.2f", time.time() - start_time)
 
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []

@@ -36,10 +36,12 @@ def eigendecompose(
         eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
         eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
-    eigenvalues, eigenvectors = torch.linalg.eigh(x.to(dtype=TORCH_DTYPES[dtype]))
+    in_dtype = x.dtype
+    x = x.to(dtype=TORCH_DTYPES[dtype])
+    eigenvalues, eigenvectors = torch.linalg.eigh(x)
 
-    eigenvalues = eigenvalues.to(dtype=x.dtype).abs()
-    eigenvectors = eigenvectors.to(dtype=x.dtype)
+    eigenvalues = eigenvalues.to(dtype=in_dtype).abs()
+    eigenvectors = eigenvectors.to(dtype=in_dtype)
     if descending:
         idx = torch.argsort(eigenvalues, descending=True)
         eigenvalues = eigenvalues[idx]
@@ -50,7 +52,7 @@ def eigendecompose(
 def calc_rotation_matrix(
     vecs: Float[Tensor, "d_hidden d_hidden_trunc"],
     vecs_pinv: Float[Tensor, "d_hidden_trunc d_hidden"],
-    n_ablated_vecs: int = 0,
+    n_ablated_vecs: int,
 ) -> Float[Tensor, "d_hidden d_hidden"]:
     """Calculate the matrix to rotates into and out of a new basis with optional ablations.
 
@@ -66,19 +68,29 @@ def calc_rotation_matrix(
     Args:
         vecs: Matrix whose columns are the basis vectors.
         vecs_pinv: Pseudo-inverse of vecs. This will be the transpose if vecs is orthonormal.
-        n_ablated_vecs: Number of vectors to ablate, starting from the last column. If > 0, we
-        ignore the smallest n_ablated_vecs eigenvectors.
+        n_ablated_vecs: Number of vectors to ablate, starting from the last column.
 
     Returns:
         The rotation matrix with which to right multiply incoming activations to rotate them
         into the new basis.
     """
-
-    vecs_ablated = vecs.clone().detach()
-    # Zero out the final n_ignore vectors
-    if n_ablated_vecs > 0:
+    assert n_ablated_vecs >= 0, "n_ablated_vecs must be positive."
+    assert n_ablated_vecs <= vecs.shape[1], "n_ablated_vecs must be less than the number of vecs."
+    if n_ablated_vecs == 0:
+        # No ablations, so we use an identity rotation. Note that this will be slightly different
+        # from multiplying by vecs @ vecs_pinv because of the truncation.
+        rotation_matrix = torch.eye(vecs.shape[0], dtype=vecs.dtype, device=vecs.device)
+    elif n_ablated_vecs == vecs.shape[1]:
+        # Completely zero out the matrix
+        rotation_matrix = torch.zeros(
+            (vecs.shape[0], vecs.shape[0]), dtype=vecs.dtype, device=vecs.device
+        )
+    else:
+        vecs_ablated = vecs.clone().detach()
+        # Zero out the final n_ignore vectors
         vecs_ablated[:, -n_ablated_vecs:] = 0
-    return vecs_ablated @ vecs_pinv
+        rotation_matrix = vecs_ablated @ vecs_pinv
+    return rotation_matrix
 
 
 def _fold_jacobian_pos_recursive(

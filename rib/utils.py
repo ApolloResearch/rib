@@ -137,8 +137,8 @@ def overwrite_output(out_file: Path) -> bool:
     return response.lower() == "y"
 
 
-def calc_ablation_schedule(
-    ablate_every_vec_cutoff: Optional[int], n_vecs: int, exp_base: Optional[float] = None
+def calc_exponential_ablation_schedule(
+    n_vecs: int, exp_base: Optional[float] = None, ablate_every_vec_cutoff: Optional[int] = None
 ) -> list[int]:
     """Create a schedule for the number of vectors to ablate.
 
@@ -147,24 +147,24 @@ def calc_ablation_schedule(
     with no ablations.
 
     Args:
-        ablate_every_vec_cutoff: The point in which we ablate every vector. If None, we ablate
-        every vector in the schedule individually (i.e. no exponential schedule).
         n_vecs: Total number of vectors.
         exp_base: The base of the exponential schedule.
+        ablate_every_vec_cutoff: The point in which we ablate every vector. If None, we ablate
+            every vector in the schedule individually (i.e. no exponential schedule).
 
     Returns:
         The schedule for the number of vectors to ablate.
 
     Examples:
-        >>> calc_ablation_schedule(None, 12)
+        >>> calc_exponential_ablation_schedule(None, 12)
         [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
-        >>> calc_ablation_schedule(0, 12)
+        >>> calc_exponential_ablation_schedule(0, 12)
         [12, 11, 9, 5, 0]  # Exponential schedule (2^x) from the beginning.
-        >>> calc_ablation_schedule(1, 12)
+        >>> calc_exponential_ablation_schedule(1, 12)
         [12, 11, 10, 8, 4, 0]  # Exponential schedule (2^x) after the first 1 value
-        >>> calc_ablation_schedule(3, 12)
+        >>> calc_exponential_ablation_schedule(3, 12)
         [12, 11, 10, 9, 8, 6, 2, 0]
-        >>> calc_ablation_schedule(3, 24)
+        >>> calc_exponential_ablation_schedule(3, 24)
         [24, 23, 22, 21, 20, 18, 14, 6, 0]
     """
     if exp_base is None:

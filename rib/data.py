@@ -9,6 +9,8 @@ from torch.utils.data import Dataset
 
 
 class HFDatasetConfig(BaseModel):
+    """Config for the HuggingFace datasets library."""
+
     source: Literal["huggingface"]
     name: str = Field(
         ..., description="The name of the dataset to load from the HuggingFace datasets library."

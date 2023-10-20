@@ -1,7 +1,9 @@
 from typing import Callable, Literal, Optional, Union
 
+import numpy as np
 import torch
 from jaxtyping import Float
+from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -9,10 +11,38 @@ from tqdm import tqdm
 from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix
-from rib.utils import calc_ablation_schedule
+from rib.utils import calc_exponential_ablation_schedule
 
 BasisVecs = Union[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden d_hidden"]]
 BasisVecsPinv = Union[Float[Tensor, "d_hidden_trunc d_hidden"], Float[Tensor, "d_hidden d_hidden"]]
+
+
+class ScheduleConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schedule_type: Literal["exponential", "linear"]
+    early_stopping_threshold: Optional[float] = Field(
+        None,
+        description="The threshold to use for stopping the ablation calculations early. If None,"
+        "we don't use early stopping.",
+    )
+
+
+class ExponentialScheduleConfig(ScheduleConfig):
+    schedule_type: Literal["exponential"]
+    ablate_every_vec_cutoff: Optional[int] = Field(
+        None,
+        description="The point in the exponential schedule at which we start ablating every"
+        "individual vector. If None, always ablate every vector.",
+    )
+    exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
+
+
+class LinearScheduleConfig(ScheduleConfig):
+    schedule_type: Literal["linear"]
+    n_points: int = Field(
+        ...,
+        description="The number of points to use in the linear ablation schedule. Must be specified if schedule_type is linear and cannot be specified if schedule_type is exponential.",
+    )
 
 
 def ablate_and_test(
@@ -110,11 +140,9 @@ def run_ablations(
     data_loader: DataLoader,
     eval_fn: Callable,
     graph_module_names: list[str],
-    ablate_every_vec_cutoff: Optional[int],
-    exp_base: Optional[float],
+    schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
     device: str,
     dtype: Optional[torch.dtype] = None,
-    early_stopping_threshold: Optional[float] = None,
 ) -> dict[str, dict[int, float]]:
     """Rotate to and from a truncated basis and compare ablation accuracies/losses.
 
@@ -126,12 +154,9 @@ def run_ablations(
         data_loader: The data loader to use for testing.
         eval_fn: The function to use to evaluate the model.
         graph_module_names: The names of the modules we want to build the graph around.
-        ablate_every_vec_cutoff: The point in the ablation schedule to start ablating every vector.
-        exp_base: The base of the exponential schedule.
+        schedule_config: The config for the ablation schedule.
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
-        early_stopping_threshold: The threshold to use for early stopping. If None, we don't use
-            early stopping.
 
     Returns:
         A dictionary mapping node layers to ablation accuracies/losses.
@@ -140,11 +165,25 @@ def run_ablations(
     for hook_name, module_name, (basis_vecs, basis_vecs_pinv) in zip(
         node_layers, graph_module_names, basis_matrices
     ):
-        ablation_schedule = calc_ablation_schedule(
-            ablate_every_vec_cutoff=ablate_every_vec_cutoff,
-            n_vecs=basis_vecs.shape[1],
-            exp_base=exp_base,
-        )
+        n_vecs = basis_vecs.shape[1]
+        if isinstance(schedule_config, ExponentialScheduleConfig):
+            ablation_schedule = calc_exponential_ablation_schedule(
+                n_vecs=n_vecs,
+                exp_base=schedule_config.exp_base,
+                ablate_every_vec_cutoff=schedule_config.ablate_every_vec_cutoff,
+            )
+        elif isinstance(schedule_config, LinearScheduleConfig):
+            assert schedule_config.n_points >= 2, f"{schedule_config.n_points} must be at least 2."
+            assert (
+                schedule_config.n_points <= n_vecs
+            ), f"{schedule_config.n_points} must be <= {n_vecs}."
+
+            ablation_schedule = [
+                int(a) for a in np.linspace(n_vecs, 0, schedule_config.n_points, dtype=int)
+            ]
+        else:
+            raise NotImplementedError(f"Schedule: {schedule_config.schedule_type} not supported.")
+
         ablation_eval_results: dict[int, float] = ablate_and_test(
             hooked_model=hooked_model,
             module_name=module_name,
@@ -156,7 +195,7 @@ def run_ablations(
             device=device,
             dtype=dtype,
             hook_name=hook_name,
-            early_stopping_threshold=early_stopping_threshold,
+            early_stopping_threshold=schedule_config.early_stopping_threshold,
         )
         results[hook_name] = ablation_eval_results
 

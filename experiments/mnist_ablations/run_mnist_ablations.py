@@ -19,7 +19,7 @@ Usage:
 
 import json
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import fire
 import torch
@@ -27,7 +27,12 @@ from pydantic import BaseModel, Field, field_validator
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from rib.ablations import load_basis_matrices, run_ablations
+from rib.ablations import (
+    ExponentialScheduleConfig,
+    LinearScheduleConfig,
+    load_basis_matrices,
+    run_ablations,
+)
 from rib.hook_manager import HookedModel
 from rib.log import logger
 from rib.models import MLP
@@ -45,18 +50,19 @@ class Config(BaseModel):
     exp_name: Optional[str]
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
-    ablate_every_vec_cutoff: Optional[int] = Field(
-        None,
-        description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
+    schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
+        ...,
+        discriminator="schedule_type",
+        description="The schedule to use for ablations.",
     )
-    exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
     dtype: str
     node_layers: list[str]
     batch_size: int
     seed: int
 
     @field_validator("dtype")
-    def dtype_validator(cls, v):
+    @classmethod
+    def dtype_validator(cls, v: str):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
         return v
 
@@ -133,10 +139,9 @@ def main(config_path_str: str) -> None:
         node_layers=config.node_layers,
         hooked_model=hooked_mlp,
         data_loader=test_loader,
-        graph_module_names=config.node_layers,
-        ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
         eval_fn=eval_model_accuracy,
-        exp_base=config.exp_base,
+        graph_module_names=config.node_layers,
+        schedule_config=config.schedule,
         device=device,
         dtype=dtype,
     )

@@ -170,8 +170,26 @@ def ablation_mock_run(
                 # Check that ablating 0 vectors gives at least max_accuracy_threshold
                 assert accuracy_vals[0] >= max_accuracy_threshold
 
-                # Check that ablating all vectors gives less than 50% accuracy (arbitrarily chosen)
-                assert accuracy_vals[-1] < 0.5
+                # TODO: Work out whether early stopping actually occured and write this test
+                # based on that
+                early_stop_threshold = None
+                for config_line in mock_config.split("\n"):
+                    if "early_stopping_threshold" in config_line:
+                        early_stop_threshold_raw = config_line.split(":")[-1].strip()
+                        early_stop_threshold = (
+                            None
+                            if early_stop_threshold_raw == "null"
+                            else float(early_stop_threshold_raw)
+                        )
+                        break
+                if early_stop_threshold is None:
+                    # This means the final accuracy_val corresponds to all vecs ablated.
+                    # Check that this is < 50%
+                    assert accuracy_vals[-1] < 0.5
+                else:
+                    # Check that the run which ablated the most vectors is all vectors is at least
+                    # early_stopping_threshold worse than the max accuracy
+                    assert accuracy_vals[0] - accuracy_vals[-1] >= early_stop_threshold
 
                 # Check that the accuracies are sorted in descending order of the number of ablated
                 # vectors
@@ -185,7 +203,11 @@ def test_run_mnist_orthog_ablations():
     exp_name: null  # Prevent saving output
     ablation_type: orthogonal
     interaction_graph_path: OVERWRITE/IN/MOCK
-    ablate_every_vec_cutoff: 2
+    schedule:
+        schedule_type: exponential
+        early_stopping_threshold: 0.05
+        ablate_every_vec_cutoff: 2
+        exp_base: 4.0
     dtype: float32
     node_layers:
         - layers.1
@@ -225,7 +247,11 @@ def test_run_mnist_rib_ablations():
     exp_name: null  # Prevent saving output
     ablation_type: orthogonal
     interaction_graph_path: OVERWRITE/IN/MOCK
-    ablate_every_vec_cutoff: 2
+    schedule:
+        schedule_type: exponential
+        early_stopping_threshold: 0.05
+        ablate_every_vec_cutoff: 2
+        exp_base: 3.0
     dtype: float32
     node_layers:
         - layers.1
@@ -253,7 +279,11 @@ def test_run_modular_arithmetic_rib_ablations():
     exp_name: null  # Prevent saving output
     ablation_type: rib
     interaction_graph_path: OVERWRITE/IN/MOCK
-    ablate_every_vec_cutoff: 2
+    schedule:
+        schedule_type: exponential
+        early_stopping_threshold: null
+        ablate_every_vec_cutoff: 1
+        exp_base: 3.0
     dataset:
         source: custom
         name: modular_arithmetic
@@ -285,7 +315,11 @@ def test_run_modular_arithmetic_orthog_ablations():
     exp_name: null  # Prevent saving output
     ablation_type: orthogonal
     interaction_graph_path: OVERWRITE/IN/MOCK
-    ablate_every_vec_cutoff: 10
+    schedule:
+        schedule_type: exponential
+        early_stopping_threshold: 0.2
+        ablate_every_vec_cutoff: 2
+        exp_base: 2.0
     dataset:
         source: custom
         name: modular_arithmetic

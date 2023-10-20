@@ -1,7 +1,11 @@
 exp_name: orthog_3-node-layers
 ablation_type: orthogonal
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/mnist_rib_build/out/3-node-layers_interaction_graph.pt
-ablate_every_vec_cutoff: 10
+schedule:
+  schedule_type: exponential
+  early_stopping_threshold: null
+  ablate_every_vec_cutoff: 10
+  exp_base: 2.0
 dtype: float32
 node_layers:  # Rotate input to these modules
   - layers.0

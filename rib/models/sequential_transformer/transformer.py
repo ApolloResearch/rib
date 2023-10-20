@@ -97,7 +97,7 @@ class SequentialTransformer(nn.Module):
         self.last_pos_module_type = last_pos_module_type
         self.has_folded_bias = False
 
-        assert len(node_layers) > 1, "Must have at least 2 node layers"
+        assert len(node_layers) > 0, "Must have at least 1 node layer"
         self.module_name_sections = self.create_module_name_sections(
             cfg.n_layers, node_layers, positional_embedding_type=cfg.positional_embedding_type
         )

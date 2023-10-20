@@ -19,7 +19,11 @@ from scipy.spatial.distance import squareform
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from rib.data_accumulator import collect_relu_interactions, collect_gram_matrices
+from rib.data_accumulator import (
+    collect_relu_interactions,
+    collect_gram_matrices,
+    calculate_swapped_relu_loss
+)
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,
@@ -104,7 +108,7 @@ def get_nested_attribute(obj, attr_name):
 
 # Helper functions for main ========================================================
 
-def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config) -> None:
+def relu_plotting(similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config) -> None:
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
         # Plot raw matrix values before clustering
         plt.figure(figsize=(10, 8))
@@ -176,8 +180,7 @@ def get_Cs(
     model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_model = HookedModel(model)
 
-    train_loader = load_mnist_dataloader(
-        train=True, batch_size=config.batch_size)
+    train_loader = load_mnist_dataloader(train=True, batch_size=config.batch_size)
 
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
@@ -292,6 +295,8 @@ def relu_similarity_main(config_path_str: str) -> None:
         model_config_dict = yaml.safe_load(f)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = load_mlp(model_config_dict, config.mlp_path, device=device)
+    model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_model = HookedModel(model)
     # print_all_modules(model) # Check module names were correctly defined
     model.eval()  # Run in inference only
 
@@ -303,7 +308,7 @@ def relu_similarity_main(config_path_str: str) -> None:
         model=model,
     )
 
-    relu_matrices = check_and_open_file(
+    relu_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = check_and_open_file(
         file_path=relu_matrices_save_file,
         get_var_fn=get_relu_similarities,
         config=config,
@@ -313,6 +318,90 @@ def relu_similarity_main(config_path_str: str) -> None:
     )
 
     relu_plotting(relu_matrices, out_dir, config)
+
+    ## Now that we have gotten our similarity matrices, actually swap in forward pass and check loss
+    num_valid_swaps_list: list[int] = []
+    loss_change_list: list[float] = []
+    acc_change_list: list[float] = []
+    random_loss_change_list: list[float] = []
+    random_acc_change_list: list[float] = []
+    tols = [[1e-3, 7e-4, 4e-4, 1e-4, 7e-5, 4e-5], [1e-4, 7e-5, 4e-5, 1e-5, 7e-6, 4e-6]]
+    layer_num = 1
+    matrix = list(relu_matrices.values())[layer_num]
+    module_name = list(config.module_names)[layer_num]
+
+    for i in range(len(tols[0])):
+        matrix = torch.abs(matrix)
+        tol = tols[layer_num][i]
+        diag_mask = torch.eye(matrix.size(0), matrix.size(1)).bool().to(matrix.device)
+        matrix = matrix.masked_fill_(diag_mask, float('inf'))
+
+        row_min_vals, row_min_idxs = torch.min(matrix, dim=-1)
+        # Keep when minimum value in row is above some threshold
+        keep_indices = torch.nonzero(row_min_vals > tol)
+        num_valid_swaps = matrix.shape[0] - len(keep_indices)
+        num_valid_swaps_list.append(num_valid_swaps)
+
+        # Where no replacement wanted, set the element to equal index itself
+        row_min_idxs[keep_indices] = keep_indices
+
+        print(f"num_valid_swaps: {num_valid_swaps}")
+
+        unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_swapped_relu_loss(
+            hooked_model=hooked_model,
+            module_name=module_name, # Used for hooks
+            data_loader=load_mnist_dataloader(train=True, batch_size=config.batch_size),
+            dtype=TORCH_DTYPES[config.dtype],
+            device=device,
+            replacement_idx_list=row_min_idxs,
+            num_replaced=num_valid_swaps,
+        )
+
+        print(
+            f"unhooked loss {unhooked_loss}",
+            f"hooked loss {hooked_loss}",
+            f"random hooked loss {random_hooked_loss}"
+            f"unhooked accuracy {unhooked_accuracy}",
+            f"hooked accuracy {hooked_accuracy}",
+            f"random hooked accuracy {random_hooked_accuracy}"
+        )
+
+        loss_change_list.append((hooked_loss - unhooked_loss) / unhooked_loss)
+        acc_change_list.append(( hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+        random_loss_change_list.append((random_hooked_loss - unhooked_loss) / unhooked_loss)
+        random_acc_change_list.append((random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+
+    plot_changes(num_valid_swaps_list, loss_change_list, random_loss_change_list, acc_change_list, random_acc_change_list, layer_num, out_dir)
+
+
+def plot_changes(
+    num_valid_swaps_list: list[int],
+    loss_change_list: list[float],
+    random_loss_change_list: list[float],
+    acc_change_list: list[float],
+    random_acc_change_list: list[float],
+    layer_num: int,
+    out_dir: Path,
+) -> None:
+    plt.figure(figsize=(10, 5))
+    # Loss change
+    plt.subplot(1, 2, 1)
+    plt.plot(num_valid_swaps_list, loss_change_list, label="not random")
+    plt.plot(num_valid_swaps_list, random_loss_change_list, label="random")
+    plt.xlabel("num_valid_swaps")
+    plt.ylabel("Loss change")
+    plt.legend()
+
+    # Accuracy change
+    plt.subplot(1, 2, 2)
+    plt.plot(num_valid_swaps_list, acc_change_list, label="not random")
+    plt.plot(num_valid_swaps_list, random_acc_change_list, label="random")
+    plt.xlabel("num_valid_swaps")
+    plt.ylabel("Accuracy change")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(out_dir / f"loss_acc_change_type_layer_{layer_num}.png")
 
 
 if __name__ == "__main__":

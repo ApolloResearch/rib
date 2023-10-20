@@ -1,4 +1,8 @@
-"""Functions that apply hooks and accumulate data when passing batches through a model."""
+"""Functions that apply hooks and accumulate data when passing batches through a model.
+
+This file will tend to call on functions from rib.hook_fns and should act as an interface between
+main code and these lower-level functions.
+"""
 
 from typing import TYPE_CHECKING, Optional, Union
 
@@ -19,7 +23,10 @@ from rib.hook_fns import (
     test_edges_forward_hook_fn,
     function_size_forward_hook_fn,
 )
+from rib.hook_fns_non_static import relu_swap_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
+from rib.utils import eval_model_accuracy, eval_model_metrics
+
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -55,7 +62,7 @@ def run_dataset_through_model(
     dtype: torch.dtype,
     device: str = "cuda",
 ) -> None:
-    """Simply pass all batches through a hooked model."""
+    """Pass all batches through a hooked model, do not obtain output."""
     assert len(hooks) > 0, "Hooks have not been applied to this model."
     for batch in dataloader:
         data, _ = batch
@@ -397,8 +404,9 @@ def collect_relu_interactions(
             num_2_shapes = [mat.shape for mat in list(relu_similarity_numerators.values())]
             lambda_shapes = [mat.shape for mat in Lambda_dashes]
             relu_similarity_matrices = {}
-            ## Lambda code DOES work, but you'd need to multiply by dataset size
-            # for i, key in enumerate(module_names):
+            for i, key in enumerate(module_names):
+            ## Lambda code DOES work, but you'd need to multiply by dataset size here
+            ## if not normalising by dataset size on both numerator and denominator
             #     vectorised_Lambda_dash = torch.diag(Lambda_dashes[i+1])
             #     d_hidden = vectorised_Lambda_dash.shape[0]
             #     numerator_term_1 = repeat(vectorised_Lambda_dash, 'd1 -> d1 d2', d2=d_hidden).cpu()
@@ -441,9 +449,7 @@ def collect_function_sizes(
         )
 
     run_dataset_through_model(hooked_model, data_loader, hooks=fn_size_hooks, dtype=dtype, device=device)
-
     fn_sizes = [hooked_model.hooked_data[hook_name]["fn_size"].item() for hook_name in hooked_model.hooked_data]
-
     hooked_model.clear_hooked_data()
 
     return fn_sizes
@@ -494,3 +500,73 @@ def collect_test_edges(
     hooked_model.clear_hooked_data()
 
     return edges
+
+
+def calculate_swapped_relu_loss(
+    hooked_model: HookedModel,
+    module_name: str,
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    replacement_idx_list: list[int],
+    num_replaced: int,
+    hook_name: Optional[str] = None,
+) -> tuple[list[float], ...]:
+    """Calculate loss for unedited forward pass, and then on forward pass with specific ReLUs
+    swapped."""
+    if hook_name is None:
+        hook_name = module_name
+
+    relu_swap_hooks = []
+    relu_swap_hooks.append(
+        Hook(
+            name=hook_name,
+            data_key="relu_swap",
+            fn=relu_swap_forward_hook_fn,
+            module_name=module_name,
+            fn_kwargs={"replacement_idx_list": replacement_idx_list}
+        )
+    )
+
+    unhooked_accuracy, unhooked_loss = eval_model_metrics(
+        hooked_model=hooked_model,
+        dataloader=data_loader,
+        hooks=None,
+        dtype=dtype,
+        device=device,
+    )
+
+    hooked_accuracy, hooked_loss = eval_model_metrics(
+        hooked_model=hooked_model,
+        dataloader=data_loader,
+        hooks=relu_swap_hooks,
+        dtype=dtype,
+        device=device,
+    )
+
+    hooked_model.remove_hooks()
+
+    random_relu_swap_hooks = []
+    length = len(replacement_idx_list)
+    random_idx_tensor = torch.arange(length)
+    indices_to_replace = torch.randperm(length)[:num_replaced]
+    random_idx_tensor[indices_to_replace] = torch.randint(0, length, (num_replaced,))
+    random_relu_swap_hooks.append(
+        Hook(
+            name=hook_name,
+            data_key="relu_swap",
+            fn=relu_swap_forward_hook_fn,
+            module_name=module_name,
+            fn_kwargs={"replacement_idx_list": random_idx_tensor.tolist()}
+        )
+    )
+
+    random_hooked_accuracy, random_hooked_loss = eval_model_metrics(
+        hooked_model=hooked_model,
+        dataloader=data_loader,
+        hooks=random_relu_swap_hooks,
+        dtype=dtype,
+        device=device,
+    )
+
+    return unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy

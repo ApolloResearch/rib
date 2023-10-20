@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Callable, Optional, Type, TypeVar, Union
 
 import numpy as np
 import torch
+from torch.nn import CrossEntropyLoss
 import yaml
 from jaxtyping import Float, Int
 from pydantic import BaseModel
@@ -69,6 +70,67 @@ def eval_model_accuracy(
 
     accuracy: float = correct_predictions / total_predictions
     return accuracy
+
+
+@torch.inference_mode()
+def eval_model_metrics(
+    hooked_model: "HookedModel",
+    dataloader: DataLoader,
+    hooks: Optional[list["Hook"]] = None,
+    dtype: Optional[torch.dtype] = None,
+    device: str = "cuda",
+) -> tuple[float, float]:
+    """
+    Run the model on the dataset and return both accuracy and cross-entropy loss.
+
+    Args:
+        hooked_model: The model to evaluate.
+        dataloader: The dataloader for the dataset.
+        hooks: The hooks to use.
+        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
+        device: The device to run the model on.
+
+    Returns:
+        A tuple containing (accuracy, cross-entropy loss) of the model on the dataset.
+    """
+
+    correct_predictions: int = 0
+    total_predictions: int = 0
+    total_loss: float = 0.0
+    total_samples: int = 0
+
+    loss_criterion = CrossEntropyLoss().to(device)
+
+    for batch in dataloader:
+        data, labels = batch
+        data, labels = data.to(device=device), labels.to(device)
+        if data.dtype not in [torch.int64, torch.int32] and dtype is not None:
+            data = data.to(dtype=dtype)
+        raw_output: Union[
+            Float[Tensor, "batch d_vocab"], tuple[Float[Tensor, "batch pos d_vocab"]]
+        ] = hooked_model(data, hooks=hooks)
+        if isinstance(raw_output, tuple):
+            assert len(raw_output) == 1, "Only one output is supported."
+            output: Float[Tensor, "... d_vocab"] = raw_output[0]
+            if output.ndim == 3:
+                output = output[:, -1, :]
+        else:
+            output = raw_output
+
+        # Compute Loss
+        loss = loss_criterion(output, labels)
+        total_loss += loss.item() * labels.shape[0]
+        total_samples += labels.shape[0]
+
+        # Compute Accuracy
+        predicted_labels: Int[Tensor, "batch"] = output.argmax(dim=-1)
+        correct_predictions += (predicted_labels == labels).sum().item()
+        total_predictions += labels.shape[0]
+
+    accuracy: float = correct_predictions / total_predictions
+    average_loss: float = total_loss / total_samples
+
+    return accuracy, average_loss
 
 
 def load_config(config_path: Path, config_model: Type[T]) -> T:

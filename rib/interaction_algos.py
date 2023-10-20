@@ -157,7 +157,6 @@ def calculate_interaction_rotations(
     Lambda_abs_sqrts = []
     U_D_sqrt_pinv_Vs = []
     U_D_sqrt_Vs = []
-    g_js = []
 
     # The C matrix for the final layer is either the eigenvectors U if rotate_final_node_layer is
     # True, and None otherwise
@@ -198,7 +197,7 @@ def calculate_interaction_rotations(
         )
         Us.append(Eigenvectors(node_layer_name=hook_name, U=U.detach().cpu()))
 
-        M_dash, Lambda_dash, g_j = collect_M_dash_and_Lambda_dash(
+        M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
             C_out=Cs[-1].C,  # most recently stored interaction matrix
             hooked_model=hooked_model,
             n_intervals=n_intervals,
@@ -208,9 +207,7 @@ def calculate_interaction_rotations(
             device=device,
             hook_name=hook_name,
         )
-
         Lambda_dashes.append(Lambda_dash)
-        g_js.append(g_j)
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
@@ -219,14 +216,12 @@ def calculate_interaction_rotations(
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
         U_D_sqrt_Vs.append(U_D_sqrt_V)
-        # print(f"U_D_sqrt_V shape for {hook_name}: {U_D_sqrt_V.shape}")
 
         D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(
             D.sqrt())
         U_D_sqrt_pinv_V: Float[Tensor,
                                "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
         U_D_sqrt_pinv_Vs.append(U_D_sqrt_pinv_V)
-        # print(f"U_D_sqrt_pinv_V shape for {hook_name}: {U_D_sqrt_pinv_V.shape}")
 
         Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
             (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_V).diag().abs()
@@ -238,13 +233,10 @@ def calculate_interaction_rotations(
         Lambda_abs_sqrts.append(Lambda_abs_sqrt_trunc)
         Lambda_abs_sqrt_pinvs.append(Lambda_abs_sqrt_trunc_pinv)
 
-        # print(f"Lambda shape for {hook_name}: {Lambda_abs_sqrt_trunc.shape}")
-        # print(f"Lambda pinv shape for {hook_name}: {Lambda_abs_sqrt_trunc_pinv.shape}")
         C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc
         C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
             Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T
         )
-        # print(f"C shape for {hook_name}: {C.shape}")
 
         Cs.append(
             InteractionRotation(
@@ -252,4 +244,4 @@ def calculate_interaction_rotations(
             )
         )
 
-    return Cs[::-1], Us[::-1], Lambda_abs_sqrts[::-1], Lambda_abs_sqrt_pinvs[::-1], U_D_sqrt_pinv_Vs[::-1], U_D_sqrt_Vs[::-1], Lambda_dashes[::-1], g_js[::-1]
+    return Cs[::-1], Us[::-1], Lambda_abs_sqrts[::-1], Lambda_abs_sqrt_pinvs[::-1], U_D_sqrt_pinv_Vs[::-1], U_D_sqrt_Vs[::-1], Lambda_dashes[::-1]

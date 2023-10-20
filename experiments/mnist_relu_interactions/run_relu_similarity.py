@@ -106,7 +106,6 @@ def get_nested_attribute(obj, attr_name):
 
 def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config) -> None:
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
-        print(similarity_matrix)
         # Plot raw matrix values before clustering
         plt.figure(figsize=(10, 8))
         sns.heatmap(similarity_matrix, annot=False,
@@ -126,33 +125,30 @@ def relu_plotting(similarity_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
                 # Threshold
                 threshold = 0.95
                 similarity_matrix[similarity_matrix < threshold] = 0
-                # Transform into distance matrix
                 distance_matrix = 1 - similarity_matrix
-            case 1 | 2 | 3:
-                similarity_matrix = torch.max(similarity_matrix, similarity_matrix.T) # Make symmetric
-                # similarity_matrix = rescale(similarity_matrix)
-                distance_matrix = similarity_matrix
-                # Threshold distance matrix
+            case 1 | 2:
+                distance_matrix = torch.max(similarity_matrix, similarity_matrix.T) # Make symmetric
                 threshold = 15
                 distance_matrix[distance_matrix > threshold] = threshold
+            case 3:
+                distance_matrix = torch.max(torch.abs(similarity_matrix), torch.abs(similarity_matrix).T)
 
-        if config.relu_metric_type in (0,1,2):
-            # Deal with zeros on diagonal
-            distance_matrix = distance_matrix.fill_diagonal_(0)
+        # Deal with zeros on diagonal
+        distance_matrix = distance_matrix.fill_diagonal_(0)
 
-            # Create linkage matrix using clustering algorithm
-            linkage_matrix = linkage(squareform(
-                distance_matrix), method='complete')
-            order = leaves_list(linkage_matrix)
-            rearranged_similarity_matrix = similarity_matrix[order, :][:, order]
+        # Create linkage matrix using clustering algorithm
+        linkage_matrix = linkage(squareform(
+            distance_matrix), method='complete')
+        order = leaves_list(linkage_matrix)
+        rearranged_similarity_matrix = similarity_matrix[order, :][:, order]
 
-            # Plot sorted similarity matrix via indices obtained from distance matrix
-            plt.figure(figsize=(10, 8))
-            sns.heatmap(rearranged_similarity_matrix, annot=False,
-                        cmap="YlGnBu", cbar=True, square=True)
-            plt.title("Reordered Similarity Matrix")
-            plt.savefig(
-                out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
+        # Plot sorted similarity matrix via indices obtained from distance matrix
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(rearranged_similarity_matrix, annot=False,
+                    cmap="YlGnBu", cbar=True, square=True)
+        plt.title("Reordered Similarity Matrix")
+        plt.savefig(
+            out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
 
 
 def load_local_config(config_path_str: str) -> dict:
@@ -197,7 +193,7 @@ def get_Cs(
 
     # Calls on collect_M_dash_and_Lambda_dash
     # Builds sqrt sorted Lambda matrix and its inverse
-    Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs, Lambda_dashes, g_js = calculate_interaction_rotations(
+    Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs, Lambda_dashes = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
         module_names=config.node_layers,
         hooked_model=hooked_model,
@@ -213,9 +209,9 @@ def get_Cs(
     C_pinv_list = [C_info.C_pinv for C_info in Cs]
 
     with open(file_path, "wb") as f:
-        pickle.dump({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "g_js": g_js, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices,}, f)
+        pickle.dump({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices,}, f)
 
-    return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "g_js": g_js, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}
+    return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}
 
 
 def get_relu_similarities(
@@ -224,7 +220,6 @@ def get_relu_similarities(
     file_path: Path,
     Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
     Lambda_dashes: list[Float[Tensor, "d_hidden d_hidden"]],
-    g_js: list[Float, Tensor, "d_hidden"],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -248,7 +243,9 @@ def get_relu_similarities(
         relu_metric_type=config.relu_metric_type,
         Cs=Cs,
         Lambda_dashes=Lambda_dashes,
-        g_js=g_js,
+        layer_module_names=config.node_layers,
+        n_intervals=config.n_intervals,
+        unhooked_model=model,
     )
 
     with open(file_path, "wb") as f:
@@ -288,14 +285,14 @@ def relu_similarity_main(config_path_str: str) -> None:
     relu_matrices_save_file = Path(__file__).parent / f"relu_similarity_type_{config.relu_metric_type}_editweights_{config.edit_weights}"
     Cs_save_file = Path(__file__).parent / "Cs"
 
-    out_dir = Path(__file__).parent / "out_relu_interactions"
+    out_dir = Path(__file__).parent / f"out_relu_interactions/type_{config.relu_metric_type}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = load_mlp(model_config_dict, config.mlp_path, device=device)
-    print_all_modules(model) # Check module names were correctly defined
+    # print_all_modules(model) # Check module names were correctly defined
     model.eval()  # Run in inference only
 
     # dict of InteractionRotation objects or Tensors
@@ -313,7 +310,6 @@ def relu_similarity_main(config_path_str: str) -> None:
         model=model,
         Cs=Cs_and_Lambdas["C"],
         Lambda_dashes=Cs_and_Lambdas["Lambda_dashes"],
-        g_js=Cs_and_Lambdas["g_js"],
     )
 
     relu_plotting(relu_matrices, out_dir, config)

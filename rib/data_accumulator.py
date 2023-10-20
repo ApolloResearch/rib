@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING, Optional, Union
 
 import torch
+import torch.nn as nn
 from einops import rearrange, reduce, repeat
 from jaxtyping import Float
 from torch import Tensor
@@ -194,7 +195,6 @@ def collect_M_dash_and_Lambda_dash(
 
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
     Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
-    g_j = torch.div(hooked_model.hooked_data[hook_name]["g_j"], len(data_loader))
     hooked_model.clear_hooked_data()
 
     # Scale the matrices by the number of samples in the dataset.
@@ -202,7 +202,7 @@ def collect_M_dash_and_Lambda_dash(
     M_dash = M_dash / len_dataset
     Lambda_dash = Lambda_dash / len_dataset
 
-    return M_dash, Lambda_dash, g_j
+    return M_dash, Lambda_dash
 
 
 def collect_interaction_edges(
@@ -285,7 +285,9 @@ def collect_relu_interactions(
     relu_metric_type: int,
     Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
     Lambda_dashes: list[Float[Tensor, "d_hidden d_hidden"]],
-    g_js: list[Float[Tensor, "d_hidden"]],
+    layer_module_names: list[str],
+    n_intervals: int,
+    unhooked_model: nn.Module,
     hook_names: Optional[str] = None,
 ) -> tuple[dict[str, Float[Tensor, "d_hidden d_hidden"]], ...]:
     """Identify whether ReLUs are synchronising.
@@ -295,6 +297,8 @@ def collect_relu_interactions(
     module_names, as well as the output of the final module.
 
     TODO: change ReLU metric type naming system to Enum rather than having integers floating around.
+
+    Most of my code assumes hook_names = model_names.
 
     Args:
         hooked_model: The hooked model.
@@ -306,6 +310,9 @@ def collect_relu_interactions(
         hook_names: Used to store the gram matrices in the hooked model.
         Cs: list of basis rotation matrices used only for metric type 2.
         Lambda_dash: Now pass in Lambda dashes as the first term in numerator for metric type 3.
+        g_js: list of g_js as derivative of f_hat^{l+1} with respect to alpha*f_l.
+        layer_module_names: non-activation layer list including last layer, to calculate functions
+        sizes over.
 
     Returns:
         A dictionary of ReLU interaction matrices, where the keys are the hook names (a.k.a. node layer names)
@@ -317,64 +324,88 @@ def collect_relu_interactions(
     else:
         hook_names = module_names
 
-    match relu_metric_type:
-        case 0:
-            data_key = ["relu_similarity"]
-        case 1 | 2 | 3:
-            data_key = ["relu_num", "relu_denom"]
-
     relu_interaction_hooks: list[Hook] = []
     for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
         relu_interaction_hooks.append(
             Hook(
                 name=hook_name,
-                data_key=data_key,
+                data_key="relu_num",
                 fn=relu_interaction_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"relu_metric_type": relu_metric_type, "C_next_layer": Cs[i+1].to(device), "g_j_next_layer": g_js[i+1].to(device)}
+                fn_kwargs={"relu_metric_type": relu_metric_type, "C_next_layer": Cs[i+1].to(device), "unhooked_model": unhooked_model, "module_name_next_layer": layer_module_names[i+1], "C_next_next_layer": Cs[i+2], "n_intervals": n_intervals}
             )
         )
 
     run_dataset_through_model(
         hooked_model, data_loader, hooks=relu_interaction_hooks, dtype=dtype, device=device)
 
-    match relu_metric_type:
-        case 0:
-            relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
-                hook_name: hooked_model.hooked_data[data_key[0]].to("cpu") for hook_name in hooked_model.hooked_data
-            }
-        case 1 | 2:
-            # Collect ReLU interaction matrices and divide by dataset size
-            relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
-                hook_name: torch.div(hooked_model.hooked_data[hook_name]["relu_num"].cpu(), hooked_model.hooked_data[hook_name]["relu_denom"].cpu())
-                for hook_name in hooked_model.hooked_data
-            }
-            preactivations = {
-                hook_name: torch.div(hooked_model.hooked_data[hook_name]["preactivations"], len(data_loader.dataset))
-                for hook_name in hooked_model.hooked_data
-            }
-            for hook_name, mat in preactivations.items():
-                plot_temp(mat, f"preact_{hook_name}")
-        case 3:
-            relu_similarity_matrices = {}
-            keys = list(hooked_model.hooked_data.keys())
-            for i in range(len(keys)-1):
-                vectorised_Lambda_dash = torch.diag(Lambda_dashes[i+1])
-                numerator_term_2: Float[Tensor, "d_hidden d_hidden"] = hooked_model.hooked_data[keys[i]]["relu_num"].cpu()
-                numerator_shapes_list = [hooked_model.hooked_data[hook_name]["relu_num"].shape for hook_name in hooked_model.hooked_data]
-                denominator_list = [hooked_model.hooked_data[hook_name]["fn_size"] for hook_name in hooked_model.hooked_data]
-                Lambda_dash_shapes_list = [Lambda_dash.shape for Lambda_dash in Lambda_dashes]
-                print(f"numerator shapes list {numerator_shapes_list}")
-                print(f"denominator list {denominator_list}")
-                print(f"L-dash shapes list {Lambda_dash_shapes_list}")
-                d_hidden = vectorised_Lambda_dash.shape[0]
-                # Matrix with columns as vectorised Lambda dash terms
-                numerator_term_1 = repeat(vectorised_Lambda_dash, 'd1 -> d1 d2', d2=d_hidden).cpu()
-                denominator = hooked_model.hooked_data[keys[i+1]]["relu_denom"].cpu()
-                matrix = (numerator_term_1 - numerator_term_2) / denominator
-                relu_similarity_matrices[keys[i]] = matrix
+    relu_similarity_numerators: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
+        hook_name: hooked_model.hooked_data[hook_name]["relu_num"].cpu()
+        for hook_name in hooked_model.hooked_data
+    }
+    if relu_metric_type == 3:
+        relu_similarity_whole_numerators = {
+            hook_name: hooked_model.hooked_data[hook_name]["whole_relu_num"].cpu()
+            for hook_name in hooked_model.hooked_data
+        }
+        relu_numerator_1s = {
+            hook_name: hooked_model.hooked_data[hook_name]["relu_num_1"].cpu()
+            for hook_name in hooked_model.hooked_data
+        }
+        my_Lambda_dashes = {
+            hook_name: hooked_model.hooked_data[hook_name]["Lambda_dash"].cpu()
+            for hook_name in hooked_model.hooked_data
+        }
+        for hook_name, mat in my_Lambda_dashes.items():
+            plot_temp(mat, f"my_Lambda_dash_{hook_name}")
+        for i, mat in enumerate(Lambda_dashes):
+            plot_temp(mat, f"Lambda_dash_{i}")
+    # Plot preactivations for debugging
+    preactivations = {
+        hook_name: torch.div(hooked_model.hooked_data[hook_name]["preactivations"], len(data_loader.dataset))
+        for hook_name in hooked_model.hooked_data
+    }
+    for hook_name, mat in preactivations.items():
+        plot_temp(mat, f"preact_{hook_name}")
 
     hooked_model.clear_hooked_data()
+
+    match relu_metric_type:
+        case 0 | 1 | 3:
+            rotate = False
+        case 2:
+            rotate = True
+
+    denominators: List[float] = collect_function_sizes(
+        hooked_model=hooked_model,
+        module_names=layer_module_names,
+        data_loader=data_loader,
+        dtype=dtype,
+        device=device,
+        hook_names=layer_module_names,
+        rotate=rotate,
+        Cs=Cs,
+    )
+
+    match relu_metric_type:
+        case 0: relu_similarity_matrices = relu_similarity_numerators / len(data_loader.dataset)
+        case 1 | 2: # We don't normalise either numerator or denominator by dataset size
+            relu_similarity_matrices = {hook_name: torch.div(relu_similarity_numerators[hook_name], denominators[i]) for i, hook_name in enumerate(module_names)
+            }
+        case 3:
+            """Todo: normalise by Lambda and fix g_j in last term."""
+            num_2_shapes = [mat.shape for mat in list(relu_similarity_numerators.values())]
+            lambda_shapes = [mat.shape for mat in Lambda_dashes]
+            relu_similarity_matrices = {}
+            ## Lambda code DOES work, but you'd need to multiply by dataset size
+            # for i, key in enumerate(module_names):
+            #     vectorised_Lambda_dash = torch.diag(Lambda_dashes[i+1])
+            #     d_hidden = vectorised_Lambda_dash.shape[0]
+            #     numerator_term_1 = repeat(vectorised_Lambda_dash, 'd1 -> d1 d2', d2=d_hidden).cpu()
+            #     numerator = numerator_term_1 - relu_similarity_numerators[key]
+
+                numerator = relu_similarity_whole_numerators[key]
+                relu_similarity_matrices[key] = numerator / denominators[i+1]
 
     return relu_similarity_matrices
 
@@ -385,10 +416,37 @@ def collect_function_sizes(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
-    relu_metric_type: int,
+    rotate: bool,
+    Cs: list[Float[Tensor, "d_hidden d_hidden"]],
     hook_names: Optional[str] = None,
-) -> None:
-    pass
+) -> list[float]:
+    """Calculate denominator for ReLU similarity metrics as l2 norm of function sizes in layer l+1."""
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    fn_size_hooks = []
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        fn_size_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="fn_size",
+                fn=function_size_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"rotate": rotate, "C_next_layer": Cs[i+1]}
+            )
+        )
+
+    run_dataset_through_model(hooked_model, data_loader, hooks=fn_size_hooks, dtype=dtype, device=device)
+
+    fn_sizes = [hooked_model.hooked_data[hook_name]["fn_size"].item() for hook_name in hooked_model.hooked_data]
+
+    hooked_model.clear_hooked_data()
+
+    return fn_sizes
 
 
 def collect_test_edges(

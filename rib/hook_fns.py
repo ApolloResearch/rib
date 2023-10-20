@@ -13,7 +13,7 @@ from functools import partial
 from typing import Any, Optional, Union
 
 import torch
-from torch.profiler import profile, record_function, ProfilerActivity
+import torch.nn as nn
 from einops import rearrange, repeat
 from jaxtyping import Float
 from torch import Tensor
@@ -23,6 +23,7 @@ from rib.linalg import (
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
 )
+from rib.models.utils import get_model_attr
 
 
 def _add_to_hooked_matrix(
@@ -224,7 +225,6 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
-        _add_to_hooked_matrix(hooked_data, hook_name, "g_j", in_grads.sum(dim=0))
 
 
 def interaction_edge_pre_forward_hook_fn(
@@ -364,7 +364,6 @@ def acts_pre_forward_hook_fn(
     hooked_data[hook_name] = {data_key: inputs}
 
 
-@torch.no_grad()
 def relu_interaction_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
@@ -383,8 +382,11 @@ def relu_interaction_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     relu_metric_type: int,
-    C_next_layer: Float[Tensor, "d_hidden_out d_hidden_trunc_next_layer_out"],
-    g_j_next_layer: Float[Tensor, "d_hidden"]
+    C_next_layer: Float[Tensor, "d_hidden1 d_hidden2"],
+    unhooked_model: nn.Module,
+    module_name_next_layer: str,
+    C_next_next_layer: Float[Tensor, "d_hidden1 d_hidden2"],
+    n_intervals: int,
 ) -> None:
     """Hook function to store pre and post output activations for ReLU operators.
 
@@ -413,6 +415,10 @@ def relu_interaction_forward_hook_fn(
             gradient expression g_m^{l+1}. Note that g_m^{l+1} f_m^{l+1} is not the same as the
             entries of Lambda, because Lambda is constructed with the g_m containing derivative of
         C_next_layer: Basis rotation matrix used only for metric type 2. Dimensions
+        model: Pass whole model in to literally grab next layer for in_grads.
+        module_name_next_layer: Also for getting next layer for in_grads.
+        C_next_next_layer: Also for in_grads.
+        n_intervals: Also for in_grads.
     """
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
     # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
@@ -421,37 +427,37 @@ def relu_interaction_forward_hook_fn(
     inputs = torch.cat([x for x in inputs], dim=-1)
 
     outputs = output if isinstance(output, tuple) else (output,)
+    raw_output = outputs
     outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
     operator: Float[Tensor, "batch d_hidden_out"] = torch.div(outputs, inputs)
+    if operator.dim() == 2:
+        batch_size, d_hidden = operator.shape # [256, 101]
+    elif operator.dim() == 3:
+        batch_size, token_len, d_hidden_concat = operator.shape
 
     match relu_metric_type:
         case 0:
-            # Use reshaping and broadcasting to compare every element to every other element
+            """Compare every operator element to every other element - resulting matrix entries either 0 or 1."""
             if operator.dim() == 2:
-                batch_size, d_hidden = operator.shape
                 operator_expanded_i: Float[Tensor, "batch 1 d_hidden"] = rearrange(operator, 'b d -> b 1 d')
                 operator_expanded_j: Float[Tensor, "batch d_hidden 1"] = rearrange(operator, 'b d -> b d 1')
-                relu_interaction_matrix = torch.einsum('bik -> ik', operator_expanded_i == operator_expanded_j) / batch_size
+                relu_interaction_matrix = torch.einsum('bik -> ik', operator_expanded_i == operator_expanded_j)
 
             elif operator.dim() == 3:
-                batch_size, token_len, d_hidden_concat = operator.shape
                 operator_expanded_j = rearrange(operator, 'b p d -> b p 1 d')
                 operator_expanded_k = rearrange(operator, 'b p d -> b p d 1')
                 # operator_matrix[batch,i,j,k,] is 1 if operator[i,j] == operator[i,k] and 0 otherwise
-                relu_interaction_matrix = torch.einsum('bpik -> ik', operator_expanded_j == operator_expanded_k) / batch_size
+                relu_interaction_matrix = torch.einsum('bpik -> ik', operator_expanded_j == operator_expanded_k)
 
-            # Store operator (ReLU pointwise ratio)
-            _add_to_hooked_matrix(hooked_data, hook_name, data_key, relu_interaction_matrix)
+            _add_to_hooked_matrix(hooked_data, hook_name, "relu_num", relu_interaction_matrix)
 
         case 1:
-            batch_size, d_hidden = operator.shape # [256, 101]
             # Element-wise product O_j * p_j
             diag_values: Float[Tensor, "batch d_hidden"] = operator.mul(inputs)
             # Repeat diag_values along rows - row_matrix_ij = O_j * p_j
             row_matrix = repeat(diag_values, 'b d -> b d_hidden d', d_hidden=d_hidden) # [256, 101, 101]
             assert (row_matrix[0, 0, :].squeeze() == diag_values[0]).all()
             assert (row_matrix[:, 5, 7] == operator[:, 7] * inputs[:, 7]).all()
-            denominator = torch.einsum('bik -> ik', row_matrix.pow(2))
 
             # Outer product O_i * p_j
             outer_product: Float[Tensor, "batch d_hidden d_hidden"] = torch.bmm(rearrange(operator, 'b n -> b n 1'), rearrange(inputs, 'b n -> b 1 n'))
@@ -462,49 +468,62 @@ def relu_interaction_forward_hook_fn(
 
             # Store commutator matrix for numerator and denominator to accumulate separately
             _add_to_hooked_matrix(hooked_data, hook_name, "relu_num", numerator)
-            _add_to_hooked_matrix(hooked_data, hook_name, "relu_denom", denominator)
 
         case 2:
-            batch_size, d_hidden = operator.shape
-            # Denominator is l2 norm of functions - i.e. output of this ReLU layer
-            denominator = torch.einsum('bi -> ', outputs)
+            with torch.no_grad():
+                # Expand twice for m, n dimensions of final matrix, keeping last dim d1 as vector dimension
+                operator_expanded = repeat(operator, 'b d1 -> b d2 d3 d1', d2=d_hidden, d3=d_hidden).clone()
+                for m in range(d_hidden):
+                    operator_expanded[:, m, :, m] = operator
+                assert operator_expanded[0, 3, 7, 3] == operator[0, 7]
+                C_next_layer_repeated = repeat(C_next_layer, 'd1 d2 -> b d3 d4 d1 d2' , b=batch_size, d3=d_hidden, d4=d_hidden)
+                p_repeated = repeat(inputs, 'b d1 -> b d2 d3 d1', d2=d_hidden, d3=d_hidden)
+                O_p = p_repeated * operator_expanded
+                # Need to unsqueeze and then squeeze to avoid issues with PyTorch auto-broadcasting
+                C_O_p = ( O_p.unsqueeze(-2) @ C_next_layer_repeated).squeeze(-2)
 
-            f_next_layer_hats: Float[Tensor, "batch d_hidden_trunc_next"] = outputs @ C_next_layer # E.g. [256, 89]
-            # Expand twice for m, n dimensions of final matrix, keeping last dim d1 as vector dimension
-            operator_expanded = repeat(operator, 'b d1 -> b d2 d3 d1', d2=d_hidden, d3=d_hidden).clone()
+                f_next_layer_hats: Float[Tensor, "batch d_hidden_trunc_next"] = outputs @ C_next_layer # E.g. [256, 89]
+                f_next_layer_hats_unsqueezed = repeat(f_next_layer_hats, "b d1 -> b d2 d3 d1", d2=d_hidden, d3=d_hidden)
 
-            for m in range(d_hidden):
-                operator_expanded[:, m, :, m] = operator
-            assert operator_expanded[0, 3, 7, 3] == operator[0, 7]
+                squared_diff = (f_next_layer_hats_unsqueezed - C_O_p).pow(2)
+                numerator = torch.einsum('bijk -> ij', squared_diff) # Sum over batch dimension and indices of vector (for each final matrix element)
 
-            C_next_layer_repeated = repeat(C_next_layer, 'd1 d2 -> b d3 d4 d1 d2' , b=batch_size, d3=d_hidden, d4=d_hidden)
-            p_repeated = repeat(inputs, 'b d1 -> b d2 d3 d1', d2=d_hidden, d3=d_hidden)
-            O_p = p_repeated * operator_expanded
-            # Need to unsqueeze and then squeeze to avoid issues with PyTorch auto-broadcasting
-            C_O_p = ( O_p.unsqueeze(-2) @ C_next_layer_repeated).squeeze(-2)
-            f_next_layer_hats_unsqueezed = repeat(f_next_layer_hats, "b d1 -> b d2 d3 d1", d2=d_hidden, d3=d_hidden)
-            squared_diff = (f_next_layer_hats_unsqueezed - C_O_p).pow(2)
-            numerator = torch.einsum('bijk -> ij', squared_diff) # Sum over batch dimension
-
-            _add_to_hooked_matrix(hooked_data, hook_name, "relu_num", numerator)
-            _add_to_hooked_matrix(hooked_data, hook_name, "relu_denom", denominator)
-            _add_to_hooked_matrix(hooked_data, hook_name, "preactivations", inputs.sum(dim=0)) # For debugging purposes
+                _add_to_hooked_matrix(hooked_data, hook_name, "relu_num", numerator.detach())
 
         case 3:
             """Note when running for any given metric, we are in layer l-1 for the lth layer metric!
-            This is so we can hook the correct O^l(x) and p^l(x)."""
-            batch_size, d_hidden = operator.shape
-            # Denominator is l2 norm of functions - i.e. output of this ReLU layer
-            denominator = torch.einsum('bi -> ', outputs)
+            This is so we can hook the correct O^l(x) and p^l(x).
+            Also makes calculating g_j^l a pain, as g_j^l depends on C^{l+1} and should be
+            calculated for module l, not l-1. Pass in separate next module name and next_next_layer
+            C^{l+1}."""
+            ## For first term of numerator
+            g_j_next_layer: Float[Tensor, "b d_hidden"] = integrated_gradient_trapezoidal_norm(
+                module=get_model_attr(unhooked_model, module_name_next_layer),
+                inputs=raw_output, # Inputs (ALWAYS TUPLE) to next layer are outputs of activation module -> may need to fix concat for transformers
+                C_out=C_next_next_layer,
+                n_intervals=n_intervals,
+            )
+            with torch.no_grad():
+                ## Second term of numerator
+                g_j_hadamard_p: Float[Tensor, "b d_hidden"] = g_j_next_layer * inputs
+                cols_g_j_hadamard_p = repeat(g_j_hadamard_p, 'b d1 -> b d1 d2', d2=d_hidden)
+                rows_operators = repeat(operator, 'b d1 -> b d2 d1', d2=d_hidden)
+                assert (rows_operators[:, 0, :] == operator).all()
+                # Hadamard product and sum over batch dimension
+                numerator_term_2: Float[Tensor, "batch d_hidden d_hidden"] = cols_g_j_hadamard_p * rows_operators
+                assert numerator_term_2[0, 4, 8] == (g_j_next_layer[0, 4] * operator[0, 8] * inputs[0, 4])
 
-            g_j_hadamard_p: Float[Tensor, "b d_hidden"] = repeat(g_j_next_layer, 'd_hidden -> b d_hidden', b=batch_size) * inputs
-            cols_g_j_hadamard_p = repeat(g_j_hadamard_p, 'b d1 -> b d1 d2', d2=d_hidden)
-            rows_operators = repeat(operator, 'b d1 -> b d2 d1', d2=d_hidden)
-            assert (rows_operators[:, 0, :] == operator).all()
-            # Hadamard product and sum over batch dimension
-            numerator_term_2: Float[Tensor, "d_hidden d_hidden"] = torch.einsum('bij -> ij', cols_g_j_hadamard_p * rows_operators)
+                ## First term of numerator
+                numerator_term_1: Float[Tensor, "batch d_hidden d_hidden"] = repeat(g_j_next_layer * outputs, 'b d1 -> b d1 d2', d2=d_hidden)
+                Lambda_dash = torch.einsum('bi,bj -> bij', g_j_next_layer, outputs)
+                whole_numerator: Float[Tensor, "batch d_hidden d_hidden"] = numerator_term_1 - numerator_term_2
 
-            _add_to_hooked_matrix(hooked_data, hook_name, "relu_num", numerator_term_2)
+                _add_to_hooked_matrix(hooked_data, hook_name, "relu_num", torch.einsum('bij -> ij', numerator_term_2))
+                _add_to_hooked_matrix(hooked_data, hook_name, "whole_relu_num", torch.einsum('bij -> ij', whole_numerator))
+                _add_to_hooked_matrix(hooked_data, hook_name, "relu_num_1", torch.einsum('bij -> ij', numerator_term_1))
+                _add_to_hooked_matrix(hooked_data, hook_name, "Lambda_dash", torch.einsum('bij -> ij', Lambda_dash))
+
+    _add_to_hooked_matrix(hooked_data, hook_name, "preactivations", inputs.sum(dim=0)) # For debugging purposes
 
 
 def function_size_forward_hook_fn(
@@ -524,11 +543,29 @@ def function_size_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
+    rotate: bool,
+    C_next_layer: Float[Tensor, "d_hidden d_hidden"],
 ) -> None:
+    """Hook function for l2 norm of f^{l+1} (output of layer module).
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module.
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        rotate: Whether to rotate the functions to calculate l2 norm of fhat
+        C_next_layer: Optional, provide for rotate=True case.
+    """
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
     outputs = output if isinstance(output, tuple) else (output,)
     outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
-    _add_to_hooked_matrix(hooked_data, hook_name, "fn_size", torch.einsum('bi -> ', outputs))
+    if rotate == True:
+        outputs = outputs @ C_next_layer
+    # l2 norm of functions f^{l+1} - i.e. output of this layer
+    _add_to_hooked_matrix(hooked_data, hook_name, "fn_size", torch.einsum('bi -> ', outputs.pow(2)))
 
 
 def test_edges_forward_hook_fn(

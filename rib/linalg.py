@@ -200,6 +200,8 @@ def integrated_gradient_trapezoidal_norm(
         C_out: The truncated interaction rotation matrix for the module's outputs.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=1 instead of using the trapezoidal rule.
+        concat_input: Whether to concatenate the input along the last dimension (used for
+        transformer functionality)
     """
     # Ensure that the inputs have requires_grad=True
     for x in inputs:

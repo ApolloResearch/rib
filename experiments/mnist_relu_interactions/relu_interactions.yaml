@@ -14,5 +14,5 @@ node_layers:
   - layers.0
   - layers.1
   - layers.2
-relu_metric_type: 2
+relu_metric_type: 3
 edit_weights: False

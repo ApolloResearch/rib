@@ -5,6 +5,24 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "lm ablation gradient flow pythia",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_ablations/run_lm_ablations.py",
+            "args": "${workspaceFolder}/experiments/lm_ablations/rib_gradient_flow_pythia-14m.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "lm gradient flow pythia",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_gradient_flow_build/run_lm_gradient_flow_build.py",
+            "args": "${workspaceFolder}/experiments/lm_gradient_flow_build/pythia-14m.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "lm rib ablate modadd",
             "type": "python",
             "request": "launch",

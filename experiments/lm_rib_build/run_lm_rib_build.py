@@ -168,21 +168,15 @@ def main(config_path_str: str):
         tlens_model_path=config.tlens_model_path,
     )
 
-    gram_train_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.gram_batch_size or config.batch_size
-    )
     logger.info("Time to load model and dataset: %.2f", time.time() - start_time)
     if config.eval_type is not None:
+        eval_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size)
         # Test model accuracy/loss before graph building, ta be sure
         if config.eval_type == "accuracy":
-            accuracy = eval_model_accuracy(
-                hooked_model, gram_train_loader, dtype=dtype, device=device
-            )
+            accuracy = eval_model_accuracy(hooked_model, eval_loader, dtype=dtype, device=device)
             logger.info("Model accuracy on dataset: %.2f%%", accuracy * 100)
         elif config.eval_type == "ce_loss":
-            loss = eval_cross_entropy_loss(
-                hooked_model, gram_train_loader, dtype=dtype, device=device
-            )
+            loss = eval_cross_entropy_loss(hooked_model, eval_loader, dtype=dtype, device=device)
             logger.info("Model per-token loss on dataset: %.2f", loss)
 
     # Don't build the graph for the section of the model before the first node layer
@@ -191,6 +185,9 @@ def main(config_path_str: str):
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
 
+    gram_train_loader = create_data_loader(
+        dataset, shuffle=True, batch_size=config.gram_batch_size or config.batch_size
+    )
     start_time = time.time()
     logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
     gram_matrices = collect_gram_matrices(

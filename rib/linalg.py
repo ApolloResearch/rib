@@ -281,6 +281,7 @@ def integrated_gradient_trapezoidal_norm(
 
 def integrated_gradient_trapezoidal_jacobian(
     fn: Callable[[Float[Tensor, "... in_hidden"]], Float[Tensor, "... out_hidden"]],
+    has_aux: bool,
     in_tensor: Float[Tensor, "... in_hidden"],
     n_intervals: int,
 ) -> Float[Tensor, "... in_hidden out_hidden"]:
@@ -289,9 +290,11 @@ def integrated_gradient_trapezoidal_jacobian(
     Uses the trapezoidal rule to approximate the integral between 0 and 1.
 
     Args:
-        fn: The function to calculate the integrated gradient of. Must take two inputs, the first
-            being the alpha-adjusted input and the second being the non-adjusted input. The
-            gradient will be calculated w.r.t the first input only.
+        fn: The function to calculate the integrated gradient of. If has_aux must take
+        two inputs, otherwise must take one input. The (first) input should be the
+        alpha-adjusted input and the second input (if has_aux) should be the non-adjusted input.
+        The gradient will then be calculated w.r.t the first input only.
+        has_aux: Whether the function takes two inputs.
         in_tensor: The input to the function.
         n_intervals: The number of intervals to use for the integral approximation.
     """
@@ -313,7 +316,10 @@ def integrated_gradient_trapezoidal_jacobian(
         # has_aux (bool) – Flag indicating that func returns a (output, aux) tuple where the first element is the output of the function to be differentiated and the second element is auxiliary objects that will not be differentiated. Default: False.
 
         # Need to detach the output to avoid a memory leak
-        alpha_jac_out = vmap(jacrev(fn, has_aux=True))(alpha * in_tensor, in_tensor).detach()
+        if has_aux:
+            alpha_jac_out = vmap(jacrev(fn, has_aux=True))(alpha * in_tensor, in_tensor).detach()
+        else:
+            alpha_jac_out = vmap(jacrev(fn, has_aux=False))(alpha * in_tensor).detach()
 
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)

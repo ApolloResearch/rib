@@ -229,16 +229,19 @@ def test_integrated_gradient_trapezoidal_jacobian_linear():
 
     result_point_estimate = integrated_gradient_trapezoidal_jacobian(
         fn=linear,
+        has_aux=False,
         in_tensor=in_tensor,
         n_intervals=0,
     )
     result_1 = integrated_gradient_trapezoidal_jacobian(
         fn=linear,
+        has_aux=False,
         in_tensor=in_tensor,
         n_intervals=1,
     )
     result_5 = integrated_gradient_trapezoidal_jacobian(
         fn=linear,
+        has_aux=False,
         in_tensor=in_tensor,
         n_intervals=2,
     )

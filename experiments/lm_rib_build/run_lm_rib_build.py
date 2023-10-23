@@ -84,6 +84,11 @@ class Config(BaseModel):
         description="The batch size to use when calculating the gram matrices. If None, use the same"
         "batch size as the one used to build the graph.",
     )
+    edge_batch_size: Optional[int] = Field(
+        None,
+        description="The batch size to use when calculating the edges. If None, use the same batch"
+        "size as the one used to build the graph.",
+    )
     truncation_threshold: float = Field(
         ...,
         description="Remove eigenvectors with eigenvalues below this threshold.",
@@ -95,7 +100,14 @@ class Config(BaseModel):
 
     n_intervals: int = Field(
         ...,
-        description="The number of intervals to use for the integrated gradient approximation.",
+        description="The number of intervals to use for the integrated gradient approximation."
+        "If 0, we take a point estimate (i.e. just alpha=1).",
+    )
+
+    out_dim_chunk_size: Optional[int] = Field(
+        None,
+        description="The size of the chunks to use for calculating the jacobian. If none, calculate"
+        "the jacobian on all output dimensions at once.",
     )
 
     dtype: str = Field(..., description="The dtype to use when building the graph.")
@@ -224,6 +236,9 @@ def main(config_path_str: str):
         logger.info("Skipping edge calculation.")
         E_hats = {}
     else:
+        edge_train_loader = create_data_loader(
+            dataset, shuffle=True, batch_size=config.edge_batch_size or config.batch_size
+        )
         logger.info("Calculating edges.")
         start_time = time.time()
         E_hats = collect_interaction_edges(
@@ -231,9 +246,10 @@ def main(config_path_str: str):
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
             module_names=graph_module_names,
-            data_loader=graph_train_loader,
+            data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
+            out_dim_chunk_size=config.out_dim_chunk_size,
         )
         logger.info("Time to calculate edges: %.2f", time.time() - start_time)
 
@@ -252,7 +268,7 @@ def main(config_path_str: str):
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
+        "edges": [(node_layer, E_hats[node_layer]) for node_layer in E_hats],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
     }

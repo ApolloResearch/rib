@@ -20,9 +20,14 @@ class InteractionRotation:
     """Dataclass storing the interaction rotation matrix and its inverse for a node layer."""
 
     node_layer_name: str
-    C: Optional[Float[Tensor, "d_hidden d_hidden_trunc"]] = None
+    out_dim: int  # Equal to d_hidden_extra_trunc if C is not None and d_hidden otherwise
+    C: Optional[Float[Tensor, "d_hidden d_hidden_extra_trunc"]] = None
     # pseudoinverse of C, not needed for the output node layer
-    C_pinv: Optional[Float[Tensor, "d_hidden_trunc d_hidden"]] = None
+    C_pinv: Optional[Float[Tensor, "d_hidden_extra_trunc d_hidden"]] = None
+
+    def __post_init__(self):
+        if self.C is not None:
+            assert self.C.shape[1] == self.out_dim, f"Expected C to have shape (_, {self.out_dim})"
 
 
 @dataclass
@@ -30,7 +35,12 @@ class Eigenvectors:
     """Dataclass storing the eigenvectors of a node layer."""
 
     node_layer_name: str
-    U: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
+    out_dim: int  # Equal to d_hidden_trunc if U is not None and d_hidden otherwise
+    U: Optional[Float[Tensor, "d_hidden d_hidden_trunc"]] = None
+
+    def __post_init__(self):
+        if self.U is not None:
+            assert self.U.shape[1] == self.out_dim, f"Expected U to have shape (_, {self.out_dim})"
 
 
 def build_sorted_lambda_matrices(
@@ -144,14 +154,46 @@ def calculate_interaction_rotations(
 
     # If not rotating the final layer, we don't need U or C
     U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = (
-        eigendecompose(gram_matrices[final_node_layer])[1] if rotate_final_node_layer else None
+        eigendecompose(gram_matrices[final_node_layer])[1].detach().cpu()
+        if rotate_final_node_layer
+        else None
     )
     C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = (
-        U_output.clone().detach() if U_output is not None else None
+        U_output.detach().cpu() if U_output is not None else None
     )
-    U_output = U_output.detach().cpu() if U_output is not None else None
-    Us.append(Eigenvectors(node_layer_name=final_node_layer, U=U_output))
-    Cs.append(InteractionRotation(node_layer_name=final_node_layer, C=C_output))
+    U_output = U_output if U_output is not None else None
+
+    if final_node_layer not in gram_matrices:
+        # Technically we don't actually need the final_node_layer to be in gram_matrices if we're
+        # not rotating it, but for now, our implementation assumes that it always is unless
+        # final_node_layer is the logits (i.e. ="output").
+        assert (
+            final_node_layer == "output"
+        ), f"Final node layer {final_node_layer} not in gram matrices."
+        with torch.inference_mode():
+            # Get the out_dim of logits by hackily passing a datapoint through it
+            out_samples = hooked_model(data_loader.dataset[0][0].to(device))
+            out_sample: Float[Tensor, "... out_dim"] = (
+                out_samples[0] if isinstance(out_samples, tuple) else out_samples
+            )
+            final_node_dim = out_sample.shape[-1]
+    else:
+        final_node_dim = gram_matrices[final_node_layer].shape[0]
+
+    Us.append(
+        Eigenvectors(
+            node_layer_name=final_node_layer,
+            out_dim=final_node_dim,
+            U=U_output,
+        )
+    )
+    Cs.append(
+        InteractionRotation(
+            node_layer_name=final_node_layer,
+            out_dim=C_output.shape[1] if C_output is not None else final_node_dim,
+            C=C_output,
+        )
+    )
 
     module_and_hook_names = (
         zip(module_names[::-1], hook_names[::-1])
@@ -176,10 +218,12 @@ def calculate_interaction_rotations(
         U: Float[Tensor, "d_hidden d_hidden_trunc"] = (
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
         )
-        Us.append(Eigenvectors(node_layer_name=hook_name, U=U.detach().cpu()))
+        Us.append(Eigenvectors(node_layer_name=hook_name, out_dim=U.shape[1], U=U.detach().cpu()))
 
+        # Most recently stored interaction matrix
+        C_out = Cs[-1].C.to(device=device) if Cs[-1].C is not None else None
         M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
-            C_out=Cs[-1].C,  # most recently stored interaction matrix
+            C_out=C_out,
             hooked_model=hooked_model,
             n_intervals=n_intervals,
             data_loader=data_loader,
@@ -205,14 +249,14 @@ def calculate_interaction_rotations(
             Lambda_abs, truncation_threshold
         )
 
-        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc
+        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
+            (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
+        )
         C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
-            Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T
+            (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
         )
         Cs.append(
-            InteractionRotation(
-                node_layer_name=hook_name, C=C.clone().detach(), C_pinv=C_pinv.clone().detach()
-            )
+            InteractionRotation(node_layer_name=hook_name, out_dim=C.shape[1], C=C, C_pinv=C_pinv)
         )
 
     return Cs[::-1], Us[::-1]

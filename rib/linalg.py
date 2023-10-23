@@ -313,7 +313,7 @@ def integrated_gradient_trapezoidal_jacobian(
         # has_aux (bool) – Flag indicating that func returns a (output, aux) tuple where the first element is the output of the function to be differentiated and the second element is auxiliary objects that will not be differentiated. Default: False.
 
         # Need to detach the output to avoid a memory leak
-        alpha_jac_out = vmap(jacrev(fn, hax_aux=True))(alpha * in_tensor, in_tensor).detach()
+        alpha_jac_out = vmap(jacrev(fn, has_aux=True))(alpha * in_tensor, in_tensor).detach()
 
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)

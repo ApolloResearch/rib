@@ -1,7 +1,0 @@
-mlp_config:
-  hidden_sizes: [50, 50, 50]
-  input_size: 784
-  output_size: 10
-  activation_fn: "relu"
-  bias: true
-  fold_bias: true

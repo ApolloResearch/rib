@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Optional, Union
 import torch
 import torch.nn as nn
 from einops import rearrange, reduce, repeat
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -517,16 +517,20 @@ def collect_test_edges(
 
 def calculate_swapped_relu_loss(
     hooked_model: HookedModel,
-    module_name: str,
+    module_names: str,
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
-    replacement_idx_list: list[int],
-    num_replaced: int,
+    replacement_idx_lists: list[int],
+    num_replaced: list[int],
     hook_name: Optional[str] = None,
 ) -> tuple[list[float], ...]:
     """Calculate loss for unedited forward pass, and then on forward pass with specific ReLUs
-    swapped."""
+    swapped.
+
+    Act only on one layer. (See similar function below for one that a) iteratively replaces,
+    b) acts on all layers.)
+    """
     if hook_name is None:
         hook_name = module_name
 
@@ -549,6 +553,7 @@ def calculate_swapped_relu_loss(
         device=device,
     )
 
+    # Pass hooks in relu_swap_hooks to forward pass evaluate with them in
     hooked_accuracy, hooked_loss = eval_model_metrics(
         hooked_model=hooked_model,
         dataloader=data_loader,
@@ -557,6 +562,9 @@ def calculate_swapped_relu_loss(
         device=device,
     )
 
+    # Remove hooks above to now create one for case where indices to swap are randomised
+    # Note that randomisation doesn't necessarily act as a perfect baseline if there is a high
+    # degree of synchronisation
     hooked_model.remove_hooks()
 
     random_relu_swap_hooks = []
@@ -581,5 +589,85 @@ def calculate_swapped_relu_loss(
         dtype=dtype,
         device=device,
     )
+
+    return unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy
+
+
+def calculate_all_swapped_iterative_relu_loss(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    replacement_idx_list: list[Int[Tensor, "d_hidden"]],
+    num_replaced_list: [int],
+    hook_names: Optional[list[str]] = None,
+) -> tuple[list[float], ...]:
+    """Calculate loss for unedited forward pass, and then on forward pass with specific ReLUs
+    swapped.
+
+    - Iteratively replaces until loss and accuracy reach given thresholds (whichever first).
+    - Acts on all layers, though keeps the indices from the initial calculation.
+    """
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    relu_swap_hooks = []
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        relu_swap_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="relu_swap",
+                fn=relu_swap_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"replacement_idx_list": replacement_idx_list[i]}
+            )
+        )
+
+    unhooked_accuracy, unhooked_loss = eval_model_metrics(
+        hooked_model=hooked_model,
+        dataloader=data_loader,
+        hooks=None,
+        dtype=dtype,
+        device=device,
+    )
+
+    hooked_accuracy, hooked_loss = eval_model_metrics(
+        hooked_model=hooked_model,
+        dataloader=data_loader,
+        hooks=relu_swap_hooks,
+        dtype=dtype,
+        device=device,
+    )
+
+    hooked_model.remove_hooks()
+
+    random_relu_swap_hooks = []
+    length = len(replacement_idx_list[i])
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        random_idx_tensor = torch.arange(length)
+        indices_to_replace = torch.randperm(length)[:num_replaced_list[i]]
+        random_idx_tensor[indices_to_replace] = torch.randint(0, length, (num_replaced_list[i],))
+        random_relu_swap_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="relu_swap",
+                fn=relu_swap_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"replacement_idx_list": random_idx_tensor.tolist()}
+            )
+        )
+
+        random_hooked_accuracy, random_hooked_loss = eval_model_metrics(
+            hooked_model=hooked_model,
+            dataloader=data_loader,
+            hooks=random_relu_swap_hooks,
+            dtype=dtype,
+            device=device,
+        )
 
     return unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy

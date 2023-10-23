@@ -235,7 +235,7 @@ def integrated_gradient_trapezoidal_norm(
 
     # Calculate the f^{l+1}(x) term which the derivative is not applied to.
     with torch.no_grad():
-        module_of_alpha_1 = module(inputs)
+        module_of_alpha_1 = module(*inputs)
         for y in module_of_alpha_1:
             assert (
                 y.requires_grad is False

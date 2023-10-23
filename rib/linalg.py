@@ -138,6 +138,7 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
 
 
 def edge_norm(
+    alpha_f_in_hat: Float[Tensor, "... in_hidden_combined"],
     f_in_hat: Float[Tensor, "... in_hidden_combined"],
     module: torch.nn.Module,
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
@@ -154,8 +155,10 @@ def edge_norm(
     If this is the case, it will not have a batch dimension.
 
     Args:
-        f_in_hat: The alpha-adjusted concatenated inputs to the model.
-            i.e. alpha * in_acts @ C_in
+        alpha_f_in_hat: The alpha-adjusted concatenated inputs to the model.
+            i.e. alpha * in_acts @ C_in (included in grad)
+        f_in_hat: The non-adjusted concatenated inputs to the model.
+            i.e. in_acts @ C_in (non included in grad)
         module: The model to pass the f_in_hat through.
         C_in_pinv: The pseudoinverse of C_in.
         C_out: The truncated interaction rotation matrix for the output node layer.
@@ -163,10 +166,16 @@ def edge_norm(
 
     """
     # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
+    alpha_f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = alpha_f_in_hat @ C_in_pinv
+    alpha_input_tuples = torch.split(alpha_f_in_adjusted, in_hidden_dims, dim=-1)
+
     f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_in_hat @ C_in_pinv
     input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
 
-    output = module(*input_tuples)
+    with torch.no_grad():
+        non_alpha_output = module(*input_tuples)
+
+    output = non_alpha_output - module(*alpha_input_tuples)
 
     outputs = (output,) if isinstance(output, torch.Tensor) else output
     # Concatenate the outputs over the hidden dimension
@@ -280,7 +289,9 @@ def integrated_gradient_trapezoidal_jacobian(
     Uses the trapezoidal rule to approximate the integral between 0 and 1.
 
     Args:
-        fn: The function to calculate the integrated gradient of.
+        fn: The function to calculate the integrated gradient of. Must take two inputs, the first
+            being the alpha-adjusted input and the second being the non-adjusted input. The
+            gradient will be calculated w.r.t the first input only.
         in_tensor: The input to the function.
         n_intervals: The number of intervals to use for the integral approximation.
     """
@@ -296,8 +307,13 @@ def integrated_gradient_trapezoidal_jacobian(
     ] = None
     alphas = np.array([1]) if n_intervals == 0 else np.arange(0, 1 + interval_size, interval_size)
     for alpha in alphas:
+        # jacrev uses autodiff so I should be able to just do as before, have fn add non-alpha input
+        # but no this doesn't work because jacrev wants the input vars. Can I give it non-diff
+        # inputs?
+        # has_aux (bool) – Flag indicating that func returns a (output, aux) tuple where the first element is the output of the function to be differentiated and the second element is auxiliary objects that will not be differentiated. Default: False.
+
         # Need to detach the output to avoid a memory leak
-        alpha_jac_out = vmap(jacrev(fn))(alpha * in_tensor).detach()
+        alpha_jac_out = vmap(jacrev(fn, hax_aux=True))(alpha * in_tensor, in_tensor).detach()
 
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)

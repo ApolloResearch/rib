@@ -224,9 +224,20 @@ def integrated_gradient_trapezoidal_norm(
 
     alphas = np.array([1]) if n_intervals == 0 else np.arange(0, 1 + interval_size, interval_size)
 
+    # Calculate the f^{l+1}(x) term which the derivative is not applied to.
+    with torch.no_grad():
+        module_of_alpha_1 = module(inputs)
+        for y in module_of_alpha_1:
+            assert (
+                y.requires_grad is False
+            ), "module_of_alpha_1 must not require grad, \
+                otherwise the gradient calculation for f_hat_norm is wrong. \
+                It _should_ not require grad but if it does \
+                we may need to add some clone() in the above."
+
     for alpha in alphas:
         alpha_inputs = tuple(alpha * x for x in inputs)
-        output = module(*alpha_inputs)
+        output = module_of_alpha_1 - module(*alpha_inputs)
         outputs = (output,) if isinstance(output, torch.Tensor) else output
 
         # Concatenate the outputs over the hidden dimension

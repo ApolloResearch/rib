@@ -208,6 +208,8 @@ def integrated_gradient_trapezoidal_norm(
     n_intervals: int,
 ) -> Float[Tensor, "... in_hidden_combined"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs.
+    Note that this differentiates (module(inputs) - module(alpha*inputs))^2 following the definition
+    of e.g. g() in equation (3.27) of the paper.
 
     Uses the trapezoidal rule to approximate the integral between 0 and 1.
 

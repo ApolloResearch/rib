@@ -195,6 +195,7 @@ def collect_interaction_edges(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
+    out_dim_chunk_size: Optional[int] = None,
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -213,6 +214,7 @@ def collect_interaction_edges(
         data_loader: The pytorch data loader.
         dtype: The data type to use for model computations.
         device: The device to run the model on.
+        out_dim_chunk_size: The size of the chunks to use for calculating the jacobian.
 
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes
@@ -222,6 +224,12 @@ def collect_interaction_edges(
     edge_modules = module_names if Cs[-1].node_layer_name == "output" else module_names[:-1]
     edge_hooks: list[Hook] = []
     for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
+        # C from the next node layer
+        assert C_info.C is not None, "C matrix is None."
+        assert C_info.C_pinv is not None, "C_pinv matrix is None."
+        C_out = Cs[idx + 1].C
+        if C_out is not None:
+            C_out = C_out.to(device=device)
         edge_hooks.append(
             Hook(
                 name=C_info.node_layer_name,
@@ -229,10 +237,12 @@ def collect_interaction_edges(
                 fn=interaction_edge_pre_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={
-                    "C_in": C_info.C,  # C from the current node layer
-                    "C_in_pinv": C_info.C_pinv,  # C_pinv from the current node layer
-                    "C_out": Cs[idx + 1].C,  # C from the next node layer
+                    "C_in": C_info.C.to(device=device),  # C from the current node layer
+                    "C_in_pinv": C_info.C_pinv.to(device=device),  # C_pinv from current node layer
+                    "C_out": C_out,
                     "n_intervals": n_intervals,
+                    "out_dim": Cs[idx + 1].out_dim,
+                    "out_dim_chunk_size": out_dim_chunk_size,
                 },
             )
         )
@@ -246,8 +256,9 @@ def collect_interaction_edges(
     hooked_model.clear_hooked_data()
 
     # Scale the edges by the number of samples in the dataset
+    # Put the resulting edges on the cpu
     for node_layer_name in edges:
-        edges[node_layer_name] = edges[node_layer_name] / len(data_loader.dataset)  # type: ignore
+        edges[node_layer_name] = (edges[node_layer_name] / len(data_loader.dataset)).cpu()  # type: ignore
 
     # Ensure that the keys of the edges dict are the same as the node layer names without `output`
     assert set(edges.keys()) == set(

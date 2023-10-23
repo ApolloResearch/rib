@@ -167,8 +167,11 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
 
     Assume we have a polynomial function f = x^3. Our normed function for the integrated gradient
     is then:
-    f_norm = integral_{0}^{1} day(((alpha * x)^3 @ C_out)^2) / day(alpha * x) d_alpha.
-           = [x^5 C_out^2 alpha^6]^1_0
+    f_norm = - integral_{0}^{1} day(((x^3 - (alpha * x)^3) @ C_out)^2) / day(alpha * x) d_alpha.
+           = - integral_{0}^{1} 2 * (x^3 - (alpha * x)^3) @ C_out) * (3 * (alpha * x)^2) @ C_out) d_alpha
+           = 6 * integral_{0}^{1} (x^3 - (alpha * x)^3)) ((alpha * x)^2)) d_alpha
+           = 6 * integral_{0}^{1} (x^5 alpha^2 - alpha^5 x^5) d_alpha
+           = [ 2 * x^5 alpha^3 - x^5 alpha^6 ]_{0}^{1}
            = x^5 C_out^2
 
     We show that this analytical solution is approached as n_intervals increases.

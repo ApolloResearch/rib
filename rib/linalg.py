@@ -222,7 +222,14 @@ def integrated_gradient_trapezoidal_norm(
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=1 instead of using the trapezoidal rule.
     """
-    # Ensure that the inputs have requires_grad=True
+    # First alculate the f^{l+1}(x) term (i.e. alpha=1) to which the derivative is not applied.
+    # For this ensure that the inputs have requires_grad=False
+    for x in inputs:
+        x.requires_grad_(False)
+
+    module_of_alpha_1 = module(*inputs)
+
+    # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:
         x.requires_grad_(True)
 
@@ -232,17 +239,6 @@ def integrated_gradient_trapezoidal_norm(
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
     alphas = np.array([1]) if n_intervals == 0 else np.arange(0, 1 + interval_size, interval_size)
-
-    # Calculate the f^{l+1}(x) term which the derivative is not applied to.
-    with torch.no_grad():
-        module_of_alpha_1 = module(*inputs)
-        for y in module_of_alpha_1:
-            assert (
-                y.requires_grad is False
-            ), "module_of_alpha_1 must not require grad, \
-                otherwise the gradient calculation for f_hat_norm is wrong. \
-                It _should_ not require grad but if it does \
-                we may need to add some clone() in the above."
 
     for alpha in alphas:
         alpha_inputs = tuple(alpha * x for x in inputs)
@@ -276,6 +272,9 @@ def integrated_gradient_trapezoidal_norm(
 
     in_grads *= interval_size
 
+    # Add the minus sign in front of the IG integral, see e.g. the definition of g_j in equation (3.27)
+    in_grads *= -1
+
     return in_grads
 
 
@@ -294,8 +293,9 @@ def integrated_gradient_trapezoidal_jacobian(
         two inputs, otherwise must take one input. The (first) input should be the
         alpha-adjusted input and the second input (if has_aux) should be the non-adjusted input.
         The gradient will then be calculated w.r.t the first input only.
-        has_aux: Whether the function takes two inputs.
+        has_aux: Whether the function takes two inputs (e.g. for f^{l+1}(x) term)
         in_tensor: The input to the function.
+
         n_intervals: The number of intervals to use for the integral approximation.
     """
 

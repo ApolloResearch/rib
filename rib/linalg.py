@@ -225,11 +225,12 @@ def integrated_gradient_trapezoidal_norm(
             point estimate at alpha=1 instead of using the trapezoidal rule.
     """
     # First alculate the f^{l+1}(x) term (i.e. alpha=1) to which the derivative is not applied.
-    # For this ensure that the inputs have requires_grad=False
-    for x in inputs:
-        x.requires_grad_(False)
-
-    module_of_alpha_1 = module(*inputs)
+    # For this ensure that the inputs have requires_grad=False / use no_grad
+    # for x in inputs:
+    #     x.requires_grad_(False)
+    # module_of_alpha_1 = module(*inputs)
+    with torch.no_grad():
+        module_of_alpha_1 = module(*tuple(x * 1 for x in inputs))
 
     # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:

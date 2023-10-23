@@ -282,6 +282,7 @@ def interaction_edge_pre_forward_hook_fn(
 
     jac_out = integrated_gradient_trapezoidal_jacobian(
         fn=edge_norm_partial,
+        has_aux=True,
         in_tensor=f_hat,
         n_intervals=n_intervals,
     )

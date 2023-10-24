@@ -34,12 +34,18 @@ from typing import Literal, Optional, Union, cast
 
 import fire
 import torch
+from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from torch import Tensor
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
-from rib.interaction_algos import calculate_interaction_rotations
+from rib.interaction_algos import (
+    Eigenvectors,
+    InteractionRotation,
+    calculate_interaction_rotations,
+)
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.types import TORCH_DTYPES
@@ -61,6 +67,9 @@ class Config(BaseModel):
     )
     tlens_model_path: Optional[Path] = Field(
         None, description="Path to saved transformer lens model."
+    )
+    interaction_matrices_path: Optional[Path] = Field(
+        None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
     node_layers: list[str] = Field(
         ..., description="Names of the modules whose inputs correspond to node layers in the graph."
@@ -95,7 +104,8 @@ class Config(BaseModel):
     )
     last_pos_module_type: Optional[Literal["add_resid1", "unembed"]] = Field(
         None,
-        description="Module type in which to only output the last position index.",
+        description="Module type in which to only output the last position index. For modular"
+        "arithmetic only.",
     )
 
     n_intervals: int = Field(
@@ -138,6 +148,35 @@ class Config(BaseModel):
                 "Exactly one of [tlens_pretrained, tlens_model_path] must be specified"
             )
         return self
+
+
+def load_interaction_rotations(
+    config: Config,
+) -> tuple[
+    dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]
+]:
+    logger.info("Loading interaction matrices from %s", config.interaction_matrices_path)
+    assert config.interaction_matrices_path is not None
+    matrices_info = torch.load(config.interaction_matrices_path)
+
+    # Verify that entries in config match those in the loaded matrices
+    loaded_config = Config(**matrices_info["config"])
+    assert config.tlens_model_path == loaded_config.tlens_model_path, (
+        f"tlens_model_path in config ({config.tlens_model_path}) does not match "
+        f"tlens_model_path in loaded matrices ({loaded_config.tlens_model_path})"
+    )
+    assert config.tlens_pretrained == loaded_config.tlens_pretrained, (
+        f"tlens_pretrained in config ({config.tlens_pretrained}) does not match "
+        f"tlens_pretrained in loaded matrices ({loaded_config.tlens_pretrained})"
+    )
+    assert set(config.node_layers) <= set(
+        loaded_config.node_layers
+    ), "node_layers in the config must be a subset of the node layers in the interaction graph."
+
+    gram_matrices = matrices_info["gram_matrices"]
+    Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
+    Us = [Eigenvectors(**data) for data in matrices_info["eigenvectors"]]
+    return gram_matrices, Cs, Us
 
 
 def main(config_path_str: str):
@@ -196,47 +235,50 @@ def main(config_path_str: str):
     # Don't build the graph for the section of the model before the first node layer
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
-    # Only need gram matrix for logits if we're rotating the final node layer
-    collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+    if config.interaction_matrices_path is None:
+        # Only need gram matrix for logits if we're rotating the final node layer
+        collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
 
-    gram_train_loader = create_data_loader(
-        dataset,
-        shuffle=False,
-        batch_size=config.gram_batch_size or config.batch_size,
-        seed=config.seed,
-    )
-    start_time = time.time()
-    logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
-    gram_matrices = collect_gram_matrices(
-        hooked_model=hooked_model,
-        module_names=graph_module_names,
-        data_loader=gram_train_loader,
-        dtype=dtype,
-        device=device,
-        collect_output_gram=collect_output_gram,
-        hook_names=config.node_layers,
-    )
+        gram_train_loader = create_data_loader(
+            dataset,
+            shuffle=False,
+            batch_size=config.gram_batch_size or config.batch_size,
+            seed=config.seed,
+        )
+        start_time = time.time()
+        logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
+        gram_matrices = collect_gram_matrices(
+            hooked_model=hooked_model,
+            module_names=graph_module_names,
+            data_loader=gram_train_loader,
+            dtype=dtype,
+            device=device,
+            collect_output_gram=collect_output_gram,
+            hook_names=config.node_layers,
+        )
 
-    logger.info("Time to collect gram matrices: %.2f", time.time() - start_time)
+        logger.info("Time to collect gram matrices: %.2f", time.time() - start_time)
 
-    graph_train_loader = create_data_loader(
-        dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
-    )
-    start_time = time.time()
-    logger.info("Calculating interaction rotations.")
-    Cs, Us = calculate_interaction_rotations(
-        gram_matrices=gram_matrices,
-        module_names=graph_module_names,
-        hooked_model=hooked_model,
-        data_loader=graph_train_loader,
-        dtype=dtype,
-        device=device,
-        n_intervals=config.n_intervals,
-        logits_node_layer=config.logits_node_layer,
-        truncation_threshold=config.truncation_threshold,
-        rotate_final_node_layer=config.rotate_final_node_layer,
-        hook_names=config.node_layers,
-    )
+        graph_train_loader = create_data_loader(
+            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+        )
+        start_time = time.time()
+        logger.info("Calculating interaction rotations.")
+        Cs, Us = calculate_interaction_rotations(
+            gram_matrices=gram_matrices,
+            module_names=graph_module_names,
+            hooked_model=hooked_model,
+            data_loader=graph_train_loader,
+            dtype=dtype,
+            device=device,
+            n_intervals=config.n_intervals,
+            logits_node_layer=config.logits_node_layer,
+            truncation_threshold=config.truncation_threshold,
+            rotate_final_node_layer=config.rotate_final_node_layer,
+            hook_names=config.node_layers,
+        )
+    else:
+        gram_matrices, Cs, Us = load_interaction_rotations(config=config)
 
     logger.info("Time to calculate interaction rotations: %.2f", time.time() - start_time)
     if not config.calculate_edges:

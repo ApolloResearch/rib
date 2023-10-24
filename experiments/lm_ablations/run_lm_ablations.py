@@ -135,7 +135,9 @@ def main(config_path_str: str) -> None:
         return_set=return_set,
         tlens_model_path=tlens_model_path,
     )
-    data_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size)
+    data_loader = create_data_loader(
+        dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+    )
 
     # Test model accuracy/loss before graph building, ta be sure
     eval_fn: Callable = (

@@ -182,7 +182,9 @@ def main(config_path_str: str):
 
     logger.info("Time to load model and dataset: %.2f", time.time() - start_time)
     if config.eval_type is not None:
-        eval_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size)
+        eval_loader = create_data_loader(
+            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+        )
         # Test model accuracy/loss before graph building, ta be sure
         if config.eval_type == "accuracy":
             accuracy = eval_model_accuracy(hooked_model, eval_loader, dtype=dtype, device=device)
@@ -198,7 +200,10 @@ def main(config_path_str: str):
     collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
 
     gram_train_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.gram_batch_size or config.batch_size
+        dataset,
+        shuffle=False,
+        batch_size=config.gram_batch_size or config.batch_size,
+        seed=config.seed,
     )
     start_time = time.time()
     logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
@@ -214,7 +219,9 @@ def main(config_path_str: str):
 
     logger.info("Time to collect gram matrices: %.2f", time.time() - start_time)
 
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = create_data_loader(
+        dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+    )
     start_time = time.time()
     logger.info("Calculating interaction rotations.")
     Cs, Us = calculate_interaction_rotations(
@@ -237,7 +244,10 @@ def main(config_path_str: str):
         E_hats = {}
     else:
         edge_train_loader = create_data_loader(
-            dataset, shuffle=True, batch_size=config.edge_batch_size or config.batch_size
+            dataset,
+            shuffle=False,
+            batch_size=config.edge_batch_size or config.batch_size,
+            seed=config.seed,
         )
         logger.info("Calculating edges.")
         start_time = time.time()

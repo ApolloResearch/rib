@@ -17,17 +17,16 @@ from tqdm import tqdm
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
     acts_pre_forward_hook_fn,
+    function_size_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
     relu_interaction_forward_hook_fn,
     test_edges_forward_hook_fn,
-    function_size_forward_hook_fn,
 )
 from rib.hook_fns_non_static import relu_swap_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.utils import eval_model_accuracy, eval_model_metrics
-
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -35,6 +34,7 @@ if TYPE_CHECKING:  # Prevent circular import to import type annotations
 
 def plot_temp(matrix: Float[Tensor, "d1 d2"], title: str) -> None:
     from pathlib import Path
+
     import matplotlib.pyplot as plt
     import seaborn as sns
     out_dir = Path(__file__).parent / "relu_temp_debug"
@@ -368,16 +368,6 @@ def collect_relu_interactions(
             hook_name: hooked_model.hooked_data[hook_name]["whole_relu_num"].cpu()
             for hook_name in hooked_model.hooked_data
         }
-        relu_numerator_1s = {
-            hook_name: hooked_model.hooked_data[hook_name]["relu_num_1"].cpu()
-            for hook_name in hooked_model.hooked_data
-        }
-        my_Lambda_dashes = {
-            hook_name: hooked_model.hooked_data[hook_name]["Lambda_dash"].cpu()
-            for hook_name in hooked_model.hooked_data
-        }
-        for hook_name, mat in my_Lambda_dashes.items():
-            plot_temp(mat, f"my_Lambda_dash_{hook_name}")
         for i, mat in enumerate(Lambda_dashes):
             plot_temp(mat, f"Lambda_dash_{i}")
     # Plot preactivations for debugging
@@ -396,13 +386,13 @@ def collect_relu_interactions(
         case 2:
             rotate = True
 
-    denominators: List[float] = collect_function_sizes(
+    denominators: list[float] = collect_function_sizes(
         hooked_model=hooked_model,
         module_names=layer_module_names,
         data_loader=data_loader,
         dtype=dtype,
         device=device,
-        hook_names=layer_module_names,
+        hook_names=layer_module_names, # Changed hook layers to activation layers only
         rotate=rotate,
         Cs=Cs,
     )
@@ -414,8 +404,8 @@ def collect_relu_interactions(
             }
         case 3:
             """Todo: normalise by Lambda and fix g_j in last term."""
-            num_2_shapes = [mat.shape for mat in list(relu_similarity_numerators.values())]
-            lambda_shapes = [mat.shape for mat in Lambda_dashes]
+            # num_2_shapes = [mat.shape for mat in list(relu_similarity_numerators.values())]
+            # lambda_shapes = [mat.shape for mat in Lambda_dashes]
             relu_similarity_matrices = {}
             for i, key in enumerate(module_names):
             ## Lambda code DOES work, but you'd need to multiply by dataset size here
@@ -443,14 +433,10 @@ def collect_function_sizes(
 ) -> list[float]:
     """Calculate denominator for ReLU similarity metrics as l2 norm of function sizes in layer l+1."""
     assert len(module_names) > 0, "No modules specified."
-    if hook_names is not None:
-        assert len(hook_names) == len(
-            module_names), "Must specify a hook name for each module."
-    else:
-        hook_names = module_names
 
     fn_size_hooks = []
     for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        if i == 2: break # This number should be changed to total number of activation function layers analysed + 1
         fn_size_hooks.append(
             Hook(
                 name=hook_name,

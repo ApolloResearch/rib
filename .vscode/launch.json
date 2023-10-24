@@ -122,11 +122,20 @@
             "justMyCode": true
         },
         {
-            "name": "relu similarities",
+            "name": "mnist relu interactions",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/mnist_relu_interactions/run_relu_similarity.py",
-            "args": "${workspaceFolder}/experiments/mnist_relu_interactions/relu_interactions.yaml",
+            "program": "${workspaceFolder}/experiments/relu_interactions/mnist_relu.py",
+            "args": "${workspaceFolder}/experiments/relu_interactions/mnist_relu.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "lm relu interactions",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/relu_interactions/transformer_relu.py",
+            "args": "${workspaceFolder}/experiments/relu_interactions/transformer_relu.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },

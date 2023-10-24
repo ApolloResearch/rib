@@ -43,7 +43,9 @@ def relu_swap_forward_hook_fn(
     # For this function, which always hooks an activation layer, inputs ARE the preactivations
     inputs = torch.cat([x for x in inputs], dim=-1)
 
-    outputs = output if isinstance(output, tuple) else (output,)
+    output_is_tuple: bool = True if isinstance(output, tuple) else False
+    outputs = output if output_is_tuple else (output,)
+    out_hidden_dims = [x.shape[-1] for x in outputs]
     outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
     operator: Float[Tensor, "batch d_hidden_out"] = torch.div(outputs, inputs)
     if operator.dim() == 2:
@@ -52,8 +54,12 @@ def relu_swap_forward_hook_fn(
         batch_size, token_len, d_hidden_concat = operator.shape
 
     edited_operator = operator.clone()
-    edited_operator[:, torch.arange(d_hidden)] = operator[:, replacement_idx_list]
+    edited_operator[..., torch.arange(d_hidden)] = operator[..., replacement_idx_list]
 
     edited_output = edited_operator * inputs
+
+    # Split back into tuple form if the ouput should have been tuple
+    if output_is_tuple:
+        edited_output = tuple(torch.split(edited_output, out_hidden_dims, dim=-1))
 
     return edited_output

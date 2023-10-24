@@ -155,7 +155,7 @@ def test_intergrated_gradient_trapezoidal_norm_linear():
     )
 
     assert torch.allclose(
-        result_point_estimate, result_1 * 0
+        result_point_estimate, result_1 * 1
     ), "Point estimate and double the n_intervals==1 estimate are not close enough"
     assert torch.allclose(
         result_1, result_5
@@ -231,20 +231,17 @@ def test_integrated_gradient_trapezoidal_jacobian_linear():
     linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
 
     result_point_estimate = integrated_gradient_trapezoidal_jacobian(
-        fn=linear,
-        has_aux=False,
+        fn=linear,  # lambda x, x0: x0 - linear(x),
         in_tensor=in_tensor,
         n_intervals=0,
     )
     result_1 = integrated_gradient_trapezoidal_jacobian(
         fn=linear,
-        has_aux=False,
         in_tensor=in_tensor,
         n_intervals=1,
     )
     result_5 = integrated_gradient_trapezoidal_jacobian(
         fn=linear,
-        has_aux=False,
         in_tensor=in_tensor,
         n_intervals=2,
     )

@@ -165,19 +165,25 @@ def edge_norm(
         in_hidden_dims: The hidden dimension of the original inputs to the module.
 
     """
-    # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
+    # Compute f^{l+1}(x) to which the derivative is not applied.
+    with torch.no_grad():
+        # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
+        f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_in_hat @ C_in_pinv
+        input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
+
+        output_const = module(*tuple(x * 1 for x in input_tuples))
+        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+
+    # Compute f^{l+1}(f^l(alpha x))
     alpha_f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = alpha_f_in_hat @ C_in_pinv
     alpha_input_tuples = torch.split(alpha_f_in_adjusted, in_hidden_dims, dim=-1)
 
-    f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_in_hat @ C_in_pinv
-    input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
+    output_alpha = module(*alpha_input_tuples)
+    outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
 
-    with torch.no_grad():
-        non_alpha_output = module(*input_tuples)
+    # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
+    outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
 
-    output = non_alpha_output - module(*alpha_input_tuples)
-
-    outputs = (output,) if isinstance(output, torch.Tensor) else output
     # Concatenate the outputs over the hidden dimension
     out_acts = torch.cat(outputs, dim=-1)
 
@@ -206,16 +212,17 @@ def integrated_gradient_trapezoidal_norm(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
+    integral_boundary_epsilon: float = 1e-3,
 ) -> Float[Tensor, "... in_hidden_combined"]:
-    """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs.
-    Note that this differentiates (module(inputs) - module(alpha*inputs))^2 following the definition
-    of e.g. g() in equation (3.27) of the paper.
+    """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
+    following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
+    derivative of f^{l+1}(x) - f^{l+1}(f^l(alpha x)) where module(·) is f^{l+1}(·).
 
-    Uses the trapezoidal rule to approximate the integral between 0 and 1.
+    Uses the trapezoidal rule to approximate the integral between 0+eps and 1-eps.
 
     Unlike in the integrated gradient calculation for the edge weights, this function takes the norm
     of the output of the module, condensing the output to a single number which we can run backward
-    on.
+    on. (Thus we do not need to use jacrev.)
 
     Args:
         module: The module to calculate the integrated gradient of.
@@ -223,30 +230,49 @@ def integrated_gradient_trapezoidal_norm(
         C_out: The truncated interaction rotation matrix for the module's outputs.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=1 instead of using the trapezoidal rule.
+        integral_boundary_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1.
     """
-    # First alculate the f^{l+1}(x) term (i.e. alpha=1) to which the derivative is not applied.
-    # For this ensure that the inputs have requires_grad=False / use no_grad
-    # for x in inputs:
-    #     x.requires_grad_(False)
-    # module_of_alpha_1 = module(*inputs)
+    # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.no_grad():
-        module_of_alpha_1 = module(*tuple(x * 1 for x in inputs))
+        output_const = module(*tuple(x * 1 for x in inputs))
+        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
 
     # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:
         x.requires_grad_(True)
 
-    # Use an interval size of 1/n_intervals (unless n_intervals == 0, in which case we use 1 so
-    # that our multiplication by interval_size below doesn't change the result)
-    interval_size = 1.0 / max(n_intervals, 1)
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    alphas = np.array([1]) if n_intervals == 0 else np.arange(0, 1 + interval_size, interval_size)
+    # Integration samples
+    alphas = (
+        np.array([0.5])
+        if n_intervals == 0
+        else np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_intervals)
+    )
+    # Use an interval size of 1/n_intervals (unless n_intervals == 0, in which case we use 1 so
+    # that our multiplication by interval_size below doesn't change the result)
+    interval_size = 1 if n_intervals == 0 else alphas[1] - alphas[0]
+    # Check that the integration steps are as expected
+    assert np.allclose(
+        1.0 / max(n_intervals, 1), interval_size
+    ), "Interval size should match 1/n_intervals."
+    assert np.allclose(np.diff(alphas), interval_size), "Alphas must be equally spaced."
 
     for alpha in alphas:
+        # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
-        output = module_of_alpha_1 - module(*alpha_inputs)
-        outputs = (output,) if isinstance(output, torch.Tensor) else output
+        output_alpha = module(*alpha_inputs)
+        outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
+
+        # Check that the output types are as expected
+        assert isinstance(output_alpha, type(output_const)), "Outputs should be the same type."
+        assert isinstance(outputs_alpha, tuple), "Outputs (alpha) should be a tuple."
+        assert isinstance(outputs_const, tuple), "Outputs (const) should be a tuple."
+
+        # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
+        outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
 
         # Concatenate the outputs over the hidden dimension
         out_acts = torch.cat(outputs, dim=-1)
@@ -283,46 +309,57 @@ def integrated_gradient_trapezoidal_norm(
 
 def integrated_gradient_trapezoidal_jacobian(
     fn: Callable[[Float[Tensor, "... in_hidden"]], Float[Tensor, "... out_hidden"]],
-    has_aux: bool,
     in_tensor: Float[Tensor, "... in_hidden"],
     n_intervals: int,
+    integral_boundary_epsilon: float = 1e-3,
 ) -> Float[Tensor, "... in_hidden out_hidden"]:
     """Calculate the integrated gradient of the batched jacobian of a function w.r.t its input.
 
     Uses the trapezoidal rule to approximate the integral between 0 and 1.
 
     Args:
-        fn: The function to calculate the integrated gradient of. If has_aux must take
-        two inputs, otherwise must take one input. The (first) input should be the
-        alpha-adjusted input and the second input (if has_aux) should be the non-adjusted input.
-        The gradient will then be calculated w.r.t the first input only.
-        has_aux: Whether the function takes two inputs (e.g. for f^{l+1}(x) term)
+        fn: Kinda the function to calculate the integrated gradient of: Our implementation is a bit
+        hacky so we fn is not f^{l+1}(·) where we evaluate f^{l+1}(x) - f^{l+1}(f^l(alpha x)) but rather f^{l+1}(·,·) where we
+        input f^{l+1}(alpha f^l(x), f^l(x)) and it returns f^{l+1}(x) - f^{l+1}(alpha f^l(x)). That function fn is currently always
+        edge_norm which does exactly this. The gradient will be calculated w.r.t the first input
+        which is the alpha term.
         in_tensor: The input to the function.
-
         n_intervals: The number of intervals to use for the integral approximation.
+        integral_boundary_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1.
     """
 
-    # Use an interval size of 1/n_intervals (unless n_intervals == 0, in which case we use 1 so
-    # that our multiplication by interval_size below doesn't change the result)
-    interval_size = 1.0 / max(n_intervals, 1)
     jac_out: Optional[
         Union[
             Float[Tensor, "batch out_hidden_trunc in_hidden_trunc"],
             Float[Tensor, "batch out_hidden_trunc pos in_hidden_trunc"],
         ]
     ] = None
-    alphas = np.array([1]) if n_intervals == 0 else np.arange(0, 1 + interval_size, interval_size)
+
+    # Integration samples
+    alphas = (
+        np.array([0.5])
+        if n_intervals == 0
+        else np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_intervals)
+    )
+    # Use an interval size of 1/n_intervals (unless n_intervals == 0, in which case we use 1 so
+    # that our multiplication by interval_size below doesn't change the result)
+    interval_size = 1 if n_intervals == 0 else alphas[1] - alphas[0]
+    # Check that the integration steps are as expected
+    assert np.allclose(
+        1.0 / max(n_intervals, 1), interval_size
+    ), "Interval size should match 1/n_intervals."
+    assert np.allclose(np.diff(alphas), interval_size), "Alphas must be equally spaced."
+
     for alpha in alphas:
-        # jacrev uses autodiff so I should be able to just do as before, have fn add non-alpha input
-        # but no this doesn't work because jacrev wants the input vars. Can I give it non-diff
-        # inputs?
-        # has_aux (bool) – Flag indicating that func returns a (output, aux) tuple where the first element is the output of the function to be differentiated and the second element is auxiliary objects that will not be differentiated. Default: False.
+        # Assume that fn is like edge_norm, taking two inputs, The first one is
+        # alpha * in_tensor and the second one is in_tensor. The gradient will then be calculated
+        # w.r.t the first input only, the second one will be used with torch.no_grad().
+        # I am insure how jacrev argnums=0 and no_grad interact, we need to test this TODO.
 
         # Need to detach the output to avoid a memory leak
-        if has_aux:
-            alpha_jac_out = vmap(jacrev(fn, has_aux=True))(alpha * in_tensor, in_tensor).detach()
-        else:
-            alpha_jac_out = vmap(jacrev(fn, has_aux=False))(alpha * in_tensor).detach()
+        alpha_jac_out = vmap(jacrev(fn, argnums=0))(alpha * in_tensor, in_tensor).detach()
 
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)

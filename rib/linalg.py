@@ -257,13 +257,11 @@ def integrated_gradient_trapezoidal_norm(
         if alpha == 0 or (alpha == 1 and n_intervals > 0):
             alpha_in_grads = 0.5 * alpha_in_grads
 
-        in_grads += alpha_in_grads
+        in_grads += alpha_in_grads * interval_size
 
         for x in alpha_inputs:
             assert x.grad is not None, "Input grad should not be None."
             x.grad.zero_()
-
-    in_grads *= interval_size
 
     return in_grads
 
@@ -331,11 +329,10 @@ def integrated_gradient_trapezoidal_jacobian(
             alpha_jac_out = 0.5 * alpha_jac_out
 
         if jac_out is None:
-            jac_out = alpha_jac_out
+            jac_out = alpha_jac_out * interval_size
         else:
-            jac_out += alpha_jac_out
+            jac_out += alpha_jac_out * interval_size
 
     assert jac_out is not None, "jac_out should not be None."
-    jac_out *= interval_size
 
     return jac_out

@@ -212,7 +212,7 @@ def integrated_gradient_trapezoidal_norm(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
-    integral_boundary_epsilon: float = 1e-3,
+    integral_boundary_relative_epsilon: float = 1e-3,
 ) -> Float[Tensor, "... in_hidden_combined"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
     following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
@@ -230,10 +230,13 @@ def integrated_gradient_trapezoidal_norm(
         C_out: The truncated interaction rotation matrix for the module's outputs.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=1 instead of using the trapezoidal rule.
-        integral_boundary_epsilon: Rather than integrating from 0 to 1, we integrate from
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
             integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
             ill-defined derivatives at 0 and 1.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
     """
+    # Scale accuracy of the integral boundaries with the number of intervals
+    integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.no_grad():
         output_const = module(*tuple(x * 1 for x in inputs))
@@ -246,21 +249,22 @@ def integrated_gradient_trapezoidal_norm(
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
     # Integration samples
-    alphas = (
-        np.array([0.5])
-        if n_intervals == 0
-        else np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_intervals)
-    )
-    # Use an interval size of 1/n_intervals (unless n_intervals == 0, in which case we use 1 so
-    # that our multiplication by interval_size below doesn't change the result)
-    interval_size = 1 if n_intervals == 0 else alphas[1] - alphas[0]
-    # Check that the integration steps are as expected
-    assert np.allclose(
-        1.0 / max(n_intervals, 1), interval_size
-    ), "Interval size should match 1/n_intervals."
-    assert np.allclose(np.diff(alphas), interval_size), "Alphas must be equally spaced."
+    if n_intervals == 0:
+        alphas = np.array([0.5])
+        interval_size = 1.0
+        n_alphas = 1
+    else:
+        # Integration steps for n_intervals intervals
+        n_alphas = n_intervals + 1
+        alphas = np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_alphas)
+        assert np.allclose(np.diff(alphas), alphas[1] - alphas[0]), "alphas must be equally spaced."
+        # Multiply the interval sizes by (1 + 2 eps) to balance out the smaller integration interval
+        interval_size = (alphas[1] - alphas[0]) * (1 + 2 * integral_boundary_epsilon)
+        assert np.allclose(
+            n_intervals * interval_size, 1
+        ), "Interval size should match 1/n_intervals."
 
-    for alpha in alphas:
+    for alpha_index, alpha in enumerate(alphas):
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
@@ -290,7 +294,7 @@ def integrated_gradient_trapezoidal_norm(
         alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)
-        if alpha == 0 or (alpha == 1 and n_intervals > 0):
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_alphas - 1):
             alpha_in_grads = 0.5 * alpha_in_grads
 
         in_grads += alpha_in_grads
@@ -311,7 +315,7 @@ def integrated_gradient_trapezoidal_jacobian(
     fn: Callable[[Float[Tensor, "... in_hidden"]], Float[Tensor, "... out_hidden"]],
     in_tensor: Float[Tensor, "... in_hidden"],
     n_intervals: int,
-    integral_boundary_epsilon: float = 1e-3,
+    integral_boundary_relative_epsilon: float = 1e-3,
 ) -> Float[Tensor, "... in_hidden out_hidden"]:
     """Calculate the integrated gradient of the batched jacobian of a function w.r.t its input.
 
@@ -325,10 +329,13 @@ def integrated_gradient_trapezoidal_jacobian(
         which is the alpha term.
         in_tensor: The input to the function.
         n_intervals: The number of intervals to use for the integral approximation.
-        integral_boundary_epsilon: Rather than integrating from 0 to 1, we integrate from
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
             integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
             ill-defined derivatives at 0 and 1.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
     """
+    # Scale accuracy of the integral boundaries with the number of intervals
+    integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
 
     jac_out: Optional[
         Union[
@@ -338,21 +345,22 @@ def integrated_gradient_trapezoidal_jacobian(
     ] = None
 
     # Integration samples
-    alphas = (
-        np.array([0.5])
-        if n_intervals == 0
-        else np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_intervals)
-    )
-    # Use an interval size of 1/n_intervals (unless n_intervals == 0, in which case we use 1 so
-    # that our multiplication by interval_size below doesn't change the result)
-    interval_size = 1 if n_intervals == 0 else alphas[1] - alphas[0]
-    # Check that the integration steps are as expected
-    assert np.allclose(
-        1.0 / max(n_intervals, 1), interval_size
-    ), "Interval size should match 1/n_intervals."
-    assert np.allclose(np.diff(alphas), interval_size), "Alphas must be equally spaced."
+    if n_intervals == 0:
+        alphas = np.array([0.5])
+        interval_size = 1.0
+        n_alphas = 1
+    else:
+        # Integration steps for n_intervals intervals
+        n_alphas = n_intervals + 1
+        alphas = np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_alphas)
+        assert np.allclose(np.diff(alphas), alphas[1] - alphas[0]), "alphas must be equally spaced."
+        # Multiply the interval sizes by (1 + 2 eps) to balance out the smaller integration interval
+        interval_size = (alphas[1] - alphas[0]) * (1 + 2 * integral_boundary_epsilon)
+        assert np.allclose(
+            n_intervals * interval_size, 1
+        ), "Interval size should match 1/n_intervals."
 
-    for alpha in alphas:
+    for alpha_index, alpha in enumerate(alphas):
         # Assume that fn is like edge_norm, taking two inputs, The first one is
         # alpha * in_tensor and the second one is in_tensor. The gradient will then be calculated
         # w.r.t the first input only, the second one will be used with torch.no_grad().
@@ -363,7 +371,7 @@ def integrated_gradient_trapezoidal_jacobian(
 
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)
-        if alpha == 0 or (alpha == 1 and n_intervals > 0):
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_alphas - 1):
             alpha_jac_out = 0.5 * alpha_jac_out
 
         if jac_out is None:

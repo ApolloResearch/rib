@@ -239,7 +239,11 @@ def integrated_gradient_trapezoidal_norm(
     integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.no_grad():
-        output_const = module(*tuple(x * 1 for x in inputs))
+        # Do this so that no_grad actually can do its job. Also works with `x * 1` rather than
+        # `x.clone()`. We could also consider using torch.info.inference_mode() instead but we
+        # don't expect a difference, see documentation
+        # [here](https://pytorch.org/docs/stable/notes/autograd.html#locally-disable-grad-doc).
+        output_const = module(*tuple(x.clone() for x in inputs))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
 
     # Ensure that the inputs have requires_grad=True from now on

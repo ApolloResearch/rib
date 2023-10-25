@@ -4,13 +4,15 @@ transformer-lens model.
 
 Steps to build the graph:
 1. Load a model from transformerlens (either from_pretrained or via ModelConfig).
-2. Fold in the biases into the weights.
-3. Convert the model to a SequentialTransformer model, which has nn.Modules corresponding to each
+2. Convert the model to a SequentialTransformer model, which has nn.Modules corresponding to each
     node layer.
-5. Collect the gram matrices at each node layer.
-6. Calculate the interaction basis matrices (labelled C in the paper) for each node layer, starting
-    from the final node layer and working backwards.
-7. Calculate the edges of the interaction graph between each node layer.
+3. Fold in the biases into the weights.
+4. Collect the gram matrices at each node layer. If interaction_matrices_path is provided, we skip
+    this step.
+5. Calculate the interaction basis matrices (labelled C in the paper) for each node layer, starting
+    from the final node layer and working backwards. If interaction_matrices_path is provided, we
+    load the pre-saved matrices instead of calculating them.
+6. Calculate the edges of the interaction graph between each node layer.
 
 Usage:
     python run_lm_rib_build.py <path/to/config.yaml>
@@ -23,8 +25,7 @@ as well as the output of the final node layer. For example, if `node_layers` is 
     with the output of ln1.0.
 - One on the input to "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_in.0".
-- One on the output of "mlp_act.0". This will include the residual stream concatenated with the
-    output of "mlp_act.0".
+- (If logits_node_layer is True:) One on the output of the model, i.e. the logits.
 """
 import json
 import time
@@ -150,23 +151,15 @@ class Config(BaseModel):
         return self
 
 
-def load_interaction_rotations(
-    config: Config,
-) -> tuple[
-    dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]
-]:
-    logger.info("Loading interaction matrices from %s", config.interaction_matrices_path)
-    assert config.interaction_matrices_path is not None
-    matrices_info = torch.load(config.interaction_matrices_path)
+def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
+    """Ensure that the config for calculating edges is compatible with that used to calculate Cs."""
 
-    # Verify that entries in config match those in the loaded matrices
-    loaded_config = Config(**matrices_info["config"])
     assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
         "node_layers in the config must be a subsequence of the node layers in the config used to"
         "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
         "match those needed to correctly calculate the edges."
     )
-    # Ensure that the following attributes match across configs
+    # The following attributes must exactly match across configs
     for attr in [
         "tlens_model_path",
         "tlens_pretrained",
@@ -177,6 +170,36 @@ def load_interaction_rotations(
             f"{attr} in config ({getattr(config, attr)}) does not match "
             f"{attr} in loaded matrices ({getattr(loaded_config, attr)})"
         )
+
+    # Verify that, for huggingface datasets, we're not trying to calculate edges on data that
+    # wasn't used to calculate the Cs
+    assert config.dataset.name == loaded_config.dataset.name, "Dataset names must match"
+    assert config.dataset.return_set == loaded_config.dataset.return_set, "Return sets must match"
+    if isinstance(config.dataset, HFDatasetConfig):
+        assert isinstance(loaded_config.dataset, HFDatasetConfig)
+        if config.dataset.return_set_frac is not None:
+            assert loaded_config.dataset.return_set_frac is not None
+            assert (
+                config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
+            ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
+        elif config.dataset.return_set_n_samples is not None:
+            assert loaded_config.dataset.return_set_n_samples is not None
+            assert (
+                config.dataset.return_set_n_samples <= loaded_config.dataset.return_set_n_samples
+            ), "Cannot use a larger return_set_n_samples for edges than to calculate the Cs"
+
+
+def load_interaction_rotations(
+    config: Config,
+) -> tuple[
+    dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]
+]:
+    logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
+    assert config.interaction_matrices_path is not None
+    matrices_info = torch.load(config.interaction_matrices_path)
+
+    loaded_config = Config(**matrices_info["config"])
+    _verify_compatible_configs(config, loaded_config)
 
     gram_matrices = matrices_info["gram_matrices"]
     Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
@@ -204,7 +227,7 @@ def main(config_path_str: str):
     dtype = TORCH_DTYPES[config.dtype]
 
     # Time each stage
-    start_time = time.time()
+    load_model_data_start_time = time.time()
     seq_model, tlens_cfg_dict = load_sequential_transformer(
         node_layers=config.node_layers,
         last_pos_module_type=config.last_pos_module_type,
@@ -227,7 +250,7 @@ def main(config_path_str: str):
         tlens_model_path=config.tlens_model_path,
     )
 
-    logger.info("Time to load model and dataset: %.2f", time.time() - start_time)
+    logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
     if config.eval_type is not None:
         eval_loader = create_data_loader(
             dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
@@ -253,7 +276,7 @@ def main(config_path_str: str):
             batch_size=config.gram_batch_size or config.batch_size,
             seed=config.seed,
         )
-        start_time = time.time()
+        collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
         gram_matrices = collect_gram_matrices(
             hooked_model=hooked_model,
@@ -265,13 +288,13 @@ def main(config_path_str: str):
             hook_names=config.node_layers,
         )
 
-        logger.info("Time to collect gram matrices: %.2f", time.time() - start_time)
+        logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
         graph_train_loader = create_data_loader(
             dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
         )
-        start_time = time.time()
-        logger.info("Calculating interaction rotations.")
+        c_start_time = time.time()
+        logger.info("Calculating interaction rotations (Cs).")
         Cs, Us = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
             module_names=graph_module_names,
@@ -285,10 +308,10 @@ def main(config_path_str: str):
             rotate_final_node_layer=config.rotate_final_node_layer,
             hook_names=config.node_layers,
         )
+        logger.info("Time to calculate Cs: %.2f", time.time() - c_start_time)
     else:
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
 
-    logger.info("Time to calculate interaction rotations: %.2f", time.time() - start_time)
     if not config.calculate_edges:
         logger.info("Skipping edge calculation.")
         E_hats = {}
@@ -300,7 +323,7 @@ def main(config_path_str: str):
             seed=config.seed,
         )
         logger.info("Calculating edges.")
-        start_time = time.time()
+        edges_start_time = time.time()
         E_hats = collect_interaction_edges(
             Cs=Cs,
             hooked_model=hooked_model,
@@ -311,7 +334,7 @@ def main(config_path_str: str):
             device=device,
             out_dim_chunk_size=config.out_dim_chunk_size,
         )
-        logger.info("Time to calculate edges: %.2f", time.time() - start_time)
+        logger.info("Time to calculate edges: %.2f", time.time() - edges_start_time)
 
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []

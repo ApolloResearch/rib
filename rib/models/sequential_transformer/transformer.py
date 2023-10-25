@@ -19,11 +19,12 @@ from rib.models.sequential_transformer.components import (
 )
 from rib.models.sequential_transformer.config import SequentialTransformerConfig
 from rib.models.utils import (
-    add_dim_attn_O,
     concat_ones,
     concat_zeros,
     create_list_partitions,
-    fold_attn_QKV,
+    fold_attn_O,
+    fold_attn_QK,
+    fold_attn_V,
     fold_mlp_in,
     fold_mlp_out,
     fold_unembed,
@@ -216,10 +217,10 @@ class SequentialTransformer(nn.Module):
         fold_fns: dict[str, Callable] = {
             "W_E": token_embed_fold_fn,
             "W_pos": concat_ones,
-            "W_Q": fold_attn_QKV,
-            "W_K": fold_attn_QKV,
-            "W_V": fold_attn_QKV,
-            "W_O": add_dim_attn_O,
+            "W_Q": fold_attn_QK,
+            "W_K": fold_attn_QK,
+            "W_V": fold_attn_V,
+            "W_O": fold_attn_O,
             "W_in": partial(fold_mlp_in, self.cfg.act_fn),
             "W_out": fold_mlp_out,
             "W_U": fold_unembed,

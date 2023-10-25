@@ -189,8 +189,10 @@ def fold_attn_O(
 ) -> None:
     """Fold in the b_O bias to the W_O matrix.
 
-    First we split the b_O bias into n_head terms of size b_O/n_head because by default there is
-    only one b_O term but we want to distribute it over the n_head W_O matrices.
+    Notice that there exists only one b_O vector (size d_model) independent of the number of
+    attention heads. However, we want to fold in the bias into the (n_head) W_O matrices. To do this
+    we first duplicate the b_O bias n_head times and multiply by 1/n_head (split_bias_data),
+    essentially folding a bit of the bias into every W_O matrix.
 
     Then we concat the modified b_O and W_O via the 'row' (d_head) dimension, and add an extra
     'column' (d_model) of all zeros to match the folded resid shape. Note that this final extra

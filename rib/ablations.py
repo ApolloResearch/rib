@@ -204,7 +204,7 @@ def run_ablations(
 
 def load_basis_matrices(
     interaction_graph_info: dict,
-    node_layers: list[str],
+    ablation_node_layers: list[str],
     ablation_type: Literal["rib", "orthogonal"],
     dtype: torch.dtype,
     device: str,
@@ -223,19 +223,22 @@ def load_basis_matrices(
 
     # Get the basis vecs and their pseudoinverses using the module_names as keys
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
-    for module_name in node_layers:
+    for module_name in ablation_node_layers:
         for basis_info in interaction_graph_info[basis_matrix_key]:
             if basis_info["node_layer_name"] == module_name:
                 if ablation_type == "rib":
+                    assert basis_info["C"] is not None, f"{module_name} has no C matrix."
+                    assert basis_info["C_pinv"] is not None, f"{module_name} has no C_pinv matrix."
                     basis_vecs = basis_info["C"].to(dtype=dtype, device=device)
                     basis_vecs_pinv = basis_info["C_pinv"].to(dtype=dtype, device=device)
                 elif ablation_type == "orthogonal":
-                    # Pseudoinverse of an orthonormal matrix is its transpose
+                    assert basis_info["U"] is not None, f"{module_name} has no U matrix."
                     basis_vecs = basis_info["U"].to(dtype=dtype, device=device)
+                    # Pseudoinverse of an orthonormal matrix is its transpose
                     basis_vecs_pinv = basis_vecs.T.detach().clone()
                 basis_matrices.append((basis_vecs, basis_vecs_pinv))
                 break
     assert len(basis_matrices) == len(
-        node_layers
+        ablation_node_layers
     ), f"Could not find all node_layer modules in the interaction graph config."
     return basis_matrices

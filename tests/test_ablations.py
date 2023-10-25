@@ -291,6 +291,7 @@ def test_run_modular_arithmetic_rib_ablations():
     node_layers:
         - ln1.0
         - unembed
+    logits_node_layer: true
     batch_size: 64
     dtype: float32
     seed: 0
@@ -327,6 +328,7 @@ def test_run_modular_arithmetic_orthog_ablations():
     node_layers:
         - ln1.0
         - unembed
+    logits_node_layer: true
     batch_size: 64
     dtype: float32
     seed: 0

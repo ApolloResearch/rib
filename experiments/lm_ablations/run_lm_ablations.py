@@ -61,6 +61,10 @@ class Config(BaseModel):
         description="The dataset to use to build the graph.",
     )
     node_layers: list[str]
+    logits_node_layer: bool = Field(
+        ...,
+        description="Whether the Cs were calculated with logits as the final node layer.",
+    )
     batch_size: int
     dtype: str
     eps: Optional[float] = 1e-5
@@ -95,13 +99,22 @@ def main(config_path_str: str) -> None:
     assert set(config.node_layers) <= set(
         interaction_graph_info["config"]["node_layers"]
     ), "The node layers in the config must be a subset of the node layers in the interaction graph."
+    assert config.logits_node_layer == interaction_graph_info["config"]["logits_node_layer"], (
+        "The logits_node_layer in the config must match the logits_node_layer in the "
+        "interaction graph."
+    )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
+    # We don't bother ablating vecs in the output layer (i.e. the inputs to the final node layer)
+    # We likely didn't calculate a rotation basis for this layer so we'd have nothing to ablate
+    ablation_node_layers = (
+        config.node_layers if config.logits_node_layer else config.node_layers[:-1]
+    )
     basis_matrices = load_basis_matrices(
         interaction_graph_info=interaction_graph_info,
-        node_layers=config.node_layers,
+        ablation_node_layers=ablation_node_layers,
         ablation_type=config.ablation_type,
         dtype=dtype,
         device=device,

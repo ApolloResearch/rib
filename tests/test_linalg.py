@@ -215,6 +215,60 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
     ), "Integrated grad norms are not decreasing"
 
 
+def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
+    """Show that our integrated gradient converges to the analytical solution for a polynomial, with
+    the special feature that act(0) != 0. Earlier code made this assumption, and this test checks
+    that our new code also holds without the assumption
+
+    Assume we have a polynomial function f = x^3. Our normed function for the integrated gradient
+    is then:
+    f_norm = integral_{0}^{1} day((((alpha * x)^3 + 1) @ C_out)^2) / day(alpha * x) d_alpha.
+           = (x^5 + 2 * x^2) C_out^2
+
+    We show that this analytical solution is approached as n_intervals increases.
+    """
+
+    torch.manual_seed(0)
+    batch_size = 2
+    hidden = 3
+
+    poly_module = torch.nn.Module()
+    poly_module.forward = lambda x: x**3 + 1
+
+    # Let C_out be a square identity matrix to avoid issues with partial derivative dimensions
+    # TODO: Handle non-identity C_out
+    C_out = torch.eye(hidden)
+    inputs = (torch.randn(batch_size, hidden),)
+    inputs = (torch.tensor([[3.0, 3.0, 3.0], [3.0, 3.0, 3.0]]),)
+    inputs = (3.0 * torch.ones(batch_size, hidden),)
+
+    result_2 = integrated_gradient_trapezoidal_norm(
+        module=poly_module, inputs=inputs, C_out=C_out, n_intervals=2
+    )
+    result_20 = integrated_gradient_trapezoidal_norm(
+        module=poly_module, inputs=inputs, C_out=C_out, n_intervals=20
+    )
+
+    result_200 = integrated_gradient_trapezoidal_norm(
+        module=poly_module, inputs=inputs, C_out=C_out, n_intervals=200
+    )
+
+    analytical_result = inputs[0] ** 5 @ C_out**2
+    # Old formula gave (inputs[0] ** 5 + 2 * inputs[0] ** 2) @ C_out**2
+
+    assert torch.allclose(
+        result_200, analytical_result, atol=1e-2
+    ), "Integrated grad norms are not close enough"
+
+    # Check that the results approach inputs[0]**5 as n_intervals increases
+    differences = [
+        (result - analytical_result).sum().abs() for result in [result_2, result_20, result_200]
+    ]  # Check that differences is decreasing
+    assert (
+        differences[0] > differences[1] > differences[2]
+    ), "Integrated grad norms are not decreasing"
+
+
 def test_integrated_gradient_trapezoidal_jacobian_linear():
     """Check independence of n_intervals for integrated gradient jacobian over a linear module
     without bias.

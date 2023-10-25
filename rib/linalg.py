@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable, Optional, Union
 
 import numpy as np
@@ -144,6 +145,8 @@ def edge_norm(
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     in_hidden_dims: list[int],
+    out_dim_start_idx: int,
+    out_dim_end_idx: int,
     has_pos: bool = False,
 ) -> Float[Tensor, "batch pos in_hidden_combined_trunc out_hidden_combined_trunc"]:
     """Calculates the norm of the alpha * in_acts @ C_in @ C_in_pinv when passed through the model.
@@ -163,6 +166,10 @@ def edge_norm(
         C_in_pinv: The pseudoinverse of C_in.
         C_out: The truncated interaction rotation matrix for the output node layer.
         in_hidden_dims: The hidden dimension of the original inputs to the module.
+        out_dim_start_idx: The start index of the output dimension to calculate the norm for.
+            Used for chunking to avoid memory issues.
+        out_dim_end_idx: The end index of the output dimension to calculate the norm for.
+        has_pos: Whether the module has a position dimension.
 
     """
     # Compute f^{l+1}(x) to which the derivative is not applied.
@@ -201,6 +208,8 @@ def edge_norm(
         pos_dim = 0 if f_out_hat.dim() == 2 else 1
         f_out_hat_norm = f_out_hat_norm.sum(dim=pos_dim)
 
+    # Just take the output dimensions that are part of this chunk
+    f_out_hat_norm = f_out_hat_norm[..., out_dim_start_idx:out_dim_end_idx]
     return f_out_hat_norm
 
 
@@ -301,13 +310,11 @@ def integrated_gradient_trapezoidal_norm(
         if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_alphas - 1):
             alpha_in_grads = 0.5 * alpha_in_grads
 
-        in_grads += alpha_in_grads
+        in_grads += alpha_in_grads * interval_size
 
         for x in alpha_inputs:
             assert x.grad is not None, "Input grad should not be None."
             x.grad.zero_()
-
-    in_grads *= interval_size
 
     # Add the minus sign in front of the IG integral, see e.g. the definition of g_j in equation (3.27)
     in_grads *= -1
@@ -319,6 +326,8 @@ def integrated_gradient_trapezoidal_jacobian(
     fn: Callable[[Float[Tensor, "... in_hidden"]], Float[Tensor, "... out_hidden"]],
     in_tensor: Float[Tensor, "... in_hidden"],
     n_intervals: int,
+    out_dim: int,
+    out_dim_chunk_size: Optional[int] = None,
     integral_boundary_relative_epsilon: float = 1e-3,
 ) -> Float[Tensor, "... in_hidden out_hidden"]:
     """Calculate the integrated gradient of the batched jacobian of a function w.r.t its input.
@@ -333,6 +342,10 @@ def integrated_gradient_trapezoidal_jacobian(
         which is the alpha term.
         in_tensor: The input to the function.
         n_intervals: The number of intervals to use for the integral approximation.
+        out_dim: The (concatenated) dimension of the output of the module computed by `fn`.
+        out_dim_chunk_size: The number of output dimensions to chunk together when calculating the
+            jacobian. This is to avoid memory issues when calculating the jacobian of a large
+            function.
         integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
             integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
             ill-defined derivatives at 0 and 1.
@@ -340,6 +353,11 @@ def integrated_gradient_trapezoidal_jacobian(
     """
     # Scale accuracy of the integral boundaries with the number of intervals
     integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
+
+    # Create a list of out_dim chunks. We use these to index the output of the function.
+    # E.g. output[start_idx:end_idx] will give the output corresponding to the chunk.
+    # Add out_dim to the list to ensure that the last chunk grabs the remaining elements
+    out_dim_chunks = list(range(0, out_dim, out_dim_chunk_size or out_dim)) + [out_dim]
 
     jac_out: Optional[
         Union[
@@ -370,8 +388,28 @@ def integrated_gradient_trapezoidal_jacobian(
         # w.r.t the first input only, the second one will be used with torch.no_grad().
         # I am insure how jacrev argnums=0 and no_grad interact, we need to test this TODO.
 
-        # Need to detach the output to avoid a memory leak
-        alpha_jac_out = vmap(jacrev(fn, argnums=0))(alpha * in_tensor, in_tensor).detach()
+        chunked_jac_outs: list[
+            Union[
+                Float[Tensor, "batch out_hidden_trunc_chunk in_hidden_trunc"],
+                Float[Tensor, "batch out_hidden_trunc_chunk pos in_hidden_trunc"],
+            ]
+        ] = []
+        for i in range(len(out_dim_chunks) - 1):
+            fn_chunked = partial(
+                fn, out_dim_start_idx=out_dim_chunks[i], out_dim_end_idx=out_dim_chunks[i + 1]
+            )
+            # Need to detach the output to avoid a memory leak
+            alpha_jac_out_chunk = vmap(jacrev(fn_chunked, argnums=0))(
+                alpha * in_tensor, in_tensor
+            ).detach()
+            chunked_jac_outs.append(alpha_jac_out_chunk)
+
+        # Concatenate the chunks together over the out_hidden_trunc_chunk dimension (i.e. dim=1)
+        alpha_jac_out = torch.cat(chunked_jac_outs, dim=1)
+
+        assert (
+            alpha_jac_out.shape[1] == out_dim
+        ), f"Error in chunking: alpha_jac_out.shape[1] ({alpha_jac_out.shape[1]}) != out_dim "
 
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)
@@ -379,11 +417,10 @@ def integrated_gradient_trapezoidal_jacobian(
             alpha_jac_out = 0.5 * alpha_jac_out
 
         if jac_out is None:
-            jac_out = alpha_jac_out
+            jac_out = alpha_jac_out * interval_size
         else:
-            jac_out += alpha_jac_out
+            jac_out += alpha_jac_out * interval_size
 
     assert jac_out is not None, "jac_out should not be None."
-    jac_out *= interval_size
 
     return jac_out

@@ -17,7 +17,7 @@ from rib.data import (
 )
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
-from rib.utils import train_test_split
+from rib.utils import set_seed, train_test_split
 
 
 def load_sequential_transformer(
@@ -282,19 +282,22 @@ def load_dataset(
 
 
 @overload
-def create_data_loader(dataset: Dataset, shuffle: bool, batch_size: int) -> DataLoader:
+def create_data_loader(dataset: Dataset, shuffle: bool, batch_size: int, seed: int) -> DataLoader:
     ...
 
 
 @overload
 def create_data_loader(
-    dataset: tuple[Dataset, Dataset], shuffle: bool, batch_size: int
+    dataset: tuple[Dataset, Dataset], shuffle: bool, batch_size: int, seed: int
 ) -> tuple[DataLoader, DataLoader]:
     ...
 
 
 def create_data_loader(
-    dataset: Union[Dataset, tuple[Dataset, Dataset]], shuffle: bool, batch_size: int
+    dataset: Union[Dataset, tuple[Dataset, Dataset]],
+    shuffle: bool,
+    batch_size: int,
+    seed: Optional[int] = None,
 ) -> Union[DataLoader, tuple[DataLoader, DataLoader]]:
     """
     Create a DataLoader from the provided dataset.
@@ -305,10 +308,13 @@ def create_data_loader(
             element is used as the test dataset.
         shuffle (bool): Whether to shuffle the dataset(s) each epoch.
         batch_size (int): The batch size to use.
+        seed (Optional[int]): The seed to use for the DataLoader.
 
     Returns:
         The DataLoader or a tuple of DataLoaders.
     """
+    if seed is not None:
+        set_seed(seed)
     if isinstance(dataset, tuple):
         train_loader = DataLoader(dataset[0], batch_size=batch_size, shuffle=shuffle)
         test_loader = DataLoader(dataset[1], batch_size=batch_size, shuffle=shuffle)

@@ -5,19 +5,21 @@ from typing import Any, Optional, Union
 
 import fire
 import matplotlib.pyplot as plt
-import numpy as np
-import seaborn as sns
 import torch
 import torch.nn as nn
 import yaml
 from jaxtyping import Float, Int
 from pydantic import BaseModel, field_validator
-from scipy.cluster.hierarchy import dendrogram, leaves_list, linkage
-from scipy.spatial.distance import squareform
 from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
+from experiments.relu_interactions.relu_interaction_utils import (
+    edit_weights_fn,
+    get_nested_attribute,
+    print_all_modules,
+    relu_plot_and_cluster,
+)
 from rib.data_accumulator import (
     calculate_all_swapped_iterative_relu_loss,
     calculate_swapped_relu_loss,
@@ -79,92 +81,7 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def print_all_modules(mlp):
-    """Use for choosing which modules go in config file."""
-    for name, module in mlp.named_modules():
-        print(name, ":", module)
-
-
-# Weights ========================================================
-
-def edit_weights_fn(model: HookedModel, layer_name: str) -> None:
-    """Weight matrix dimensions are rows=output, cols=input."""
-    layer = get_nested_attribute(model, layer_name)
-
-    weights = layer.weight.data.clone()
-    print(f"Weights shape{weights.shape}")
-    output_neurons, input_neurons = weights.shape
-    weights[:output_neurons//2, -1] = 1e8
-    layer.weight.data.copy_(weights)
-
-
-def get_nested_attribute(obj, attr_name):
-    attrs = attr_name.split('.')
-    current_attr = obj
-    for attr in attrs:
-        current_attr = getattr(current_attr, attr)
-    return current_attr
-
-
 # Helper functions for main ========================================================
-
-def relu_plotting(similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]], out_dir: Path, config: Config) -> None:
-    for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
-        # Plot raw matrix values before clustering
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(similarity_matrix, annot=False,
-                    cmap="YlGnBu", cbar=True, square=True)
-        plt.savefig(
-            out_dir / f"mat_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
-
-        # Plot histogram
-        plt.figure(figsize=(10,8))
-        flat_similarity = np.array(similarity_matrix).flatten()
-        sns.histplot(flat_similarity, bins=100, kde=False)
-        plt.savefig(
-            out_dir / f"hist_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
-
-        match config.relu_metric_type:
-            case 0:
-                # Threshold
-                threshold = 0.95
-                similarity_matrix[similarity_matrix < threshold] = 0
-                distance_matrix = 1 - similarity_matrix
-            case 1 | 2:
-                distance_matrix = torch.max(similarity_matrix, similarity_matrix.T) # Make symmetric
-                threshold = 15
-                distance_matrix[distance_matrix > threshold] = threshold
-            case 3:
-                distance_matrix = torch.max(torch.abs(similarity_matrix), torch.abs(similarity_matrix).T)
-
-        # Deal with zeros on diagonal
-        distance_matrix = distance_matrix.fill_diagonal_(0)
-
-        # Create linkage matrix using clustering algorithm
-        linkage_matrix = linkage(squareform(
-            distance_matrix), method='complete')
-        order = leaves_list(linkage_matrix)
-        rearranged_similarity_matrix = similarity_matrix[order, :][:, order]
-
-        # Plot sorted similarity matrix via indices obtained from distance matrix
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(rearranged_similarity_matrix, annot=False,
-                    cmap="YlGnBu", cbar=True, square=True)
-        plt.title("Reordered Similarity Matrix")
-        plt.savefig(
-            out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}_editweights_{config.edit_weights}.png")
-
-
-def load_local_config(config_path_str: str) -> dict:
-    """Load config (specifically, including MLP config) from local config file.
-
-    Rest of RIB loads MLP config from FluidStack servers.
-    """
-    config_path = Path(__file__).parent / config_path_str
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
-    return config
-
 
 def get_Cs(
     model: nn.Module,
@@ -584,7 +501,7 @@ def mlp_relu_main(config_path_str: str) -> None:
         Lambda_dashes=Cs_and_Lambdas["Lambda_dashes"],
     )
 
-    # relu_plotting(relu_matrices, out_dir, config)
+    # relu_plot_and_cluster(relu_matrices, out_dir, config)
 
     swap_all_layers(hooked_model, relu_matrices, config, device, out_dir)
 

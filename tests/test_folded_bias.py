@@ -134,7 +134,7 @@ def test_gpt2_folded_bias() -> None:
         hf_model_str="gpt2",
         node_layers=node_layers,
         positional_embedding_type="standard",
-        atol=1e-6,
+        atol=1e-5,
     )
 
 

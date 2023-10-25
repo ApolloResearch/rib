@@ -161,17 +161,21 @@ def load_interaction_rotations(
 
     # Verify that entries in config match those in the loaded matrices
     loaded_config = Config(**matrices_info["config"])
-    assert config.tlens_model_path == loaded_config.tlens_model_path, (
-        f"tlens_model_path in config ({config.tlens_model_path}) does not match "
-        f"tlens_model_path in loaded matrices ({loaded_config.tlens_model_path})"
+    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
+        "node_layers in the config must be a subsequence of the node layers in the interaction "
+        "graph, ending at the final node layer. Otherwise, the C matrices for config will need to be different."
     )
-    assert config.tlens_pretrained == loaded_config.tlens_pretrained, (
-        f"tlens_pretrained in config ({config.tlens_pretrained}) does not match "
-        f"tlens_pretrained in loaded matrices ({loaded_config.tlens_pretrained})"
-    )
-    assert set(config.node_layers) <= set(
-        loaded_config.node_layers
-    ), "node_layers in the config must be a subset of the node layers in the interaction graph."
+    # Ensure that the following attributes match across configs
+    for attr in [
+        "tlens_model_path",
+        "tlens_pretrained",
+        "logits_node_layer",
+        "rotate_final_node_layer",
+    ]:
+        assert getattr(config, attr) == getattr(loaded_config, attr), (
+            f"{attr} in config ({getattr(config, attr)}) does not match "
+            f"{attr} in loaded matrices ({getattr(loaded_config, attr)})"
+        )
 
     gram_matrices = matrices_info["gram_matrices"]
     Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]

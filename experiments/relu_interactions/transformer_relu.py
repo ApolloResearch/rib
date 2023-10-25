@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, List, Literal, Optional, Union, cast
 
 import fire
+import torch
 import torch.nn as nn
 from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -44,6 +45,10 @@ from experiments.relu_interactions.relu_interaction_utils import (
     get_nested_attribute,
     print_all_modules,
     relu_plot_and_cluster,
+    swap_all_layers,
+    swap_single_layer,
+    swap_all_layers_using_clusters,
+    plot_changes,
 )
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import (
@@ -362,6 +367,7 @@ def transformer_relu_main(config_path_str: str):
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
+    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
     # dict of InteractionRotation objects or Tensors
     Cs_and_Lambdas: dict[str, list[Union[InteractionRotation, Float[Tensor, ...]]]] = check_and_open_file(
@@ -386,7 +392,18 @@ def transformer_relu_main(config_path_str: str):
         Lambda_dashes=Cs_and_Lambdas["Lambda_dashes"],
     )
 
-    index_list: list[Int[Tensor, "d_hidden"]] = relu_plot_and_cluster(relu_matrices, out_dir, config)
+    replacement_idxs_from_cluster, num_valid_swaps_from_cluster = relu_plot_and_cluster(relu_matrices, out_dir, config)
+
+    print(f"number swaps {num_valid_swaps_from_cluster}")
+
+    swap_all_layers_using_clusters(
+        replacement_idxs_from_cluster=replacement_idxs_from_cluster,
+        num_valid_swaps_from_cluster=num_valid_swaps_from_cluster,
+        hooked_model=hooked_model,
+        config=config,
+        data_loader=graph_train_loader,
+        device=device)
+
 
 if __name__ == "__main__":
     fire.Fire(transformer_relu_main)

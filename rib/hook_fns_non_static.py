@@ -36,7 +36,11 @@ def relu_swap_forward_hook_fn(
     data_key: Union[str, list[str]],
     replacement_idx_list: list[tuple],
 ) -> None:
-    """Hooks activation layers."""
+    """Swap each ReLU with another ReLU. Whether the swap is based on clustering or otherwise
+    depends on the indices you pass in.
+
+    Hook activation layers.
+    """
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
     # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
     # Inputs always tuple
@@ -51,7 +55,7 @@ def relu_swap_forward_hook_fn(
     if operator.dim() == 2:
         batch_size, d_hidden = operator.shape # [256, 101]
     elif operator.dim() == 3:
-        batch_size, token_len, d_hidden_concat = operator.shape
+        batch_size, token_len, d_hidden = operator.shape
 
     edited_operator = operator.clone()
     edited_operator[..., torch.arange(d_hidden)] = operator[..., replacement_idx_list]

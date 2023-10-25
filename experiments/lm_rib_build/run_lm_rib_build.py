@@ -159,12 +159,14 @@ def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
         "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
         "match those needed to correctly calculate the edges."
     )
+    assert (
+        config.logits_node_layer or not loaded_config.logits_node_layer
+    ), "Cannot have logits_node_layer in config but not in loaded matrices config"
+
     # The following attributes must exactly match across configs
     for attr in [
         "tlens_model_path",
         "tlens_pretrained",
-        "logits_node_layer",
-        "rotate_final_node_layer",
     ]:
         assert getattr(config, attr) == getattr(loaded_config, attr), (
             f"{attr} in config ({getattr(config, attr)}) does not match "

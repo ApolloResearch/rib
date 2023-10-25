@@ -162,8 +162,9 @@ def load_interaction_rotations(
     # Verify that entries in config match those in the loaded matrices
     loaded_config = Config(**matrices_info["config"])
     assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
-        "node_layers in the config must be a subsequence of the node layers in the interaction "
-        "graph, ending at the final node layer. Otherwise, the C matrices for config will need to be different."
+        "node_layers in the config must be a subsequence of the node layers in the config used to"
+        "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
+        "match those needed to correctly calculate the edges."
     )
     # Ensure that the following attributes match across configs
     for attr in [

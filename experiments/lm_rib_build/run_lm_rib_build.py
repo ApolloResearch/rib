@@ -191,8 +191,11 @@ def main(config_path_str: str):
 
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
-    if out_interaction_graph_file.exists() and not overwrite_output(out_interaction_graph_file):
+    if config.calculate_edges:
+        out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
+    else:
+        out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
+    if out_file.exists() and not overwrite_output(out_file):
         logger.info("Exiting.")
         return None
 
@@ -330,8 +333,8 @@ def main(config_path_str: str):
     }
 
     # Save the results (which include torch tensors) to file
-    torch.save(results, out_interaction_graph_file)
-    logger.info("Saved results to %s", out_interaction_graph_file)
+    torch.save(results, out_file)
+    logger.info("Saved results to %s", out_file)
 
 
 if __name__ == "__main__":

@@ -75,13 +75,22 @@ seq_model, tlens_cfg_dict = load_sequential_transformer(
     device=device,
 )
 
-# %%
-
 seq_model.eval()
 seq_model.to(device=torch.device(device), dtype=dtype)
 seq_model.fold_bias()
 hooked_model = HookedModel(seq_model)
 
+print(hooked_model)
+
+# %%
+
+# Interp plans
+# Run model with hooks and collect all activations, do a PCA and stuff
+# Analyze attentiohn patterns
+# Collect RIB-activations rather than standard activations
+#     Do resample-ablation tests on these, what happens if I replace some?
+#     Do logit-attribution of these, and confirm things match the way they should
+#     Maximum activating dataset examples for these
 
 # %%
 config_path = Path("mod_arithmetic_config.yaml")
@@ -90,12 +99,21 @@ config = load_config(config_path, config_model=Config)
 datasets = load_dataset(dataset_config=config.dataset, return_set=config.dataset.return_set)
 train_loader, test_loader = create_data_loader(datasets, shuffle=True, batch_size=11, seed=0)
 
-train_loader.dataset[0:10]
+print(train_loader.dataset[0:10])  #
 
 # %%
 
 logits = hooked_model(torch.tensor([3, 3, 113]))[0]
 
 logits.argmax(dim=-1)
+
+# %%
+
+logits, cache = hooked_model.run_with_cache(torch.tensor([3, 3, 113]))
+
+for key, value in cache.items():
+    for index, stream in enumerate(value["acts"]):
+        print(key, index, cache[key]["acts"][index].shape)
+
 
 # %%

@@ -1,4 +1,4 @@
-exp_name: pythia-14m-pull142
+exp_name: pythia-14m-pull150
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null

@@ -1,6 +1,6 @@
-exp_name: orthog_eps1e-4_ln_intervals50_modular_arithmetic
+exp_name: orthog_ln_intervals50_modular_arithmetic
 ablation_type: orthogonal
-interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/eps1e-4_ln_intervals50_modular_arithmetic_rib_graph.pt
+interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/ln_intervals50_modular_arithmetic_rib_graph.pt
 schedule:
   schedule_type: linear
   early_stopping_threshold: 0.3
@@ -18,5 +18,5 @@ logits_node_layer: true
 batch_size: 128
 dtype: float32
 eval_type: accuracy
-eps: 1e-4
+eps: 1e-5
 seed: 0

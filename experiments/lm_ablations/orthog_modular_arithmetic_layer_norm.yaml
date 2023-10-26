@@ -1,4 +1,4 @@
-exp_name: orthog_ln_intervals50_modular_arithmetic
+exp_name: newnorm_orthog_ln_intervals50_modular_arithmetic
 ablation_type: orthogonal
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/newnorm_ln_intervals50_modular_arithmetic_rib_graph.pt
 schedule:

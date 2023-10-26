@@ -1,4 +1,4 @@
-exp_name: rib_ln_intervals50_modular_arithmetic
+exp_name: newnorm_rib_ln_intervals50_modular_arithmetic
 ablation_type: rib
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/newnorm_ln_intervals50_modular_arithmetic_rib_graph.pt
 schedule:
@@ -8,7 +8,7 @@ schedule:
 dataset:
   source: custom
   name: modular_arithmetic
-  return_set: test
+  return_set: train
 node_layers:  # Rotate the input to these modules into the interaction basis
   - ln1.0
   - ln2.0

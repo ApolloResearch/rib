@@ -423,4 +423,7 @@ def integrated_gradient_trapezoidal_jacobian(
 
     assert jac_out is not None, "jac_out should not be None."
 
+    # Add the minus sign in front of the IG integral, see e.g. the definition of g_j in equation (3.27)
+    jac_out *= -1
+
     return jac_out

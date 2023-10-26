@@ -359,6 +359,9 @@ def test_integrated_gradient_trapezoidal_jacobian_chunks():
         out_dim_chunk_size=3,
     )
 
+    # Check the value is the right one (to detect e.g. if a change messes up a sign)
+    assert torch.allclose(result_5[0][0][0], torch.tensor(-0.5516), atol=1e-3)
+
     # Check that all results are close
     assert torch.allclose(
         result_point_estimate, result_1

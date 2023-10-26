@@ -1,4 +1,4 @@
-exp_name: modular_arithmetic
+exp_name: modular_arithmetic-pull150
 seed: 0
 tlens_pretrained: null
 tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt

@@ -181,6 +181,11 @@ def run_ablations(
             ablation_schedule = [
                 int(a) for a in np.linspace(n_vecs, 0, schedule_config.n_points, dtype=int)
             ]
+            # Add 129
+            ablation_schedule = ablation_schedule + (n_vecs - np.arange(125, 134, 1)).tolist()
+            # Sort
+            ablation_schedule = sorted(ablation_schedule, reverse=True)
+            print(ablation_schedule)
         else:
             raise NotImplementedError(f"Schedule: {schedule_config.schedule_type} not supported.")
 

@@ -41,6 +41,15 @@
             "justMyCode": true
         },
         {
+            "name": "eigenvaluetest lm build pythia-14m",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_rib_build/run_lm_rib_build.py",
+            "args": "${workspaceFolder}/experiments/lm_rib_build/pythia-14m-eigenvaluetest.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "lm build pythia-14m",
             "type": "python",
             "request": "launch",

@@ -180,6 +180,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     data_key: Union[str, list[str]],
     C_out: Optional[Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"]],
     n_intervals: int,
+    n_dataset: int,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -193,6 +194,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 1.
+        n_dataset: The number of samples in the dataset.
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -210,12 +212,15 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     has_pos = inputs[0].dim() == 3
 
     einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
+    # Scale by size of the dataset and (optionally) the number of positional indices
+    # scale_factor = in_grads.shape[1] * n_dataset if has_pos else n_dataset
+    scale_factor = n_dataset
 
     with torch.inference_mode():
-        M_dash = torch.einsum(einsum_pattern, in_grads, in_grads)
+        M_dash = torch.einsum(einsum_pattern, in_grads / scale_factor, in_grads)
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
-        Lambda_dash = torch.einsum(einsum_pattern, in_grads, in_acts)
+        Lambda_dash = torch.einsum(einsum_pattern, in_grads / scale_factor, in_acts)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
@@ -234,6 +239,7 @@ def interaction_edge_pre_forward_hook_fn(
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
+    n_dataset: int,
     out_dim: int,
     out_dim_chunk_size: Optional[int] = None,
 ) -> None:
@@ -258,6 +264,7 @@ def interaction_edge_pre_forward_hook_fn(
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 1.
+        n_dataset: The number of samples in the dataset.
         out_dim: The number of basis vectors in the output of this module. Will be equal to
             C_out.shape[1] if C_out is not None, otherwise it will be equal to the raw concatenated
             output dimension of the module.
@@ -297,7 +304,7 @@ def interaction_edge_pre_forward_hook_fn(
     einsum_pattern = "bipj,bpj->ij" if has_pos else "bij,bj->ij"
 
     with torch.inference_mode():
-        E = torch.einsum(einsum_pattern, jac_out, f_hat)
+        E = torch.einsum(einsum_pattern, jac_out, f_hat) / n_dataset
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key, E)
 

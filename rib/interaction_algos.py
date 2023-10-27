@@ -68,6 +68,9 @@ def build_sorted_lambda_matrices(
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
 
+    # Ensure that we don't truncate all the eigenvalues
+    assert n_small_lambdas < Lambda_abs.shape[0], "Truncating all eigenvalues."
+
     truncated_idxs: Int[Tensor, "d_hidden_extra_trunc"] = (
         idxs[:-n_small_lambdas] if n_small_lambdas > 0 else idxs
     )
@@ -208,6 +211,9 @@ def calculate_interaction_rotations(
         D_dash, U_dash = eigendecompose(gram_matrices[hook_name])
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
+        # Ensure that we don't truncate all the eigenvalues
+        assert n_small_eigenvals < D_dash.shape[0], f"Truncating all eigenvalues for {hook_name}."
+
         # Truncate the D matrix to remove small eigenvalues
         D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
             torch.diag(D_dash)[:-n_small_eigenvals, :-n_small_eigenvals]
@@ -235,7 +241,23 @@ def calculate_interaction_rotations(
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
-        _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
+        M_eigvals, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
+        import json
+
+        import matplotlib.pyplot as plt
+
+        plt.clf()
+        plt.yscale("log")
+        plt.title(f"Eigenvalues of M for {hook_name}")
+        plt.plot(M_eigvals.detach().cpu().numpy())
+        # Put a vertical line exactly at 129
+        plt.axvline(x=129, color="r")
+        # Make an x-tick at 129
+        plt.xticks([129])
+        plt.savefig(f"eigvals_normalised_setup3_{hook_name}.png")
+        # Also store the raw data to file in the format {0: eigval0, 1: eigval1, ...}
+        with open(f"eigvals_normalised_setup3_{hook_name}.json", "w") as f:
+            json.dump({i: eigval.item() for i, eigval in enumerate(M_eigvals)}, f)
 
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V

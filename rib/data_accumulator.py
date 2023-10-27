@@ -163,6 +163,7 @@ def collect_M_dash_and_Lambda_dash(
         fn_kwargs={
             "C_out": C_out,
             "n_intervals": n_intervals,
+            "n_dataset": len(data_loader.dataset),  # type: ignore
         },
     )
 
@@ -180,9 +181,9 @@ def collect_M_dash_and_Lambda_dash(
     hooked_model.clear_hooked_data()
 
     # Scale the matrices by the number of samples in the dataset.
-    len_dataset = len(data_loader.dataset)  # type: ignore
-    M_dash = M_dash / len_dataset
-    Lambda_dash = Lambda_dash / len_dataset
+    # len_dataset = len(data_loader.dataset)  # type: ignore
+    # M_dash = M_dash / len_dataset
+    # Lambda_dash = Lambda_dash / len_dataset
 
     return M_dash, Lambda_dash
 
@@ -241,6 +242,7 @@ def collect_interaction_edges(
                     "C_in_pinv": C_info.C_pinv.to(device=device),  # C_pinv from current node layer
                     "C_out": C_out,
                     "n_intervals": n_intervals,
+                    "n_dataset": len(data_loader.dataset),  # type: ignore
                     "out_dim": Cs[idx + 1].out_dim,
                     "out_dim_chunk_size": out_dim_chunk_size,
                 },

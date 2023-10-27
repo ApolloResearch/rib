@@ -183,7 +183,7 @@ def edge_norm(
         out_acts @ C_out if C_out is not None else out_acts
     )
 
-    # Calculate the square and sum over the pos dimension if it exists.
+    # Calculate the square and take the mean over the pos dimension if it exists.
     f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = f_out_hat**2
     if has_pos:
         # f_out_hat is shape (pos, hidden) if vmapped or (batch, pos, hidden) otherwise
@@ -191,7 +191,7 @@ def edge_norm(
             f_out_hat.dim() == 2 or f_out_hat.dim() == 3
         ), f"f_out_hat should have 2 or 3 dims, got {f_out_hat.dim()}"
         pos_dim = 0 if f_out_hat.dim() == 2 else 1
-        f_out_hat_norm = f_out_hat_norm.sum(dim=pos_dim)
+        f_out_hat_norm = f_out_hat_norm.mean(dim=pos_dim)
 
     # Just take the output dimensions that are part of this chunk
     f_out_hat_norm = f_out_hat_norm[..., out_dim_start_idx:out_dim_end_idx]
@@ -247,6 +247,9 @@ def integrated_gradient_trapezoidal_norm(
         # to taking the gradient of each output element separately, but it lets us simply use
         # backward() instead of more complex (and probably less efficient) vmap operations.
         f_hat_norm = (f_hat**2).sum()
+        if f_hat.dim() == 3:
+            # scale by the number of positions
+            f_hat_norm /= f_hat.shape[1]
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors
         f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)

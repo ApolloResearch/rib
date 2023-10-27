@@ -1,4 +1,4 @@
-exp_name: rib_pythia-14m
+exp_name: rib_pythia-14m_manual-W_out
 ablation_type: rib
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/pythia-14m_rib_Cs.pt
 schedule:

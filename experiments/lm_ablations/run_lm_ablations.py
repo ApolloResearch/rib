@@ -36,6 +36,7 @@ from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.hook_manager import HookedModel
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
+from rib.models.utils import get_model_attr
 from rib.types import TORCH_DTYPES
 from rib.utils import (
     eval_cross_entropy_loss,
@@ -160,6 +161,17 @@ def main(config_path_str: str) -> None:
     logger.info("Model %s on dataset: %.4f", config.eval_type, eval_results)
 
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
+
+    if True:
+        # Overwrite basis matrices where node_layer is an mlp_out
+        for layer_index, node_layer in enumerate(config.node_layers):
+            if "mlp_out" in node_layer:
+                resid_identity = torch.eye(129, dtype=dtype, device=device)
+                first_W_out = get_model_attr(
+                    hooked_model.model, f"sections.section_{layer_index}.0"
+                ).W_out.detach()
+                manual_C_matrix = torch.cat([first_W_out, resid_identity], dim=0)
+                basis_matrices[layer_index] = (manual_C_matrix, torch.linalg.pinv(manual_C_matrix))
 
     ablation_results: dict[str, dict[int, float]] = run_ablations(
         basis_matrices=basis_matrices,

@@ -191,6 +191,7 @@ def collect_interaction_edges(
     Cs: list["InteractionRotation"],
     hooked_model: HookedModel,
     n_intervals: int,
+    logits_node_layer: bool,
     module_names: list[str],
     data_loader: DataLoader,
     dtype: torch.dtype,
@@ -200,7 +201,7 @@ def collect_interaction_edges(
     """Collect interaction edges between each node layer in Cs.
 
     Recall that the node layers correspond to the positions at the input to each module specified in
-    module_names, as well as the output of the final module.
+    module_names, as well as the output of the final module if logits_node_layer is True.
 
     Note that there is no edge weight that uses the position of the final interaction matrix as a
     starting node. This means that, if we did not collect the output logits, we don't apply any
@@ -210,6 +211,7 @@ def collect_interaction_edges(
         Cs: The interaction rotation matrix and its pseudoinverse, order by node layer.
         hooked_model: The hooked model.
         n_intervals: The number of integrated gradient intervals to use.
+        logits_node_layer: Whether the final node layer is the output logits.
         module_names: The names of the modules to apply the hooks to.
         data_loader: The pytorch data loader.
         dtype: The data type to use for model computations.
@@ -221,9 +223,20 @@ def collect_interaction_edges(
         through.
     """
 
-    edge_modules = module_names if Cs[-1].node_layer_name == "output" else module_names[:-1]
+    # edge_modules = module_names if Cs[-1].node_layer_name == "output" else module_names[:-1]
+    edge_modules = module_names if logits_node_layer else module_names[:-1]
+    if logits_node_layer:
+        assert Cs[-1].node_layer_name == "output", "Final node layer must be output."
+        C_list = Cs[:-1]
+    else:
+        if Cs[-1].node_layer_name == "output":
+            C_list = Cs[:-2]
+        else:
+            C_list = Cs[:-1]
+
     edge_hooks: list[Hook] = []
-    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
+    # for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
+    for idx, (C_info, module_name) in enumerate(zip(C_list, edge_modules)):
         # C from the next node layer
         assert C_info.C is not None, "C matrix is None."
         assert C_info.C_pinv is not None, "C_pinv matrix is None."
@@ -247,7 +260,9 @@ def collect_interaction_edges(
             )
         )
 
-    run_dataset_through_model(hooked_model, data_loader, edge_hooks, dtype=dtype, device=device)
+    run_dataset_through_model(
+        hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
+    )
 
     edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {
         node_layer_name: hooked_model.hooked_data[node_layer_name]["edge"]
@@ -260,8 +275,4 @@ def collect_interaction_edges(
     for node_layer_name in edges:
         edges[node_layer_name] = (edges[node_layer_name] / len(data_loader.dataset)).cpu()  # type: ignore
 
-    # Ensure that the keys of the edges dict are the same as the node layer names without `output`
-    assert set(edges.keys()) == set(
-        [C.node_layer_name for C in Cs[:-1]]
-    ), f"Edge keys not the same as node layer names. "
     return edges

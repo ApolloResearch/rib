@@ -152,16 +152,29 @@ class Config(BaseModel):
 
 
 def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
-    """Ensure that the config for calculating edges is compatible with that used to calculate Cs."""
+    """Ensure that the config for calculating edges is compatible with that used to calculate Cs.
 
-    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
-        "node_layers in the config must be a subsequence of the node layers in the config used to"
-        "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
-        "match those needed to correctly calculate the edges."
+    To draw an edge at a particular node layer, we need the C matrix at the next node layer. This
+    means that the node_layers (including the optional logits_node_layer) in the config need to be a
+    subsequence of the node layers used to calculate the C matrices (i.e. those in loaded_config).
+
+    Additionally, we ensure that the model is the same, and that the dataset used to calculate the
+    C matrices is a superset of the dataset used to calculate the edges.
+    """
+    # Check that config.node_layers is a subsequence of loaded_config.node_layers
+    edge_layers = (
+        config.node_layers + ["logits"] if config.logits_node_layer else config.node_layers
     )
-    assert (
-        config.logits_node_layer or not loaded_config.logits_node_layer
-    ), "Cannot have logits_node_layer in config but not in loaded matrices config"
+    C_layers = (
+        loaded_config.node_layers + ["logits"]
+        if loaded_config.logits_node_layer
+        else loaded_config.node_layers
+    )
+    assert "|".join(edge_layers) in "|".join(C_layers), (
+        "node_layers in the config must be a subsequence of the node layers in the config used to"
+        "calculate the C matrices. Otherwise, the C matrices won't match those needed to correctly"
+        "calculate the edges."
+    )
 
     # The following attributes must exactly match across configs
     for attr in [
@@ -180,12 +193,16 @@ def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
     if isinstance(config.dataset, HFDatasetConfig):
         assert isinstance(loaded_config.dataset, HFDatasetConfig)
         if config.dataset.return_set_frac is not None:
-            assert loaded_config.dataset.return_set_frac is not None
+            assert (
+                loaded_config.dataset.return_set_frac is not None
+            ), "Cannot use return_set_frac in config if it wasn't used to calculate the Cs"
             assert (
                 config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
             ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
         elif config.dataset.return_set_n_samples is not None:
-            assert loaded_config.dataset.return_set_n_samples is not None
+            assert (
+                loaded_config.dataset.return_set_n_samples is not None
+            ), "Cannot use return_set_n_samples in config if it wasn't used to calculate the Cs"
             assert (
                 config.dataset.return_set_n_samples <= loaded_config.dataset.return_set_n_samples
             ), "Cannot use a larger return_set_n_samples for edges than to calculate the Cs"
@@ -330,6 +347,7 @@ def main(config_path_str: str):
             Cs=Cs,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
+            logits_node_layer=config.logits_node_layer,
             module_names=graph_module_names,
             data_loader=edge_train_loader,
             dtype=dtype,

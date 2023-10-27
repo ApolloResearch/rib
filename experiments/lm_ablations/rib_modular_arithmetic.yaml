@@ -15,6 +15,7 @@ node_layers:  # Rotate the input to these modules into the interaction basis
   - ln2.0
   - mlp_out.0
   - unembed
+logits_node_layer: true
 batch_size: 128
 dtype: float32
 eval_type: accuracy

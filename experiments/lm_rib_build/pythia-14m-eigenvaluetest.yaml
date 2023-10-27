@@ -1,4 +1,4 @@
-exp_name: pythia-14m-eigenvaluetest-nonneighbouring
+exp_name: pythia-14m-eigenvaluetest-nonneighbouring100
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
@@ -20,8 +20,8 @@ edge_batch_size: 1
 truncation_threshold: 1e-30  # Default is 1e-6
 logits_node_layer: false
 rotate_final_node_layer: false
-n_intervals: 1
-out_dim_chunk_size: 5
+n_intervals: 100
+out_dim_chunk_size: 10
 dtype: float32
 calculate_edges: false
 eval_type: null

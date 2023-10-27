@@ -1,6 +1,6 @@
-exp_name: rib_pythia-14m-eigenvaluetest-nonneighbouring
+exp_name: rib_pythia-14m-eigenvaluetest-nonneighbouring100
 ablation_type: rib
-interaction_graph_path: /mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/pythia-14m-eigenvaluetest-nonneighbouring_rib_Cs.pt
+interaction_graph_path: /mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/pythia-14m-eigenvaluetest-nonneighbouring100_rib_Cs.pt
 schedule:
   schedule_type: linear
   early_stopping_threshold: 1.5

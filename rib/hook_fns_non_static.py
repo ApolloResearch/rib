@@ -6,7 +6,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.nn as nn
 from einops import rearrange, repeat
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 
 from rib.linalg import (
@@ -34,8 +34,13 @@ def relu_swap_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    replacement_idx_list: list[tuple],
-) -> None:
+    replacement_idxs: Int[Tensor, "d_hidden"],
+) -> Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ]:
     """Swap each ReLU with another ReLU. Whether the swap is based on clustering or otherwise
     depends on the indices you pass in.
 
@@ -51,6 +56,7 @@ def relu_swap_forward_hook_fn(
     outputs = output if output_is_tuple else (output,)
     out_hidden_dims = [x.shape[-1] for x in outputs]
     outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
+
     operator: Float[Tensor, "batch d_hidden_out"] = torch.div(outputs, inputs)
     if operator.dim() == 2:
         batch_size, d_hidden = operator.shape # [256, 101]
@@ -58,7 +64,7 @@ def relu_swap_forward_hook_fn(
         batch_size, token_len, d_hidden = operator.shape
 
     edited_operator = operator.clone()
-    edited_operator[..., torch.arange(d_hidden)] = operator[..., replacement_idx_list]
+    edited_operator[..., torch.arange(d_hidden)] = operator[..., replacement_idxs]
 
     edited_output = edited_operator * inputs
 
@@ -67,3 +73,4 @@ def relu_swap_forward_hook_fn(
         edited_output = tuple(torch.split(edited_output, out_hidden_dims, dim=-1))
 
     return edited_output
+

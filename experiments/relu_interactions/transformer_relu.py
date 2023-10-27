@@ -35,6 +35,8 @@ from typing import Any, List, Literal, Optional, Union, cast
 import fire
 import torch
 import torch.nn as nn
+import numpy as np
+import matplotlib.pyplot as plt
 from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch import Tensor
@@ -42,6 +44,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from experiments.relu_interactions.relu_interaction_utils import (
     edit_weights_fn,
+    extract_weights_mlp,
     get_nested_attribute,
     print_all_modules,
     relu_plot_and_cluster,
@@ -56,6 +59,7 @@ from rib.data_accumulator import (
     calculate_swapped_relu_loss,
     collect_gram_matrices,
     collect_relu_interactions,
+    collect_clustered_relu_P_mats,
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
@@ -73,6 +77,8 @@ from rib.utils import (
     overwrite_output,
     set_seed,
 )
+from rib.models.sequential_transformer.components import MODULE_CLASS_MAP
+from rib.models.utils import get_model_attr, get_model_weight
 
 
 class Config(BaseModel):
@@ -269,14 +275,6 @@ def get_relu_similarities(
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
-
-    # # Weight editing stuff
-    # print_all_modules(model) # Check module names were correctly defined
-    # layer_list = ["layers.0.linear", "layers.1.linear"]
-    # if config.edit_weights:
-    #     for layer in layer_list:
-    #         edit_weights_fn(model, layer)
-
     graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
     # Don't build the graph for the section of the model before the first node layer
@@ -303,11 +301,102 @@ def get_relu_similarities(
     return relu_similarity_matrices
 
 
+def get_rotated_Ws(
+    model: nn.Module,
+    config: Config,
+    file_path: str,
+    dataset: Dataset,
+    device: str,
+    hooked_model: HookedModel,
+    C_pinv_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+) -> list[Float[Tensor, "layer_count d_hidden d_hidden"]]:
+    """Extract W^l, perform paper-equivalent right multiplication of psuedoinverse of C^l.
+
+    Has to be called on config with node_layers edited to include linear layer.
+
+    Quick explanation on how this works:
+    - graph_module_names passes in automatically named sections based on node_layers in config.
+    - These are MultiSequential objects with modules inside, and they are iterable.
+    - Pass into get_model_weight (from rib.models.utils) - explanation of this function in docstring
+    there.
+    - Append returned weight to weight list only if it is not None.
+    - Because C_pinv_list
+    """
+    graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+    module_classes = ["mlp_in", "mlp_out"]
+
+    weights_list = []
+    for module_name, module_class in zip(graph_module_names, module_classes):
+        # Sometimes can return None if module_classes instance doesn't match the module
+        weights_list.append(get_model_weight(model, attr_path=module_name, module_class=module_class, module_class_map=MODULE_CLASS_MAP))
+
+    rotated_weights_list = []
+    idxs_list = check_matrix_multiplication(weights_list, C_pinv_list)
+    for idxs in idxs_list:
+        rotated_weights_list.append(weights_list[idxs[0]] @ C_pinv_list[idxs[1]].detach().cpu())
+
+    with open(file_path, "wb") as f:
+        torch.save(rotated_weights_list, f)
+
+    return rotated_weights_list
+
+
+def check_matrix_multiplication(list_A, list_B):
+    """Return all multpliable matrix pairs in two lists of matrices, via A @ B."""
+    results = []
+    for i, A in enumerate(list_A):
+        if A is not None:
+            for j, B in enumerate(list_B):
+                if B is not None and A.size(1) == B.size(0):
+                    results.append((i, j))
+    return results
+
+
+def get_P_matrices(
+    model: nn.Module,
+    config: Config,
+    file_path: str,
+    dataset: Dataset,
+    device: str,
+    hooked_model: HookedModel,
+    Cs_list: list[Float[Tensor, "d_hidden d_hidden"]],
+    W_hat_list: list[Float[Tensor, "d_hidden d_hidden"]],
+    all_cluster_idxs: list[list[np.ndarray]],
+) -> dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]]:
+    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
+    dataset = load_dataset(
+        dataset_config=config.dataset,
+        return_set=return_set,
+        tlens_model_path=config.tlens_model_path,
+    )
+    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+
+    # Don't build the graph for the section of the model before the first node layer
+    # The names below are *defined from* the node_layers dictionary in the config file
+    graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+
+    P_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_clustered_relu_P_mats(
+        hooked_model=hooked_model,
+        module_names=graph_module_names,
+        data_loader=graph_train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+        Cs_list=Cs_list,
+        W_hat_list=W_hat_list,
+        all_cluster_idxs=all_cluster_idxs,
+    )
+
+    with open(file_path, "wb") as f:
+        torch.save(P_matrices, f)
+
+    return P_matrices
+
+
 def check_and_open_file(
-    file_path: Path,
     get_var_fn: callable,
     model: nn.Module,
     config: Config,
+    file_path: Path,
     dataset: Dataset,
     device: str,
     hooked_model: HookedModel = None,
@@ -326,6 +415,22 @@ def check_and_open_file(
     return var
 
 
+def plot_and_save_Ps(tensor_dict: dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]], out_dir: Path):
+    for outer_key, inner_dict in tensor_dict.items():
+        for i, (inner_key, tensor) in enumerate(inner_dict.items()):
+            plt.figure()
+            ax = plt.gca()
+            plt.imshow(tensor, cmap='viridis')
+
+            # Adjust subplot parameters to create space for annotation
+            plt.subplots_adjust(top=0.85)
+            ax.text(0.5, 1.05, f'Inner Key: {inner_key}', transform=ax.transAxes, ha='center', va='bottom', fontsize=8, bbox=dict(boxstyle='round,pad=0.3'))
+
+            plt.colorbar()
+            file_name = out_dir / f"{outer_key}_cluster_{i}.png"
+            plt.savefig(file_name, bbox_inches='tight')
+            plt.close()
+
 # ============================================================================
 
 def transformer_relu_main(config_path_str: str):
@@ -335,7 +440,9 @@ def transformer_relu_main(config_path_str: str):
     set_seed(config.seed)
 
     relu_matrices_save_file = Path(__file__).parent / f"transformer_{config.relu_metric_type}_edit_weights_{config.edit_weights}"
-    Cs_save_file = Path(__file__).parent / "Cs"
+    Cs_save_file = Path(__file__).parent / "Cs_relu_cluster"
+    Ws_save_file = Path(__file__).parent / "Ws_relu_cluster"
+    Ps_save_file = Path(__file__).parent / "Ps_relu_cluster"
 
     out_dir = Path(__file__).parent / f"out_transformer_relu / type_{config.relu_metric_type}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -355,9 +462,8 @@ def transformer_relu_main(config_path_str: str):
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
     seq_model.fold_bias()
-
     print_all_modules(seq_model) # Check module names were correctly defined
-
+    print("===============================================")
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need both train and test sets
@@ -380,11 +486,13 @@ def transformer_relu_main(config_path_str: str):
         hooked_model=hooked_model,
     )
 
+    C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list, U_D_sqrt_pinv_Vs_list, U_D_sqrt_Vs_list, Cs, Us, gram_matrices = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"], Cs_and_Lambdas["Lambda_abs_sqrts"], Cs_and_Lambdas["Lambda_abs_sqrt_pinvs"], Cs_and_Lambdas["U_D_sqrt_pinv_Vs"], Cs_and_Lambdas["U_D_sqrt_Vs"], Cs_and_Lambdas["Cs raw"], Cs_and_Lambdas["Us raw"], Cs_and_Lambdas["gram matrices"]
+
     relu_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = check_and_open_file(
-        file_path=relu_matrices_save_file,
         get_var_fn=get_relu_similarities,
         model=seq_model,
         config=config,
+        file_path=relu_matrices_save_file,
         dataset=dataset,
         device=device,
         hooked_model=hooked_model,
@@ -392,7 +500,7 @@ def transformer_relu_main(config_path_str: str):
         Lambda_dashes=Cs_and_Lambdas["Lambda_dashes"],
     )
 
-    replacement_idxs_from_cluster, num_valid_swaps_from_cluster = relu_plot_and_cluster(relu_matrices, out_dir, config)
+    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)
 
     print(f"number swaps {num_valid_swaps_from_cluster}")
 
@@ -403,6 +511,56 @@ def transformer_relu_main(config_path_str: str):
         config=config,
         data_loader=graph_train_loader,
         device=device)
+
+    # Separate part of main code ===================================================
+    # Due to legacy code, ReLU metric calculation and ReLU swapping code only uses activation layers
+    # `node_layers`` is fixed and wraps activation layer by itself
+    # However, for next task, need whole MLP input + activation segment
+    # So redefine node_layers to create a new model
+
+    seq_model, tlens_cfg_dict = load_sequential_transformer(
+        node_layers=["mlp_in.0", "mlp_out.0"],
+        last_pos_module_type=config.last_pos_module_type,
+        tlens_pretrained=config.tlens_pretrained,
+        tlens_model_path=config.tlens_model_path,
+        eps=config.eps,
+        dtype=dtype,
+        device=device,
+    )
+    seq_model.eval()
+    seq_model.to(device=torch.device(device), dtype=dtype)
+    seq_model.fold_bias()
+    print_all_modules(seq_model) # Check module names were correctly defined
+    hooked_model = HookedModel(seq_model)
+
+    # Has to be after editing node_layers so this contains the linear layers to extract weights from
+    W_hat_list = check_and_open_file(
+        get_var_fn=get_rotated_Ws,
+        model=seq_model,
+        config=config,
+        file_path=Ws_save_file,
+        dataset=dataset,
+        device=device,
+        hooked_model=hooked_model,
+        C_pinv_list=C_pinv_list,
+    )
+
+    # config.node_layers can now be used in hooks in this function
+    # But first need to be converted into graph node layers
+    P_matrices: dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]] = check_and_open_file(
+        file_path=Ps_save_file,
+        get_var_fn=get_P_matrices,
+        model=seq_model,
+        config=config,
+        dataset=dataset,
+        device=device,
+        hooked_model=hooked_model,
+        Cs_list=Cs_and_Lambdas["C"],
+        W_hat_list=W_hat_list,
+        all_cluster_idxs=all_cluster_idxs,
+    )
+
+    plot_and_save_Ps(P_matrices, out_dir)
 
 
 if __name__ == "__main__":

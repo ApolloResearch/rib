@@ -22,6 +22,7 @@ from experiments.relu_interactions.relu_interaction_utils import (
     swap_all_layers,
     swap_single_layer,
     plot_changes,
+    extract_weights_mlp,
 )
 from rib.data_accumulator import (
     calculate_all_swapped_iterative_relu_loss,

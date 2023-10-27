@@ -34,8 +34,10 @@ import numpy as np
 import scipy
 import seaborn as sns
 from jaxtyping import Float, Int
+from einops import rearrange, repeat
 import torch
 from torch import Tensor
+import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from scipy.cluster.hierarchy import dendrogram, fcluster, leaves_list, linkage, cophenet
@@ -76,17 +78,21 @@ def relu_plot_and_cluster(
         similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]],
         out_dir: Path,
         config: "Config",
-) -> tuple[list[Int[Tensor, "d_hidden"]], list[int]]:
+) -> tuple[list[Int[Tensor, "d_hidden"]], list[list[int]], list[list[Int[Tensor, "cluster_size"]]]]:
     """Form clustering. Plot original and clustered matrices.
 
     Returns:
-        all_layer_clusters: List of lists. Outer list: layers. Inner list: indices of the
+        return_index_list: Outer idx layers. Tensor idx hidden neurons.
+        all_num_valid_swaps:
+        all_cluser_idxs: Outer idx layers. Inner idx cluster number. Tensor idx hidden neurons in cluster.
     """
-    return_index_list: list[list[int]] = []
-    num_valid_swaps: list[int] = []
+    return_index_list: list[Int[Tensor, "d_hidden"]] = []
+    all_num_valid_swaps: list[list[int]] = []
+    all_cluster_idxs: list[list[Int[Tensor, "cluster_size"]]] = []
 
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
-
+        layer_cluster_idxs = []
+        layer_num_valid_swaps = []
         # Plot raw matrix values before clustering
         plt.figure(figsize=(10, 8))
         sns.heatmap(similarity_matrix, annot=False,
@@ -131,17 +137,17 @@ def relu_plot_and_cluster(
         # Cut dendrogram
         # ith `clusters` element is flat cluster number to which original observation i belonged
         # Idxs of `clusters` is original element idxs
-        threshold = 0.001
+        threshold = 0.0015
         clusters = fcluster(Z, t=threshold, criterion="distance")
-        unique, unique_reverse_indices = np.unique(clusters, return_inverse=True)
-        print(f"unique cluster vals {unique}")
+        unique_clusters = np.unique(clusters)
+        print(f"unique cluster vals {unique_clusters}")
 
         # Important: this index vector will be what's passed into hook function
         # To replace elements of operator vector within clusters with `centroid member` of each cluster
         indices_of_original_O = np.arange(distance_matrix.shape[0])
-        for cluster in unique:
+        for cluster in unique_clusters:
             cluster_idx = np.where(clusters == cluster)[0] # 1D array of indices of original matrix
-            num_valid_swaps.append(cluster_idx.shape[0] - 1)
+            layer_num_valid_swaps.append(cluster_idx.shape[0] - 1)
             cluster_distances = distance_matrix[np.ix_(cluster_idx, cluster_idx)]
             # Use symmetry of matrix, sum only over one dimension to compute total distance to all
             # other members
@@ -153,6 +159,10 @@ def relu_plot_and_cluster(
             # *distance matrix values*)
             # Want instead indices with which to permute the O(x) vector in forward hook
             indices_of_original_O[cluster_idx] = centroid_idx_original
+            layer_cluster_idxs.append(torch.tensor(cluster_idx))
+
+        all_cluster_idxs.append(layer_cluster_idxs)
+        all_num_valid_swaps.append(layer_num_valid_swaps)
 
         # Cast indices to tensor and add to list of returns - one item per layer
         return_index_list.append(torch.tensor(indices_of_original_O))
@@ -167,7 +177,7 @@ def relu_plot_and_cluster(
         plt.savefig(
             out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}.png")
 
-    return return_index_list, num_valid_swaps
+    return return_index_list, all_num_valid_swaps, all_cluster_idxs
 
 
 def detect_edges(matrix, sigma=1):
@@ -194,7 +204,10 @@ def swap_single_layer(
     hooked_model: HookedModel,
     relu_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
     config: "Config",
+    data_loader: DataLoader,
+    device: str,
     layer_num: int,
+    out_dir: str,
 ) -> None:
     """Now that we have gotten our similarity matrices, swap in forward pass.
     Check loss and accuracy drop, and plot as a function of similarity tolerance for pruning."""
@@ -217,7 +230,7 @@ def swap_single_layer(
         unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_swapped_relu_loss(
             hooked_model=hooked_model,
             module_name=module_name, # Used for hooks
-            data_loader=load_mnist_dataloader(train=False, batch_size=config.batch_size),
+            data_loader=data_loader,
             dtype=TORCH_DTYPES[config.dtype],
             device=device,
             replacement_idx_list=row_min_idxs,
@@ -246,6 +259,7 @@ def swap_all_layers(
     relu_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
     tols: list[list[float]],
     config: "Config",
+    data_loader: DataLoader,
     device: str,
     out_dir: str,
 ) -> None:
@@ -284,7 +298,7 @@ def swap_all_layers(
         unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_iterative_relu_loss(
             hooked_model=hooked_model,
             module_names=module_list, # Used for hooks
-            data_loader=load_mnist_dataloader(train=False, batch_size=config.batch_size),
+            data_loader=data_loader,
             dtype=TORCH_DTYPES[config.dtype],
             device=device,
             replacement_idx_list=replacement_idx_list,
@@ -357,8 +371,7 @@ def swap_all_layers_using_clusters(
 def find_indices_to_replace(matrix: Float[Tensor, "d1 d1"], tol: float) -> tuple[Float[Tensor, "d1"], int]:
     """Use for swapping function to, for each row (m, index to swap), find:
     - The minimum distance to another neuron
-    - Whether this minimum distance is below a given threshold -> if true, then swap the mth row
-      with the nth column
+    - Whether this minimum distance is below a given threshold -> if true, then swap mth row with nth column
     """
     matrix = torch.abs(matrix)
     diag_mask = torch.eye(matrix.size(0), matrix.size(1)).bool().to(matrix.device)
@@ -393,6 +406,32 @@ def get_nested_attribute(obj, attr_name):
     for attr in attrs:
         current_attr = getattr(current_attr, attr)
     return current_attr
+
+
+def extract_weights_mlp(model: torch.nn.Module) -> list[torch.Tensor]:
+    """Recursively extract weights from each layer of the model and return them as a list."""
+    weights_list = []
+
+    for name, layer in model.named_children():
+        if hasattr(layer, 'weight'):
+            weights = get_nested_attribute(model, name + '.weight').data.clone().cpu()
+
+            batch_size, d_hidden = weights.shape
+            # Create vector with last element 1
+            to_append_weights = torch.zeros(d_hidden)
+            to_append_weights[-1] = 1
+            # Append as row of W (dims output, input)
+            # N.B. will tranpose weights later for multiplication
+            # Since canonical code form will be (input, output)
+            weights = torch.cat([weights, rearrange(to_append_weights, 'd -> 1 d')], dim=0)
+            assert weights[-1, -1] == 1
+
+            weights_list.append(weights)
+
+        # Recursively extract weights from nested children
+        weights_list.extend(extract_weights_mlp(layer))
+
+    return weights_list
 
 
 def print_all_modules(model):

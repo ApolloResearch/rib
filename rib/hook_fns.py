@@ -15,7 +15,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.nn as nn
 from einops import rearrange, repeat
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 
 from rib.linalg import (
@@ -24,6 +24,31 @@ from rib.linalg import (
     integrated_gradient_trapezoidal_norm,
 )
 from rib.models.utils import get_model_attr
+
+
+def _add_to_hooked_matrix(
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: str,
+    hooked_matrix: Float[Tensor, "d_hidden d_hidden"],
+) -> None:
+    """Update the hooked data matrix with the given matrix.
+
+    We add the hooked matrix to previously stored data matrix for this hook point.
+
+    Note that the data matrix will be stored on the same device as the output.
+
+    Args:
+        hooked_data: Dictionary of hook data that will be updated.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        hooked_matrix: Matrix to add to the hooked data.
+
+    """
+    # If no data exists, initialize with zeros
+    hooked_data.setdefault(hook_name, {}).setdefault(
+        data_key, torch.zeros_like(hooked_matrix))
+    hooked_data[hook_name][data_key] += hooked_matrix
 
 
 def _add_to_hooked_matrix(
@@ -422,14 +447,20 @@ def relu_interaction_forward_hook_fn(
         n_intervals: Also for in_grads.
     """
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
-    # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
-    # Inputs always tuple
-    # For this function, which always hooks an activation layer, inputs ARE the preactivations
-    inputs = torch.cat([x for x in inputs], dim=-1)
 
+    output_is_tuple: bool = True if isinstance(output, tuple) else False
     outputs = output if isinstance(output, tuple) else (output,)
     raw_output = outputs
-    outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
+    out_hidden_dims = [x.shape[-1] for x in outputs]
+
+    # We don't want residual stream for operator syncing
+    inputs = inputs[1]
+    outputs = outputs[1]
+
+    # inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1) # Inputs always tuple
+    # batch_size = inputs.shape[0]
+    # outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+
     operator: Float[Tensor, "batch d_hidden_out"] = torch.div(outputs, inputs)
 
     has_pos = True if operator.dim() == 3 else False
@@ -506,6 +537,8 @@ def relu_interaction_forward_hook_fn(
                 C_out=C_next_next_layer,
                 n_intervals=n_intervals,
             )
+
+            if output_is_tuple: g_j_next_layer = torch.split(g_j_next_layer, out_hidden_dims, dim=-1)[1]
 
             if has_pos: # Fold position into batch dimension
                 g_j_next_layer = rearrange(g_j_next_layer, "b p d_hidden_combined -> (b p) d_hidden_combined")
@@ -608,7 +641,7 @@ def test_edges_forward_hook_fn(
     C_next_layer: Float[Tensor, "d_hidden_out d_hidden_truncated"],
     W_hat: Float[Tensor, "d_hidden_out d_hiddden_in"],
 ) -> None:
-    """Calculates C^l+1_scaled O^l W_hat^l f_hat^l.
+    """Calculate C^l+1_scaled O^l W_hat^l f_hat^l.
 
     W_hat^l and f_hat^l are calculated using unscaled C matrices (we leave the dimensions
     degenerate).
@@ -633,14 +666,9 @@ def test_edges_forward_hook_fn(
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
     """
     assert isinstance(data_key, str), "data_key must be a string."
-
-    # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
-    # Inputs are always tuple
+    outputs = output if isinstance(output, tuple) else (output,)
     inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
     batch_size = inputs.shape[0]
-
-    # Make outputs standard tuple and concat over hidden dimension
-    outputs = output if isinstance(output, tuple) else (output,)
     outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
     next_layer_preactivations = module.linear(inputs)
@@ -655,15 +683,14 @@ def test_edges_forward_hook_fn(
 
     # Get whole load of matrices to left of f in equation
     C_next_layer_unsqueezed = repeat(C_next_layer, 'd_hidden_out d_hidden_trunc_next -> batch_size d_hidden_out d_hidden_trunc_next', batch_size=batch_size)
-    W_hat_transpose_unsqueezed = repeat(W_hat.T, 'd_hidden_out d_hidden_trunc_in -> batch_size d_hidden_out d_hidden_trunc_in', batch_size=batch_size)
-    # print(f"W_hat_transpose {W_hat_transpose_unsqueezed.shape}")
-    # print(f"C next layer {C_next_layer_unsqueezed.shape}")
-    C_O_W_hat: Float[Tensor, "batch d_hidden_trunc_curr d_hidden_trunc_next"] = W_hat_transpose_unsqueezed @ diag_operator_matrix @ C_next_layer_unsqueezed
+    W_hat_t_unsqueezed = repeat(W_hat.T, 'd_hidden_out d_hidden_trunc_in -> batch_size d_hidden_out d_hidden_trunc_in', batch_size=batch_size)
+    C_O_W_hat: Float[Tensor, "batch d_hidden_trunc_curr d_hidden_trunc_next"] = W_hat_t_unsqueezed @ diag_operator_matrix @ C_next_layer_unsqueezed
 
     batch_size, d_hidden_trunc_curr, d_hidden_trunc_next = C_O_W_hat.shape
     rows_f_next_layer_hats = repeat(f_next_layer_hats, 'b d_hidden_trunc_next -> b d d_hidden_trunc_next', d=d_hidden_trunc_curr)
     cols_f_hats = repeat(f_hats, 'b d_hidden_trunc_curr -> b d_hidden_trunc_curr d', d=d_hidden_trunc_next)
     assert (cols_f_hats[:, :, 0] == f_hats).all()
+
     # E_ij = hat{f^{l+1}_i} * C_O_W_hat_ij * hat{f^l_j} where * denotes scalar product
     # Equivalent to Hadamard product of hat{f^{l+1}_i} repeated along rows with C_O_W_hat
     # Then Hadamard product with hat{f^l_j} repeated along columns
@@ -671,3 +698,65 @@ def test_edges_forward_hook_fn(
     edge_matrix = torch.einsum('bij -> ij', rows_f_next_layer_hats * C_O_W_hat * cols_f_hats)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, edge_matrix.detach())
+
+
+# def clustered_relu_P_hook_fn(
+#     module: torch.nn.Module,
+#     inputs: Union[
+#         tuple[Float[Tensor, "batch d_hidden"]],
+#         tuple[Float[Tensor, "batch pos d_hidden"]],
+#         tuple[Float[Tensor, "batch pos d_hidden1"],
+#               Float[Tensor, "batch pos d_hidden2"]],
+#     ],
+#     output: Union[
+#         Float[Tensor, "batch d_hidden"],
+#         Float[Tensor, "batch pos d_hidden"],
+#         tuple[Float[Tensor, "batch pos d_hidden1"],
+#               Float[Tensor, "batch pos d_hidden2"]],
+#     ],
+#     hooked_data: dict[str, Any],
+#     hook_name: str,
+#     data_key: Union[str, list[str]],
+#     C_next_layer: Float[Tensor, "d_hidden_out d_hidden_truncated"],
+#     W_hat: Float[Tensor, "d_hidden_out d_hiddden_in"],
+#     layer_cluster_idxs: list[Int[Tensor, "cluster_size"]],
+# ) -> None:
+#     """Do same thing as function above, but hook whole layer - get the P matrix from
+#     notes. Calculate C^l+1 O^l W_hat^l f_hat^l.
+
+#     Hooks activation layer (makes things easier for transformer).
+#     """
+#     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
+
+#     inputs = torch.cat([x for x in inputs], dim=-1)
+
+#     # next_layer_preactivations = module.linear(inputs)
+
+#     output_is_tuple: bool = True if isinstance(output, tuple) else False
+#     outputs = output if output_is_tuple else (output,)
+#     outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
+
+#     # operator: Union[Float[Tensor, "batch d_hidden_out"], Float[Tensor, "batch pos d_hidden_out_concat"]] = torch.div(outputs, next_layer_preactivations)
+#     # if operator.dim() == 3: # Combine token dimension with batch dimension to compute as if it were 2D
+#     #     inputs = rearrange(inputs, "b p d_hidden_combined -> (b p) d_hidden_combined")
+#     #     outputs = rearrange(outputs, "b p d_hidden_combined -> (b p) d_hidden_combined")
+#     #     operator = rearrange(operator, 'b p d_hidden -> (b p) d_hidden')
+#     # batch_size, d_hidden = operator.shape
+#     # diag_operator_matrix: Float[Tensor, "batch d_hidden_out d_hidden_out"] = torch.diag_embed(operator)
+
+#     # # ---------------- Now have edited output to pass to next layer, also hook vals in middle -----------------
+#     # C_next_layer_unsqueezed = repeat(C_next_layer, "d_hidden_out d_hidden_trunc_next -> batch_size d_hidden_out d_hidden_trunc_next", batch_size=batch_size)
+#     # W_hat_t_unsqueezed = repeat(W_hat.T, "d_hidden_out d_hidden_trunc_in -> batch_size d_hidden_out d_hidden_trunc_in", batch_size=batch_size)
+#     # C_O_W_hat: Float[Tensor, "batch d_hidden_trunc_curr d_hidden_trunc_next"] = W_hat_t_unsqueezed @ diag_operator_matrix @ C_next_layer_unsqueezed
+
+#     # batch_size, d_hidden_trunc_curr, d_hidden_trunc_next = C_O_W_hat.shape
+#     # cols_f = repeat(inputs, "b d_hidden_trunc_curr -> b d_hidden_trunc_curr d", d=d_hidden_trunc_next)
+
+#     P_dict = {}
+#     for cluster_idxs in layer_cluster_idxs:
+#         C_next_layer_cluster = C_next_layer[cluster_idxs, :] # Cols C in overleaf = rows C in code
+#         W_hat_cluster = W_hat.T[:, cluster_idxs] # Rows W overleaf = cols C in code
+#         P: Float[Tensor, "d_hidden_next_layer d_hidden"] = W_hat_cluster.T @ C_next_layer_cluster
+#         P_dict[cluster_idxs] = P.detach().cpu()
+
+#     _add_to_hooked_matrix(hooked_data, hook_name, data_key, P_dict)

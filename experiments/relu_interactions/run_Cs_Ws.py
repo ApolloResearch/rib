@@ -277,7 +277,6 @@ def Cs_Ws_main(config_path_str: str) -> None:
     """
     Cs_save_file = Path(__file__).parent / "Cs"
     Ws_save_file = Path(__file__).parent / "Ws"
-    fhats_save_file = Path(__file__).parent / "fhats"
     edges_save_file = Path(__file__).parent / "edges"
 
     config_path = Path(config_path_str)

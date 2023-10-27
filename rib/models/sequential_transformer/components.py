@@ -638,3 +638,12 @@ SEQUENTIAL_COMPONENT_REGISTRY = {
     "add_resid2": Add,
     "unembed": Unembed,
 }
+
+
+MODULE_CLASS_MAP = {
+    "mlp_out": MLPOut,
+    "mlp_act": MLPAct,
+    "mlp_in": MLPIn,
+    "embed": Embed,
+}
+

@@ -503,11 +503,11 @@ def collect_test_edges(
 
 def calculate_swapped_relu_loss(
     hooked_model: HookedModel,
-    module_names: str,
+    module_name: str,
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
-    replacement_idx_lists: list[int],
+    replacement_idx_list: list[int],
     num_replaced: list[int],
     hook_name: Optional[str] = None,
 ) -> tuple[list[float], ...]:
@@ -657,3 +657,57 @@ def calculate_all_swapped_iterative_relu_loss(
         )
 
     return unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy
+
+
+def collect_clustered_relu_P_mats(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    Cs_list: list[Float[Tensor, "d_hidden_out d_hidden_truncated"]],
+    W_hat_list: list[Float[Tensor, "d_hidden_out d_hiddden_in"]],
+    all_cluster_idxs: list[list[Int[Tensor, "cluster_size"]]],
+    hook_names: Optional[list[str]] = None,
+) -> dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]]:
+    """In expression for functions in next layer, obtain per-cluster P matrix for each cluster."""
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    # relu_swap_hooks = []
+    # for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+    #     relu_swap_hooks.append(
+    #         Hook(
+    #             name=hook_name,
+    #             data_key="Ps_clustered",
+    #             fn=clustered_relu_P_hook_fn,
+    #             module_name=module_name,
+    #             fn_kwargs={"C_next_layer": Cs_list[i+1], "W_hat": W_hats_list[i], "layer_cluster_idxs": all_cluster_idxs[i]}
+    #         )
+    #     )
+
+    # run_dataset_through_model(hooked_model, data_loader, hooks=relu_swap_hooks, dtype=dtype, device=device)
+
+    # Ps = {
+    #     hook_name: torch.div(hooked_model.hooked_data[hook_name]["Ps_clustered"], len(data_loader.dataset))
+    #     for hook_name in hooked_model.hooked_data
+    # }
+    # hooked_model.clear_hooked_data()
+
+    P_dict = {}
+    for i, (module_name, hook_name, layer_cluster_idxs) in enumerate(zip(module_names, hook_names, all_cluster_idxs)):
+        layer_P_dict = {}
+        for cluster_idxs in layer_cluster_idxs:
+            C_next_layer_cluster = Cs_list[i][cluster_idxs, :] # Cols C in overleaf = rows C in code
+            W_hat_t = W_hat_list[i].T
+            W_hat_cluster = W_hat_t[:, cluster_idxs] # Rows W overleaf = cols C in code
+            P: Float[Tensor, "d_hidden_next_layer d_hidden"] = W_hat_cluster @ C_next_layer_cluster
+            layer_P_dict[f"{cluster_idxs}"] = P.detach().cpu()
+        P_dict[module_name] = layer_P_dict
+
+    return P_dict
+

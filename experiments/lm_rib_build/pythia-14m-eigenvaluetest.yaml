@@ -1,4 +1,4 @@
-exp_name: pythia-14m-eigenvaluetest-nonneighbouring100
+exp_name: pythia-14m-eigenvaluetest-nonneighbouring100-float64
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
@@ -13,15 +13,15 @@ dataset:
   return_set_portion: first
 node_layers:
   - mlp_out.3
-  - ln1.5
-batch_size: 8  #  A100 can handle 24
-gram_batch_size: 40  #  A100 can handle 80
+  - ln1.5 # Next: attn.4, ln2.5, mlp_in.5
+batch_size: 4  #  A100 can handle 24
+gram_batch_size: 20  #  A100 can handle 80
 edge_batch_size: 1
 truncation_threshold: 1e-30  # Default is 1e-6
 logits_node_layer: false
 rotate_final_node_layer: false
 n_intervals: 100
-out_dim_chunk_size: 10
-dtype: float32
+out_dim_chunk_size: 25
+dtype: float64
 calculate_edges: false
 eval_type: null

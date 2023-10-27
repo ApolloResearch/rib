@@ -1,6 +1,6 @@
-exp_name: rib_pythia-14m-eigenvaluetest-nonneighbouring100
+exp_name: rib_pythia-14m-eigenvaluetest-nonneighbouring100-float64
 ablation_type: rib
-interaction_graph_path: /mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/pythia-14m-eigenvaluetest-nonneighbouring100_rib_Cs.pt
+interaction_graph_path: /mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/pythia-14m-eigenvaluetest-nonneighbouring100-float64_rib_Cs.pt
 schedule:
   schedule_type: linear
   early_stopping_threshold: 1.5
@@ -17,7 +17,7 @@ node_layers:
   - mlp_out.3
   - ln1.5
 logits_node_layer: false
-batch_size: 30  # A100 can handle 60
-dtype: float32
+batch_size: 15  # A100 can handle 60
+dtype: float64
 eval_type: ce_loss
 seed: 0

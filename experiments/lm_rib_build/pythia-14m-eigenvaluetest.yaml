@@ -1,4 +1,4 @@
-exp_name: pythia-14m-eigenvaluetest
+exp_name: pythia-14m-eigenvaluetest-nonneighbouring
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
@@ -13,7 +13,7 @@ dataset:
   return_set_portion: first
 node_layers:
   - mlp_out.3
-  - ln1.4
+  - ln1.5
 batch_size: 8  #  A100 can handle 24
 gram_batch_size: 40  #  A100 can handle 80
 edge_batch_size: 1

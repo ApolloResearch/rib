@@ -88,6 +88,11 @@ def ablate_and_test(
 
     base_result: Optional[float] = None
 
+    # Track the results for the case when there is no ablation. There may be many of these, so we
+    # store them to avoid recomputing.
+    n_truncated_vecs = basis_vecs.shape[0] - basis_vecs.shape[1]
+    no_ablation_result: Optional[float] = None
+
     eval_results: dict[int, float] = {}
     # Iterate through possible number of ablated vectors, starting from no ablated vectors
     for i, n_ablated_vecs in enumerate(
@@ -97,14 +102,23 @@ def ablate_and_test(
             desc=f"Ablating {module_name}",
         )
     ):
-        n_vecs_remaining = basis_vecs.shape[1] - n_ablated_vecs
+        # Note that we may have truncated vectors with small eigenvalues, so we make sure not to
+        # ablate more vectors than we have remaining
+        n_vecs_remaining = basis_vecs.shape[0] - n_ablated_vecs
+
+        # Count the n_ablated_vecs taking into account the truncation
+        n_ablated_vecs_trunc = max(n_ablated_vecs - n_truncated_vecs, 0)
+
+        if n_ablated_vecs_trunc == 0 and no_ablation_result is not None:
+            eval_results[n_vecs_remaining] = no_ablation_result
+            continue
 
         basis_vecs = basis_vecs.to(device)
         basis_vecs_pinv = basis_vecs_pinv.to(device)
         rotation_matrix = calc_rotation_matrix(
             vecs=basis_vecs,
             vecs_pinv=basis_vecs_pinv,
-            n_ablated_vecs=n_ablated_vecs,
+            n_ablated_vecs=n_ablated_vecs_trunc,
         )
 
         rotation_hook = Hook(
@@ -146,6 +160,11 @@ def run_ablations(
 ) -> dict[str, dict[int, float]]:
     """Rotate to and from a truncated basis and compare ablation accuracies/losses.
 
+    Note that we want our ablation schedules for different bases to match up, even though different
+    bases may have different number of basis vectors due to truncation. We therefore create our
+    ablation schedule assuming a non-truncated basis (i.e. using the full hidden size
+    (basis_vecs.shape[0])).
+
     Args:
         basis_matrices: List of basis vector matrices and their pseudoinverses. In the orthogonal
             basis case, the pseudoinverse is the transpose.
@@ -165,7 +184,7 @@ def run_ablations(
     for hook_name, module_name, (basis_vecs, basis_vecs_pinv) in zip(
         node_layers, graph_module_names, basis_matrices
     ):
-        n_vecs = basis_vecs.shape[1]
+        n_vecs = basis_vecs.shape[0]
         if isinstance(schedule_config, ExponentialScheduleConfig):
             ablation_schedule = calc_exponential_ablation_schedule(
                 n_vecs=n_vecs,

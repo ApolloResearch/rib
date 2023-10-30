@@ -115,7 +115,7 @@ print(train_loader.dataset[0:10])
 
 # Interp plans
 # Run model with hooks and collect all activations, do a PCA and stuff
-# Analyze attentiohn patterns
+# Analyze attention patterns
 # Collect RIB-activations rather than standard activations
 #     Do resample-ablation tests on these, what happens if I replace some?
 #     Do logit-attribution of these, and confirm things match the way they should
@@ -158,8 +158,8 @@ sec_2_1_resid_acts = get_normal_activations(section="sections.section_2.1", size
 # %%
 
 
-def plot_activations(acts, title="Default title", nrows=3, ncols=2):
-    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=(8, 10))
+def plot_activations(acts, title="Default title", nrows=3, ncols=2, figsize=(8, 10)):
+    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
     fig.suptitle(title)
     for i, axs in enumerate(axes):
         for j, ax in enumerate(axs):
@@ -237,39 +237,101 @@ def connect_RIB_acts(
     return rib_return_acts
 
 
-rib_acts_out = connect_RIB_acts()
+rib_acts_extended_embedding = connect_RIB_acts(section="sections.section_0.2")
+rib_acts_mlp_post_act = connect_RIB_acts(section="sections.section_1.2")
+rib_acts_pre_unembed = connect_RIB_acts(section="sections.section_2.2")
+# Last two should be basically identical? Yep look visually the same!
 
 
 # %%
 
-import matplotlib.pyplot as plt
 
-nrows = 3
-ncols = 2
+def plot_activations(acts, title="Default title", nrows=3, ncols=2, figsize=(8, 10)):
+    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
+    fig.suptitle(title)
+    for i, axs in enumerate(axes):
+        for j, ax in enumerate(axs):
+            ax.set_title(f"({i * ncols + j})")
+            vminmax = acts[:, :, i * ncols + j].abs().max() / 10
+            im = ax.imshow(
+                acts[:, :, i * ncols + j].numpy(), cmap="RdBu", vmin=-vminmax, vmax=vminmax
+            )
+            # Color
+            fig.colorbar(im, ax=ax)
 
-fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=(6, 8))
-for i, axs in enumerate(axes):
-    for j, ax in enumerate(axs):
-        ax.set_title(f"({i * ncols + j})")
-        im = ax.imshow(sec_1_1_mlp_pre_acts[:, :, i * ncols + j].numpy())
-        fig.colorbar(im, ax=ax)
-
-fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=(6, 8))
-for i, axs in enumerate(axes):
-    for j, ax in enumerate(axs):
-        ax.set_title(f"({i * ncols + j})")
-        im = ax.imshow(sec_1_1_resid_acts[:, :, i * ncols + j].numpy())
-        fig.colorbar(im, ax=ax)
 
 # %%
 
-fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=(8, 10))
-for i, axs in enumerate(axes):
-    for j, ax in enumerate(axs):
-        ax.set_title(f"({i * ncols + j})")
-        im = ax.imshow(rib_acts_out[:, :, i * ncols + j].numpy())
-        # Color
-        fig.colorbar(im, ax=ax)
+plot_activations(
+    rib_acts_extended_embedding,
+    title="RIB activations section 0.2 (extended embedding)",
+    nrows=10,
+    figsize=(8, 30),
+)
+# plot_activations(rib_acts_mlp_post_act, title="RIB activations section 1.2 (MLP post-act)")
+# plot_activations(rib_acts_pre_unembed, title="RIB activations section 2.2 (pre-unembed)")
+# %%
+# Fourier transform
+rib_acts_extended_embedding_fft = torch.fft.fft2(rib_acts_extended_embedding, dim=(0, 1))
+# %%
 
-# plt.imshow(rib_acts[:, :, 0].numpy())
+plot_activations(
+    rib_acts_extended_embedding_fft.real,
+    title="RIB activations section 0.2 (extended embedding), real",
+    nrows=4,
+    figsize=(8, 10),
+)
+
+# plot_activations(
+#     rib_acts_extended_embedding_fft.imag,
+#     title="RIB activations section 0.2 (extended embedding), imag",
+#     nrows=6,
+#     figsize=(8, 30),
+# )
+# %%
+
+# Print out the indices of the largest values of rib_acts_extended_embedding_fft
+# rib_acts_extended_embedding_fft.shape = (x, y, n)
+# Iterate through n and print value and coords of biggest points
+for i in range(1):
+    print(f"Top 10 activations for index {i}")
+    p = 113
+    values = rib_acts_extended_embedding_fft[:, :, i].real.abs().flatten()
+    # Find the top 10 indices
+    max_indices = torch.topk(values, 10).indices
+    # Convert the linear index to 2D coordinates (row, col)
+    coords = torch.stack([max_indices // p, max_indices % p], dim=1)
+    # Calculate the corresponding pos and neg frequencies
+    frequencies = torch.fft.fftfreq(p)
+    print("Freq", frequencies)
+
+    # Print the values and coordinates
+    print("Top vals", rib_acts_extended_embedding_fft[:, :, i].flatten()[max_indices])
+    for entry in coords:
+        x, y = entry
+        freq_x = frequencies[x]
+        freq_y = frequencies[y]
+        print(
+            f"Value {rib_acts_extended_embedding_fft[x, y, i].real:.2f} at freqs {freq_x:.2f}, {freq_y:.2f}"
+        )
+# %%
+
+# Toy sine example
+f = lambda x: torch.sin(x * 2 * np.pi * 3)
+n_sample = 100
+
+x = torch.linspace(0, 1, n_sample)
+sample_spacing = x[1] - x[0]  # s
+
+y = f(x)
+plt.plot(x, f(x))
+plt.show()
+# FFT
+y_fft = torch.fft.fft(y)
+topk = y_fft.real.abs().topk(10)
+freqs = torch.fft.fftfreq(n_sample, d=sample_spacing)
+periods = 1 / freqs
+print(freqs[topk.indices], periods[topk.indices], topk.values)
+plt.scatter(freqs, y_fft.real)
+
 # %%

@@ -27,16 +27,12 @@ def main(results_file: str) -> None:
     # Ensure that we have edges
     assert results["edges"], "The results file does not contain any edges."
 
-    layer_names = results["config"]["node_layers"]
-    if results["config"]["logits_node_layer"]:
-        layer_names.append("logits")
-
     # Set all layers to have the same number of nodes
     nodes_per_layer = 40
 
     plot_interaction_graph(
         raw_edges=results["edges"],
-        layer_names=layer_names,
+        layer_names=results["config"]["node_layers"],
         exp_name=results["exp_name"],
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,

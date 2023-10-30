@@ -25,6 +25,11 @@ class ScheduleConfig(BaseModel):
         description="The threshold to use for stopping the ablation calculations early. If None,"
         "we don't use early stopping.",
     )
+    specific_points: Optional[list[int]] = Field(
+        None,
+        description="A list of number of vecs remaining to add to the schedule. If None, we use"
+        "the default schedule.",
+    )
 
 
 class ExponentialScheduleConfig(ScheduleConfig):
@@ -202,6 +207,16 @@ def run_ablations(
             ]
         else:
             raise NotImplementedError(f"Schedule: {schedule_config.schedule_type} not supported.")
+
+        if schedule_config.specific_points is not None:
+            # Ignore the specific points that are greater than the number of vecs
+            specific_ablated_vecs = [
+                n_vecs - x for x in schedule_config.specific_points if x <= n_vecs
+            ]
+            # Add our specific points for the number of vecs remaining to the ablation schedule
+            ablation_schedule = sorted(
+                list(set(ablation_schedule + specific_ablated_vecs)), reverse=True
+            )
 
         ablation_eval_results: dict[int, float] = ablate_and_test(
             hooked_model=hooked_model,

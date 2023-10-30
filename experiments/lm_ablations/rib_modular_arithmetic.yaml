@@ -10,12 +10,11 @@ dataset:
   source: custom
   name: modular_arithmetic
   return_set: train
-node_layers:  # Rotate the input to these modules into the interaction basis
+ablation_node_layers:  # Rotate the input to these modules into the interaction basis
   - ln1.0
   - ln2.0
   - mlp_out.0
   - unembed
-logits_node_layer: true
 batch_size: 128
 dtype: float32
 eval_type: accuracy

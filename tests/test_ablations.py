@@ -34,7 +34,7 @@ def mock_load_config_mnist(*args, **kwargs):
     config = load_config(*args, **kwargs)
     config.interaction_graph_path = (
         Path(__file__).parent.parent
-        / "experiments/mnist_rib_build/sample_graphs/3-node-layers_interaction_graph_sample.pt"
+        / "experiments/mnist_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt"
     )
     return config
 
@@ -44,7 +44,7 @@ def mock_load_config_lm(*args, **kwargs):
     config = load_config(*args, **kwargs)
     config.interaction_graph_path = (
         Path(__file__).parent.parent
-        / "experiments/lm_rib_build/sample_graphs/modular_arithmetic_interaction_graph_sample.pt"
+        / "experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt"
     )
     return config
 

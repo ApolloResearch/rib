@@ -149,7 +149,7 @@ def ablate_and_test(
 @torch.inference_mode()
 def run_ablations(
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]],
-    node_layers: list[str],
+    ablation_node_layers: list[str],
     hooked_model: HookedModel,
     data_loader: DataLoader,
     eval_fn: Callable,
@@ -168,7 +168,7 @@ def run_ablations(
     Args:
         basis_matrices: List of basis vector matrices and their pseudoinverses. In the orthogonal
             basis case, the pseudoinverse is the transpose.
-        node_layers: The names of the node layers to build the graph with.
+        ablation_node_layers: The names of the node layers whose (rotated) inputs we want to ablate.
         hooked_model: The hooked model.
         data_loader: The data loader to use for testing.
         eval_fn: The function to use to evaluate the model.
@@ -181,8 +181,8 @@ def run_ablations(
         A dictionary mapping node layers to ablation accuracies/losses.
     """
     results: dict[str, dict[int, float]] = {}
-    for hook_name, module_name, (basis_vecs, basis_vecs_pinv) in zip(
-        node_layers, graph_module_names, basis_matrices
+    for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
+        ablation_node_layers, graph_module_names, basis_matrices
     ):
         n_vecs = basis_vecs.shape[0]
         if isinstance(schedule_config, ExponentialScheduleConfig):
@@ -213,10 +213,10 @@ def run_ablations(
             ablation_schedule=ablation_schedule,
             device=device,
             dtype=dtype,
-            hook_name=hook_name,
+            hook_name=ablation_node_layer,
             early_stopping_threshold=schedule_config.early_stopping_threshold,
         )
-        results[hook_name] = ablation_eval_results
+        results[ablation_node_layer] = ablation_eval_results
 
     return results
 

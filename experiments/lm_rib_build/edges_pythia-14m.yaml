@@ -1,8 +1,8 @@
-exp_name: mini-edges_pythia-14m
+exp_name: edges_pythia-14m
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
-interaction_matrices_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/mini-pythia-14m_rib_Cs.pt
+interaction_matrices_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/pythia-14m_rib_Cs.pt
 dataset:
   source: huggingface
   name: NeelNanda/pile-10k

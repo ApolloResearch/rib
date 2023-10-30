@@ -1,7 +1,8 @@
-exp_name: eps1e-4_ln_intervals50_modular_arithmetic
+exp_name: ln_intervals50_modular_arithmetic
 seed: 0
 tlens_pretrained: null
 tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-LNPre_2023-09-27_08-59-19/model_epoch_60000.pt
+interaction_matrices_path: null
 dataset:
   source: custom
   name: modular_arithmetic
@@ -16,8 +17,8 @@ logits_node_layer: true
 rotate_final_node_layer: false
 truncation_threshold: 1e-6
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
-n_intervals: 100
+n_intervals: 50
 out_dim_chunk_size: null
 dtype: float32
 calculate_edges: true
-eps: 1e-4
+eps: 1e-5  # Default is 1e-5

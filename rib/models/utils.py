@@ -4,6 +4,7 @@ from typing import Any, TypeVar
 import numpy as np
 import torch
 import yaml
+from fancy_einsum import einsum
 from jaxtyping import Float
 from torch import Tensor, nn
 
@@ -135,12 +136,12 @@ def concat_ones(x: Float[Tensor, "a b"]) -> None:
     )  # (a, b+1)
 
 
-def fold_attn_QKV(
+def fold_attn_QK(
     weight: Float[Tensor, "head_index d_model d_head"], bias: Float[Tensor, "head_index d_head"]
 ) -> None:
     """Concatenate the bias to the d_model dimension of the weight matrix and zero out the bias.
 
-    This is used for the Q, K and V matrices in the attention layer.
+    This is used for the Q and K matrices in the attention layer.
     """
     weight.data = torch.cat(
         [weight.data, bias.data[:, None]], dim=1
@@ -148,33 +149,78 @@ def fold_attn_QKV(
     bias.data = torch.zeros_like(bias.data)
 
 
-def add_dim_attn_O(
-    weight: Float[Tensor, "head_index d_head d_model"], bias: Float[Tensor, "d_model"]
+def fold_attn_V(
+    weight: Float[Tensor, "head_index d_model d_head"], bias: Float[Tensor, "head_index d_head"]
 ) -> None:
-    """DOES NOT FOLD IN BIAS. Merely adds a dimension to the weight and bias.
+    """Fold in the bias to the W_V matrix.
 
-    This should be updated in the future to fold in the bias (see issue #72). For now, this just
-    adds a dimension of zeros to the weight and bias so that the output, when added back to the
-    residual stream, will have an extra dimension of ones (the residual stream will already have an
-    extra dimension of ones).
+    We concat the bias vector to 'row' (d_model) dimension and then add an extra
+    'column' (d_head) dimension with all zeros and a single 1. I.e. W_V_folded will be of
+    shape (n_head, d_model + 1, d_head + 1).
 
+    This is used for the V matrices in the attention layer.
     """
     weight.data = torch.cat(
         [
-            weight.data,
-            torch.zeros(
-                weight.shape[0], weight.shape[1], 1, dtype=weight.dtype, device=weight.device
+            torch.cat([weight.data, bias.data[:, None, :]], dim=1),
+            torch.cat(
+                [
+                    torch.zeros(
+                        weight.shape[0],
+                        weight.shape[1],
+                        1,
+                        device=weight.device,
+                        dtype=weight.dtype,
+                    ),
+                    torch.ones(weight.shape[0], 1, 1, device=weight.device, dtype=weight.dtype),
+                ],
+                dim=1,
             ),
         ],
         dim=2,
-    )  # (head_idx, d_head, d_model+1)
-    bias.data = torch.cat(
+    )  # (n_head, d_model+1, d_head+1)
+    bias.data = torch.zeros(
+        bias.shape[0], bias.shape[1] + 1, device=bias.device, dtype=bias.dtype
+    )  # (n_head, d_head+1)
+
+
+def fold_attn_O(
+    weight: Float[Tensor, "head_index d_head d_model"], bias: Float[Tensor, "d_model"]
+) -> None:
+    """Fold in the b_O bias to the W_O matrix.
+
+    Notice that there exists only one b_O vector (size d_model) independent of the number of
+    attention heads. However, we want to fold in the bias into the (n_head) W_O matrices. To do this
+    we first duplicate the b_O bias n_head times and multiply by 1/n_head (split_bias_data),
+    essentially folding a bit of the bias into every W_O matrix.
+
+    Then we concat the modified b_O and W_O via the 'row' (d_head) dimension, and add an extra
+    'column' (d_model) of all zeros to match the folded resid shape. Note that this final extra
+    column does have only zeros and no one(s), just like the W_out of the folded MLP, because the
+    residual stream will already have an extra dimension of ones.
+
+    """
+    # Split up b_O over the different heads to distribute it over the W_O matrices
+    # b_O current shape = (d_model,)
+    # split_bias_data target shape = (n_head, d_model)
+    split_bias_data = einsum(
+        "n_head, d_model -> n_head d_model",
+        torch.ones(weight.shape[0], device=weight.device, dtype=weight.dtype) / weight.shape[0],
+        bias.data,
+    )  # (n_head, d_model)
+    # weight.data current shape = (n_head, d_head, d_model)
+    weight.data = torch.cat(
         [
-            bias.data,
-            torch.zeros(1, device=bias.device, dtype=bias.dtype),
+            torch.cat(
+                [weight.data, split_bias_data[:, None, :]], dim=1
+            ),  # (n_head, d_head+1, d_model)
+            torch.zeros(
+                weight.shape[0], weight.shape[1] + 1, 1, device=weight.device, dtype=weight.dtype
+            ),  # (n_head, d_head+1, 1)
         ],
-        dim=0,
-    )  # (d_model+1)
+        dim=2,
+    )  # (n_head, d_head+1, d_model+1)
+    bias.data = torch.zeros(bias.shape[0] + 1, device=bias.device, dtype=bias.dtype)  # (d_model+1)
 
 
 def fold_mlp_in(

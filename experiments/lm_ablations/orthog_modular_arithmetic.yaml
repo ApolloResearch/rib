@@ -1,20 +1,20 @@
-exp_name: orthog_modular_arithmetic
+exp_name: train_orthog_modular_arithmetic
 ablation_type: orthogonal
-interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt
+interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_rib_graph.pt
 schedule:
-  schedule_type: exponential
-  early_stopping_threshold: null
-  ablate_every_vec_cutoff: 10
-  exp_base: 2.0
+  schedule_type: linear
+  early_stopping_threshold: 0.3
+  n_points: 30
 dataset:
   source: custom
   name: modular_arithmetic
-  return_set: test
+  return_set: train
 node_layers:  # Rotate the input to these modules into the orthogonal basis
   - ln1.0
   - ln2.0
   - mlp_out.0
   - unembed
+logits_node_layer: true
 batch_size: 128
 dtype: float32
 eval_type: accuracy

@@ -112,7 +112,7 @@ def main(config_path_str: str) -> None:
 
     basis_matrices = load_basis_matrices(
         interaction_graph_info=interaction_graph_info,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.node_layers,
         ablation_type=config.ablation_type,
         dtype=dtype,
         device=device,

@@ -530,7 +530,7 @@ def transformer_relu_main(config_path_str: str):
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
     seq_model.fold_bias()
-    print_all_modules(seq_model) # Check module names were correctly defined
+    # print_all_modules(seq_model) # Check module names were correctly defined
     hooked_model = HookedModel(seq_model)
 
     # Has to be after editing node_layers so this contains the linear layers to extract weights from

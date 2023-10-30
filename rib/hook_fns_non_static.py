@@ -47,14 +47,12 @@ def relu_swap_forward_hook_fn(
     Hook activation layers.
     """
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
-    # Code below would be `in_acts = torch.cat(inputs,d dim=-1)` if not detaching
-    # Inputs always tuple
-    # For this function, which always hooks an activation layer, inputs ARE the preactivations
-    inputs = torch.cat([x for x in inputs], dim=-1)
 
     output_is_tuple: bool = True if isinstance(output, tuple) else False
     outputs = output if output_is_tuple else (output,)
     out_hidden_dims = [x.shape[-1] for x in outputs]
+
+    inputs = torch.cat([x for x in inputs], dim=-1)
     outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
 
     operator: Float[Tensor, "batch d_hidden_out"] = torch.div(outputs, inputs)
@@ -64,9 +62,13 @@ def relu_swap_forward_hook_fn(
         batch_size, token_len, d_hidden = operator.shape
 
     edited_operator = operator.clone()
-    edited_operator[..., torch.arange(d_hidden)] = operator[..., replacement_idxs]
+    # `replacement_idxs` is shorter than `operator` by however large residual stream dim is
+    # Trivially extend for residual stream by avoiding replacing these indices
+    extended_replacement_idxs = torch.arange(d_hidden)
+    extended_replacement_idxs[:len(replacement_idxs)] = replacement_idxs
+    operator[..., torch.arange(d_hidden)] = operator[..., extended_replacement_idxs]
 
-    edited_output = edited_operator * inputs
+    edited_output = operator * inputs
 
     # Split back into tuple form if the ouput should have been tuple
     if output_is_tuple:

@@ -507,7 +507,7 @@ def calculate_swapped_relu_loss(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
-    replacement_idx_list: list[int],
+    replacement_idxs: Int[Tensor, "d_hidden"],
     num_replaced: list[int],
     hook_name: Optional[str] = None,
 ) -> tuple[list[float], ...]:
@@ -527,7 +527,7 @@ def calculate_swapped_relu_loss(
             data_key="relu_swap",
             fn=relu_swap_forward_hook_fn,
             module_name=module_name,
-            fn_kwargs={"replacement_idx_list": replacement_idx_list}
+            fn_kwargs={"replacement_idxs": replacement_idxs}
         )
     )
 
@@ -586,7 +586,7 @@ def calculate_all_swapped_iterative_relu_loss(
     dtype: torch.dtype,
     device: str,
     replacement_idx_list: list[Int[Tensor, "d_hidden"]],
-    num_replaced_list: [int],
+    num_replaced_list: list[list[int]],
     hook_names: Optional[list[str]] = None,
 ) -> tuple[list[float], ...]:
     """Calculate loss for unedited forward pass, and then on forward pass with specific ReLUs
@@ -610,7 +610,7 @@ def calculate_all_swapped_iterative_relu_loss(
                 data_key="relu_swap",
                 fn=relu_swap_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"replacement_idx_list": replacement_idx_list[i]}
+                fn_kwargs={"replacement_idxs": replacement_idx_list[i]}
             )
         )
 
@@ -633,18 +633,20 @@ def calculate_all_swapped_iterative_relu_loss(
     hooked_model.remove_hooks()
 
     random_relu_swap_hooks = []
-    length = len(replacement_idx_list[i])
     for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        length = len(replacement_idx_list[i])
+        total_num_swapped = sum(num_replaced_list[i])
         random_idx_tensor = torch.arange(length)
-        indices_to_replace = torch.randperm(length)[:num_replaced_list[i]]
-        random_idx_tensor[indices_to_replace] = torch.randint(0, length, (num_replaced_list[i],))
+        indices_to_replace = torch.randperm(length)[:total_num_swapped]
+
+        random_idx_tensor[indices_to_replace] = torch.randint(0, length, (total_num_swapped,))
         random_relu_swap_hooks.append(
             Hook(
                 name=hook_name,
                 data_key="relu_swap",
                 fn=relu_swap_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"replacement_idx_list": random_idx_tensor.tolist()}
+                fn_kwargs={"replacement_idxs": random_idx_tensor}
             )
         )
 

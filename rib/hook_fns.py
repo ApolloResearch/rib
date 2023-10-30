@@ -450,10 +450,10 @@ def relu_interaction_forward_hook_fn(
 
     output_is_tuple: bool = True if isinstance(output, tuple) else False
     outputs = output if isinstance(output, tuple) else (output,)
-    raw_output = outputs
+    raw_output = outputs # For passing into g_j finding function for metric 3
     out_hidden_dims = [x.shape[-1] for x in outputs]
 
-    # We don't want residual stream for operator syncing
+    # Don't want residual stream for operator syncing
     inputs = inputs[1]
     outputs = outputs[1]
 

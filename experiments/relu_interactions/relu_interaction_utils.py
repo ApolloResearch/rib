@@ -137,7 +137,7 @@ def relu_plot_and_cluster(
         # Cut dendrogram
         # ith `clusters` element is flat cluster number to which original observation i belonged
         # Idxs of `clusters` is original element idxs
-        threshold = 0.0015
+        threshold = 3e-7
         clusters = fcluster(Z, t=threshold, criterion="distance")
         unique_clusters = np.unique(clusters)
         print(f"unique cluster vals {unique_clusters}")
@@ -151,10 +151,13 @@ def relu_plot_and_cluster(
             cluster_distances = distance_matrix[np.ix_(cluster_idx, cluster_idx)]
             # Use symmetry of matrix, sum only over one dimension to compute total distance to all
             # other members
+            # print(f"cluster distances {cluster_distances}")
             # And find minimum index in this cluster subarray
-            centroid_idx_in_cluster = np.argmin(cluster_distances.sum(axis=0))
+            centroid_idx_in_cluster = np.argmin(cluster_distances.sum(axis=1))
+            # print(f"centroid idx in cluster {centroid_idx_in_cluster}")
             # Map this back to indices of original array
             centroid_idx_original = cluster_idx[centroid_idx_in_cluster]
+            # print(f"original idx {centroid_idx_original}")
             # Set all index elements to cluster centroid index (note we do not return or manipulate
             # *distance matrix values*)
             # Want instead indices with which to permute the O(x) vector in forward hook
@@ -167,15 +170,15 @@ def relu_plot_and_cluster(
         # Cast indices to tensor and add to list of returns - one item per layer
         return_index_list.append(torch.tensor(indices_of_original_O))
 
+        print(f"return index list \n {return_index_list}")
+
         rearranged_similarity_matrix = distance_matrix[order, :][:, order]
 
         # Plot sorted similarity matrix via indices obtained from distance matrix
         plt.figure(figsize=(10, 8))
-        sns.heatmap(rearranged_similarity_matrix, annot=False,
-                    cmap="YlGnBu", cbar=True, square=True)
+        sns.heatmap(rearranged_similarity_matrix, annot=False, cmap="YlGnBu", cbar=True, square=True)
         plt.title("Reordered Similarity Matrix")
-        plt.savefig(
-            out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}.png")
+        plt.savefig(out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}.png")
 
     return return_index_list, all_num_valid_swaps, all_cluster_idxs
 
@@ -386,6 +389,7 @@ def find_indices_to_replace(matrix: Float[Tensor, "d1 d1"], tol: float) -> tuple
     row_min_idxs[keep_indices] = keep_indices
 
     return row_min_idxs, num_valid_swaps
+
 
 # Weights/ Models ========================================================
 

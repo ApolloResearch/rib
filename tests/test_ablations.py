@@ -34,7 +34,7 @@ def mock_load_config_mnist(*args, **kwargs):
     config = load_config(*args, **kwargs)
     config.interaction_graph_path = (
         Path(__file__).parent.parent
-        / "experiments/mnist_rib_build/sample_graphs/3-node-layers_interaction_graph_sample.pt"
+        / "experiments/mnist_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt"
     )
     return config
 
@@ -44,7 +44,7 @@ def mock_load_config_lm(*args, **kwargs):
     config = load_config(*args, **kwargs)
     config.interaction_graph_path = (
         Path(__file__).parent.parent
-        / "experiments/lm_rib_build/sample_graphs/modular_arithmetic_interaction_graph_sample.pt"
+        / "experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt"
     )
     return config
 
@@ -209,7 +209,7 @@ def test_run_mnist_orthog_ablations():
         ablate_every_vec_cutoff: 2
         exp_base: 4.0
     dtype: float32
-    node_layers:
+    ablation_node_layers:
         - layers.1
         - layers.2
     batch_size: 64
@@ -253,7 +253,7 @@ def test_run_mnist_rib_ablations():
         ablate_every_vec_cutoff: 2
         exp_base: 3.0
     dtype: float32
-    node_layers:
+    ablation_node_layers:
         - layers.1
         - layers.2
     batch_size: 64
@@ -288,10 +288,9 @@ def test_run_modular_arithmetic_rib_ablations():
         source: custom
         name: modular_arithmetic
         return_set: test
-    node_layers:
+    ablation_node_layers:
         - ln1.0
         - unembed
-    logits_node_layer: true
     batch_size: 64
     dtype: float32
     seed: 0
@@ -325,10 +324,9 @@ def test_run_modular_arithmetic_orthog_ablations():
         source: custom
         name: modular_arithmetic
         return_set: test
-    node_layers:
+    ablation_node_layers:
         - ln1.0
         - unembed
-    logits_node_layer: true
     batch_size: 64
     dtype: float32
     seed: 0

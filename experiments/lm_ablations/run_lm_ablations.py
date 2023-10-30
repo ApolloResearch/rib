@@ -60,11 +60,7 @@ class Config(BaseModel):
         discriminator="source",
         description="The dataset to use to build the graph.",
     )
-    node_layers: list[str]
-    logits_node_layer: bool = Field(
-        ...,
-        description="Whether the Cs were calculated with logits as the final node layer.",
-    )
+    ablation_node_layers: list[str]
     batch_size: int
     dtype: str
     eps: Optional[float] = 1e-5
@@ -96,25 +92,18 @@ def main(config_path_str: str) -> None:
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
-    assert set(config.node_layers) <= set(
+    assert set(config.ablation_node_layers) <= set(
         interaction_graph_info["config"]["node_layers"]
     ), "The node layers in the config must be a subset of the node layers in the interaction graph."
-    assert config.logits_node_layer == interaction_graph_info["config"]["logits_node_layer"], (
-        "The logits_node_layer in the config must match the logits_node_layer in the "
-        "interaction graph."
-    )
+
+    assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
-    # We don't bother ablating vecs in the output layer (i.e. the inputs to the final node layer)
-    # We likely didn't calculate a rotation basis for this layer so we'd have nothing to ablate
-    ablation_node_layers = (
-        config.node_layers if config.logits_node_layer else config.node_layers[:-1]
-    )
     basis_matrices = load_basis_matrices(
         interaction_graph_info=interaction_graph_info,
-        ablation_node_layers=ablation_node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         ablation_type=config.ablation_type,
         dtype=dtype,
         device=device,
@@ -127,7 +116,7 @@ def main(config_path_str: str) -> None:
     )
 
     seq_model, _ = load_sequential_transformer(
-        node_layers=config.node_layers,
+        node_layers=interaction_graph_info["config"]["node_layers"],
         last_pos_module_type=interaction_graph_info["config"]["last_pos_module_type"],
         tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
         tlens_model_path=tlens_model_path,
@@ -163,7 +152,7 @@ def main(config_path_str: str) -> None:
 
     ablation_results: dict[str, dict[int, float]] = run_ablations(
         basis_matrices=basis_matrices,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         hooked_model=hooked_model,
         data_loader=data_loader,
         eval_fn=eval_fn,

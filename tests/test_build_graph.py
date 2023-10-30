@@ -81,11 +81,8 @@ def graph_build_test(
                     Cs[-1]["C"] is None
                 ), "The output interaction matrix should be None if rotate_final_node_layer is False"
 
-            comparison_layers = results["config"]["node_layers"]
-            # If we don't have a logit node layer, then we don't have edges or lambdas for the final
-            # layer in node_layers
-            if not results["config"]["logits_node_layer"]:
-                comparison_layers = comparison_layers[:-1]
+            # We don't have edges or lambdas for the final layer in node_layers
+            comparison_layers = results["config"]["node_layers"][:-1]
             for i, module_name in enumerate(comparison_layers):
                 # Get the module names from the grams
                 # Check that the size of the sum of activations in the interaction basis is equal
@@ -121,13 +118,13 @@ def test_modular_arithmetic_build_graph():
         - ln1.0
         - mlp_in.0
         - unembed
+        - output
     dataset:
         source: custom
         name: modular_arithmetic
         return_set: train
     batch_size: 128
     truncation_threshold: 1e-6
-    logits_node_layer: false
     rotate_final_node_layer: false
     last_pos_module_type: add_resid1
     n_intervals: 0
@@ -174,7 +171,6 @@ def test_pythia_14m_build_graph():
         - unembed
     batch_size: 2
     truncation_threshold: 1e-6
-    logits_node_layer: false
     rotate_final_node_layer: false
     n_intervals: 0
     dtype: float32
@@ -195,16 +191,16 @@ def test_mnist_build_graph():
     mock_config = """
     exp_name: test
     mlp_path: OVERWRITE/IN/MOCK
-    batch_size: 64
+    batch_size: 256
     seed: 0
     truncation_threshold: 1e-6
-    logits_node_layer: true
     rotate_final_node_layer: false
     n_intervals: 0
     dtype: float32
     node_layers:
         - layers.1
         - layers.2
+        - output
     """
     load_config_path = "experiments.mnist_rib_build.run_mnist_rib_build.load_config"
 

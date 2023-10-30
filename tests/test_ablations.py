@@ -115,6 +115,7 @@ def ablation_mock_run(
     layer_keys: list[str],
     max_accuracy_threshold: float,
     sort_tolerance: int = 10,
+    specific_points: list[int] = None,
 ) -> None:
     """Run the ablation script with a mock config and check the results.
 
@@ -127,6 +128,7 @@ def ablation_mock_run(
         max_accuracy_threshold: Lower bound on accuracy to expect with 0 ablated vectors.
         sort_tolerance: The number of out-of-order pairs to tolerate when checking if the
             accuracies are roughly sorted.
+        specific_points: The specific ablation points to check for.
     """
     accuracies = None
 
@@ -163,6 +165,12 @@ def ablation_mock_run(
             for layer_key in layer_keys:
                 vecs_remaining = list(accuracies[layer_key].keys())
                 accuracy_vals = list(accuracies[layer_key].values())
+
+                if specific_points is not None:
+                    for point in specific_points:
+                        assert (
+                            point in vecs_remaining
+                        ), f"Expected specific point {point} in vecs remaining, but it isn't there"
 
                 # Check that the accuracies are ordered by their number of ablated vectors
                 assert vecs_remaining == sorted(vecs_remaining, reverse=True)
@@ -284,6 +292,7 @@ def test_run_modular_arithmetic_rib_ablations():
         early_stopping_threshold: null
         ablate_every_vec_cutoff: 1
         exp_base: 3.0
+        specific_points: [30, 31]
     dataset:
         source: custom
         name: modular_arithmetic
@@ -304,6 +313,7 @@ def test_run_modular_arithmetic_rib_ablations():
         mock_main_fn=lm_ablations_main,
         layer_keys=["ln1.0", "unembed"],
         max_accuracy_threshold=0.998,  # Model should converge to 100% accuracy
+        specific_points=[30, 31],
     )
 
 

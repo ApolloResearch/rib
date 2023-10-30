@@ -4,6 +4,7 @@ Defines a generic MLP to be used for rib.
 from typing import Any, Optional, Type, Union
 
 import torch
+from einops import rearrange, repeat
 from torch import nn
 from torch.nn import functional as F
 
@@ -26,16 +27,29 @@ class LinearFoldedBias(nn.Linear):
         """
         self.concat_bias_to_output = concat_bias_to_output
         super().__init__(in_features + 1, out_features, bias=False, device=device, dtype=dtype)
+        if self.concat_bias_to_output:
+            self.concat_one_output()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Run a standard linear transformation and concatenate a vector of 1s to the output.
-
-        If self.concat_bias_to_output is True, we concatenate a vector of 1s to the output.
-        """
+        """Run a standard linear transformation."""
         x = F.linear(x, self.weight, self.bias)
-        if self.concat_bias_to_output:
-            x = torch.cat([x, torch.ones_like(x[..., :1])], dim=-1)
         return x
+
+    def concat_one_output(self):
+        """Concat row of 0s with trailing 1 on to end of W vector with dims (out, in).
+
+        Has effect of appending 1 to end of output vector when multiplied.
+        Concatenation of 1s to batched inputs done in forward method of MLP model (see below).
+        """
+        if hasattr(self, "weight"):
+            weights = self.weight.data.clone()
+            d_hidden_out, d_hidden_in = weights.shape
+            # Create vector of zeros with last element 1
+            to_append_weights = torch.zeros(d_hidden_in)
+            to_append_weights[-1] = 1
+            # Append as last row of W - last column of input matrix are 1s
+            weights = torch.cat([weights, rearrange(to_append_weights, "d -> 1 d")], dim=0)
+            self.weight.data = weights
 
 
 class Layer(nn.Module):

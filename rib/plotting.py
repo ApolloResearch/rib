@@ -198,9 +198,9 @@ def plot_ablation_results(
     """
     # Verify that all results have the same node layers
     node_layers_per_exp = [set(result.keys()) for result in results]
-    assert all(
-        node_layers == node_layers_per_exp[0] for node_layers in node_layers_per_exp[1:]
-    ), "All results must have the same node layers."
+    # assert all(
+    #     node_layers == node_layers_per_exp[0] for node_layers in node_layers_per_exp[1:]
+    # ), "All results must have the same node layers."
 
     node_layers = results[0].keys()
     n_plots = len(node_layers)
@@ -211,6 +211,8 @@ def plot_ablation_results(
 
     for i, node_layer in enumerate(node_layers):
         for exp_name, ablation_type, exp_results in zip(exp_names, ablation_types, results):
+            if node_layer not in exp_results:
+                continue
             n_vecs_remaining = sorted(list(int(k) for k in exp_results[node_layer]))
             y_values = [exp_results[node_layer][str(i)] for i in n_vecs_remaining]
             axs[i].plot(n_vecs_remaining, y_values, "-o", label=exp_name)

@@ -115,8 +115,12 @@ def main(config_path_str: str) -> None:
         else None
     )
 
+    # Note that we specify node_layers as config.ablation_node_layers, even though the original
+    # graph was built with interaction_graph_info["config"]["node_layers"]. This is because
+    # changing the sections in the model has no effect on the computation, and we would like the
+    # sections to match ablation_node_layers so we can hook them easily.
     seq_model, _ = load_sequential_transformer(
-        node_layers=interaction_graph_info["config"]["node_layers"],
+        node_layers=config.ablation_node_layers,
         last_pos_module_type=interaction_graph_info["config"]["last_pos_module_type"],
         tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
         tlens_model_path=tlens_model_path,

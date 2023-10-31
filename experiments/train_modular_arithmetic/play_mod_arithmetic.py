@@ -12,6 +12,7 @@ import torch
 import torch.optim as optim
 import wandb
 from pydantic import BaseModel
+from sklearn.decomposition import PCA
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -124,10 +125,25 @@ print(train_loader.dataset[0:10])
 # %%
 
 
+def get_normal_activation_sizes(hooked_model=hooked_model, section="sections.section_1.2", p=113):
+    _, cache = hooked_model.run_with_cache(torch.tensor([0, 0, p]))
+    # Get activations
+    acts = cache[section]["acts"]
+
+    sizes = []
+    for i, act in enumerate(acts):
+        sizes.append(act[0].shape[0])
+    return sizes
+
+
 def get_normal_activations(
-    hooked_model=hooked_model, section="sections.section_1.2", sizes=(129, 513), p=113
+    hooked_model=hooked_model, section="sections.section_1.2", sizes=None, p=113
 ):
     return_acts = []
+
+    if sizes is None:
+        sizes = get_normal_activation_sizes(hooked_model=hooked_model, section=section, p=p)
+
     for size in sizes:
         return_acts.append(torch.empty([p, p, size]))
 
@@ -137,7 +153,7 @@ def get_normal_activations(
             _, cache = hooked_model.run_with_cache(torch.tensor([x, y, p]))
             # Get activations
             acts = cache[section]["acts"]
-            assert len(acts) == len(sizes)
+            assert len(acts) == len(sizes), f"{len(acts)} != {len(sizes)}"
             for i, act in enumerate(acts):
                 assert act[batch_index].shape[0] == sizes[i], f"{act.shape[0]} != {sizes[i]}"
                 return_acts[i][x, y] = act[batch_index]
@@ -145,6 +161,8 @@ def get_normal_activations(
 
 
 # %%
+sec_0_2_resid_acts = get_normal_activations(section="sections.section_0.2")[0]
+
 sec_1_1_resid_acts, sec_1_1_mlp_pre_acts = get_normal_activations(
     section="sections.section_1.1", sizes=(129, 513)
 )
@@ -173,27 +191,21 @@ def plot_activations(acts, title="Default title", nrows=3, ncols=2, figsize=(8, 
 # plot_activations(sec_1_1_mlp_pre_acts, title="MLP pre-activations section 1.1")
 # plot_activations(sec_1_2_resid_acts, title="Residual activations section 1.2")
 # plot_activations(sec_1_2_mlp_post_acts, title="MLP post-activations section 1.2")
-plot_activations(sec_2_1_resid_acts, title="Residual activations section 2.1")
+# plot_activations(sec_2_1_resid_acts, title="Residual activations section 2.1")
+plot_activations(sec_0_2_resid_acts, title="Residual activations section 0.2 (extended embedding)")
 
 
 # %%
 
 
-def connect_RIB_acts(
+def collect_RIB_acts(
     hooked_model=hooked_model,
     section="sections.section_0.2",
     p=113,
     interaction_graph_path="/mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt",
     ablation_type="rib",
 ):
-    # node_layer_dict = {
-    #     "ln1.0": "sections.section_0.0",
-    #     "ln2.0": "sections.section_1.0",
-    #     "mlp_out.0": "sections.section_2.0",
-    #     "unembed": "sections.section_2.2",
-    # }
-    # Issue: Make a mapping function given some model
-    # Issue: run_with_cache give inputs or outputs
+    # Note that the mapping feels shifted because hooks give us outputs but rib acts are inputs
     node_layer_dict = {
         "sections.section_pre.2": "ln1.0",
         "sections.section_0.2": "ln2.0",
@@ -237,28 +249,10 @@ def connect_RIB_acts(
     return rib_return_acts
 
 
-rib_acts_extended_embedding = connect_RIB_acts(section="sections.section_0.2")
-rib_acts_mlp_post_act = connect_RIB_acts(section="sections.section_1.2")
-rib_acts_pre_unembed = connect_RIB_acts(section="sections.section_2.2")
-# Last two should be basically identical? Yep look visually the same!
-
-
-# %%
-
-
-def plot_activations(acts, title="Default title", nrows=3, ncols=2, figsize=(8, 10)):
-    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
-    fig.suptitle(title)
-    for i, axs in enumerate(axes):
-        for j, ax in enumerate(axs):
-            ax.set_title(f"({i * ncols + j})")
-            vminmax = acts[:, :, i * ncols + j].abs().max() / 10
-            im = ax.imshow(
-                acts[:, :, i * ncols + j].numpy(), cmap="RdBu", vmin=-vminmax, vmax=vminmax
-            )
-            # Color
-            fig.colorbar(im, ax=ax)
-
+rib_acts_extended_embedding = collect_RIB_acts(section="sections.section_0.2")
+rib_acts_mlp_post_act = collect_RIB_acts(section="sections.section_1.2")
+rib_acts_pre_unembed = collect_RIB_acts(section="sections.section_2.2")
+# Last two should be basically identical because only differ due to linear transform? Yep look visually the same!
 
 # %%
 
@@ -271,67 +265,90 @@ plot_activations(
 # plot_activations(rib_acts_mlp_post_act, title="RIB activations section 1.2 (MLP post-act)")
 # plot_activations(rib_acts_pre_unembed, title="RIB activations section 2.2 (pre-unembed)")
 # %%
-# Fourier transform
-rib_acts_extended_embedding_fft = torch.fft.fft2(rib_acts_extended_embedding, dim=(0, 1))
+
+
+def plot_fft_activations(
+    acts, title="Default title", nrows=3, ncols=2, figsize=(8, 10), fftshift=True
+):
+    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
+    freqs = torch.fft.fftfreq(acts.shape[0])
+    if fftshift:
+        freqs = torch.fft.fftshift(freqs).numpy()
+        acts = torch.fft.fftshift(acts, dim=[0, 1])
+        title += "(fftshift'ed)"
+        extent = [freqs[0], freqs[-1], freqs[0], freqs[-1]]
+    else:
+        extent = None
+    title += "\n" + "".join([f"{freq:.2f} " for freq in freqs[::10]])
+    fig.suptitle(title)
+    for i, axs in enumerate(axes):
+        for j, ax in enumerate(axs):
+            ax.set_title(f"({i * ncols + j})")
+            vminmax = acts[:, :, i * ncols + j].abs().max() / 10
+            im = ax.imshow(
+                acts[:, :, i * ncols + j].numpy(),
+                cmap="RdBu",
+                vmin=-vminmax,
+                vmax=vminmax,
+                aspect="equal",
+                extent=extent,
+                origin="lower",
+            )
+            # Color
+            fig.colorbar(im, ax=ax)
+
+
 # %%
 
-plot_activations(
+# Fourier transform
+rib_acts_extended_embedding_fft = torch.fft.fft2(rib_acts_extended_embedding, dim=(0, 1))
+
+# %%
+
+plot_fft_activations(
     rib_acts_extended_embedding_fft.real,
     title="RIB activations section 0.2 (extended embedding), real",
-    nrows=4,
+    nrows=3,
     figsize=(8, 10),
 )
 
-# plot_activations(
-#     rib_acts_extended_embedding_fft.imag,
-#     title="RIB activations section 0.2 (extended embedding), imag",
-#     nrows=6,
-#     figsize=(8, 30),
-# )
+plot_fft_activations(
+    rib_acts_extended_embedding_fft.imag,
+    title="RIB activations section 0.2 (extended embedding), imag",
+    nrows=3,
+    figsize=(8, 10),
+)
 # %%
 
-# Print out the indices of the largest values of rib_acts_extended_embedding_fft
-# rib_acts_extended_embedding_fft.shape = (x, y, n)
-# Iterate through n and print value and coords of biggest points
-for i in range(1):
-    print(f"Top 10 activations for index {i}")
-    p = 113
-    values = rib_acts_extended_embedding_fft[:, :, i].real.abs().flatten()
-    # Find the top 10 indices
-    max_indices = torch.topk(values, 10).indices
-    # Convert the linear index to 2D coordinates (row, col)
-    coords = torch.stack([max_indices // p, max_indices % p], dim=1)
-    # Calculate the corresponding pos and neg frequencies
-    frequencies = torch.fft.fftfreq(p)
-    print("Freq", frequencies)
+sec_0_2_resid_acts_fft = torch.fft.fft2(sec_0_2_resid_acts, dim=(0, 1))
 
-    # Print the values and coordinates
-    print("Top vals", rib_acts_extended_embedding_fft[:, :, i].flatten()[max_indices])
-    for entry in coords:
-        x, y = entry
-        freq_x = frequencies[x]
-        freq_y = frequencies[y]
-        print(
-            f"Value {rib_acts_extended_embedding_fft[x, y, i].real:.2f} at freqs {freq_x:.2f}, {freq_y:.2f}"
-        )
+plot_fft_activations(
+    sec_0_2_resid_acts_fft.real,
+    title="Normal activations section 0.2 (extended embedding), real",
+    nrows=3,
+    figsize=(8, 10),
+)
+
 # %%
 
-# Toy sine example
-f = lambda x: torch.sin(x * 2 * np.pi * 3)
-n_sample = 100
 
-x = torch.linspace(0, 1, n_sample)
-sample_spacing = x[1] - x[0]  # s
+def pca_activations(acts):
+    acts_pca = acts.reshape(-1, acts.shape[-1])
+    pca = PCA(n_components=acts_pca.shape[-1])
+    acts_transformed = pca.fit_transform(acts_pca)
+    acts_transformed = acts_transformed.reshape(acts.shape[0], acts.shape[1], -1)
+    print("Explained variance", pca.explained_variance_ratio_)
+    acts_transformed = torch.tensor(acts_transformed)
+    return acts_transformed
 
-y = f(x)
-plt.plot(x, f(x))
-plt.show()
-# FFT
-y_fft = torch.fft.fft(y)
-topk = y_fft.real.abs().topk(10)
-freqs = torch.fft.fftfreq(n_sample, d=sample_spacing)
-periods = 1 / freqs
-print(freqs[topk.indices], periods[topk.indices], topk.values)
-plt.scatter(freqs, y_fft.real)
 
+sec_0_2_resid_acts_transformed = pca_activations(sec_0_2_resid_acts)
+sec_0_2_resid_acts_transformed_fft = torch.fft.fft2(sec_0_2_resid_acts_transformed, dim=(0, 1))
+
+plot_fft_activations(
+    sec_0_2_resid_acts_transformed_fft.real,
+    title="PCA activations section 0.2 (extended embedding), real",
+    nrows=3,
+    figsize=(8, 10),
+)
 # %%

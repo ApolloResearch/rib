@@ -296,6 +296,10 @@ def plot_fft_activations(
             )
             # Color
             fig.colorbar(im, ax=ax)
+    # Save to filename based on title without bad characters
+    filename = title.replace(" ", "_").replace("\n", "_").replace(".", "_")
+    filename = filename.replace("(", "").replace(")", "").replace(",", "").replace("'", "")
+    plt.savefig(f"fft_activations_{filename}.png")
 
 
 # %%
@@ -308,15 +312,15 @@ rib_acts_extended_embedding_fft = torch.fft.fft2(rib_acts_extended_embedding, di
 plot_fft_activations(
     rib_acts_extended_embedding_fft.real,
     title="RIB activations section 0.2 (extended embedding), real",
-    nrows=3,
-    figsize=(8, 10),
+    nrows=20,
+    figsize=(8, 60),
 )
 
 plot_fft_activations(
     rib_acts_extended_embedding_fft.imag,
     title="RIB activations section 0.2 (extended embedding), imag",
-    nrows=3,
-    figsize=(8, 10),
+    nrows=20,
+    figsize=(8, 60),
 )
 # %%
 
@@ -325,8 +329,8 @@ sec_0_2_resid_acts_fft = torch.fft.fft2(sec_0_2_resid_acts, dim=(0, 1))
 plot_fft_activations(
     sec_0_2_resid_acts_fft.real,
     title="Normal activations section 0.2 (extended embedding), real",
-    nrows=3,
-    figsize=(8, 10),
+    nrows=20,
+    figsize=(8, 60),
 )
 
 # %%
@@ -348,7 +352,7 @@ sec_0_2_resid_acts_transformed_fft = torch.fft.fft2(sec_0_2_resid_acts_transform
 plot_fft_activations(
     sec_0_2_resid_acts_transformed_fft.real,
     title="PCA activations section 0.2 (extended embedding), real",
-    nrows=3,
-    figsize=(8, 10),
+    nrows=20,
+    figsize=(8, 60),
 )
 # %%

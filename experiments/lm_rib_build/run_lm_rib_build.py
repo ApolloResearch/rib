@@ -4,13 +4,15 @@ transformer-lens model.
 
 Steps to build the graph:
 1. Load a model from transformerlens (either from_pretrained or via ModelConfig).
-2. Fold in the biases into the weights.
-3. Convert the model to a SequentialTransformer model, which has nn.Modules corresponding to each
+2. Convert the model to a SequentialTransformer model, which has nn.Modules corresponding to each
     node layer.
-5. Collect the gram matrices at each node layer.
-6. Calculate the interaction basis matrices (labelled C in the paper) for each node layer, starting
-    from the final node layer and working backwards.
-7. Calculate the edges of the interaction graph between each node layer.
+3. Fold in the biases into the weights.
+4. Collect the gram matrices at each node layer. If interaction_matrices_path is provided, we skip
+    this step.
+5. Calculate the interaction basis matrices (labelled C in the paper) for each node layer, starting
+    from the final node layer and working backwards. If interaction_matrices_path is provided, we
+    load the pre-saved matrices instead of calculating them.
+6. Calculate the edges of the interaction graph between each node layer.
 
 Usage:
     python run_lm_rib_build.py <path/to/config.yaml>
@@ -23,8 +25,7 @@ as well as the output of the final node layer. For example, if `node_layers` is 
     with the output of ln1.0.
 - One on the input to "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_in.0".
-- One on the output of "mlp_act.0". This will include the residual stream concatenated with the
-    output of "mlp_act.0".
+- (If logits_node_layer is True:) One on the output of the model, i.e. the logits.
 """
 import json
 import time
@@ -34,12 +35,18 @@ from typing import Literal, Optional, Union, cast
 
 import fire
 import torch
+from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from torch import Tensor
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
-from rib.interaction_algos import calculate_interaction_rotations
+from rib.interaction_algos import (
+    Eigenvectors,
+    InteractionRotation,
+    calculate_interaction_rotations,
+)
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.types import TORCH_DTYPES
@@ -62,12 +69,13 @@ class Config(BaseModel):
     tlens_model_path: Optional[Path] = Field(
         None, description="Path to saved transformer lens model."
     )
-    node_layers: list[str] = Field(
-        ..., description="Names of the modules whose inputs correspond to node layers in the graph."
+    interaction_matrices_path: Optional[Path] = Field(
+        None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
-    logits_node_layer: bool = Field(
+    node_layers: list[str] = Field(
         ...,
-        description="Whether to build an extra output node layer for the logits.",
+        description="Names of the modules whose inputs correspond to node layers in the graph."
+        "`output` is a special node layer that corresponds to the output of the model.",
     )
     rotate_final_node_layer: bool = Field(
         ...,
@@ -84,18 +92,31 @@ class Config(BaseModel):
         description="The batch size to use when calculating the gram matrices. If None, use the same"
         "batch size as the one used to build the graph.",
     )
+    edge_batch_size: Optional[int] = Field(
+        None,
+        description="The batch size to use when calculating the edges. If None, use the same batch"
+        "size as the one used to build the graph.",
+    )
     truncation_threshold: float = Field(
         ...,
         description="Remove eigenvectors with eigenvalues below this threshold.",
     )
     last_pos_module_type: Optional[Literal["add_resid1", "unembed"]] = Field(
         None,
-        description="Module type in which to only output the last position index.",
+        description="Module type in which to only output the last position index. For modular"
+        "arithmetic only.",
     )
 
     n_intervals: int = Field(
         ...,
-        description="The number of intervals to use for the integrated gradient approximation.",
+        description="The number of intervals to use for the integrated gradient approximation."
+        "If 0, we take a point estimate (i.e. just alpha=1).",
+    )
+
+    out_dim_chunk_size: Optional[int] = Field(
+        None,
+        description="The size of the chunks to use for calculating the jacobian. If none, calculate"
+        "the jacobian on all output dimensions at once.",
     )
 
     dtype: str = Field(..., description="The dtype to use when building the graph.")
@@ -128,6 +149,61 @@ class Config(BaseModel):
         return self
 
 
+def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
+    """Ensure that the config for calculating edges is compatible with that used to calculate Cs."""
+
+    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
+        "node_layers in the config must be a subsequence of the node layers in the config used to"
+        "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
+        "match those needed to correctly calculate the edges."
+    )
+
+    # The following attributes must exactly match across configs
+    for attr in [
+        "tlens_model_path",
+        "tlens_pretrained",
+    ]:
+        assert getattr(config, attr) == getattr(loaded_config, attr), (
+            f"{attr} in config ({getattr(config, attr)}) does not match "
+            f"{attr} in loaded matrices ({getattr(loaded_config, attr)})"
+        )
+
+    # Verify that, for huggingface datasets, we're not trying to calculate edges on data that
+    # wasn't used to calculate the Cs
+    assert config.dataset.name == loaded_config.dataset.name, "Dataset names must match"
+    assert config.dataset.return_set == loaded_config.dataset.return_set, "Return sets must match"
+    if isinstance(config.dataset, HFDatasetConfig):
+        assert isinstance(loaded_config.dataset, HFDatasetConfig)
+        if config.dataset.return_set_frac is not None:
+            assert loaded_config.dataset.return_set_frac is not None
+            assert (
+                config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
+            ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
+        elif config.dataset.return_set_n_samples is not None:
+            assert loaded_config.dataset.return_set_n_samples is not None
+            assert (
+                config.dataset.return_set_n_samples <= loaded_config.dataset.return_set_n_samples
+            ), "Cannot use a larger return_set_n_samples for edges than to calculate the Cs"
+
+
+def load_interaction_rotations(
+    config: Config,
+) -> tuple[
+    dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]
+]:
+    logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
+    assert config.interaction_matrices_path is not None
+    matrices_info = torch.load(config.interaction_matrices_path)
+
+    loaded_config = Config(**matrices_info["config"])
+    _verify_compatible_configs(config, loaded_config)
+
+    gram_matrices = matrices_info["gram_matrices"]
+    Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
+    Us = [Eigenvectors(**data) for data in matrices_info["eigenvectors"]]
+    return gram_matrices, Cs, Us
+
+
 def main(config_path_str: str):
     """Build the interaction graph and store it on disk."""
     config_path = Path(config_path_str)
@@ -136,8 +212,11 @@ def main(config_path_str: str):
 
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
-    if out_interaction_graph_file.exists() and not overwrite_output(out_interaction_graph_file):
+    if config.calculate_edges:
+        out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
+    else:
+        out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
+    if out_file.exists() and not overwrite_output(out_file):
         logger.info("Exiting.")
         return None
 
@@ -145,7 +224,7 @@ def main(config_path_str: str):
     dtype = TORCH_DTYPES[config.dtype]
 
     # Time each stage
-    start_time = time.time()
+    load_model_data_start_time = time.time()
     seq_model, tlens_cfg_dict = load_sequential_transformer(
         node_layers=config.node_layers,
         last_pos_module_type=config.last_pos_module_type,
@@ -168,9 +247,11 @@ def main(config_path_str: str):
         tlens_model_path=config.tlens_model_path,
     )
 
-    logger.info("Time to load model and dataset: %.2f", time.time() - start_time)
+    logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
     if config.eval_type is not None:
-        eval_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size)
+        eval_loader = create_data_loader(
+            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+        )
         # Test model accuracy/loss before graph building, ta be sure
         if config.eval_type == "accuracy":
             accuracy = eval_model_accuracy(hooked_model, eval_loader, dtype=dtype, device=device)
@@ -180,62 +261,76 @@ def main(config_path_str: str):
             logger.info("Model per-token loss on dataset: %.2f", loss)
 
     # Don't build the graph for the section of the model before the first node layer
-    graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
+    section_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
-    # Only need gram matrix for logits if we're rotating the final node layer
-    collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+    if config.interaction_matrices_path is None:
+        # Only need gram matrix for output if we're rotating the final node layer
+        collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
-    gram_train_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.gram_batch_size or config.batch_size
-    )
-    start_time = time.time()
-    logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
-    gram_matrices = collect_gram_matrices(
-        hooked_model=hooked_model,
-        module_names=graph_module_names,
-        data_loader=gram_train_loader,
-        dtype=dtype,
-        device=device,
-        collect_output_gram=collect_output_gram,
-        hook_names=config.node_layers,
-    )
+        gram_train_loader = create_data_loader(
+            dataset,
+            shuffle=False,
+            batch_size=config.gram_batch_size or config.batch_size,
+            seed=config.seed,
+        )
+        collect_gram_start_time = time.time()
+        logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
+        gram_matrices = collect_gram_matrices(
+            hooked_model=hooked_model,
+            module_names=section_names,
+            data_loader=gram_train_loader,
+            dtype=dtype,
+            device=device,
+            collect_output_gram=collect_output_gram,
+            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
+        )
 
-    logger.info("Time to collect gram matrices: %.2f", time.time() - start_time)
+        logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
-    start_time = time.time()
-    logger.info("Calculating interaction rotations.")
-    Cs, Us = calculate_interaction_rotations(
-        gram_matrices=gram_matrices,
-        module_names=graph_module_names,
-        hooked_model=hooked_model,
-        data_loader=graph_train_loader,
-        dtype=dtype,
-        device=device,
-        n_intervals=config.n_intervals,
-        logits_node_layer=config.logits_node_layer,
-        truncation_threshold=config.truncation_threshold,
-        rotate_final_node_layer=config.rotate_final_node_layer,
-        hook_names=config.node_layers,
-    )
+        graph_train_loader = create_data_loader(
+            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+        )
+        c_start_time = time.time()
+        logger.info("Calculating interaction rotations (Cs).")
+        Cs, Us = calculate_interaction_rotations(
+            gram_matrices=gram_matrices,
+            section_names=section_names,
+            node_layers=config.node_layers,
+            hooked_model=hooked_model,
+            data_loader=graph_train_loader,
+            dtype=dtype,
+            device=device,
+            n_intervals=config.n_intervals,
+            truncation_threshold=config.truncation_threshold,
+            rotate_final_node_layer=config.rotate_final_node_layer,
+        )
+        logger.info("Time to calculate Cs: %.2f", time.time() - c_start_time)
+    else:
+        gram_matrices, Cs, Us = load_interaction_rotations(config=config)
 
-    logger.info("Time to calculate interaction rotations: %.2f", time.time() - start_time)
     if not config.calculate_edges:
         logger.info("Skipping edge calculation.")
         E_hats = {}
     else:
+        edge_train_loader = create_data_loader(
+            dataset,
+            shuffle=False,
+            batch_size=config.edge_batch_size or config.batch_size,
+            seed=config.seed,
+        )
         logger.info("Calculating edges.")
-        start_time = time.time()
+        edges_start_time = time.time()
         E_hats = collect_interaction_edges(
             Cs=Cs,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
-            module_names=graph_module_names,
-            data_loader=graph_train_loader,
+            section_names=section_names,
+            data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
+            out_dim_chunk_size=config.out_dim_chunk_size,
         )
-        logger.info("Time to calculate edges: %.2f", time.time() - start_time)
+        logger.info("Time to calculate edges: %.2f", time.time() - edges_start_time)
 
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []
@@ -252,14 +347,14 @@ def main(config_path_str: str):
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
+        "edges": [(node_layer, E_hats[node_layer]) for node_layer in E_hats],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
     }
 
     # Save the results (which include torch tensors) to file
-    torch.save(results, out_interaction_graph_file)
-    logger.info("Saved results to %s", out_interaction_graph_file)
+    torch.save(results, out_file)
+    logger.info("Saved results to %s", out_file)
 
 
 if __name__ == "__main__":

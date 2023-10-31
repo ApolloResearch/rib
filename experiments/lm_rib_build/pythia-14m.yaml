@@ -2,6 +2,7 @@ exp_name: pythia-14m
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
+interaction_matrices_path: null
 dataset:
   source: huggingface
   name: NeelNanda/pile-10k
@@ -11,18 +12,19 @@ dataset:
   return_set_n_samples: null
   return_set_portion: first
 node_layers:
-  - ln1.0
   - mlp_out.0
   - ln2.3
   - mlp_out.3
   - ln1.5
   - mlp_out.5
-batch_size: 24  #  A100 can handle 24
-gram_batch_size: 80  #  A100 can handle 80
+  - output
+batch_size: 12  #  A100 can handle 24
+gram_batch_size: 40  #  A100 can handle 80
+edge_batch_size: 1
 truncation_threshold: 1e-6
-logits_node_layer: true
 rotate_final_node_layer: false
-n_intervals: 10
+n_intervals: 20
+out_dim_chunk_size: 5
 dtype: float32
 calculate_edges: false
 eval_type: null

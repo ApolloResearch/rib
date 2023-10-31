@@ -266,6 +266,8 @@ def interaction_edge_pre_forward_hook_fn(
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
+    out_dim: int,
+    out_dim_chunk_size: Optional[int] = None,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -290,6 +292,11 @@ def interaction_edge_pre_forward_hook_fn(
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 1.
+        out_dim: The number of basis vectors in the output of this module. Will be equal to
+            C_out.shape[1] if C_out is not None, otherwise it will be equal to the raw concatenated
+            output dimension of the module.
+        out_dim_chunk_size: The chunk size to use when calculating the jacobian. If None, the
+            entire jacobian is calculated at once. The chunks get applied to the output dimension.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -318,6 +325,8 @@ def interaction_edge_pre_forward_hook_fn(
         fn=edge_norm_partial,
         in_tensor=f_hat,
         n_intervals=n_intervals,
+        out_dim=out_dim,
+        out_dim_chunk_size=out_dim_chunk_size,
     )
     einsum_pattern = "bipj,bpj->ij" if has_pos else "bij,bj->ij"
 

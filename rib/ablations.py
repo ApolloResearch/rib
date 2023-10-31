@@ -25,6 +25,11 @@ class ScheduleConfig(BaseModel):
         description="The threshold to use for stopping the ablation calculations early. If None,"
         "we don't use early stopping.",
     )
+    specific_points: Optional[list[int]] = Field(
+        None,
+        description="A list of number of vecs remaining to add to the schedule. If None, we use"
+        "the default schedule.",
+    )
 
 
 class ExponentialScheduleConfig(ScheduleConfig):
@@ -88,6 +93,11 @@ def ablate_and_test(
 
     base_result: Optional[float] = None
 
+    # Track the results for the case when there is no ablation. There may be many of these, so we
+    # store them to avoid recomputing.
+    n_truncated_vecs = basis_vecs.shape[0] - basis_vecs.shape[1]
+    no_ablation_result: Optional[float] = None
+
     eval_results: dict[int, float] = {}
     # Iterate through possible number of ablated vectors, starting from no ablated vectors
     for i, n_ablated_vecs in enumerate(
@@ -97,14 +107,23 @@ def ablate_and_test(
             desc=f"Ablating {module_name}",
         )
     ):
-        n_vecs_remaining = basis_vecs.shape[1] - n_ablated_vecs
+        # Note that we may have truncated vectors with small eigenvalues, so we make sure not to
+        # ablate more vectors than we have remaining
+        n_vecs_remaining = basis_vecs.shape[0] - n_ablated_vecs
+
+        # Count the n_ablated_vecs taking into account the truncation
+        n_ablated_vecs_trunc = max(n_ablated_vecs - n_truncated_vecs, 0)
+
+        if n_ablated_vecs_trunc == 0 and no_ablation_result is not None:
+            eval_results[n_vecs_remaining] = no_ablation_result
+            continue
 
         basis_vecs = basis_vecs.to(device)
         basis_vecs_pinv = basis_vecs_pinv.to(device)
         rotation_matrix = calc_rotation_matrix(
             vecs=basis_vecs,
             vecs_pinv=basis_vecs_pinv,
-            n_ablated_vecs=n_ablated_vecs,
+            n_ablated_vecs=n_ablated_vecs_trunc,
         )
 
         rotation_hook = Hook(
@@ -135,7 +154,7 @@ def ablate_and_test(
 @torch.inference_mode()
 def run_ablations(
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]],
-    node_layers: list[str],
+    ablation_node_layers: list[str],
     hooked_model: HookedModel,
     data_loader: DataLoader,
     eval_fn: Callable,
@@ -146,10 +165,15 @@ def run_ablations(
 ) -> dict[str, dict[int, float]]:
     """Rotate to and from a truncated basis and compare ablation accuracies/losses.
 
+    Note that we want our ablation schedules for different bases to match up, even though different
+    bases may have different number of basis vectors due to truncation. We therefore create our
+    ablation schedule assuming a non-truncated basis (i.e. using the full hidden size
+    (basis_vecs.shape[0])).
+
     Args:
         basis_matrices: List of basis vector matrices and their pseudoinverses. In the orthogonal
             basis case, the pseudoinverse is the transpose.
-        node_layers: The names of the node layers to build the graph with.
+        ablation_node_layers: The names of the node layers whose (rotated) inputs we want to ablate.
         hooked_model: The hooked model.
         data_loader: The data loader to use for testing.
         eval_fn: The function to use to evaluate the model.
@@ -162,10 +186,10 @@ def run_ablations(
         A dictionary mapping node layers to ablation accuracies/losses.
     """
     results: dict[str, dict[int, float]] = {}
-    for hook_name, module_name, (basis_vecs, basis_vecs_pinv) in zip(
-        node_layers, graph_module_names, basis_matrices
+    for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
+        ablation_node_layers, graph_module_names, basis_matrices
     ):
-        n_vecs = basis_vecs.shape[1]
+        n_vecs = basis_vecs.shape[0]
         if isinstance(schedule_config, ExponentialScheduleConfig):
             ablation_schedule = calc_exponential_ablation_schedule(
                 n_vecs=n_vecs,
@@ -184,6 +208,16 @@ def run_ablations(
         else:
             raise NotImplementedError(f"Schedule: {schedule_config.schedule_type} not supported.")
 
+        if schedule_config.specific_points is not None:
+            # Ignore the specific points that are greater than the number of vecs
+            specific_ablated_vecs = [
+                n_vecs - x for x in schedule_config.specific_points if x <= n_vecs
+            ]
+            # Add our specific points for the number of vecs remaining to the ablation schedule
+            ablation_schedule = sorted(
+                list(set(ablation_schedule + specific_ablated_vecs)), reverse=True
+            )
+
         ablation_eval_results: dict[int, float] = ablate_and_test(
             hooked_model=hooked_model,
             module_name=module_name,
@@ -194,17 +228,17 @@ def run_ablations(
             ablation_schedule=ablation_schedule,
             device=device,
             dtype=dtype,
-            hook_name=hook_name,
+            hook_name=ablation_node_layer,
             early_stopping_threshold=schedule_config.early_stopping_threshold,
         )
-        results[hook_name] = ablation_eval_results
+        results[ablation_node_layer] = ablation_eval_results
 
     return results
 
 
 def load_basis_matrices(
     interaction_graph_info: dict,
-    node_layers: list[str],
+    ablation_node_layers: list[str],
     ablation_type: Literal["rib", "orthogonal"],
     dtype: torch.dtype,
     device: str,
@@ -223,19 +257,22 @@ def load_basis_matrices(
 
     # Get the basis vecs and their pseudoinverses using the module_names as keys
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
-    for module_name in node_layers:
+    for module_name in ablation_node_layers:
         for basis_info in interaction_graph_info[basis_matrix_key]:
             if basis_info["node_layer_name"] == module_name:
                 if ablation_type == "rib":
+                    assert basis_info["C"] is not None, f"{module_name} has no C matrix."
+                    assert basis_info["C_pinv"] is not None, f"{module_name} has no C_pinv matrix."
                     basis_vecs = basis_info["C"].to(dtype=dtype, device=device)
                     basis_vecs_pinv = basis_info["C_pinv"].to(dtype=dtype, device=device)
                 elif ablation_type == "orthogonal":
-                    # Pseudoinverse of an orthonormal matrix is its transpose
+                    assert basis_info["U"] is not None, f"{module_name} has no U matrix."
                     basis_vecs = basis_info["U"].to(dtype=dtype, device=device)
+                    # Pseudoinverse of an orthonormal matrix is its transpose
                     basis_vecs_pinv = basis_vecs.T.detach().clone()
                 basis_matrices.append((basis_vecs, basis_vecs_pinv))
                 break
     assert len(basis_matrices) == len(
-        node_layers
+        ablation_node_layers
     ), f"Could not find all node_layer modules in the interaction graph config."
     return basis_matrices

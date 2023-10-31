@@ -173,12 +173,12 @@ def edge_norm(
 
     """
     # Compute f^{l+1}(x) to which the derivative is not applied.
-    with torch.no_grad():
+    with torch.inference_mode():
         # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
         f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_in_hat @ C_in_pinv
         input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
 
-        output_const = module(*tuple(x * 1 for x in input_tuples))
+        output_const = module(*tuple(x.detach().clone() for x in input_tuples))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
 
     # Compute f^{l+1}(f^l(alpha x))
@@ -213,6 +213,45 @@ def edge_norm(
     return f_out_hat_norm
 
 
+def calculate_integration_intervals(
+    n_intervals: int,
+    integral_boundary_relative_epsilon: float = 1e-3,
+) -> tuple[np.ndarray, float]:
+    """Calculate the integration steps for n_intervals between 0+eps and 1-eps.
+
+    Args:
+        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+            point estimate at alpha=1 instead of using the trapezoidal rule.
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+
+    Returns:
+        alphas: The integration steps.
+        interval_size: The size of each integration step, including a correction factor to account
+            for integral_boundary_epsilon.
+    """
+    # Scale accuracy of the integral boundaries with the number of intervals
+    integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
+    # Integration samples
+    if n_intervals == 0:
+        alphas = np.array([0.5])
+        interval_size = 1.0
+        n_alphas = 1
+    else:
+        # Integration steps for n_intervals intervals
+        n_alphas = n_intervals + 1
+        alphas = np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_alphas)
+        assert np.allclose(np.diff(alphas), alphas[1] - alphas[0]), "alphas must be equally spaced."
+        # Multiply the interval sizes by (1 + 2 eps) to balance out the smaller integration interval
+        interval_size = (alphas[1] - alphas[0]) * (1 + 2 * integral_boundary_epsilon)
+        assert np.allclose(
+            n_intervals * interval_size, 1
+        ), "Interval size should match 1/n_intervals."
+    return alphas, interval_size
+
+
 def integrated_gradient_trapezoidal_norm(
     module: torch.nn.Module,
     inputs: Union[
@@ -244,15 +283,9 @@ def integrated_gradient_trapezoidal_norm(
             ill-defined derivatives at 0 and 1.
             integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
     """
-    # Scale accuracy of the integral boundaries with the number of intervals
-    integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
     # Compute f^{l+1}(x) to which the derivative is not applied.
-    with torch.no_grad():
-        # Do this so that no_grad actually can do its job. Also works with `x * 1` rather than
-        # `x.clone()`. We could also consider using torch.info.inference_mode() instead but we
-        # don't expect a difference, see documentation
-        # [here](https://pytorch.org/docs/stable/notes/autograd.html#locally-disable-grad-doc).
-        output_const = module(*tuple(x.clone() for x in inputs))
+    with torch.inference_mode():
+        output_const = module(*tuple(x.detach().clone() for x in inputs))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
 
     # Ensure that the inputs have requires_grad=True from now on
@@ -261,32 +294,15 @@ def integrated_gradient_trapezoidal_norm(
 
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    # Integration samples
-    if n_intervals == 0:
-        alphas = np.array([0.5])
-        interval_size = 1.0
-        n_alphas = 1
-    else:
-        # Integration steps for n_intervals intervals
-        n_alphas = n_intervals + 1
-        alphas = np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_alphas)
-        assert np.allclose(np.diff(alphas), alphas[1] - alphas[0]), "alphas must be equally spaced."
-        # Multiply the interval sizes by (1 + 2 eps) to balance out the smaller integration interval
-        interval_size = (alphas[1] - alphas[0]) * (1 + 2 * integral_boundary_epsilon)
-        assert np.allclose(
-            n_intervals * interval_size, 1
-        ), "Interval size should match 1/n_intervals."
+    alphas, interval_size = calculate_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon
+    )
 
     for alpha_index, alpha in enumerate(alphas):
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
         outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
-
-        # Check that the output types are as expected
-        assert isinstance(output_alpha, type(output_const)), "Outputs should be the same type."
-        assert isinstance(outputs_alpha, tuple), "Outputs (alpha) should be a tuple."
-        assert isinstance(outputs_const, tuple), "Outputs (const) should be a tuple."
 
         # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
         outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
@@ -307,7 +323,7 @@ def integrated_gradient_trapezoidal_norm(
         alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_alphas - 1):
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
             alpha_in_grads = 0.5 * alpha_in_grads
 
         in_grads += alpha_in_grads * interval_size
@@ -351,9 +367,6 @@ def integrated_gradient_trapezoidal_jacobian(
             ill-defined derivatives at 0 and 1.
             integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
     """
-    # Scale accuracy of the integral boundaries with the number of intervals
-    integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
-
     # Create a list of out_dim chunks. We use these to index the output of the function.
     # E.g. output[start_idx:end_idx] will give the output corresponding to the chunk.
     # Add out_dim to the list to ensure that the last chunk grabs the remaining elements
@@ -366,21 +379,9 @@ def integrated_gradient_trapezoidal_jacobian(
         ]
     ] = None
 
-    # Integration samples
-    if n_intervals == 0:
-        alphas = np.array([0.5])
-        interval_size = 1.0
-        n_alphas = 1
-    else:
-        # Integration steps for n_intervals intervals
-        n_alphas = n_intervals + 1
-        alphas = np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_alphas)
-        assert np.allclose(np.diff(alphas), alphas[1] - alphas[0]), "alphas must be equally spaced."
-        # Multiply the interval sizes by (1 + 2 eps) to balance out the smaller integration interval
-        interval_size = (alphas[1] - alphas[0]) * (1 + 2 * integral_boundary_epsilon)
-        assert np.allclose(
-            n_intervals * interval_size, 1
-        ), "Interval size should match 1/n_intervals."
+    alphas, interval_size = calculate_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon
+    )
 
     for alpha_index, alpha in enumerate(alphas):
         # Assume that fn is like edge_norm, taking two inputs, The first one is
@@ -413,7 +414,7 @@ def integrated_gradient_trapezoidal_jacobian(
 
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_alphas - 1):
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
             alpha_jac_out = 0.5 * alpha_jac_out
 
         if jac_out is None:

@@ -156,7 +156,7 @@ def test_intergrated_gradient_trapezoidal_norm_linear():
 
     assert torch.allclose(
         result_point_estimate, result_1 * 1
-    ), "Point estimate and double the n_intervals==1 estimate are not close enough"
+    ), "Point estimate and n_intervals==1 estimate are not close enough"
     assert torch.allclose(
         result_1, result_5
     ), "n_intervals==1 and n_intervals==5 are not close enough"

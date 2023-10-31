@@ -338,7 +338,7 @@ def integrated_gradient_trapezoidal_jacobian(
     return jac_out
 
 
-def calculate_gram_matrix(
+def calc_gram_matrix(
     acts: Union[
         Float[Tensor, "batch pos d_hidden"],
         Float[Tensor, "batch d_hidden"],

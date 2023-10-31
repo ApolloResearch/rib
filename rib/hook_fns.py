@@ -18,7 +18,7 @@ from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
-    calculate_gram_matrix,
+    calc_gram_matrix,
     edge_norm,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
@@ -85,7 +85,7 @@ def gram_forward_hook_fn(
     # Concat over the hidden dimension
     out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
-    gram_matrix = calculate_gram_matrix(out_acts)
+    gram_matrix = calc_gram_matrix(out_acts)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
@@ -117,7 +117,7 @@ def gram_pre_forward_hook_fn(
 
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
 
-    gram_matrix = calculate_gram_matrix(in_acts)
+    gram_matrix = calc_gram_matrix(in_acts)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 

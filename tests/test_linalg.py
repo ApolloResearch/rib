@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from rib.linalg import (
+    calc_gram_matrix,
     calc_rotation_matrix,
     eigendecompose,
     integrated_gradient_trapezoidal_jacobian,
@@ -309,3 +310,22 @@ def test_integrated_gradient_trapezoidal_jacobian_chunks():
     assert torch.allclose(
         result_1, result_5
     ), "n_intervals==1 and n_intervals==5 are not close enough"
+
+
+@pytest.mark.parametrize(
+    "input_tensor, expected_output",
+    [
+        # Tensor without positional indices
+        (torch.tensor([[1.0, 2.0], [3.0, 4.0]]), torch.tensor([[10.0, 14.0], [14.0, 20.0]])),
+        # Tensor with positional indices (scaled by number of positions = 2)
+        (
+            torch.tensor([[[1.0, 2.0], [3.0, 4.0]], [[1.0, 2.0], [3.0, 4.0]]]),
+            torch.tensor([[10.0, 14.0], [14.0, 20.0]]),
+        ),
+    ],
+)
+def test_calc_gram_matrix(input_tensor, expected_output):
+    gram_matrix = calc_gram_matrix(input_tensor)
+
+    # Check if the output tensor matches the expected tensor
+    assert torch.allclose(gram_matrix, expected_output, atol=1e-6)

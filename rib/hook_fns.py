@@ -90,7 +90,9 @@ def gram_forward_hook_fn(
     else:
         raise ValueError("Unexpected tensor rank")
 
-    gram_matrix = torch.einsum(einsum_pattern, out_acts, out_acts)
+    pos_normalisation = 1 if out_acts.dim() == 2 else out_acts.shape[1]
+
+    gram_matrix = torch.einsum(einsum_pattern, out_acts / pos_normalisation, out_acts)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
@@ -131,7 +133,10 @@ def gram_pre_forward_hook_fn(
     else:
         raise ValueError("Unexpected tensor rank")
 
-    gram_matrix = torch.einsum(einsum_pattern, in_acts, in_acts)
+    pos_normalisation = 1 if in_acts.dim() == 2 else in_acts.shape[1]
+    # pos_normalisation = 1
+
+    gram_matrix = torch.einsum(einsum_pattern, in_acts / pos_normalisation, in_acts)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 

@@ -235,7 +235,7 @@ def calculate_interaction_rotations(
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
-        _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
+        M_eigvals, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
 
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
@@ -248,6 +248,17 @@ def calculate_interaction_rotations(
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
             Lambda_abs, truncation_threshold
         )
+        # import json
+
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        plt.clf()
+        plt.yscale("log")
+        plt.title(f"gram_scaled_Lambda_abs {node_layer}")
+        plt.plot(np.sort(Lambda_abs.detach().cpu().numpy()))
+
+        plt.savefig(f"Lambda_abs_gram_scaled{node_layer}.png")
 
         C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
             (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()

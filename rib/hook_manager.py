@@ -131,7 +131,7 @@ class HookedModel(torch.nn.Module):
         has_children: Callable[[torch.nn.Module], bool] = (
             lambda module: sum(1 for _ in module.children()) > 0
         )
-        module_names = [name for name, mod in self.model.named_modules() if not has_children(mod)]
+        module_names = [name for name, mod in self.model.named_modules() if name.count(".") >= 2]
         act_hooks: list[Hook] = []
         for module_name in module_names:
             act_hooks.append(

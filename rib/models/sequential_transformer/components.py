@@ -154,6 +154,42 @@ class Add(nn.Module):
             return summed
 
 
+class AttentionScores(nn.Module):
+    """
+    Compute the attention scores. This module exists purely so that we can hook the attention
+    scores (and pattern). Note that unlike the other modules, does not return a tuple but just
+    a single tensor.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(
+        self,
+        q: Float[Tensor, "... query_pos head_index d_head"],
+        k: Float[Tensor, "... key_pos head_index d_head"],
+        attn_scale: float,
+    ) -> Float[Tensor, "... head_index query_pos key_pos"]:
+        """Calculate the attention scores.
+
+        Args:
+            q: The query tensor.
+            k: The key tensor.
+            attn_scale: The scale to divide the attention scores by.
+        """
+        attn_scores = (
+            einsum(
+                "... query_pos head_index d_head, \
+                        ... key_pos head_index d_head \
+                        -> ... head_index query_pos key_pos",
+                q,
+                k,
+            )
+            / attn_scale
+        )  # [..., head_index, query_pos, key_pos]
+        return attn_scores
+
+
 class Attention(nn.Module):
     def __init__(
         self,
@@ -192,6 +228,8 @@ class Attention(nn.Module):
         self.b_K = nn.Parameter(torch.zeros(self.cfg.n_heads, self.cfg.d_head, dtype=cfg.dtype))
         self.b_V = nn.Parameter(torch.zeros(self.cfg.n_heads, self.cfg.d_head, dtype=cfg.dtype))
         self.b_O = nn.Parameter(torch.zeros(self.cfg.d_model, dtype=cfg.dtype))
+
+        self.attention_scores = AttentionScores()
 
         # Create a max_ctx x max_ctx mask, with True iff that query position
         # can attend to that key position (query is first axis, key is second axis)
@@ -296,15 +334,8 @@ class Attention(nn.Module):
             q = q.to(torch.float32)
             k = k.to(torch.float32)
 
-        attn_scores = (
-            einsum(
-                "... query_pos head_index d_head, \
-                        ... key_pos head_index d_head \
-                        -> ... head_index query_pos key_pos",
-                q,
-                k,
-            )
-            / self.attn_scale
+        attn_scores = self.attention_scores(
+            q, k, self.attn_scale
         )  # [..., head_index, query_pos, key_pos]
 
         # Only supports causal attention (not bidirectional)

@@ -8,9 +8,11 @@ import einops
 import fire
 import matplotlib.pyplot as plt
 import numpy as np
+import plotly.express as px
 import torch
 import torch.optim as optim
 import wandb
+from matplotlib.colors import LogNorm, Normalize, SymLogNorm
 from pydantic import BaseModel
 from sklearn.decomposition import PCA
 from torch import nn
@@ -125,24 +127,29 @@ print(train_loader.dataset[0:10])
 # %%
 
 
-def get_normal_activation_sizes(hooked_model=hooked_model, section="sections.section_1.2", p=113):
+def get_normal_activation_sizes(
+    hooked_model=hooked_model, section="sections.section_1.2", p=113, pos_index=-1
+):
     _, cache = hooked_model.run_with_cache(torch.tensor([0, 0, p]))
     # Get activations
     acts = cache[section]["acts"]
+    print(type(acts))
+    print(acts[0].shape)
 
     sizes = []
     for i, act in enumerate(acts):
-        sizes.append(act[0].shape[0])
+        sizes.append(act[pos_index].shape[0])
     return sizes
 
 
 def get_normal_activations(
-    hooked_model=hooked_model, section="sections.section_1.2", sizes=None, p=113
+    hooked_model=hooked_model, section="sections.section_1.2", sizes=None, p=113, pos_index=-1
 ):
     return_acts = []
 
     if sizes is None:
         sizes = get_normal_activation_sizes(hooked_model=hooked_model, section=section, p=p)
+        print("Determined sizes", sizes)
 
     for size in sizes:
         return_acts.append(torch.empty([p, p, size]))
@@ -150,14 +157,53 @@ def get_normal_activations(
     for x in tqdm(range(p)):
         for y in range(p):
             batch_index = 0
-            _, cache = hooked_model.run_with_cache(torch.tensor([x, y, p]))
+            _, cache = hooked_model.run_with_cache(torch.tensor([[x, y, p]]))
             # Get activations
             acts = cache[section]["acts"]
             assert len(acts) == len(sizes), f"{len(acts)} != {len(sizes)}"
             for i, act in enumerate(acts):
-                assert act[batch_index].shape[0] == sizes[i], f"{act.shape[0]} != {sizes[i]}"
-                return_acts[i][x, y] = act[batch_index]
+                assert (
+                    act[batch_index][pos_index].shape[0] == sizes[i]
+                ), f"{act.shape[0]} != {sizes[i]}"
+                return_acts[i][x, y] = act[batch_index][pos_index]
     return tuple(return_acts)
+
+
+# %%$
+def get_attn_scores(
+    hooked_model=hooked_model,
+    section="sections.section_0.1.attention_scores",
+    p=113,
+):
+    batch_index = 0
+    head = slice(None)
+    key = slice(None)
+    query = slice(None)
+
+    _, cache = hooked_model.run_with_cache(torch.tensor([[0, 0, p]]))
+    acts = cache[section]["acts"]
+    assert len(acts) == 1, f"acts should be tuple size 1 for attn scores"
+    batch_size, n_heads, n_query, n_key = acts[0].shape
+    # confirmed these, acts[0][47,47,3,1] has a -1e5 at last position
+    assert n_query == n_key, f"n_ctx should be equal to n_ctx2"
+    assert batch_size == 1, f"batch_size should be 1"
+    assert n_heads == 4, f"n_heads should be 4"
+    assert n_query == 3, f"n_query should be 3"
+
+    return_acts = torch.empty([p, p, n_heads, n_query, n_key])
+
+    for x in tqdm(range(p)):
+        for y in range(p):
+            _, cache = hooked_model.run_with_cache(torch.tensor([[x, y, p]]))
+            # Get activations
+            act = cache[section]["acts"][0]
+            return_acts[x, y] = act[batch_index, head, key, query]
+    return return_acts
+
+
+sec_attention_scores = get_attn_scores(section="sections.section_0.1.attention_scores")
+sec_attention_pattern = torch.softmax(sec_attention_scores, dim=-1)[:, :, :, -1]
+# import slice
 
 
 # %%
@@ -165,7 +211,7 @@ sec_0_2_resid_acts = get_normal_activations(section="sections.section_0.2")[0]
 
 sec_1_1_resid_acts, sec_1_1_mlp_pre_acts = get_normal_activations(
     section="sections.section_1.1", sizes=(129, 513)
-)
+)  # type: ignore
 sec_1_2_resid_acts, sec_1_2_mlp_post_acts = get_normal_activations(
     section="sections.section_1.2", sizes=(129, 513)
 )
@@ -173,6 +219,10 @@ assert torch.allclose(sec_1_1_resid_acts, sec_1_2_resid_acts)
 assert torch.allclose(torch.relu(sec_1_1_mlp_pre_acts), sec_1_2_mlp_post_acts)
 
 sec_2_1_resid_acts = get_normal_activations(section="sections.section_2.1", sizes=(129,))[0]
+
+# %%
+
+
 # %%
 
 
@@ -187,12 +237,21 @@ def plot_activations(acts, title="Default title", nrows=3, ncols=2, figsize=(8, 
             fig.colorbar(im, ax=ax)
 
 
+plot_activations(
+    sec_attention_pattern[:, :, :, 0],
+    title="Attention pattern on pos x",
+    nrows=2,
+    ncols=2,
+    figsize=(8, 10),
+)
+
+
 # plot_activations(sec_1_1_resid_acts, title="Residual activations section 1.1")
 # plot_activations(sec_1_1_mlp_pre_acts, title="MLP pre-activations section 1.1")
 # plot_activations(sec_1_2_resid_acts, title="Residual activations section 1.2")
 # plot_activations(sec_1_2_mlp_post_acts, title="MLP post-activations section 1.2")
 # plot_activations(sec_2_1_resid_acts, title="Residual activations section 2.1")
-plot_activations(sec_0_2_resid_acts, title="Residual activations section 0.2 (extended embedding)")
+# plot_activations(sec_0_2_resid_acts, title="Residual activations section 0.2 (extended embedding)")
 
 
 # %%
@@ -204,10 +263,11 @@ def collect_RIB_acts(
     p=113,
     interaction_graph_path="/mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt",
     ablation_type="rib",
+    pos_index=-1,
 ):
     # Note that the mapping feels shifted because hooks give us outputs but rib acts are inputs
     node_layer_dict = {
-        "sections.section_pre.2": "ln1.0",
+        "sections.pre.2": "ln1.0",
         "sections.section_0.2": "ln2.0",
         "sections.section_1.2": "mlp_out.0",
         "sections.section_2.2": "unembed",
@@ -238,17 +298,25 @@ def collect_RIB_acts(
     for x in tqdm(range(p)):
         for y in range(p):
             batch_index = 0
-            _, cache = hooked_model.run_with_cache(torch.tensor([x, y, p]))
+            _, cache = hooked_model.run_with_cache(torch.tensor([[x, y, p]]))
             acts = cache[section]["acts"]
-            # print("Shapes", [act.shape for act in acts])
-            acts = torch.cat([acts[i][batch_index] for i in range(len(acts))], dim=-1)
+            if x == 0 and y == 0:
+                print("In shapes (pre-cat)", [act.shape for act in acts])
+            acts = torch.cat([acts[i][batch_index][pos_index] for i in range(len(acts))], dim=-1)
+
             transformed_acts = einops.einsum(
-                acts, basis_matrices[node_index][basis_matrices_index], "act, act rib -> rib"
+                acts, basis_matrices[node_index][basis_matrices_index].cpu(), "act, act rib -> rib"
             )
             rib_return_acts[x, y] = transformed_acts
+            if x == 0 and y == 0:
+                print("In shapes (cat tuples, batch 0)", acts.shape)
+                print("Out shapes", transformed_acts.shape)
     return rib_return_acts
 
 
+rib_acts_embedding_x = collect_RIB_acts(section="sections.pre.2", pos_index=0)
+rib_acts_embedding_y = collect_RIB_acts(section="sections.pre.2", pos_index=1)
+rib_acts_embedding_z = collect_RIB_acts(section="sections.pre.2", pos_index=-1)
 rib_acts_extended_embedding = collect_RIB_acts(section="sections.section_0.2")
 rib_acts_mlp_post_act = collect_RIB_acts(section="sections.section_1.2")
 rib_acts_pre_unembed = collect_RIB_acts(section="sections.section_2.2")
@@ -257,13 +325,18 @@ rib_acts_pre_unembed = collect_RIB_acts(section="sections.section_2.2")
 # %%
 
 plot_activations(
-    rib_acts_extended_embedding,
+    rib_acts_embedding_z,
     title="RIB activations section 0.2 (extended embedding)",
     nrows=10,
     figsize=(8, 30),
 )
 # plot_activations(rib_acts_mlp_post_act, title="RIB activations section 1.2 (MLP post-act)")
 # plot_activations(rib_acts_pre_unembed, title="RIB activations section 2.2 (pre-unembed)")
+# %%
+
+# Fourier transform
+rib_acts_extended_embedding_fft = torch.fft.fft2(rib_acts_extended_embedding, dim=(0, 1))
+rib_acts_mlp_post_act_fft = torch.fft.fft2(rib_acts_mlp_post_act, dim=(0, 1))
 # %%
 
 
@@ -279,17 +352,27 @@ def plot_fft_activations(
         extent = [freqs[0], freqs[-1], freqs[0], freqs[-1]]
     else:
         extent = None
-    title += "\n" + "".join([f"{freq:.2f} " for freq in freqs[::10]])
+
+    assert ncols == 2, "Only works for 2 columns with Re/Im"
+
     fig.suptitle(title)
-    for i, axs in enumerate(axes):
-        for j, ax in enumerate(axs):
-            ax.set_title(f"({i * ncols + j})")
-            vminmax = acts[:, :, i * ncols + j].abs().max() / 10
+    for col, title_info in enumerate(["Magnitude", "Phase"]):
+        if col == 0:
+            acts_component = acts.abs()
+        else:
+            acts_component = acts.angle()
+        for row, ax in enumerate(axes[:, col]):
+            ax.set_title(f"({row}) {title_info}")
+            vminmax = acts_component[:, :, row].abs().max().item()
+            if col == 0:
+                # SymLogNorm
+                norm = SymLogNorm(linthresh=vminmax / 10, linscale=1, vmin=-vminmax, vmax=vminmax)
+            else:
+                norm = Normalize(vmin=-vminmax, vmax=vminmax)
             im = ax.imshow(
-                acts[:, :, i * ncols + j].numpy(),
+                acts_component[:, :, row].numpy(),
                 cmap="RdBu",
-                vmin=-vminmax,
-                vmax=vminmax,
+                norm=norm,
                 aspect="equal",
                 extent=extent,
                 origin="lower",
@@ -304,31 +387,20 @@ def plot_fft_activations(
 
 # %%
 
-# Fourier transform
-rib_acts_extended_embedding_fft = torch.fft.fft2(rib_acts_extended_embedding, dim=(0, 1))
-
-# %%
-
 plot_fft_activations(
-    rib_acts_extended_embedding_fft.real,
-    title="RIB activations section 0.2 (extended embedding), real",
+    rib_acts_extended_embedding_fft,
+    title="RIB activations section 0.2 (extended embedding), combined",
     nrows=20,
     figsize=(8, 60),
 )
 
-plot_fft_activations(
-    rib_acts_extended_embedding_fft.imag,
-    title="RIB activations section 0.2 (extended embedding), imag",
-    nrows=20,
-    figsize=(8, 60),
-)
 # %%
 
 sec_0_2_resid_acts_fft = torch.fft.fft2(sec_0_2_resid_acts, dim=(0, 1))
 
 plot_fft_activations(
-    sec_0_2_resid_acts_fft.real,
-    title="Normal activations section 0.2 (extended embedding), real",
+    rib_acts_mlp_post_act_fft,
+    title="RIB activations section 1.2 (MLP post-act), combined",
     nrows=20,
     figsize=(8, 60),
 )
@@ -346,13 +418,115 @@ def pca_activations(acts):
     return acts_transformed
 
 
+# %%
+
+
+def svd_activations(acts):
+    acts_flat = acts.reshape(-1, acts.shape[-1])
+    U, S, Vt = np.linalg.svd(acts_flat, full_matrices=False)
+    acts_transformed = np.dot(acts_flat, Vt.T)
+    acts_transformed = acts_transformed.reshape(acts.shape[0], acts.shape[1], -1)
+    explained_variance_ratio = S**2 / (S**2).sum()
+    print("Explained variance", explained_variance_ratio)
+    acts_transformed = torch.tensor(acts_transformed)
+    return acts_transformed
+
+
+sec_attn_pattern_svd = svd_activations(sec_attention_pattern[:, :, :, 0])
+plot_activations(sec_attn_pattern_svd, nrows=2)
+sec_attn_pattern_svd_fft = torch.fft.fft2(sec_attn_pattern_svd, dim=(0, 1))
+plot_fft_activations(sec_attn_pattern_svd_fft, nrows=4)
+
+# You can call this function with your activations 'acts' and the number of components 'n_components'.
+# If you don't specify 'n_components', it will use the minimum of the number of samples and features.
+# %%
+
 sec_0_2_resid_acts_transformed = pca_activations(sec_0_2_resid_acts)
 sec_0_2_resid_acts_transformed_fft = torch.fft.fft2(sec_0_2_resid_acts_transformed, dim=(0, 1))
 
 plot_fft_activations(
-    sec_0_2_resid_acts_transformed_fft.real,
+    sec_0_2_resid_acts_transformed_fft,
     title="PCA activations section 0.2 (extended embedding), real",
     nrows=20,
     figsize=(8, 60),
 )
+
+
+plot_fft_activations(
+    sec_0_2_resid_acts_transformed_fft.imag,
+    title="PCA activations section 0.2 (extended embedding), imag",
+    nrows=20,
+    figsize=(8, 60),
+)
+# %%
+
+sec_attention_pattern_fft = torch.fft.fft2(sec_attention_pattern[:, :, :, 0], dim=(0, 1))
+
+
+plot_fft_activations(
+    sec_attention_pattern_fft,
+    title="FFT",
+    nrows=4,
+    figsize=(8, 10),
+)
+# %%
+
+sec_attention_pattern_pca = pca_activations(sec_attention_pattern[:, :, :, 0])
+sec_attention_pattern_pca_fft = torch.fft.fft2(sec_attention_pattern_pca, dim=(0, 1))
+
+plot_fft_activations(
+    sec_attention_pattern_pca_fft,
+    title="Attn pattern PCA'ed",
+    nrows=4,
+    figsize=(8, 10),
+)
+
+# %%
+# plotly
+
+# Imshow sec_attention_pattern_pca_fft[:,:,0].abs().numpy()
+px.imshow(torch.fft.fftshift(sec_attention_pattern_pca_fft[:, :, 0]).abs().numpy())
+px.imshow(torch.fft.fftshift(sec_attention_pattern_pca_fft[:, :, 1]).abs().numpy())
+freqs = torch.fft.fftfreq(sec_attention_pattern_pca_fft.shape[0])
+freqs = torch.fft.fftshift(freqs).numpy()
+print("Index 0:", freqs[26], freqs[56], freqs[86])
+# 56 with both, both with 56
+print("Index 0:", freqs[3], freqs[26], freqs[86], freqs[109], "less bright")
+
+print("Index 1:", freqs[20], freqs[56], freqs[92])
+print(torch.fft.fftshift(sec_attention_pattern_pca_fft)[56, 26].abs())
+# %%
+# 26 56
+# 1
+# 20 56, 92 56, 20 56, 56, 20, 56 92
+
+# %%
+p = 113
+for x in range(p):
+    for y in range(p):
+        if (
+            sec_attention_pattern_pca_fft[x, y, 0].abs() > 300
+            and sec_attention_pattern_pca_fft[x, y, 0].abs() < 1000
+        ):
+            freqs = torch.fft.fftfreq(sec_attention_pattern_pca_fft.shape[0])
+            val = sec_attention_pattern_pca_fft[x, y, 0].abs().item()
+            phase = sec_attention_pattern_pca_fft[x, y, 0].angle().item()
+            print(
+                f"({freqs[x]:.3f}, {freqs[y]:.3f})",
+                f"Value {val:.1f}",
+                f"Phase {phase/np.pi*180:.1f} deg",
+                f"Phrase as real & imag: e^(i phi) = {np.cos(phase):.3f} + i {np.sin(phase):.3f}",
+            )
+
+# %%
+
+
+plot_activations(
+    rib_acts_mlp_post_act,
+    title="rib_acts_mlp_post_act",
+    nrows=2,
+    ncols=2,
+    figsize=(8, 10),
+)
+
 # %%

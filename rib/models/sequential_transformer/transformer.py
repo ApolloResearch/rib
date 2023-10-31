@@ -51,6 +51,9 @@ class SequentialTransformer(nn.Module):
     the first node_layer. This pre-section will not be part of the graph but needs to be run
     with all forward passes in order to feed the correct data to susbequent sections.
 
+    The node_layers list may end in an `output` layer, we ignore this layer when partitioning the
+    model into sections.
+
     A SequentialTransformer contains a fold_bias method which modifies the weights of the model
     to fold in the bias parameters. If called, beware that the dimensions of the weight matrices
     will change.
@@ -195,7 +198,9 @@ class SequentialTransformer(nn.Module):
         all_layers.append(ln_final_name)
         all_layers.append(unembed_module_name)
 
-        module_name_sections = create_list_partitions(all_layers, node_layers)
+        # We ignore the optional `output` layer when partitioning the model into sections
+        partition_modules = [layer for layer in node_layers if layer != "output"]
+        module_name_sections = create_list_partitions(all_layers, partition_modules)
         return module_name_sections
 
     def fold_bias(self) -> None:

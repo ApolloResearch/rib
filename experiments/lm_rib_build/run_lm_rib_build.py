@@ -73,11 +73,9 @@ class Config(BaseModel):
         None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
     node_layers: list[str] = Field(
-        ..., description="Names of the modules whose inputs correspond to node layers in the graph."
-    )
-    logits_node_layer: bool = Field(
         ...,
-        description="Whether to build an extra output node layer for the logits.",
+        description="Names of the modules whose inputs correspond to node layers in the graph."
+        "`output` is a special node layer that corresponds to the output of the model.",
     )
     rotate_final_node_layer: bool = Field(
         ...,
@@ -159,9 +157,6 @@ def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
         "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
         "match those needed to correctly calculate the edges."
     )
-    assert (
-        config.logits_node_layer or not loaded_config.logits_node_layer
-    ), "Cannot have logits_node_layer in config but not in loaded matrices config"
 
     # The following attributes must exactly match across configs
     for attr in [
@@ -266,11 +261,11 @@ def main(config_path_str: str):
             logger.info("Model per-token loss on dataset: %.2f", loss)
 
     # Don't build the graph for the section of the model before the first node layer
-    graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
+    section_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
     if config.interaction_matrices_path is None:
-        # Only need gram matrix for logits if we're rotating the final node layer
-        collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+        # Only need gram matrix for output if we're rotating the final node layer
+        collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
         gram_train_loader = create_data_loader(
             dataset,
@@ -282,12 +277,12 @@ def main(config_path_str: str):
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
         gram_matrices = collect_gram_matrices(
             hooked_model=hooked_model,
-            module_names=graph_module_names,
+            module_names=section_names,
             data_loader=gram_train_loader,
             dtype=dtype,
             device=device,
             collect_output_gram=collect_output_gram,
-            hook_names=config.node_layers,
+            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
         )
 
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
@@ -299,16 +294,15 @@ def main(config_path_str: str):
         logger.info("Calculating interaction rotations (Cs).")
         Cs, Us = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
-            module_names=graph_module_names,
+            section_names=section_names,
+            node_layers=config.node_layers,
             hooked_model=hooked_model,
             data_loader=graph_train_loader,
             dtype=dtype,
             device=device,
             n_intervals=config.n_intervals,
-            logits_node_layer=config.logits_node_layer,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
-            hook_names=config.node_layers,
         )
         logger.info("Time to calculate Cs: %.2f", time.time() - c_start_time)
     else:
@@ -330,7 +324,7 @@ def main(config_path_str: str):
             Cs=Cs,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
-            module_names=graph_module_names,
+            section_names=section_names,
             data_loader=edge_train_loader,
             dtype=dtype,
             device=device,

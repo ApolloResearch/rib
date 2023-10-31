@@ -2,19 +2,19 @@ exp_name: rib_modular_arithmetic
 ablation_type: rib
 interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_rib_graph.pt
 schedule:
-  schedule_type: linear
-  early_stopping_threshold: 0.3
-  n_points: 30
+  schedule_type: exponential
+  early_stopping_threshold: null
+  ablate_every_vec_cutoff: 10
+  exp_base: 2
 dataset:
   source: custom
   name: modular_arithmetic
   return_set: train
-node_layers:  # Rotate the input to these modules into the interaction basis
+ablation_node_layers:  # Rotate the input to these modules into the interaction basis
   - ln1.0
   - ln2.0
   - mlp_out.0
   - unembed
-logits_node_layer: true
 batch_size: 128
 dtype: float32
 eval_type: accuracy

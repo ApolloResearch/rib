@@ -191,7 +191,7 @@ def collect_interaction_edges(
     Cs: list["InteractionRotation"],
     hooked_model: HookedModel,
     n_intervals: int,
-    module_names: list[str],
+    section_names: list[str],
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
@@ -199,18 +199,15 @@ def collect_interaction_edges(
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
-    Recall that the node layers correspond to the positions at the input to each module specified in
-    module_names, as well as the output of the final module.
-
     Note that there is no edge weight that uses the position of the final interaction matrix as a
-    starting node. This means that, if we did not collect the output logits, we don't apply any
-    hooks to the final module list in module_names.
+    starting node. This means that, unless node_layers contained the model output, we ignore the
+    final section name in section_names when calculating the edges.
 
     Args:
         Cs: The interaction rotation matrix and its pseudoinverse, order by node layer.
         hooked_model: The hooked model.
         n_intervals: The number of integrated gradient intervals to use.
-        module_names: The names of the modules to apply the hooks to.
+        section_names: The names of the modules to apply the hooks to.
         data_loader: The pytorch data loader.
         dtype: The data type to use for model computations.
         device: The device to run the model on.
@@ -221,7 +218,7 @@ def collect_interaction_edges(
         through.
     """
 
-    edge_modules = module_names if Cs[-1].node_layer_name == "output" else module_names[:-1]
+    edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
     edge_hooks: list[Hook] = []
     for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
         # C from the next node layer

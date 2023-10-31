@@ -1,7 +1,9 @@
+import numpy as np
 import pytest
 import torch
 
 from rib.linalg import (
+    _calc_integration_intervals,
     calc_rotation_matrix,
     eigendecompose,
     integrated_gradient_trapezoidal_jacobian,
@@ -369,3 +371,30 @@ def test_integrated_gradient_trapezoidal_jacobian_chunks():
     assert torch.allclose(
         result_1, result_5
     ), "n_intervals==1 and n_intervals==5 are not close enough"
+
+
+@pytest.mark.parametrize(
+    "n_intervals,integral_boundary_relative_epsilon,expected_alphas,expected_interval_size",
+    [
+        # Testing for n_intervals=0
+        (0, 1e-3, [0.5], 1.0),
+        # Testing for n_intervals=1
+        (1, 1e-3, [5e-4, 1 - 5e-4], 1.0),
+        # Testing for n_intervals=2 and small epsilon
+        (2, 1e-4, [1e-4 / 3, 0.5, 1 - 1e-4 / 3], 0.5),
+    ],
+)
+def test_calc_integration_intervals(
+    n_intervals, integral_boundary_relative_epsilon, expected_alphas, expected_interval_size
+):
+    alphas, interval_size = _calc_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon
+    )
+
+    # Assert that the returned alphas are close to the expected values
+    assert np.allclose(alphas, expected_alphas), f"alphas: {alphas} != {expected_alphas}"
+
+    # Assert that the returned interval_size is close to the expected value
+    assert np.isclose(
+        interval_size, expected_interval_size
+    ), f"interval_size: {interval_size} != {expected_interval_size}"

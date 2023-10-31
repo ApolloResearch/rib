@@ -213,7 +213,7 @@ def edge_norm(
     return f_out_hat_norm
 
 
-def calculate_integration_intervals(
+def _calc_integration_intervals(
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
 ) -> tuple[np.ndarray, float]:
@@ -245,10 +245,11 @@ def calculate_integration_intervals(
         alphas = np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_alphas)
         assert np.allclose(np.diff(alphas), alphas[1] - alphas[0]), "alphas must be equally spaced."
         # Multiply the interval sizes by (1 + 2 eps) to balance out the smaller integration interval
-        interval_size = (alphas[1] - alphas[0]) * (1 + 2 * integral_boundary_epsilon)
+        interval_size = (alphas[1] - alphas[0]) / (1 - 2 * integral_boundary_epsilon)
         assert np.allclose(
-            n_intervals * interval_size, 1
-        ), "Interval size should match 1/n_intervals."
+            n_intervals * interval_size,
+            1,
+        ), f"n_intervals * interval_size ({n_intervals * interval_size}) != 1"
     return alphas, interval_size
 
 
@@ -294,7 +295,7 @@ def integrated_gradient_trapezoidal_norm(
 
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    alphas, interval_size = calculate_integration_intervals(
+    alphas, interval_size = _calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon
     )
 
@@ -379,7 +380,7 @@ def integrated_gradient_trapezoidal_jacobian(
         ]
     ] = None
 
-    alphas, interval_size = calculate_integration_intervals(
+    alphas, interval_size = _calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon
     )
 

@@ -13,6 +13,7 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 from functools import partial
 from typing import Any, Optional, Union
 
+import fancy_einsum
 import torch
 from jaxtyping import Float
 from torch import Tensor
@@ -209,16 +210,22 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
     has_pos = inputs[0].dim() == 3
 
-    einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
+    einsum_pattern = (
+        "batch position j, batch position jprime -> j jprime"
+        if has_pos
+        else "batch j, batch jprime -> j jprime"
+    )
+    normalization = 1.0 / in_grads.shape[1] if has_pos else 1.0
 
     with torch.inference_mode():
-        M_dash = torch.einsum(einsum_pattern, in_grads, in_grads)
+        M_dash = fancy_einsum.einsum(einsum_pattern, in_grads, in_grads * normalization)
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
-        Lambda_dash = torch.einsum(einsum_pattern, in_grads, in_acts)
+        Lambda_dash = fancy_einsum.einsum(einsum_pattern, in_grads, in_acts * normalization)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
+    pass
 
 
 def interaction_edge_pre_forward_hook_fn(

@@ -122,16 +122,16 @@
             "justMyCode": true
         },
         {
-            "name": "mnist relu interactions",
+            "name": "mlp relu",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/relu_interactions/mnist_relu.py",
-            "args": "${workspaceFolder}/experiments/relu_interactions/mnist_relu.yaml",
+            "program": "${workspaceFolder}/experiments/relu_interactions/mlp_relu.py",
+            "args": "${workspaceFolder}/experiments/relu_interactions/mlp_relu.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },
         {
-            "name": "lm relu interactions",
+            "name": "lm relu",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/experiments/relu_interactions/transformer_relu.py",

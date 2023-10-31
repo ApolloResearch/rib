@@ -145,6 +145,10 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
+    threshold: float = Field(
+        None,
+        description="Dendrogram distance cutting with fcluster to make clusters"
+    )
     relu_metric_type: Literal[0, 1, 2, 3] = Field(
         None,
         description="Which similarity metric to use to calculate whether ReLUs are synced."
@@ -439,7 +443,7 @@ def transformer_relu_main(config_path_str: str):
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
-    relu_matrices_save_file = Path(__file__).parent / f"transformer_{config.relu_metric_type}_edit_weights_{config.edit_weights}"
+    relu_matrices_save_file = Path(__file__).parent / f"transformer_{config.relu_metric_type}"
     Cs_save_file = Path(__file__).parent / "Cs_relu_cluster"
     Ws_save_file = Path(__file__).parent / "Ws_relu_cluster"
     Ps_save_file = Path(__file__).parent / "Ps_relu_cluster"

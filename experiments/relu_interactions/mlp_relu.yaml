@@ -7,7 +7,7 @@ logits_node_layer: true
 rotate_final_node_layer: true
 n_intervals: 0
 dtype: float32
-module_names:
+activation_layers:
   - layers.0.activation
   - layers.1.activation
 node_layers:
@@ -16,3 +16,4 @@ node_layers:
   - layers.2
 relu_metric_type: 3
 edit_weights: False
+threshold: 4e-3

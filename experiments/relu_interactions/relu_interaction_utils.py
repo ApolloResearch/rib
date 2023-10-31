@@ -75,9 +75,9 @@ if TYPE_CHECKING:   # Prevent circular import to import type annotations
 
 
 def relu_plot_and_cluster(
-        similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]],
-        out_dir: Path,
-        config: "Config",
+    similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]],
+    out_dir: Path,
+    config: "Config",
 ) -> tuple[list[Int[Tensor, "d_hidden"]], list[list[int]], list[list[Int[Tensor, "cluster_size"]]]]:
     """Form clustering. Plot original and clustered matrices.
 
@@ -91,6 +91,7 @@ def relu_plot_and_cluster(
     all_cluster_idxs: list[list[Int[Tensor, "cluster_size"]]] = []
 
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
+        similarity_matrix = similarity_matrix.detach().cpu()
         layer_cluster_idxs = []
         layer_num_valid_swaps = []
         # Plot raw matrix values before clustering
@@ -137,10 +138,9 @@ def relu_plot_and_cluster(
         # Cut dendrogram
         # ith `clusters` element is flat cluster number to which original observation i belonged
         # Idxs of `clusters` is original element idxs
-        threshold = 3e-7
-        clusters = fcluster(Z, t=threshold, criterion="distance")
+        clusters = fcluster(Z, t=config.threshold, criterion="distance")
         unique_clusters = np.unique(clusters)
-        print(f"unique cluster vals {unique_clusters}")
+        print(f"unique clusters {len(unique_clusters)}")
 
         # Important: this index vector will be what's passed into hook function
         # To replace elements of operator vector within clusters with `centroid member` of each cluster
@@ -166,11 +166,9 @@ def relu_plot_and_cluster(
 
         all_cluster_idxs.append(layer_cluster_idxs)
         all_num_valid_swaps.append(layer_num_valid_swaps)
-
+        print(f"swaps {layer_num_valid_swaps}")
         # Cast indices to tensor and add to list of returns - one item per layer
         return_index_list.append(torch.tensor(indices_of_original_O))
-
-        print(f"return index list \n {return_index_list}")
 
         rearranged_similarity_matrix = distance_matrix[order, :][:, order]
 

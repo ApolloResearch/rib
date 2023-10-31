@@ -16,13 +16,14 @@ from torchvision import datasets, transforms
 
 from experiments.relu_interactions.relu_interaction_utils import (
     edit_weights_fn,
+    extract_weights_mlp,
     get_nested_attribute,
     print_all_modules,
     relu_plot_and_cluster,
     swap_all_layers,
     swap_single_layer,
+    swap_all_layers_using_clusters,
     plot_changes,
-    extract_weights_mlp,
 )
 from rib.data_accumulator import (
     calculate_all_swapped_iterative_relu_loss,
@@ -51,10 +52,11 @@ class Config(BaseModel):
     rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
-    module_names: list[str]
+    activation_layers: list[str]
     node_layers: list[str]
     relu_metric_type: int
     edit_weights: bool
+    threshold: float # For dendrogram distance cutting with fcluster to make clusters
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -159,7 +161,7 @@ def get_relu_similarities(
 
     relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
         hooked_model=hooked_mlp,
-        module_names=config.module_names,
+        module_names=config.activation_layers,
         data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
@@ -205,7 +207,7 @@ def mlp_relu_main(config_path_str: str) -> None:
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
-    relu_matrices_save_file = Path(__file__).parent / f"type_{config.relu_metric_type}_edit_weights_{config.edit_weights}"
+    relu_matrices_save_file = Path(__file__).parent / f"mlp_type_{config.relu_metric_type}"
     Cs_save_file = Path(__file__).parent / "Cs"
 
     out_dir = Path(__file__).parent / f"out_mlp_relu/type_{config.relu_metric_type}"
@@ -239,13 +241,16 @@ def mlp_relu_main(config_path_str: str) -> None:
         Lambda_dashes=Cs_and_Lambdas["Lambda_dashes"],
     )
 
-    # relu_plot_and_cluster(relu_matrices, out_dir, config)
+    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)
 
-    # Need to manually fix as many lists as there are layers
-    # tols = [[1e-3, 7e-4, 4e-4, 1e-4, 7e-5, 4e-5], [1e-4, 7e-5, 4e-5, 1e-5, 7e-6, 4e-6]]
-    tols = [[1e-3, 7e-4, 4e-4, 1e-4, 7e-5, 4e-5], [5e-4, 5e-4, 5e-4, 5e-4, 5e-4, 5e-4]]
-
-    swap_all_layers(hooked_model, relu_matrices, tols, config, device, out_dir)
+    swap_all_layers_using_clusters(
+        replacement_idxs_from_cluster=replacement_idxs_from_cluster,
+        num_valid_swaps_from_cluster=num_valid_swaps_from_cluster,
+        hooked_model=hooked_model,
+        config=config,
+        data_loader=load_mnist_dataloader(train=True, batch_size=config.batch_size),
+        device=device,
+    )
 
 
 if __name__ == "__main__":

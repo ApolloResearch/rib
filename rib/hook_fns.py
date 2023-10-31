@@ -393,8 +393,8 @@ def acts_pre_forward_hook_fn(
 def relu_interaction_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
-        tuple[Float[Tensor, "batch d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch d_hidden"],],
+        tuple[Float[Tensor, "batch pos d_hidden"],],
         tuple[Float[Tensor, "batch pos d_hidden1"],
               Float[Tensor, "batch pos d_hidden2"]],
     ],
@@ -453,13 +453,13 @@ def relu_interaction_forward_hook_fn(
     raw_output = outputs # For passing into g_j finding function for metric 3
     out_hidden_dims = [x.shape[-1] for x in outputs]
 
-    # Don't want residual stream for operator syncing
-    inputs = inputs[1]
-    outputs = outputs[1]
-
-    # inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1) # Inputs always tuple
-    # batch_size = inputs.shape[0]
-    # outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+    if inputs[0].dim() == 3: # Don't want residual stream for operator syncing
+        inputs = inputs[1]
+        outputs = outputs[1]
+    else:  # Inputs always tuple
+        inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+        batch_size = inputs.shape[0]
+        outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
     operator: Float[Tensor, "batch d_hidden_out"] = torch.div(outputs, inputs)
 

@@ -22,3 +22,4 @@ dtype: float32
 eval_type: accuracy
 relu_metric_type: 3
 edit_weights: False
+threshold: 1e-7

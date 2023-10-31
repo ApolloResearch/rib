@@ -436,7 +436,7 @@ def collect_function_sizes(
 
     fn_size_hooks = []
     for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
-        if i == 2: break # This number should be changed to total number of activation function layers analysed + 1
+        # if i == 2: break # This number should be changed to total number of activation function layers analysed + 1
         fn_size_hooks.append(
             Hook(
                 name=hook_name,
@@ -448,8 +448,10 @@ def collect_function_sizes(
         )
 
     run_dataset_through_model(hooked_model, data_loader, hooks=fn_size_hooks, dtype=dtype, device=device)
-    fn_sizes = [hooked_model.hooked_data[hook_name]["fn_size"].item() for hook_name in hooked_model.hooked_data]
+    fn_sizes = [hooked_model.hooked_data[hook_name]["fn_size"].item()
+                for hook_name in hooked_model.hooked_data]
     hooked_model.clear_hooked_data()
+
 
     return fn_sizes
 
@@ -554,7 +556,7 @@ def calculate_swapped_relu_loss(
     hooked_model.remove_hooks()
 
     random_relu_swap_hooks = []
-    length = len(replacement_idx_list)
+    length = len(replacement_idxs)
     random_idx_tensor = torch.arange(length)
     indices_to_replace = torch.randperm(length)[:num_replaced]
     random_idx_tensor[indices_to_replace] = torch.randint(0, length, (num_replaced,))

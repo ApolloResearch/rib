@@ -207,6 +207,10 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
 
+    assert (
+        Lambda_dash.std() > 0
+    ), "Lambda_dash cannot be all zeros otherwise everything will be truncated"
+
 
 def interaction_edge_pre_forward_hook_fn(
     module: torch.nn.Module,

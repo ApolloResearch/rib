@@ -405,12 +405,12 @@ def test_calc_integration_intervals(
     "input_tensor, dataset_size, expected_output",
     [
         # Tensor without positional indices
-        (torch.tensor([[1.0, 2.0], [3.0, 4.0]]), 1, torch.tensor([[10.0, 14.0], [14.0, 20.0]])),
+        (torch.tensor([[1.0, 2.0], [3.0, 4.0]]), 2, torch.tensor([[5.0, 7.0], [7.0, 10.0]])),
         # Tensor with positional indices (scaled by number of positions = 2)
         (
             torch.tensor([[[1.0, 2.0], [3.0, 4.0]], [[1.0, 2.0], [3.0, 4.0]]]),
-            2,
-            torch.tensor([[5.0, 7.0], [7.0, 10.0]]),
+            4,
+            torch.tensor([[2.5, 3.5], [3.5, 5.0]]),
         ),
     ],
 )

@@ -161,6 +161,7 @@ def collect_M_dash_and_Lambda_dash(
         fn_kwargs={
             "C_out": C_out,
             "n_intervals": n_intervals,
+            "dataset_size": len(data_loader.dataset),  # type: ignore
         },
     )
 
@@ -176,11 +177,6 @@ def collect_M_dash_and_Lambda_dash(
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
     Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
     hooked_model.clear_hooked_data()
-
-    # Scale the matrices by the number of samples in the dataset.
-    len_dataset = len(data_loader.dataset)  # type: ignore
-    M_dash = M_dash / len_dataset
-    Lambda_dash = Lambda_dash / len_dataset
 
     return M_dash, Lambda_dash
 

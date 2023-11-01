@@ -172,6 +172,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     data_key: Union[str, list[str]],
     C_out: Optional[Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"]],
     n_intervals: int,
+    dataset_size: int,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -185,6 +186,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 1.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -202,12 +204,13 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     has_pos = inputs[0].dim() == 3
 
     einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
+    scaling_factor = in_grads.shape[1] * dataset_size if has_pos else dataset_size
 
     with torch.inference_mode():
-        M_dash = torch.einsum(einsum_pattern, in_grads, in_grads)
+        M_dash = torch.einsum(einsum_pattern, in_grads / scaling_factor, in_grads)
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
-        Lambda_dash = torch.einsum(einsum_pattern, in_grads, in_acts)
+        Lambda_dash = torch.einsum(einsum_pattern, in_grads / scaling_factor, in_acts)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)

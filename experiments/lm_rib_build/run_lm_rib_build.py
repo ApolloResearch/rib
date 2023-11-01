@@ -150,12 +150,17 @@ class Config(BaseModel):
 
 
 def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
-    """Ensure that the config for calculating edges is compatible with that used to calculate Cs."""
+    """Ensure that the config for calculating edges is compatible with that used to calculate Cs.
 
-    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
+    TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
+    path management nice with this Config being defined in this file in the experiments dir.
+    """
+
+    # config.node_layers must be a subsequence of loaded_config.node_layers
+    assert "|".join(config.node_layers) in "|".join(loaded_config.node_layers), (
         "node_layers in the config must be a subsequence of the node layers in the config used to"
-        "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
-        "match those needed to correctly calculate the edges."
+        "calculate the C matrices. Otherwise, the C matrices won't match those needed to correctly"
+        "calculate the edges."
     )
 
     # The following attributes must exactly match across configs
@@ -205,7 +210,16 @@ def load_interaction_rotations(
 
 
 def main(config_path_str: str):
-    """Build the interaction graph and store it on disk."""
+    """Build the interaction graph and store it on disk.
+
+    Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
+    E_hats using pre-saved Cs, we need to ensure, among other things, that the pre-saved Cs were
+    calculated for the same node_layers that we wish to draw edges between (i.e. config.node_layers
+    should be a subsequence of the node_layers used to calculate the Cs).
+
+    We use the variable edge_Cs to indicate the Cs that are needed to calculate the edges. If
+    the Cs were pre-calculated and loaded from file, edge_Cs may be a subsequence of Cs.
+    """
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
@@ -222,6 +236,8 @@ def main(config_path_str: str):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
+    calc_C_time = None
+    calc_edges_time = None
 
     # Time each stage
     load_model_data_start_time = time.time()
@@ -304,9 +320,14 @@ def main(config_path_str: str):
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
         )
-        logger.info("Time to calculate Cs: %.2f", time.time() - c_start_time)
+        # Cs used to calculate edges
+        edge_Cs = Cs
+
+        calc_C_time = time.time() - c_start_time
+        logger.info("Time to calculate Cs: %.2f", calc_C_time)
     else:
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
+        edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
 
     if not config.calculate_edges:
         logger.info("Skipping edge calculation.")
@@ -321,7 +342,7 @@ def main(config_path_str: str):
         logger.info("Calculating edges.")
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
-            Cs=Cs,
+            Cs=edge_Cs,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
             section_names=section_names,
@@ -330,7 +351,8 @@ def main(config_path_str: str):
             device=device,
             out_dim_chunk_size=config.out_dim_chunk_size,
         )
-        logger.info("Time to calculate edges: %.2f", time.time() - edges_start_time)
+        calc_edges_time = time.time() - edges_start_time
+        logger.info("Time to calculate edges: %.2f", calc_edges_time)
 
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []
@@ -350,6 +372,8 @@ def main(config_path_str: str):
         "edges": [(node_layer, E_hats[node_layer]) for node_layer in E_hats],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
+        "calc_C_time": calc_C_time,
+        "calc_edges_time": calc_edges_time,
     }
 
     # Save the results (which include torch tensors) to file

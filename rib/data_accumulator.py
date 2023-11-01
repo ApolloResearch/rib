@@ -79,6 +79,7 @@ def collect_gram_matrices(
     else:
         hook_names = module_names
 
+    dataset_size = len(data_loader.dataset)  # type: ignore
     gram_hooks: list[Hook] = []
     # Add input hooks
     for module_name, hook_name in zip(module_names, hook_names):
@@ -88,16 +89,18 @@ def collect_gram_matrices(
                 data_key="gram",
                 fn=gram_pre_forward_hook_fn,
                 module_name=module_name,
+                fn_kwargs={"dataset_size": dataset_size},
             )
         )
     if collect_output_gram:
-        # Add output hook
+        # Add hook to collect model output
         gram_hooks.append(
             Hook(
                 name="output",
                 data_key="gram",
                 fn=gram_forward_hook_fn,
                 module_name=module_names[-1],
+                fn_kwargs={"dataset_size": dataset_size},
             )
         )
 
@@ -109,16 +112,11 @@ def collect_gram_matrices(
     }
     hooked_model.clear_hooked_data()
 
-    # Scale the gram matrix by the number of samples in the dataset.
-    for hook_name in gram_matrices:
-        gram_matrices[hook_name] /= len(data_loader.dataset)  # type: ignore
-
-    # Ensure that the gram_matrix keys are the same as the module names (optionally with an
-    # additional "output" if collect_output_gram is True).
-    if collect_output_gram:
-        assert set(gram_matrices.keys()) == set(hook_names + ["output"])
-    else:
-        assert set(gram_matrices.keys()) == set(hook_names)
+    expected_gram_keys = set(hook_names + ["output"]) if collect_output_gram else set(hook_names)
+    assert set(gram_matrices.keys()) == expected_gram_keys, (
+        f"Gram matrix keys not the same as the module names that were hooked. "
+        f"Expected: {expected_gram_keys}, got: {set(gram_matrices.keys())}"
+    )
 
     return gram_matrices
 
@@ -163,6 +161,7 @@ def collect_M_dash_and_Lambda_dash(
         fn_kwargs={
             "C_out": C_out,
             "n_intervals": n_intervals,
+            "dataset_size": len(data_loader.dataset),  # type: ignore
         },
     )
 
@@ -178,11 +177,6 @@ def collect_M_dash_and_Lambda_dash(
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
     Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
     hooked_model.clear_hooked_data()
-
-    # Scale the matrices by the number of samples in the dataset.
-    len_dataset = len(data_loader.dataset)  # type: ignore
-    M_dash = M_dash / len_dataset
-    Lambda_dash = Lambda_dash / len_dataset
 
     return M_dash, Lambda_dash
 

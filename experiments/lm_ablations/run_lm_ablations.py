@@ -165,15 +165,18 @@ def main(config_path_str: str) -> None:
         device=device,
     )
 
+    time_taken = f"{(time.time() - start_time) / 60:.1f} minutes"
+    logger.info("Finished in %s.", time_taken)
+
     if config.exp_name is not None:
         results = {
             "config": json.loads(config.model_dump_json()),
             "results": ablation_results,
+            "time_taken": time_taken,
         }
         with open(out_file, "w") as f:
             json.dump(results, f)
         logger.info("Wrote results to %s", out_file)
-    logger.info("Finished in %.2f seconds.", time.time() - start_time)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from rib.hook_fns import (
     interaction_edge_pre_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
+from rib.log import logger
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -213,6 +214,7 @@ def collect_interaction_edges(
     """
 
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
+    logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
     edge_hooks: list[Hook] = []
     for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
         # C from the next node layer
@@ -238,7 +240,9 @@ def collect_interaction_edges(
             )
         )
 
-    run_dataset_through_model(hooked_model, data_loader, edge_hooks, dtype=dtype, device=device)
+    run_dataset_through_model(
+        hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
+    )
 
     edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {
         node_layer_name: hooked_model.hooked_data[node_layer_name]["edge"]

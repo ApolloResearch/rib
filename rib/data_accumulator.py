@@ -105,7 +105,9 @@ def collect_gram_matrices(
             )
         )
 
-    run_dataset_through_model(hooked_model, data_loader, gram_hooks, dtype=dtype, device=device)
+    run_dataset_through_model(
+        hooked_model, data_loader, gram_hooks, dtype=dtype, device=device, use_tqdm=True
+    )
 
     gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["gram"]

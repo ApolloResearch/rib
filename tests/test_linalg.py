@@ -4,6 +4,7 @@ import torch
 
 from rib.linalg import (
     _calc_integration_intervals,
+    calc_gram_matrix,
     calc_rotation_matrix,
     eigendecompose,
     integrated_gradient_trapezoidal_jacobian,
@@ -398,3 +399,25 @@ def test_calc_integration_intervals(
     assert np.isclose(
         interval_size, expected_interval_size
     ), f"interval_size: {interval_size} != {expected_interval_size}"
+
+
+@pytest.mark.parametrize(
+    "input_tensor, dataset_size, expected_output",
+    [
+        # Tensor without positional indices
+        (torch.tensor([[1.0, 2.0], [3.0, 4.0]]), 2, torch.tensor([[5.0, 7.0], [7.0, 10.0]])),
+        # Tensor with positional indices (scaled by number of positions = 2)
+        (
+            torch.tensor([[[1.0, 2.0], [3.0, 4.0]], [[1.0, 2.0], [3.0, 4.0]]]),
+            4,
+            torch.tensor([[2.5, 3.5], [3.5, 5.0]]),
+        ),
+    ],
+)
+def test_calc_gram_matrix(input_tensor, dataset_size, expected_output):
+    gram_matrix = calc_gram_matrix(input_tensor, dataset_size)
+
+    # Check if the output tensor matches the expected tensor
+    assert torch.allclose(
+        gram_matrix, expected_output
+    ), f"gram_matrix: {gram_matrix} != {expected_output}"

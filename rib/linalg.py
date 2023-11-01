@@ -429,3 +429,36 @@ def integrated_gradient_trapezoidal_jacobian(
     jac_out *= -1
 
     return jac_out
+
+
+def calc_gram_matrix(
+    acts: Union[
+        Float[Tensor, "batch pos d_hidden"],
+        Float[Tensor, "batch d_hidden"],
+    ],
+    dataset_size: int,
+) -> Float[Tensor, "d_hidden d_hidden"]:
+    """Calculate the gram matrix for a given tensor.
+
+    The gram is normalized by the number of positions if the tensor has a position dimension.
+
+    Note that the inputs must contain a batch dimension, otherwise the normalization will not be
+    correct.
+
+    Args:
+        acts: The tensor to calculate the gram matrix for. May or may not have a position dimension.
+        dataset_size: The size of the dataset. Used for scaling the gram matrix.
+
+    Returns:
+        The gram matrix.
+    """
+    if acts.dim() == 3:  # tensor with pos dimension
+        einsum_pattern = "bpi, bpj -> ij"
+        normalization_factor = acts.shape[1] * dataset_size
+    elif acts.dim() == 2:  # tensor without pos dimension
+        einsum_pattern = "bi, bj -> ij"
+        normalization_factor = dataset_size
+    else:
+        raise ValueError("Unexpected tensor rank")
+
+    return torch.einsum(einsum_pattern, acts / normalization_factor, acts)

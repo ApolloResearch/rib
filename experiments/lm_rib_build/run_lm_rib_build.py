@@ -323,8 +323,8 @@ def main(config_path_str: str):
         # Cs used to calculate edges
         edge_Cs = Cs
 
-        calc_C_time = time.time() - c_start_time
-        logger.info("Time to calculate Cs: %.2f", calc_C_time)
+        calc_C_time = f"{(time.time() - c_start_time) / 60:.1f} minutes"
+        logger.info("Time to calculate Cs: %s", calc_C_time)
     else:
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
         edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
@@ -351,8 +351,8 @@ def main(config_path_str: str):
             device=device,
             out_dim_chunk_size=config.out_dim_chunk_size,
         )
-        calc_edges_time = time.time() - edges_start_time
-        logger.info("Time to calculate edges: %.2f", calc_edges_time)
+        calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
+        logger.info("Time to calculate edges: %s", calc_edges_time)
 
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []

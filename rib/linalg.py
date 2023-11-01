@@ -435,19 +435,27 @@ def calc_gram_matrix(
     acts: Union[
         Float[Tensor, "batch pos d_hidden"],
         Float[Tensor, "batch d_hidden"],
-    ]
+    ],
+    dataset_size: int,
 ) -> Float[Tensor, "d_hidden d_hidden"]:
     """Calculate the gram matrix for a given tensor.
 
     The gram is scaled by the number of positions if the tensor has a position dimension.
+
+    Args:
+        acts: The tensor to calculate the gram matrix for. May or may not have a position dimension.
+        dataset_size: The size of the dataset. Used for scaling the gram matrix.
+
+    Returns:
+        The gram matrix.
     """
     if acts.dim() == 3:  # tensor with pos dimension
         einsum_pattern = "bpi, bpj -> ij"
-        position_normalisation = acts.shape[1]
+        scaling_factor = acts.shape[1] * dataset_size
     elif acts.dim() == 2:  # tensor without pos dimension
         einsum_pattern = "bi, bj -> ij"
-        position_normalisation = 1
+        scaling_factor = dataset_size
     else:
         raise ValueError("Unexpected tensor rank")
 
-    return torch.einsum(einsum_pattern, acts / position_normalisation, acts)
+    return torch.einsum(einsum_pattern, acts / scaling_factor, acts)

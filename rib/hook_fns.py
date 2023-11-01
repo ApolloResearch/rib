@@ -64,6 +64,7 @@ def gram_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
+    dataset_size: int,
 ) -> None:
     """Hook function for calculating and updating the gram matrix.
 
@@ -77,6 +78,8 @@ def gram_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
+
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -85,7 +88,7 @@ def gram_forward_hook_fn(
     # Concat over the hidden dimension
     out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
-    gram_matrix = calc_gram_matrix(out_acts)
+    gram_matrix = calc_gram_matrix(out_acts, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
@@ -100,6 +103,7 @@ def gram_pre_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
+    dataset_size: int,
 ) -> None:
     """Calculate the gram matrix for inputs with positional indices and add it to the global.
 
@@ -112,12 +116,13 @@ def gram_pre_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
 
-    gram_matrix = calc_gram_matrix(in_acts)
+    gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 

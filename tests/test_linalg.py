@@ -402,19 +402,22 @@ def test_calc_integration_intervals(
 
 
 @pytest.mark.parametrize(
-    "input_tensor, expected_output",
+    "input_tensor, dataset_size, expected_output",
     [
         # Tensor without positional indices
-        (torch.tensor([[1.0, 2.0], [3.0, 4.0]]), torch.tensor([[10.0, 14.0], [14.0, 20.0]])),
+        (torch.tensor([[1.0, 2.0], [3.0, 4.0]]), 1, torch.tensor([[10.0, 14.0], [14.0, 20.0]])),
         # Tensor with positional indices (scaled by number of positions = 2)
         (
             torch.tensor([[[1.0, 2.0], [3.0, 4.0]], [[1.0, 2.0], [3.0, 4.0]]]),
-            torch.tensor([[10.0, 14.0], [14.0, 20.0]]),
+            2,
+            torch.tensor([[5.0, 7.0], [7.0, 10.0]]),
         ),
     ],
 )
-def test_calc_gram_matrix(input_tensor, expected_output):
-    gram_matrix = calc_gram_matrix(input_tensor)
+def test_calc_gram_matrix(input_tensor, dataset_size, expected_output):
+    gram_matrix = calc_gram_matrix(input_tensor, dataset_size)
 
     # Check if the output tensor matches the expected tensor
-    assert torch.allclose(gram_matrix, expected_output, atol=1e-6)
+    assert torch.allclose(
+        gram_matrix, expected_output
+    ), f"gram_matrix: {gram_matrix} != {expected_output}"

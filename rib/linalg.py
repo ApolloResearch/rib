@@ -178,14 +178,14 @@ def edge_norm(
         f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_in_hat @ C_in_pinv
         input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
 
-        output_const = module(*tuple(x.detach().clone() for x in input_tuples)).to(torch.float64)
+        output_const = module(*tuple(x.detach().clone() for x in input_tuples))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
 
     # Compute f^{l+1}(f^l(alpha x))
     alpha_f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = alpha_f_in_hat @ C_in_pinv
     alpha_input_tuples = torch.split(alpha_f_in_adjusted, in_hidden_dims, dim=-1)
 
-    output_alpha = module(*alpha_input_tuples).to(torch.float64)
+    output_alpha = module(*alpha_input_tuples)
     outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
 
     # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))

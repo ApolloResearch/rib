@@ -208,8 +208,8 @@ def calculate_interaction_rotations(
         desc="Interaction rotations",
     ):
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
-        D_dash = D_dash.to(torch.float64)
-        U_dash = U_dash.to(torch.float64)
+        D_dash = D_dash.to(torch.float64)  # Needed when M_dash is float64
+        U_dash = U_dash.to(torch.float64)  # Needed when M_dash is float64
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
         # Truncate the D matrix to remove small eigenvalues

@@ -234,9 +234,11 @@ def calculate_interaction_rotations(
         )
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
-        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
+        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
+            U_D_sqrt.T.to(torch.float64) @ M_dash.to(torch.float64) @ U_D_sqrt.to(torch.float64)
+        )
         _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
-
+        V = V.to(torch.float32)
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
         D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())

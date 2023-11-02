@@ -4,6 +4,8 @@
 from dataclasses import dataclass
 from typing import Optional
 
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 from jaxtyping import Float, Int
 from torch import Tensor
@@ -206,6 +208,8 @@ def calculate_interaction_rotations(
         desc="Interaction rotations",
     ):
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
+        D_dash = D_dash.to(torch.float64)
+        U_dash = U_dash.to(torch.float64)
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
         # Truncate the D matrix to remove small eigenvalues
@@ -228,7 +232,7 @@ def calculate_interaction_rotations(
             n_intervals=n_intervals,
             data_loader=data_loader,
             module_name=section_name,
-            dtype=dtype,
+            dtype=torch.float64,
             device=device,
             hook_name=node_layer,
         )
@@ -258,5 +262,19 @@ def calculate_interaction_rotations(
         Cs.append(
             InteractionRotation(node_layer_name=node_layer, out_dim=C.shape[1], C=C, C_pinv=C_pinv)
         )
+        # M
+        # Count number of NaNs in M
+        n_nans = torch.sum(torch.isnan(M))
+        plt.hist(
+            M.log10().cpu().flatten(), bins=50, alpha=0.5, label=f"M_{node_layer}, #nans={n_nans}"
+        )
+        plt.legend()
+        plt.xlabel("log10")
+        plt.savefig(f"M_{node_layer}.png")
+        # # Lambda
+        # plt.hist(Lambda_dash.log10().cpu().flatten(), bins=50, alpha=0.5, label=f"Lambda_{node_layer}")
+        # plt.legend()
+        # plt.xlabel("log10")
+        # plt.savefig(f"Lambda_{node_layer}.png")
 
     return Cs[::-1], Us[::-1]

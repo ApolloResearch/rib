@@ -133,6 +133,7 @@ def load_config(config_path: Path, config_model: Type[T]) -> T:
 
 def overwrite_output(out_file: Path) -> bool:
     """Check if the user wants to overwrite the output file."""
+    return True
     response = input(f"Output file {out_file} already exists. Overwrite? (y/n) ")
     return response.lower() == "y"
 

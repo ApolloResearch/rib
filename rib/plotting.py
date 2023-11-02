@@ -7,6 +7,7 @@ plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional, Union
 
@@ -167,8 +168,9 @@ def plot_interaction_graph(
         alpha=1,
         edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
     )
-
-    plt.suptitle(exp_name)
+    # Add time stamp
+    time_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    plt.suptitle(exp_name + " " + time_stamp, fontsize=16)
     plt.tight_layout()
     ax.axis("off")
     plt.savefig(out_file)
@@ -230,7 +232,8 @@ def plot_ablation_results(
             axs[i].legend()
 
     # Make a title for the entire figure
-    plt.suptitle("_".join(exp_names))
+    time_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    plt.suptitle("_".join(exp_names) + " " + time_stamp)
 
     # Adjust the spacing between subplots
     plt.subplots_adjust(hspace=0.4)

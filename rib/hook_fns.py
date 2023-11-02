@@ -120,7 +120,7 @@ def gram_pre_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
-    in_acts = torch.cat([x.detach().clone().to(torch.float64) for x in inputs], dim=-1)
+    in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
 
     gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
 

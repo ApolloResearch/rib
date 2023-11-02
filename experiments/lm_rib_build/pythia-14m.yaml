@@ -18,7 +18,7 @@ node_layers:
   - ln1.5
   # - mlp_out.5
   # - output
-batch_size: 6  #  A100 can handle 24
+batch_size: 12  #  A100 can handle 24
 gram_batch_size: 20  #  A100 can handle 80
 edge_batch_size: 1
 truncation_threshold: 1e-6

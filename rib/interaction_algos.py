@@ -236,6 +236,7 @@ def calculate_interaction_rotations(
             device=device,
             hook_name=node_layer,
         )
+        Lambda_dash = Lambda_dash.to(torch.float64)
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt

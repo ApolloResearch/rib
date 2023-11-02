@@ -208,8 +208,8 @@ def calculate_interaction_rotations(
         desc="Interaction rotations",
     ):
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
-        D_dash = D_dash.to(torch.float64)  # Needed when M_dash is float64
-        U_dash = U_dash.to(torch.float64)  # Needed when M_dash is float64
+        D_dash = D_dash  # .to(torch.float64)  # Needed when M_dash is float64
+        U_dash = U_dash  # .to(torch.float64)  # Needed when M_dash is float64
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
         # Truncate the D matrix to remove small eigenvalues
@@ -236,12 +236,15 @@ def calculate_interaction_rotations(
             device=device,
             hook_name=node_layer,
         )
-        Lambda_dash = Lambda_dash.to(torch.float64)
+        assert M_dash.dtype == torch.float64, "M_dash should be float64."
+        assert Lambda_dash.dtype == torch.float32, "Lambda_dash should be float32."
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
-        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
+        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
+            U_D_sqrt.T.to(torch.float64) @ M_dash @ U_D_sqrt.to(torch.float64)
+        )
         _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
-
+        V = V.to(torch.float32)
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
         D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())

@@ -232,16 +232,17 @@ def calculate_interaction_rotations(
             n_intervals=n_intervals,
             data_loader=data_loader,
             module_name=section_name,
-            dtype=torch.float64,
+            dtype=dtype,
             device=device,
             hook_name=node_layer,
         )
-        assert M_dash.dtype == torch.float64, "M_dash should be float64."
+        # assert M_dash.dtype == torch.float64, "M_dash should be float64."
         assert Lambda_dash.dtype == torch.float32, "Lambda_dash should be float32."
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
+
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            U_D_sqrt.T.to(torch.float64) @ M_dash @ U_D_sqrt.to(torch.float64)
+            U_D_sqrt.T.to(torch.float64) @ M_dash.to(torch.float64) @ U_D_sqrt.to(torch.float64)
         )
         _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
         V = V.to(torch.float32)

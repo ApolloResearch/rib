@@ -214,7 +214,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             einsum_pattern,
             in_grads / normalization_factor,
             in_grads,
-        ).to(torch.float64)
+        )  # .to(torch.float64)
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
         Lambda_dash = torch.einsum(

@@ -161,8 +161,32 @@ class AttentionScores(nn.Module):
     a single tensor.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, cfg) -> None:
         super().__init__()
+        self.cfg = cfg
+        # Create a max_ctx x max_ctx mask, with True iff that query position
+        # can attend to that key position (query is first axis, key is second axis)
+        causal_mask: Bool[Tensor, "pos pos"] = torch.tril(
+            torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool()
+        )
+        self.register_buffer("mask", causal_mask)
+
+        self.register_buffer("IGNORE", torch.tensor(-1e5))
+
+    def apply_causal_mask(
+        self,
+        attn_scores: Float[Tensor, "... head_index pos pos_plus_past_kv_pos_offset"],
+    ):
+        # The key context length is the number of positions in the past - this includes all positions in the cache
+        # If not caching, query_ctx_length == key_ctx_length
+        key_ctx_length = attn_scores.size(-1)
+
+        mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
+        return torch.where(
+            mask[:key_ctx_length],
+            attn_scores,
+            cast(Tensor, self.IGNORE),
+        )
 
     def forward(
         self,
@@ -187,6 +211,11 @@ class AttentionScores(nn.Module):
             )
             / attn_scale
         )  # [..., head_index, query_pos, key_pos]
+
+        # Only supports causal attention (not bidirectional)
+        # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
+        attn_scores = self.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
+
         return attn_scores
 
 
@@ -229,16 +258,7 @@ class Attention(nn.Module):
         self.b_V = nn.Parameter(torch.zeros(self.cfg.n_heads, self.cfg.d_head, dtype=cfg.dtype))
         self.b_O = nn.Parameter(torch.zeros(self.cfg.d_model, dtype=cfg.dtype))
 
-        self.attention_scores = AttentionScores()
-
-        # Create a max_ctx x max_ctx mask, with True iff that query position
-        # can attend to that key position (query is first axis, key is second axis)
-        causal_mask: Bool[Tensor, "pos pos"] = torch.tril(
-            torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool()
-        )
-        self.register_buffer("mask", causal_mask)
-
-        self.register_buffer("IGNORE", torch.tensor(-1e5))
+        self.attention_scores = AttentionScores(cfg)
 
         self.layer_id = layer_id
 
@@ -338,10 +358,6 @@ class Attention(nn.Module):
             q, k, self.attn_scale
         )  # [..., head_index, query_pos, key_pos]
 
-        # Only supports causal attention (not bidirectional)
-        # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
-        attn_scores = self.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
-
         pattern = F.softmax(attn_scores, dim=-1)  # [..., head_index, query_pos, key_pos]
         pattern = pattern.to(in_dtype)
         z = einsum(
@@ -366,21 +382,6 @@ class Attention(nn.Module):
         )  # [..., pos, d_model]
 
         return residual, out
-
-    def apply_causal_mask(
-        self,
-        attn_scores: Float[Tensor, "... head_index pos pos_plus_past_kv_pos_offset"],
-    ):
-        # The key context length is the number of positions in the past - this includes all positions in the cache
-        # If not caching, query_ctx_length == key_ctx_length
-        key_ctx_length = attn_scores.size(-1)
-
-        mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
-        return torch.where(
-            mask[:key_ctx_length],
-            attn_scores,
-            cast(Tensor, self.IGNORE),
-        )
 
     def calculate_sin_cos_rotary(
         self,

@@ -394,9 +394,18 @@ plot_fft_activations(
     figsize=(8, 60),
 )
 
+
+plot_fft_activations(
+    rib_acts_extended_embedding_fft,
+    title="RIB activations section 0.2 (extended embedding), combined",
+    nrows=20,
+    figsize=(8, 60),
+)
+
 # %%
 
 sec_0_2_resid_acts_fft = torch.fft.fft2(sec_0_2_resid_acts, dim=(0, 1))
+rib_acts_mlp_post_act_fft = torch.fft.fft2(rib_acts_mlp_post_act, dim=(0, 1))
 
 plot_fft_activations(
     rib_acts_mlp_post_act_fft,
@@ -417,6 +426,9 @@ def pca_activations(acts):
     acts_transformed = torch.tensor(acts_transformed)
     return acts_transformed
 
+
+sec_1_2_mlp_post_acts_pca = pca_activations(sec_1_2_mlp_post_acts)
+sec_1_2_mlp_post_acts_pca_fft = torch.fft.fft2(sec_1_2_mlp_post_acts_pca, dim=(0, 1))
 
 # %%
 
@@ -451,6 +463,8 @@ plot_fft_activations(
     figsize=(8, 60),
 )
 
+
+# %%
 
 plot_fft_activations(
     sec_0_2_resid_acts_transformed_fft.imag,
@@ -500,23 +514,38 @@ print(torch.fft.fftshift(sec_attention_pattern_pca_fft)[56, 26].abs())
 # 1
 # 20 56, 92 56, 20 56, 56, 20, 56 92
 
+
 # %%
-p = 113
-for x in range(p):
-    for y in range(p):
-        if (
-            sec_attention_pattern_pca_fft[x, y, 0].abs() > 300
-            and sec_attention_pattern_pca_fft[x, y, 0].abs() < 1000
-        ):
-            freqs = torch.fft.fftfreq(sec_attention_pattern_pca_fft.shape[0])
-            val = sec_attention_pattern_pca_fft[x, y, 0].abs().item()
-            phase = sec_attention_pattern_pca_fft[x, y, 0].angle().item()
-            print(
-                f"({freqs[x]:.3f}, {freqs[y]:.3f})",
-                f"Value {val:.1f}",
-                f"Phase {phase/np.pi*180:.1f} deg",
-                f"Phrase as real & imag: e^(i phi) = {np.cos(phase):.3f} + i {np.sin(phase):.3f}",
-            )
+def print_acts_and_phases(ffted_acts, index, p=113, lower=300):
+    for x in range(p):
+        for y in range(p):
+            if ffted_acts[x, y, index].abs() > lower and ffted_acts[x, y, 0].abs() < 1e10:
+                freqs = torch.fft.fftfreq(ffted_acts.shape[0])
+                val = ffted_acts[x, y, index].abs().item()
+                phase = ffted_acts[x, y, index].angle().item()
+                print(
+                    f"({freqs[x]:.3f}, {freqs[y]:.3f})",
+                    f"Value {val:.1f}",
+                    f"Phase {phase/np.pi*180:.1f} deg",
+                    f"Phrase as real & imag: e^(i phi) = {np.cos(phase):.3f} + i {np.sin(phase):.3f}",
+                )
+
+
+print_acts_and_phases(sec_attention_pattern_pca_fft, 0)
+
+# %%
+
+plot_fft_activations(sec_1_2_mlp_post_acts_pca_fft, nrows=8, figsize=(8, 50))
+
+# %%
+
+plot_fft_activations(rib_acts_mlp_post_act_fft, nrows=8, figsize=(8, 50))
+
+# %%
+print_acts_and_phases(rib_acts_mlp_post_act_fft, 0, lower=200000)
+
+# %%
+print_acts_and_phases(rib_acts_mlp_post_act_fft, 0, lower=200000)
 
 # %%
 

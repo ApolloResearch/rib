@@ -73,11 +73,9 @@ class Config(BaseModel):
         None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
     node_layers: list[str] = Field(
-        ..., description="Names of the modules whose inputs correspond to node layers in the graph."
-    )
-    logits_node_layer: bool = Field(
         ...,
-        description="Whether to build an extra output node layer for the logits.",
+        description="Names of the modules whose inputs correspond to node layers in the graph."
+        "`output` is a special node layer that corresponds to the output of the model.",
     )
     rotate_final_node_layer: bool = Field(
         ...,
@@ -152,16 +150,18 @@ class Config(BaseModel):
 
 
 def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
-    """Ensure that the config for calculating edges is compatible with that used to calculate Cs."""
+    """Ensure that the config for calculating edges is compatible with that used to calculate Cs.
 
-    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
+    TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
+    path management nice with this Config being defined in this file in the experiments dir.
+    """
+
+    # config.node_layers must be a subsequence of loaded_config.node_layers
+    assert "|".join(config.node_layers) in "|".join(loaded_config.node_layers), (
         "node_layers in the config must be a subsequence of the node layers in the config used to"
-        "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
-        "match those needed to correctly calculate the edges."
+        "calculate the C matrices. Otherwise, the C matrices won't match those needed to correctly"
+        "calculate the edges."
     )
-    assert (
-        config.logits_node_layer or not loaded_config.logits_node_layer
-    ), "Cannot have logits_node_layer in config but not in loaded matrices config"
 
     # The following attributes must exactly match across configs
     for attr in [
@@ -210,7 +210,16 @@ def load_interaction_rotations(
 
 
 def main(config_path_str: str):
-    """Build the interaction graph and store it on disk."""
+    """Build the interaction graph and store it on disk.
+
+    Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
+    E_hats using pre-saved Cs, we need to ensure, among other things, that the pre-saved Cs were
+    calculated for the same node_layers that we wish to draw edges between (i.e. config.node_layers
+    should be a subsequence of the node_layers used to calculate the Cs).
+
+    We use the variable edge_Cs to indicate the Cs that are needed to calculate the edges. If
+    the Cs were pre-calculated and loaded from file, edge_Cs may be a subsequence of Cs.
+    """
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
@@ -227,6 +236,8 @@ def main(config_path_str: str):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
+    calc_C_time = None
+    calc_edges_time = None
 
     # Time each stage
     load_model_data_start_time = time.time()
@@ -266,11 +277,11 @@ def main(config_path_str: str):
             logger.info("Model per-token loss on dataset: %.2f", loss)
 
     # Don't build the graph for the section of the model before the first node layer
-    graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
+    section_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
     if config.interaction_matrices_path is None:
-        # Only need gram matrix for logits if we're rotating the final node layer
-        collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+        # Only need gram matrix for output if we're rotating the final node layer
+        collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
         gram_train_loader = create_data_loader(
             dataset,
@@ -282,12 +293,12 @@ def main(config_path_str: str):
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
         gram_matrices = collect_gram_matrices(
             hooked_model=hooked_model,
-            module_names=graph_module_names,
+            module_names=section_names,
             data_loader=gram_train_loader,
             dtype=dtype,
             device=device,
             collect_output_gram=collect_output_gram,
-            hook_names=config.node_layers,
+            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
         )
 
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
@@ -299,20 +310,24 @@ def main(config_path_str: str):
         logger.info("Calculating interaction rotations (Cs).")
         Cs, Us = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
-            module_names=graph_module_names,
+            section_names=section_names,
+            node_layers=config.node_layers,
             hooked_model=hooked_model,
             data_loader=graph_train_loader,
             dtype=dtype,
             device=device,
             n_intervals=config.n_intervals,
-            logits_node_layer=config.logits_node_layer,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
-            hook_names=config.node_layers,
         )
-        logger.info("Time to calculate Cs: %.2f", time.time() - c_start_time)
+        # Cs used to calculate edges
+        edge_Cs = Cs
+
+        calc_C_time = f"{(time.time() - c_start_time) / 60:.1f} minutes"
+        logger.info("Time to calculate Cs: %s", calc_C_time)
     else:
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
+        edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
 
     if not config.calculate_edges:
         logger.info("Skipping edge calculation.")
@@ -327,16 +342,17 @@ def main(config_path_str: str):
         logger.info("Calculating edges.")
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
-            Cs=Cs,
+            Cs=edge_Cs,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
-            module_names=graph_module_names,
+            section_names=section_names,
             data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
             out_dim_chunk_size=config.out_dim_chunk_size,
         )
-        logger.info("Time to calculate edges: %.2f", time.time() - edges_start_time)
+        calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
+        logger.info("Time to calculate edges: %s", calc_edges_time)
 
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []
@@ -356,6 +372,8 @@ def main(config_path_str: str):
         "edges": [(node_layer, E_hats[node_layer]) for node_layer in E_hats],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
+        "calc_C_time": calc_C_time,
+        "calc_edges_time": calc_edges_time,
     }
 
     # Save the results (which include torch tensors) to file

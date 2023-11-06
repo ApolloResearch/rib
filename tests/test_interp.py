@@ -6,8 +6,6 @@ import numpy as np
 import pytest
 import torch
 
-torch.set_grad_enabled(False)
-
 from experiments.interp_modular_arithmetic.activations import Activations
 
 

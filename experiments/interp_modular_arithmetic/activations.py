@@ -14,8 +14,6 @@ from rib.loader import create_data_loader, load_dataset, load_sequential_transfo
 from rib.types import TORCH_DTYPES
 from rib.utils import load_config
 
-torch.set_grad_enabled(False)
-
 
 class ModelConfig(BaseModel):
     n_layers: int
@@ -175,24 +173,25 @@ class Activations:
         combinations = [(x, y) for x in range(self.p) for y in range(self.p)]
 
         # Process combinations in batches
-        for i in tqdm(
-            range(0, n_combinations, batch_size), desc=f"Getting activations for {section}"
-        ):
-            batch = combinations[i : i + batch_size]
-            batch_input = torch.tensor([[x, y, self.p] for x, y in batch])
+        with torch.no_grad():
+            for i in tqdm(
+                range(0, n_combinations, batch_size), desc=f"Getting activations for {section}"
+            ):
+                batch = combinations[i : i + batch_size]
+                batch_input = torch.tensor([[x, y, self.p] for x, y in batch])
 
-            # Run the batch through the model
-            _, cache = self.hooked_model.run_with_cache(batch_input)
-            acts = cache[section]["acts"]
+                # Run the batch through the model
+                _, cache = self.hooked_model.run_with_cache(batch_input)
+                acts = cache[section]["acts"]
 
-            # Make sure the `sizes` argument matches the actual sizes
-            assert len(acts) == len(sizes), f"len(sizes) mismatch {len(sizes)} != {len(acts)}"
+                # Make sure the `sizes` argument matches the actual sizes
+                assert len(acts) == len(sizes), f"len(sizes) mismatch {len(sizes)} != {len(acts)}"
 
-            for batch_idx, (x, y) in enumerate(batch):
-                for i, act in enumerate(acts):
-                    act_shape = act[batch_idx].shape
-                    assert act_shape == sizes[i], f"{act_shape} != {sizes[i]}"
-                    return_acts[i][x, y] = act[batch_idx]
+                for batch_idx, (x, y) in enumerate(batch):
+                    for i, act in enumerate(acts):
+                        act_shape = act[batch_idx].shape
+                        assert act_shape == sizes[i], f"{act_shape} != {sizes[i]}"
+                        return_acts[i][x, y] = act[batch_idx]
 
         if concat:
             return torch.cat(return_acts, dim=-1).to(self.return_device)
@@ -277,15 +276,18 @@ class Activations:
         for size in sizes:
             return_acts.append(torch.empty([self.p, self.p, *size]))
 
-        for x in tqdm(range(self.p), desc=f"Getting activations for {section}"):
-            for y in range(self.p):
-                _, cache = self.hooked_model.run_with_cache(torch.tensor([[x, y, self.p]]))
-                acts = cache[section]["acts"]
-                # Make sure the `sizes` argument matches the actual sizes
-                assert len(acts) == len(sizes), f"len(sizes) mismatch {len(sizes)} != {len(acts)}"
-                for i, act in enumerate(acts):
-                    assert (
-                        act[batch_index].shape == sizes[i]
-                    ), f"{act[batch_index].shape} != {sizes[i]}"
-                    return_acts[i][x, y] = act[batch_index]
+        with torch.no_grad():
+            for x in tqdm(range(self.p), desc=f"Getting activations for {section}"):
+                for y in range(self.p):
+                    _, cache = self.hooked_model.run_with_cache(torch.tensor([[x, y, self.p]]))
+                    acts = cache[section]["acts"]
+                    # Make sure the `sizes` argument matches the actual sizes
+                    assert len(acts) == len(
+                        sizes
+                    ), f"len(sizes) mismatch {len(sizes)} != {len(acts)}"
+                    for i, act in enumerate(acts):
+                        assert (
+                            act[batch_index].shape == sizes[i]
+                        ), f"{act[batch_index].shape} != {sizes[i]}"
+                        return_acts[i][x, y] = act[batch_index]
         return torch.stack(return_acts, dim=0)  # (n_acts, p, p, *act_shape)

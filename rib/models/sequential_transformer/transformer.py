@@ -65,9 +65,14 @@ class SequentialTransformer(nn.Module):
     - ln_final (may be an identity module if cfg.normalization_type is None)
     - unembed
 
+    The naming convention is the same as used in https://github.com/neelnanda-io/TransformerLens.
+    E.g. "attn.0" refers to the attention module in the 0th transformer block (zero-indexed), and
+    and "ln2.3" refers to the layer norm module before the MLP in the 3rd transformer block.
+
     This same module structure is used for both sequential (GPT2) and parallel (Pythia) attention
-    models, with the difference being handled by the module classes and arguments that get used for
-    each module name above.
+    models, with the difference being handled by the module classes and arguments that are
+    associated with each module name. See the diagram in `docs/SequentialTransformer.drawio.png`
+    for a visual representation of the module structure.
 
     The `node_layers` specify the points in which to partition the model into sections.
 
@@ -92,27 +97,46 @@ class SequentialTransformer(nn.Module):
             in which to only output the last position index. This is used for modular addition.
 
     For example:
-    >>> cfg = ... # config for gpt2
-    >>> node_layers = ["attn.0", "mlp_out.0"]
+    >>> cfg = ... # config for pythia-14m
+    >>> # Including "output" won't affect the section structure but will change the RIB computation
+    >>> node_layers = ["mlp_out.0", "ln2.3", "mlp_out.3", "output"]
     >>> model = SequentialTransformer(cfg, node_layers)
     >>> print(model)
-        SequentialTransformer(
-            (sections): ModuleDict(
-                (pre): MultiSequential(
-                    (0): Embed()
-                    (1): PosEmbed()
-                    (2): Add()
-                    (3): SeqLayerNormPre_Folded()
-                )
-                (section_0): MultiSequential(
-                    (0): Attention()
-                    (1): Add()
-                    (2): SeqLayerNormPre_Folded()
-                    (3): MLPIn()
-                    (4): MLPAct()
-                )
+    SequentialTransformer(
+        (sections): ModuleDict(
+            (pre): MultiSequential(
+                (0): Embed()
+                (1): LayerNormPreFolded()
+                (2): Attention()
+                (3): Add()
+                (4): DualLayerNormPreFolded()
+                (5): MLPIn()
+                (6): MLPAct()
+            )
+            (section_0): MultiSequential(
+                (0): MLPOut()
+                (1): Add()
+                (2): LayerNormPreFolded()
+                ...
+                (19): Attention()
+                (20): Add()
+            )
+            (section_1): MultiSequential(
+                (0): DualLayerNormPreFolded()
+                (1): MLPIn()
+                (2): MLPAct()
+            )
+            (section_2): MultiSequential(
+                (0): MLPOut()
+                (1): Add()
+                (2): LayerNormPreFolded()
+                (3): Attention()
+                ...
+                (18): LayerNormPreFolded()
+                (19): Unembed()
             )
         )
+    )
     """
 
     def __init__(

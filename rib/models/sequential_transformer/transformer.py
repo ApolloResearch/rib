@@ -43,31 +43,57 @@ class MultiSequential(nn.Sequential):
 
 
 class SequentialTransformer(nn.Module):
-    """Transformer whose modules are organised into a hierarchy based on the desired RIB graph.
+    """Transformer written as a sequence of nn.Modules.
 
-    The order of modules in the graph is set out in the `create_module_name_sections` method.
+    The modules are organised into sections based on the provided `node_layers` list. Each section
+    is a MultiSequential object where the outputs of each module in the section is fed as inputs to
+    the next, and the outputs of the final module in the section are the fed as inputs to the first
+    module in the next section.
+
+    The order of module names in the transformer must be as follows:
+    - embed
+    - pos_embed (optional)
+    - add_embed (optional, only if pos_embed is present)
+    - ln1 (may be an identity module if cfg.normalization_type is None)
+    - attn
+    - add_resid1
+    - ln2 (may be an identity module if cfg.normalization_type is None)
+    - mlp_in
+    - mlp_act
+    - mlp_out
+    - add_resid2
+    - ln_final (may be an identity module if cfg.normalization_type is None)
+    - unembed
+
+    This same module structure is used for both sequential (GPT2) and parallel (Pythia) attention
+    models, with the difference being handled by the module classes and arguments that get used for
+    each module name above.
+
+    The `node_layers` specify the points in which to partition the model into sections.
 
     If the first node_layer is not "embed", we will have a pre-section of modules from embed to
-    the first node_layer. This pre-section will not be part of the graph but needs to be run
+    the first node_layer. This pre-section will not be part of the RIB graph but needs to be run
     with all forward passes in order to feed the correct data to susbequent sections.
 
-    The node_layers list may end in an `output` layer, we ignore this layer when partitioning the
+    The node_layers list may end in an `output` layer, meaning that the outputs of the model will
+    be the first basis in our RIB graph. We ignore this `output` layer when partitioning the
     model into sections.
 
     A SequentialTransformer contains a fold_bias method which modifies the weights of the model
     to fold in the bias parameters. If called, beware that the dimensions of the weight matrices
-    will change.
+    will change. After running the `fold_bias` method, it will no longer be valid to train the
+    model. This is because fold_bias adds vectors of zeros and ones to the weight matrices that must
+    be fixed for the model to be valid.
 
     Args:
         cfg (SequentialTransformerConfig): The SequentialTransformer config.
         node_layers (list[str]): The names of the node layers used to partition the transformer.
-            There will be `node_layers - 1` sections in the graph, one between each node layer.
         last_pos_module_type (Optional[Literal["add_resid1", "unembed"]]): The name of the module
-            in which to only output the last position index.
+            in which to only output the last position index. This is used for modular addition.
 
     For example:
     >>> cfg = ... # config for gpt2
-    >>> node_layers = ["attn.0", "mlp_act.0"]
+    >>> node_layers = ["attn.0", "mlp_out.0"]
     >>> model = SequentialTransformer(cfg, node_layers)
     >>> print(model)
         SequentialTransformer(
@@ -210,6 +236,8 @@ class SequentialTransformer(nn.Module):
         layer norm does not consider the extra feature of ones when calculating the mean and std.
 
         We define a mapping from each weight-bias pair to a function defining how to fold the bias.
+
+        Note that, after running this method, it will no longer be valid to train the model!
         """
         if self.has_folded_bias:
             raise ValueError("Model already has folded bias")

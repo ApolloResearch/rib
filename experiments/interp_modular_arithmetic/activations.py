@@ -36,6 +36,12 @@ class Config(BaseModel):
 
 
 class Activations:
+    """Class to get activations from a hooked model.
+
+    Loads a model from a config file, and computes normal
+    and RIB activations.
+    """
+
     # Mapping from sections to between node_layers, the outputs of the sections are
     # the inputs to the node_layers
     node_layer_dict = {
@@ -56,10 +62,12 @@ class Activations:
         """Initialize the Activations class.
 
         Args:
-            hooked_model: The hooked model to get activations from.
-            device: The device to use. Defaults to "cuda" if available, otherwise "cpu".
+            config_path_str: The path to the config file. Defaults to "mod_arithmetic_config.yaml".
+            internal_device: The device to use for internal computations such as model calls.
+                Defaults to "cuda" if available, otherwise "cpu".
+            return_device: The device to use for the return values. Defaults to "cpu".
             dtype: The dtype to use. Defaults to "float32".
-            modulus: The modulus to use. Defaults to 113.
+            modulus: The mod add modulus (p) to use. Defaults to 113.
         """
         self.dtype = TORCH_DTYPES["float32"] if dtype is None else TORCH_DTYPES[dtype]
         self.p = modulus
@@ -100,6 +108,7 @@ class Activations:
         )
 
     def print_info(self):
+        """Print some info about the model and dataset."""
         random_input, random_label = self.train_loader.dataset[np.random.randint(0, self.p)]
         print("Model", self.hooked_model)
         print("Input", random_input, "Label", random_label)
@@ -119,16 +128,10 @@ class Activations:
         (there may be multiple because our modules have multiple inputs and outputs).
 
         Args:
-            section: The section to get activations for.
+            section: The section to get activation sizes for.
 
         Returns:
-            A tensor of shape (n_acts, p, p, *act_shape) containing the activations.
-                n_acts is the number of outputs of that section, usually 1 or 2 for us.
-                p is the vocab size (modulus, usually 113 for us).
-                act_shape is the shape of the activations in the section, containing
-                token dimension but not batch dimension. Examples: Residual stream
-                activations have shape (token, d_embed), attention activations have shape
-                (n_head, query, key, d_head).
+            A list of shapes of activations in the section, should be of the form (p, p, ...).
         """
         _, cache = self.hooked_model.run_with_cache(torch.tensor([[0, 0, 0]]))
         batch_index = 0
@@ -136,44 +139,6 @@ class Activations:
         # acts is a n_acts-long list with elements of shape (batch_size, *shape)
         # where shape is e.g. [token, d_embed] for resid, or [n_head, query, key, d_head] for attn
         return [act[batch_index].shape for act in acts]
-
-    def get_section_activations_unbatched(
-        self,
-        section: str,
-        sizes: list = None,
-    ) -> torch.Tensor:
-        """Get activations for a section from run_with_cache.
-
-        Currently does not support batches.
-
-        Args:
-            section: The section to get activations for.
-            p: The size of the input. Defaults to 113.
-            sizes: The sizes of activations in the section. If None, this is determined
-                automatically.
-        """
-        if sizes is None:
-            sizes = self._get_activation_shapes(section=section)
-            print("Determined sizes of activations as", sizes)
-
-        batch_index = 0
-
-        return_acts = []
-        for size in sizes:
-            return_acts.append(torch.empty([self.p, self.p, *size]))
-
-        for x in tqdm(range(self.p), desc=f"Getting activations for {section}"):
-            for y in range(self.p):
-                _, cache = self.hooked_model.run_with_cache(torch.tensor([[x, y, self.p]]))
-                acts = cache[section]["acts"]
-                # Make sure the `sizes` argument matches the actual sizes
-                assert len(acts) == len(sizes), f"len(sizes) mismatch {len(sizes)} != {len(acts)}"
-                for i, act in enumerate(acts):
-                    assert (
-                        act[batch_index].shape == sizes[i]
-                    ), f"{act[batch_index].shape} != {sizes[i]}"
-                    return_acts[i][x, y] = act[batch_index]
-        return torch.stack(return_acts, dim=0)  # (n_acts, p, p, *act_shape)
 
     def get_section_activations(
         self,
@@ -186,8 +151,17 @@ class Activations:
 
         Args:
             section: The section to get activations for.
+            concat: Whether to concatenate the activations over the n_acts dimension.
             batch_size: The number of samples to process in a batch.
             sizes: The sizes of activations in the section. If None, this is determined automatically.
+
+        Returns:
+            A tensor (if concat) or tuple of tensors (if not concat) containing the activations
+            of the section. The tensor(s) have shape (p, p, *act_shape) where p is the vocab size,
+            and act_shape is the shape of the activations in the section, including
+                token dimension but not batch dimension. Examples: Residual stream
+                activations have shape (token, d_embed), attention activations have shape
+                (n_head, query, key, d_head).
         """
         if sizes is None:
             sizes = self._get_activation_shapes(section=section)
@@ -244,8 +218,8 @@ class Activations:
             A tensor of shape (p, p, *act_shape) containing the transformed activations.
                 Note that this is concatenated over n_acts by RIB. p is the vocab size,
                 act_shape is the shape of the activations in the section, containing
-                token dimension but not batch dimension. Examples: Residual stream
-                activations have shape (token, d_embed), attention activations have shape
+                token dimension but not batch dimension. Examples: Activations during the MLP
+                have the shape (token, d_embed + d_mlp), attention pattern activations have shape
                 (n_head, query, key, d_head).
         """
         interaction_graph_info = torch.load(interaction_graph_path)
@@ -280,33 +254,38 @@ class Activations:
             basis_matrices[node_index][basis_matrices_index],
             "... hidden, hidden rib -> ... rib",
         ).to(self.return_device)
-        # return_acts = torch.zeros_like(acts)
-        # for i, act in enumerate(acts):
-        #     return_acts[..., i] = einops.einsum(
-        #         act,
-        #         basis_matrices[node_index][basis_matrices_index].cpu(),
-        #         "act pos, act rib -> rib pos",
-        #     )
 
-        # return_acts = torch.empty(
-        #     [self.p, self.p, basis_matrices[node_index][basis_matrices_index].shape[1]]
-        # )
-        # for x in tqdm(range(self.p)):
-        #     for y in range(self.p):
-        #         batch_index = 0
-        #         _, cache = self.hooked_model.run_with_cache(torch.tensor([[x, y, self.p]]))
-        #         acts = cache[section]["acts"]
-        #         if x == 0 and y == 0:
-        #             print("In shapes (pre-cat)", [act.shape for act in acts])
-        #         acts = torch.cat([acts[i][batch_index] for i in range(len(acts))], dim=-1)
+    def get_section_activations_unbatched(
+        self,
+        section: str,
+        sizes: list = None,
+    ) -> torch.Tensor:
+        """[Better use the batched version!] Get activations for a section from run_with_cache.
 
-        #         transformed_acts = einops.einsum(
-        #             acts,
-        #             basis_matrices[node_index][basis_matrices_index].cpu(),
-        #             "act pos, act rib -> rib pos",
-        #         )
-        #         return_acts[x, y] = transformed_acts
-        #         if x == 0 and y == 0:
-        #             print("In shapes (cat tuples, batch 0)", acts.shape)
-        #             print("Out shapes", transformed_acts.shape)
-        return return_acts
+        Args:
+            section: The section to get activations for.
+            sizes: The sizes of activations in the section. If None, this is determined
+                automatically.
+        """
+        if sizes is None:
+            sizes = self._get_activation_shapes(section=section)
+            print("Determined sizes of activations as", sizes)
+
+        batch_index = 0
+
+        return_acts = []
+        for size in sizes:
+            return_acts.append(torch.empty([self.p, self.p, *size]))
+
+        for x in tqdm(range(self.p), desc=f"Getting activations for {section}"):
+            for y in range(self.p):
+                _, cache = self.hooked_model.run_with_cache(torch.tensor([[x, y, self.p]]))
+                acts = cache[section]["acts"]
+                # Make sure the `sizes` argument matches the actual sizes
+                assert len(acts) == len(sizes), f"len(sizes) mismatch {len(sizes)} != {len(acts)}"
+                for i, act in enumerate(acts):
+                    assert (
+                        act[batch_index].shape == sizes[i]
+                    ), f"{act[batch_index].shape} != {sizes[i]}"
+                    return_acts[i][x, y] = act[batch_index]
+        return torch.stack(return_acts, dim=0)  # (n_acts, p, p, *act_shape)

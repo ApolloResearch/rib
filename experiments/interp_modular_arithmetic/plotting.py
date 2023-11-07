@@ -1,40 +1,42 @@
 from datetime import datetime
 
+import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib.colors import LogNorm, Normalize, SymLogNorm
 
-torch.set_grad_enabled(False)
-
 
 def annotated_fft_line_plot(
     acts,
-    ax,
+    ax=None,
     fftshift=True,
     title="Default title",
     figsize=(8, 8),
     xlabel="Fourier frequency",
     ylabel="Magnitude",
     label=None,
+    annotation_magnitude_threshold=0.05,
 ):
-    x = torch.fft.fftfreq(acts.shape[0])
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+    freqs = torch.fft.fftfreq(acts.shape[0])
     if fftshift:
-        x = torch.fft.fftshift(x)
-        y = torch.fft.fftshift(y)
-    phase = y.angle()
-    y = y.abs()
+        freqs = torch.fft.fftshift(freqs)
+        acts = torch.fft.fftshift(acts)
+    phase = acts.angle()
+    acts = acts.abs()
     ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.plot(x, y, label=label)
-    for j, v in enumerate(y):
-        if v > y.max() / 10:
+    ax.plot(freqs, acts, label=label)
+    for j, v in enumerate(acts):
+        if v > annotation_magnitude_threshold * acts.max():
             sign = "+" if phase[j] >= 0 else "-"
             ax.text(
-                x[j],
-                v + 0.1 * v.max(),
-                f"@{x[j]:.3f}:\nMag {v:.1f}\nPhase {sign}π/{np.sign(phase[j])*np.pi/phase[j]:.2f}",
+                freqs[j],
+                min(v + 0.05 * acts.max(), 0.95 * acts.max()),
+                f"@{freqs[j]:.3f}:\nMag {v:.1e}\nPhase {phase[j]/np.pi:.2f}π",
                 rotation=0,
                 fontsize=10,
             )
@@ -67,7 +69,7 @@ def plot_activations(acts, title="Default title", nrows=2, ncols=2, figsize=(8, 
             fig.colorbar(im, ax=ax)
 
     datetimestr = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = (
+    filename = datetimestr + (
         title.replace(" ", "_")
         .replace("\n", "_")
         .replace(".", "_")
@@ -75,8 +77,8 @@ def plot_activations(acts, title="Default title", nrows=2, ncols=2, figsize=(8, 
         .replace(")", "")
         .replace(",", "")
         .replace("'", "")
-    ) + datetimestr
-    plt.savefig(f"out/activations_{filename}.png")
+    )
+    plt.savefig(f"out/{filename}.png")
 
 
 def plot_fft_activations(
@@ -84,6 +86,7 @@ def plot_fft_activations(
     title="Default title",
     nrows=4,
     figsize=(8, 16),
+    annotate=False,
     fftshift=True,
     phaseplot_magnitude_threshold=0.5,
 ):
@@ -96,6 +99,7 @@ def plot_fft_activations(
         title (str, optional): The title of the plot.
         nrows (int, optional): The number of rows to plot. Defaults to 4.
         figsize (tuple, optional): The size of the figure. Defaults to (8, 16).
+        annotate (bool, optional): Whether to annotate the phase plot with the magnitude and phase
         fftshift (bool, optional): Whether to fftshift the activations before plotting. Defaults
             to True.
         phaseplot_magnitude_threshold (float, optional): The magnitude threshold deciding
@@ -143,13 +147,30 @@ def plot_fft_activations(
                     ),
                     edgecolors="black",
                 )
+                if annotate:
+                    # Annotate scatter
+                    for i, xfreq in enumerate(freqs):
+                        for j, yfreq in enumerate(freqs):
+                            val = acts.abs()[i, j, row].numpy()
+                            phase = acts.angle()[i, j, row].numpy()
+                            sign = "+" if phase >= 0 else "-"
+                            if abs_norm(val) > phaseplot_magnitude_threshold:
+                                ax.text(
+                                    xfreq,
+                                    yfreq,
+                                    f"@({xfreq:.3f}, {yfreq:.3f})\nMag {val:.1e}\nPhase {phase/np.pi:.2f}π",
+                                    fontsize=4,
+                                    ha="center",
+                                    va="center",
+                                    path_effects=[pe.withStroke(linewidth=0.5, foreground="white")],
+                                )
                 cbar = fig.colorbar(im, ax=ax)
                 cbar.set_ticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
                 cbar.set_ticklabels([r"$-\pi$", r"$-\pi/2$", r"$0$", r"$\pi/2$", r"$\pi$"])
             ax.set_title(f"Dim {row}, {title_info}")
 
     datetimestr = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = (
+    filename = datetimestr + (
         title.replace(" ", "_")
         .replace("\n", "_")
         .replace(".", "_")
@@ -157,5 +178,6 @@ def plot_fft_activations(
         .replace(")", "")
         .replace(",", "")
         .replace("'", "")
-    ) + datetimestr
-    plt.savefig(f"out/fft_activations_{filename}.png")
+    )
+    dpi = 600 if annotate else 300
+    plt.savefig(f"out/{filename}.png", dpi=dpi)

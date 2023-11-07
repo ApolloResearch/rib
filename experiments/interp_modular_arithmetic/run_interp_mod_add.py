@@ -167,33 +167,41 @@ print_acts_and_phases(rib_acts_mlp_post_fft_z, 0, lower=200000)
 # %%
 
 # Plot embedding activations and compare whether RIB or SVD activations are simpler
-
-fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 10))
-fig.suptitle(
-    "SVD is applied to x and y separately, while RIB needs to find a transformation for both!"
-)
-for i in [7]:
+fig, axes = plt.subplots(10, 1, figsize=(8, 50))
+for i in range(10):
     annotated_fft_line_plot(
-        y=rib_acts_embedding_x_fft[:, :, i].mean(dim=1),
-        ax=axes[0],
+        acts=rib_acts_embedding_x_fft[:, :, i].mean(dim=1),
         label=f"RIB, i={i}",
-        title="RIB acts at x embedding",
+        ax=axes[i],
+        title=f"RIB acts at x embedding, i={i}",
+        annotation_magnitude_threshold=0.05,
     )
-axes[0].legend()
 
 # %%
 
 # Now plot ln2.0 input aka sections.section_0.2 output to compare
 
-
-# Plot FFT of these
 plot_fft_activations(
-    rib_acts_extended_embedding_fft[:, :, 0, :],
-    nrows=15,
-    figsize=(10, 30),
-    title="Attn patterns, SVD over heads, FFT'ed",
+    rib_acts_extended_embedding_fft[:, :, 0, 9:11],
+    nrows=2,
+    figsize=(10, 10),
+    title="FFT of RIB acts at extended embedding, dim9-10",
     fftshift=True,
+    annotate=True,
     phaseplot_magnitude_threshold=0.3,
 )
+
+# %%
+
+plot_fft_activations(
+    rib_acts_extended_embedding_fft[:, :, 0, 6:8],
+    nrows=2,
+    figsize=(10, 10),
+    title="FFT of RIB acts at extended embedding, dim6-7",
+    fftshift=True,
+    annotate=True,
+    phaseplot_magnitude_threshold=0.6,
+)
+
 
 # %%

@@ -2,8 +2,6 @@ import numpy as np
 import torch
 from sklearn.decomposition import PCA
 
-torch.set_grad_enabled(False)
-
 
 def fft2(acts: torch.Tensor) -> torch.Tensor:
     """Compute the 2D FFT of the activations over the first two dimensions, assumed to be x and y

@@ -202,23 +202,27 @@ def test_gpt2_conversion():
                     (1): PosEmbed()
                     (2): Add()
                     (3): LayerNormPre()
-                    (4): Attention()
-                    (5): Add()
-                    (6): LayerNormPre()
-                    (7): MLPIn()
-                    (8): MLPAct()
-                    (9): MLPOut()
-                    (10): Add()
-                    (11): LayerNormPre()
-                    (12): Attention()
-                    (13): Add()
+                    (4): AttentionIn()
+                    (5): AttentionOut()
+                    (6): Add()
+                    (7): LayerNormPre()
+                    (8): MLPIn()
+                    (9): MLPAct()
+                    (10): MLPOut()
+                    (11): Add()
+                    (12): LayerNormPre()
+                    (13): AttentionIn()
+                    (14): AttentionOut()
+                    (15): Add()
                 )
                 (section_0): MultiSequential(
                     (0): LayerNormPre()
                     (1): MLPIn()
                     (2): MLPAct()
+                    (3): MLPOut()
+                    (4): Add()
                     ...
-                    (84): LayerNormPre()
+                    (95): LayerNormPre()
                 )
                 (section_1): MultiSequential(
                     (0): Unembed()
@@ -240,11 +244,11 @@ def test_gpt2_conversion():
             "tuple_idx": 0,
         },
         "blocks.3.hook_resid_mid": {
-            "seq_key": "sections.section_0.15",
+            "seq_key": "sections.section_0.17",
             "tuple_idx": 0,
         },
         "blocks.8.hook_resid_post": {
-            "seq_key": "sections.section_0.60",
+            "seq_key": "sections.section_0.67",
             "tuple_idx": 0,
         },
     }
@@ -265,23 +269,28 @@ def test_pythia_conversion():
                 (pre): MultiSequential(
                     (0): Embed()
                     (1): LayerNormPre()
-                    (2): Attention()
-                    (3): Add()
-                    (4): DualLayerNormPre()
-                    (5): MLPIn()
-                    (6): MLPAct()
-                    (7): MLPOut()
-                    (8): Add()
-                    (9): LayerNormPre()
-                    (10): Attention()
-                    (11): Add()
+                    (2): AttentionIn()
+                    (3): AttentionOut()
+                    (4): Add()
+                    (5): DualLayerNormPre()
+                    (6): MLPIn()
+                    (7): MLPAct()
+                    (8): MLPOut()
+                    (9): Add()
+                    (10): LayerNormPre()
+                    (11): AttentionIn()
+                    (12): AttentionOut()
+                    (13): Add()
                 )
                 (section_0): MultiSequential(
                     (0): DualLayerNormPre()
                     (1): MLPIn()
                     (2): MLPAct()
+                    (3): MLPOut()
+                    (4): Add()
+                    (5): LayerNormPre()
                     ...
-                    (37): LayerNormPre()
+                    (41): LayerNormPre()
                 )
                 (section_1): MultiSequential(
                     (0): Unembed()
@@ -303,11 +312,11 @@ def test_pythia_conversion():
             "tuple_idx": 0,
         },
         "blocks.3.hook_mlp_out": {
-            "seq_key": "sections.section_0.19",
+            "seq_key": "sections.section_0.21",
             "tuple_idx": 1,
         },
         "blocks.4.hook_resid_post": {
-            "seq_key": "sections.section_0.28",
+            "seq_key": "sections.section_0.31",
             "tuple_idx": 0,
         },
     }

@@ -213,8 +213,6 @@ class AttentionIn(nn.Module):
         Args:
             residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
             x (Float[Tensor, "... pos d_model]): The normed residual stream (the input to the attention block)
-
-        TODO: Split into multiple modules so we can create graphs at each layer.
         """
         in_dtype = x.dtype
 
@@ -428,8 +426,6 @@ class AttentionOut(nn.Module):
             q (Float[Tensor, "... pos n_head_times_d_head]): The query tensor
             k (Float[Tensor, "... pos n_head_times_d_head]): The key tensor
             v (Float[Tensor, "... pos n_head_times_d_head]): The value tensor
-
-        TODO: Split into multiple modules so we can create graphs at each layer.
         """
         # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)
         q = einops.rearrange(

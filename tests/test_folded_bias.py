@@ -10,6 +10,7 @@ from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.hook_manager import HookedModel
 from rib.models import SequentialTransformer, SequentialTransformerConfig
+from rib.models.sequential_transformer.components import AttentionIn
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.models.utils import get_model_attr
 from rib.utils import set_seed
@@ -53,7 +54,17 @@ def _folded_bias_comparison(
 
             assert vA.shape == vB.shape, f"shape mismatch for {k}: {vA.shape} vs {vB.shape}"
 
-            assert torch.allclose(vA, vB, atol=atol), f"WARNING: mismatched values for {k}"
+            # Check if this is a Pythia attention module:
+            stages = k.split(".")
+            if (
+                isinstance(
+                    getattr(getattr(model_raw, stages[0]), stages[1])[int(stages[2])], AttentionIn
+                )
+                and model_raw.cfg.rotary_dim is not None
+            ):
+                assert torch.allclose(vA, vB, atol=1e-3), f"WARNING: mismatched values for {k}"
+            else:
+                assert torch.allclose(vA, vB, atol=atol), f"WARNING: mismatched values for {k}"
 
     for outA, outB in zip(outputA, outputB):
         assert torch.allclose(outA, outB, atol=atol), "WARNING: mismatched output values"

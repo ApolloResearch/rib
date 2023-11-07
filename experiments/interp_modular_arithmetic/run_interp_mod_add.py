@@ -37,8 +37,8 @@ attention_scores = activations.get_section_activations(
 )
 
 attention_pattern = torch.softmax(attention_scores, dim=-1)
-attention_pattern_z = attention_pattern[:, :, :, -1, :]
-attention_pattern_z_to_x = attention_pattern[:, :, :, -1, 0]
+attention_pattern_p = attention_pattern[:, :, :, -1, :]
+attention_pattern_p_to_x = attention_pattern[:, :, :, -1, 0]
 
 sec_0_2_resid_post_attn_acts = activations.get_section_activations(section="sections.section_0.2")
 
@@ -78,11 +78,11 @@ rib_acts_pre_unembed = activations.get_rib_activations(section="sections.section
 # Create PCA and SVD versions of normal activations
 
 # Attention pattern
-attention_pattern_z_to_x_svd = svd_activations(attention_pattern_z_to_x)
-attention_pattern_z_to_x_pca = pca_activations(attention_pattern_z_to_x)
-attention_pattern_z_to_x_fft = fft2(attention_pattern_z_to_x)
-attention_pattern_z_to_x_svd_fft = fft2(attention_pattern_z_to_x_svd)
-attention_pattern_z_to_x_pca_fft = fft2(attention_pattern_z_to_x_pca)
+attention_pattern_p_to_x_svd = svd_activations(attention_pattern_p_to_x)
+attention_pattern_p_to_x_pca = pca_activations(attention_pattern_p_to_x)
+attention_pattern_p_to_x_fft = fft2(attention_pattern_p_to_x)
+attention_pattern_p_to_x_svd_fft = fft2(attention_pattern_p_to_x_svd)
+attention_pattern_p_to_x_pca_fft = fft2(attention_pattern_p_to_x_pca)
 
 # Extended embedding
 sec_0_2_resid_post_attn_acts_svd = svd_activations(sec_0_2_resid_post_attn_acts)
@@ -103,11 +103,11 @@ rib_acts_mlp_post_fft_z = rib_acts_mlp_post_fft[:, :, -1, :]
 
 # Plot PCA'ed and SVD'ed activations
 plot_activations(
-    attention_pattern_z_to_x_svd, nrows=2, center=False, title="Attn patterns, SVD over heads"
+    attention_pattern_p_to_x_svd, nrows=2, center=False, title="Attn patterns, SVD over heads"
 )
 
 plot_activations(
-    attention_pattern_z_to_x_pca, nrows=2, center=False, title="Attn patterns, PCA over heads"
+    attention_pattern_p_to_x_pca, nrows=2, center=False, title="Attn patterns, PCA over heads"
 )
 
 # %%
@@ -115,7 +115,7 @@ plot_activations(
 
 # Plot FFT of these
 plot_fft_activations(
-    attention_pattern_z_to_x_pca_fft,
+    attention_pattern_p_to_x_pca_fft,
     nrows=4,
     title="Attn patterns, SVD over heads, FFT'ed",
     fftshift=True,
@@ -123,7 +123,7 @@ plot_fft_activations(
 )
 
 plot_fft_activations(
-    attention_pattern_z_to_x_pca_fft,
+    attention_pattern_p_to_x_pca_fft,
     nrows=4,
     title="Attn patterns, indiv heads, FFT'ed",
     fftshift=True,
@@ -149,7 +149,7 @@ def print_acts_and_phases(ffted_acts, index, p=113, lower=300):
                 )
 
 
-print_acts_and_phases(attention_pattern_z_to_x_pca_fft, 0)
+print_acts_and_phases(attention_pattern_p_to_x_pca_fft, 0)
 # Confirmed same output as play_mod_arithmetic.py notebook
 
 # %%

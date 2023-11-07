@@ -5,9 +5,19 @@ from sklearn.decomposition import PCA
 torch.set_grad_enabled(False)
 
 
-def fft2(acts):
-    """Compute the 2D FFT of the activations over the first two dimensions, assumed to be x and y"""
-    return torch.fft.fft2(acts, dim=(0, 1))
+def fft2(acts: torch.Tensor) -> torch.Tensor:
+    """Compute the 2D FFT of the activations over the first two dimensions, assumed to be x and y
+
+    Args:
+        acts (torch.Tensor): The activations to transform. If acts is of shape (x, y, ...), then the
+            returned tensor will be of shape (x, y, ...) with x and y FFT'ed.
+
+    Returns:
+        acts (torch.Tensor): The FFT'ed activations.
+    """
+    assert acts.shape[0] == acts.shape[1], "acts must be square (same x and y dim)"
+    acts = torch.fft.fft2(acts, dim=(0, 1))
+    return acts
 
 
 def pca_activations(acts):

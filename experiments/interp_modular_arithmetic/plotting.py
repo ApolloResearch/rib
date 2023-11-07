@@ -8,6 +8,38 @@ from matplotlib.colors import LogNorm, Normalize, SymLogNorm
 torch.set_grad_enabled(False)
 
 
+def annotated_fft_line_plot(
+    acts,
+    ax,
+    fftshift=True,
+    title="Default title",
+    figsize=(8, 8),
+    xlabel="Fourier frequency",
+    ylabel="Magnitude",
+    label=None,
+):
+    x = torch.fft.fftfreq(acts.shape[0])
+    if fftshift:
+        x = torch.fft.fftshift(x)
+        y = torch.fft.fftshift(y)
+    phase = y.angle()
+    y = y.abs()
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.plot(x, y, label=label)
+    for j, v in enumerate(y):
+        if v > y.max() / 10:
+            sign = "+" if phase[j] >= 0 else "-"
+            ax.text(
+                x[j],
+                v + 0.1 * v.max(),
+                f"@{x[j]:.3f}:\nMag {v:.1f}\nPhase {sign}π/{np.sign(phase[j])*np.pi/phase[j]:.2f}",
+                rotation=0,
+                fontsize=10,
+            )
+
+
 def plot_activations(acts, title="Default title", nrows=2, ncols=2, figsize=(8, 8), center=True):
     fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
     """Plot the first ncols*nrows activation dimensions as a function of x and y, in a grid of subplots

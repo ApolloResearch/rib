@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from activations import Activations
-from plotting import plot_activations, plot_fft_activations
+from plotting import annotated_fft_line_plot, plot_activations, plot_fft_activations
 from transformations import fft2, pca_activations, svd_activations
 
 torch.set_grad_enabled(False)
@@ -168,22 +168,32 @@ print_acts_and_phases(rib_acts_mlp_post_fft_z, 0, lower=200000)
 
 # Plot embedding activations and compare whether RIB or SVD activations are simpler
 
-freqs = torch.fft.fftfreq(rib_acts_embedding_x_fft.shape[0])
-
 fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 10))
 fig.suptitle(
     "SVD is applied to x and y separately, while RIB needs to find a transformation for both!"
 )
-for i in range(5):
-    axes[0].set_title("RIB acts at x embedding")
-    axes[0].set_xlabel("Fourier frequency")
-    axes[0].set_ylabel("Magnitude")
-    axes[0].plot(freqs, rib_acts_embedding_x_fft[:, :, i].mean(dim=1).abs(), label=f"i={i}")
-    axes[1].set_title("single-SVD acts at x embedding")
-    axes[1].set_xlabel("Fourier frequency")
-    axes[1].set_ylabel("Magnitude")
-    axes[1].plot(
-        freqs, sec_pre_2_resid_embed_acts_svd_fft[:, :, 0, i].mean(dim=1).abs(), label=f"i={i}"
+for i in [7]:
+    annotated_fft_line_plot(
+        y=rib_acts_embedding_x_fft[:, :, i].mean(dim=1),
+        ax=axes[0],
+        label=f"RIB, i={i}",
+        title="RIB acts at x embedding",
     )
+axes[0].legend()
+
+# %%
+
+# Now plot ln2.0 input aka sections.section_0.2 output to compare
+
+
+# Plot FFT of these
+plot_fft_activations(
+    rib_acts_extended_embedding_fft[:, :, 0, :],
+    nrows=15,
+    figsize=(10, 30),
+    title="Attn patterns, SVD over heads, FFT'ed",
+    fftshift=True,
+    phaseplot_magnitude_threshold=0.3,
+)
 
 # %%

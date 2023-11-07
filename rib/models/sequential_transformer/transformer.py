@@ -231,7 +231,8 @@ class SequentialTransformer(nn.Module):
 
         block_module_names: list[str] = [
             "ln1",
-            "attn",
+            "attn_in",
+            "attn_out",
             "add_resid1",
             "ln2",
             "mlp_in",

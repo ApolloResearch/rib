@@ -27,24 +27,26 @@ def test_modular_arithmetic_conversion() -> None:
                 (1): PosEmbed()
                 (2): Add()
                 (3): LayerNormPre()
-                (4): Attention()
-                (5): Add()
-                (6): LayerNormPre()
-                (7): MLPIn()
+                (4): AttentionIn()
+                (5): AttentionOut()
+                (6): Add()
+                (7): LayerNormPre()
+                (8): MLPIn()
             )
             (section_0): MultiSequential(
                 (0): MLPAct()
                 (1): MLPOut()
                 (2): Add()
                 (3): LayerNormPre()
-                (4): Attention()
-                (5): Add()
-                (6): LayerNormPre()
-                (7): MLPIn()
-                (8): MLPAct()
-                (9): MLPOut()
-                (10): Add()
-                (11): LayerNormPre()
+                (4): AttentionIn()
+                (5): AttentionOut()
+                (6): Add()
+                (7): LayerNormPre()
+                (8): MLPIn()
+                (9): MLPAct()
+                (10): MLPOut()
+                (11): Add()
+                (12): LayerNormPre()
             )
             (section_1): MultiSequential(
                 (0): Unembed()
@@ -100,11 +102,11 @@ def test_modular_arithmetic_conversion() -> None:
             "tuple_idx": 0,
         },
         "blocks.0.hook_resid_mid": {
-            "seq_key": "sections.pre.5",
+            "seq_key": "sections.pre.6",
             "tuple_idx": 0,
         },
         "blocks.1.hook_mlp_out": {
-            "seq_key": "sections.section_0.9",
+            "seq_key": "sections.section_0.10",
             "tuple_idx": 1,
         },
     }

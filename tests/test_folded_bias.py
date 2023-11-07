@@ -3,6 +3,7 @@
 from dataclasses import asdict
 from typing import Literal
 
+import einops
 import pytest
 import torch
 from transformer_lens import HookedTransformer, HookedTransformerConfig
@@ -36,6 +37,19 @@ def _folded_bias_comparison(
             if vB.shape[-1] == vA.shape[-1] + 1:
                 # Consider the final dimension (it should be our constant function)
                 vB = vB[..., :-1]
+            if vB.shape[-1] == vA.shape[-1] + model_folded.cfg.n_heads:
+                # We add a constant dimension per attention head to v and then concatenate heads
+                # This is a bit more complicated to cut out
+                vB = einops.rearrange(
+                    vB,
+                    "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
+                    head_index=model_folded.cfg.n_heads,
+                )
+                assert torch.allclose(vB[..., :, -1], torch.tensor(1, dtype=vB.dtype))
+                vB = vB[..., :, :-1]
+                vB = einops.rearrange(
+                    vB, "... pos head_index d_head_v -> ... pos (head_index d_head_v)"
+                )
 
             assert vA.shape == vB.shape, f"shape mismatch for {k}: {vA.shape} vs {vB.shape}"
 
@@ -69,7 +83,7 @@ def test_modular_arithmetic_folded_bias() -> None:
     tlens_cfg = HookedTransformerConfig.from_dict(cfg)
     cfg = SequentialTransformerConfig(**asdict(tlens_cfg))
 
-    node_layers = ["attn.0", "mlp_act.0"]
+    node_layers = ["attn_in.0", "mlp_act.0"]
 
     model_raw = SequentialTransformer(cfg, node_layers)
     model_raw.eval()
@@ -89,6 +103,9 @@ def test_modular_arithmetic_folded_bias() -> None:
     model_folded.eval()
 
     _folded_bias_comparison(model_raw, model_folded, atol=atol)
+
+
+test_modular_arithmetic_folded_bias()
 
 
 def pretrained_lm_folded_bias_comparison(
@@ -129,7 +146,7 @@ def pretrained_lm_folded_bias_comparison(
 def test_gpt2_folded_bias() -> None:
     """Test that the folded bias trick works for GPT2."""
     set_seed(42)
-    node_layers = ["attn.0", "mlp_act.0"]
+    node_layers = ["attn_in.0", "mlp_act.0"]
     pretrained_lm_folded_bias_comparison(
         hf_model_str="gpt2",
         node_layers=node_layers,

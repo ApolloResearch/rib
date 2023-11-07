@@ -25,6 +25,13 @@ attention_pattern = torch.softmax(attention_scores, dim=-1)
 attention_pattern_p = attention_pattern[:, :, :, -1, :]
 attention_pattern_p_to_x = attention_pattern[:, :, :, -1, 0]
 
+sec_pre_2_resid_embed_acts = activations.get_section_activations(section="sections.pre.2")[0]
+(
+    sec_pre_2_resid_embed_acts_x,
+    sec_pre_2_resid_embed_acts_y,
+    sec_pre_2_resid_embed_acts_z,
+) = einops.rearrange(sec_pre_2_resid_embed_acts, "x y p h -> p x y h")
+
 sec_0_2_resid_post_attn_acts = activations.get_section_activations(section="sections.section_0.2")[
     0
 ]
@@ -48,6 +55,9 @@ sec_2_1_resid_post_mlp_acts = activations.get_section_activations(section="secti
 # Extract RIB activations
 
 rib_acts_embedding = activations.get_rib_activations(section="sections.pre.2")
+orthog_acts_embedding = activations.get_rib_activations(
+    section="sections.pre.2", ablation_type="orthogonal"
+)
 rib_acts_embedding_x, rib_acts_embedding_y, rib_acts_embedding_z = einops.rearrange(
     rib_acts_embedding, "x y p h -> p x y h"
 )
@@ -60,7 +70,34 @@ rib_acts_pre_unembed = activations.get_rib_activations(section="sections.section
 
 # %%
 
-# Create PCA and SVD versions of normal activations
+# Create PCA and SVD versions of normal activations, and FFT these as well as RIB
+
+# Embedding
+sec_pre_2_resid_embed_acts_svd = svd_activations(sec_pre_2_resid_embed_acts)
+
+# sec_pre_2_resid_embed_acts_xyz_svd = svd_activations(sec_pre_2_resid_embed_acts
+#     sec_pre_2_resid_embed_acts.reshape(113, 113, -1)
+# ).reshape(113, 113, 3, -1)
+# sec_pre_2_resid_embed_acts_xyz_pca = pca_activations(
+#     sec_pre_2_resid_embed_acts.reshape(113, 113, -1)
+# ).reshape(113, 113, 3, -1)
+
+sec_pre_2_resid_embed_acts_x_svd = svd_activations(sec_pre_2_resid_embed_acts_x)
+sec_pre_2_resid_embed_acts_x_pca = pca_activations(sec_pre_2_resid_embed_acts_x)
+sec_pre_2_resid_embed_acts_svd_fft = fft2(sec_pre_2_resid_embed_acts_svd)
+orthog_acts_embedding_fft = fft2(orthog_acts_embedding)
+# sec_pre_2_resid_embed_acts_xyz_svd_fft = fft2(sec_pre_2_resid_embed_acts_xyz_svd)
+# sec_pre_2_resid_embed_acts_xyz_pca_fft = fft2(sec_pre_2_resid_embed_acts_xyz_pca)
+sec_pre_2_resid_embed_acts_x_svd_fft = fft2(sec_pre_2_resid_embed_acts_x_svd)
+sec_pre_2_resid_embed_acts_x_pca_fft = fft2(sec_pre_2_resid_embed_acts_x_pca)
+
+sec_pre_2_resid_embed_acts_y_svd = svd_activations(sec_pre_2_resid_embed_acts_y)
+sec_pre_2_resid_embed_acts_y_pca = pca_activations(sec_pre_2_resid_embed_acts_y)
+sec_pre_2_resid_embed_acts_y_svd_fft = fft2(sec_pre_2_resid_embed_acts_y_svd)
+sec_pre_2_resid_embed_acts_y_pca_fft = fft2(sec_pre_2_resid_embed_acts_y_pca)
+
+rib_acts_embedding_x_fft = fft2(rib_acts_embedding_x)
+rib_acts_embedding_y_fft = fft2(rib_acts_embedding_y)
 
 # Attention pattern
 attention_pattern_p_to_x_svd = svd_activations(attention_pattern_p_to_x)
@@ -141,4 +178,70 @@ print_acts_and_phases(attention_pattern_p_to_x_pca_fft, 0)
 print_acts_and_phases(rib_acts_mlp_post_fft_z, 0, lower=200000)
 # Confirmed same output as play_mod_arithmetic.py notebook
 
+# %%
+
+
+plot_fft_activations(
+    rib_acts_embedding_x_fft,
+    nrows=10,
+    figsize=(10, 20),
+    title="Embed RIB FFT",
+    fftshift=True,
+    phaseplot_magnitude_threshold=0.3,
+)
+# %%
+
+# Plot embedding activations and compare whether RIB or SVD activations are simpler
+
+freqs = torch.fft.fftfreq(rib_acts_embedding_x_fft.shape[0])
+
+fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(10, 15))
+fig.suptitle(
+    "SVD is applied to x and y separately, while RIB needs to find a transformation for both!"
+)
+for i in range(5):
+    axes[0, 0].set_title("RIB acts at x embedding")
+    axes[0, 0].set_xlabel("Fourier frequency")
+    axes[0, 0].set_ylabel("Magnitude")
+    axes[0, 0].plot(freqs, rib_acts_embedding_x_fft[:, :, i].mean(dim=1).abs(), label=f"i={i}")
+    axes[0, 1].set_title("RIB acts at y embedding")
+    axes[0, 1].set_xlabel("Fourier frequency")
+    axes[0, 1].set_ylabel("Magnitude")
+    axes[0, 1].plot(freqs, rib_acts_embedding_y_fft[:, :, i].mean(dim=0).abs(), label=f"i={i}")
+    axes[1, 0].set_title("SVD acts at x embedding")
+    axes[1, 0].set_xlabel("Fourier frequency")
+    axes[1, 0].set_ylabel("Magnitude")
+    axes[1, 0].plot(
+        freqs, sec_pre_2_resid_embed_acts_x_svd_fft[:, :, i].mean(dim=1), label=f"i={i}"
+    )
+    axes[1, 1].set_title("SVD acts at y embedding")
+    axes[1, 1].set_xlabel("Fourier frequency")
+    axes[1, 1].set_ylabel("Magnitude")
+    axes[1, 1].plot(
+        freqs, sec_pre_2_resid_embed_acts_y_svd_fft[:, :, i].mean(dim=0), label=f"i={i}"
+    )
+    axes[2, 0].set_title("single-SVD acts at x embedding")
+    axes[2, 0].set_xlabel("Fourier frequency")
+    axes[2, 0].set_ylabel("Magnitude")
+    axes[2, 0].plot(
+        freqs, sec_pre_2_resid_embed_acts_svd_fft[:, :, 0, i].mean(dim=1).abs(), label=f"i={i}"
+    )
+    axes[2, 1].set_title("single-SVD acts at y embedding")
+    axes[2, 1].set_xlabel("Fourier frequency")
+    axes[2, 1].set_ylabel("Magnitude")
+    axes[2, 1].plot(
+        freqs, sec_pre_2_resid_embed_acts_svd_fft[:, :, 1, i].mean(dim=0).abs(), label=f"i={i}"
+    )
+
+# plt.figure()
+# plt.title("Embed SVD FFT")
+# for i in range(10):
+#     plt.plot(freqs, sec_pre_2_resid_embed_acts_x_svd_fft[:, :, i].mean(dim=1), label=f"i={i}")
+# plt.legend()
+
+# plt.figure()
+# plt.title("Embed PCA FFT")
+# for i in range(10):
+#     plt.plot(freqs, sec_pre_2_resid_embed_acts_x_pca_fft[:, :, i].mean(dim=1), label=f"i={i}")
+# plt.legend()
 # %%

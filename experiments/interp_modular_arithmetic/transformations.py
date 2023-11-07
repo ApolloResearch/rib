@@ -12,7 +12,8 @@ def fft2(acts):
 
 def pca_activations(acts):
     """Compute the PCA over the last dimension of the activations."""
-    acts_pca = acts.reshape(-1, acts.shape[-1])
+    acts_shape = acts.shape
+    acts_pca = acts.reshape(-1, acts_shape[-1])
     pca = PCA(n_components=acts_pca.shape[-1])
     acts_transformed = pca.fit_transform(acts_pca)
     acts_transformed = acts_transformed.reshape(acts.shape[0], acts.shape[1], -1)
@@ -21,11 +22,14 @@ def pca_activations(acts):
         "".join([f"{x:.2f} " if x > 1e-5 else "." for x in pca.explained_variance_ratio_]),
     )
     acts_transformed = torch.tensor(acts_transformed)
+    # Reshape back into the original form (disentangling data (x, y) and token dimensions)
+    acts_transformed = acts_transformed.reshape(acts_shape)
     return acts_transformed
 
 
 def svd_activations(acts):
     """Compute the SVD over the last dimension of the activations."""
+    acts_shape = acts.shape
     acts_flat = acts.reshape(-1, acts.shape[-1])
     U, S, Vt = np.linalg.svd(acts_flat, full_matrices=False)
     acts_transformed = np.dot(acts_flat, Vt.T)
@@ -36,4 +40,6 @@ def svd_activations(acts):
         "".join([f"{x:.2f} " if x > 1e-5 else "." for x in explained_variance_ratio]),
     )
     acts_transformed = torch.tensor(acts_transformed)
+    # Reshape back into the original form (disentangling data (x, y) and token dimensions)
+    acts_transformed = acts_transformed.reshape(acts_shape)
     return acts_transformed

@@ -1,10 +1,11 @@
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import einops
 import numpy as np
 import torch
 from pydantic import BaseModel
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from rib.ablations import load_basis_matrices
@@ -51,7 +52,7 @@ class Activations:
 
     def __init__(
         self,
-        config_path_str: Optional[str] = "mod_arithmetic_config.yaml",
+        config_path_str: str = "mod_arithmetic_config.yaml",
         internal_device: Optional[str] = None,
         return_device: str = "cpu",
         dtype: Optional[str] = None,
@@ -89,18 +90,20 @@ class Activations:
                 "/mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
             ),
             eps=1e-5,
-            dtype=dtype,
-            device=internal_device,
+            dtype=self.dtype,
+            device=self.internal_device,
         )
 
         seq_model.eval()
-        seq_model.to(device=self.internal_device)
+        seq_model.to(self.internal_device)
         seq_model.fold_bias()
         self.hooked_model = HookedModel(seq_model)
 
         self.datasets = load_dataset(
             dataset_config=self.config.dataset, return_set=self.config.dataset.return_set
         )
+        self.train_loader: DataLoader
+        self.test_loader: DataLoader
         self.train_loader, self.test_loader = create_data_loader(
             self.datasets, shuffle=True, batch_size=11, seed=0
         )
@@ -141,17 +144,17 @@ class Activations:
     def get_section_activations(
         self,
         section: str,
-        concat: bool = True,
         batch_size: int = 32,
-        sizes: list = None,
-    ) -> torch.Tensor:
+        sizes: Optional[list] = None,
+        device: Optional[str] = None,
+    ) -> tuple[torch.Tensor, ...]:
         """Get activations for a section from run_with_cache.
 
         Args:
             section: The section to get activations for.
-            concat: Whether to concatenate the activations over the n_acts dimension.
             batch_size: The number of samples to process in a batch.
             sizes: The sizes of activations in the section. If None, this is determined automatically.
+            device: The device to use for the activations. Defaults to self.return_device.
 
         Returns:
             A tensor (if concat) or tuple of tensors (if not concat) containing the activations
@@ -164,6 +167,8 @@ class Activations:
         if sizes is None:
             sizes = self._get_activation_shapes(section=section)
             print("Determined sizes of activations as", sizes)
+
+        device = self.return_device if device is None else device
 
         # Initialize the tensor to hold all activations
         return_acts = [torch.empty([self.p, self.p, *size]) for size in sizes]
@@ -193,16 +198,13 @@ class Activations:
                         assert act_shape == sizes[i], f"{act_shape} != {sizes[i]}"
                         return_acts[i][x, y] = act[batch_idx]
 
-        if concat:
-            return torch.cat(return_acts, dim=-1).to(self.return_device)
-        else:
-            return tuple([r.to(self.return_device) for r in return_acts])
+        return tuple([r.to(device) for r in return_acts])
 
     def get_rib_activations(
         self,
         section: str,
         interaction_graph_path: str = "/mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt",
-        ablation_type: str = "rib",
+        ablation_type: Literal["rib", "orthogonal"] = "rib",
     ):
         """Collect RIB-transformed activations for a section.
 
@@ -245,7 +247,9 @@ class Activations:
             "Got rotation matrix of shape", basis_matrices[node_index][basis_matrices_index].shape
         )
 
-        acts = self.get_section_activations(section=section, concat=True).to(self.internal_device)
+        acts = torch.cat(
+            self.get_section_activations(section=section, device=self.internal_device), dim=-1
+        )
         print("Got activations of shape", acts.shape)
 
         return einops.einsum(
@@ -257,7 +261,7 @@ class Activations:
     def get_section_activations_unbatched(
         self,
         section: str,
-        sizes: list = None,
+        sizes: Optional[list] = None,
     ) -> torch.Tensor:
         """[Better use the batched version!] Get activations for a section from run_with_cache.
 

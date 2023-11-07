@@ -32,7 +32,7 @@ def test_activations_batched_vs_unbatched():
     activations = Activations(path)
 
     resid_acts_sec_0_2 = activations.get_section_activations(
-        section="sections.section_0.2", concat=False
+        section="sections.section_0.2",
     )[0]
     resid_acts_sec_0_2_nobatch = activations.get_section_activations_unbatched(
         section="sections.section_0.2"
@@ -52,7 +52,7 @@ def test_attention_pattern():
 
     attention_scores = activations.get_section_activations(
         section="sections.section_0.1.attention_scores",
-    )
+    )[0]
     attention_scores_x_to_y = attention_scores[:, :, :, 0, 1]
     assert torch.allclose(
         attention_scores_x_to_y, torch.tensor(-1e5)

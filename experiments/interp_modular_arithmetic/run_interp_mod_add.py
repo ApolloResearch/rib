@@ -15,48 +15,33 @@ activations.print_info()
 
 # %%
 
-resid_acts_sec_0_2 = activations.get_section_activations(section="sections.section_0.2")[0]
-
-
-# resid_acts_sec_0_2_b = activations.get_section_activations_unbatched(
-#     section="sections.section_0.2"
-# )[0]
-
-# assert torch.allclose(resid_acts_sec_0_2, resid_acts_sec_0_2_b, atol=1e-6)
-# %%
-# Tests: Batch vs unbatched
-#        Atn score 1e-5 where it should be
-#        Logits give right answer for mod add
-
-# %%
-
 # Extract all normal activations
 
 attention_scores = activations.get_section_activations(
     section="sections.section_0.1.attention_scores",
-)
+)[0]
 
 attention_pattern = torch.softmax(attention_scores, dim=-1)
 attention_pattern_p = attention_pattern[:, :, :, -1, :]
 attention_pattern_p_to_x = attention_pattern[:, :, :, -1, 0]
 
-sec_0_2_resid_post_attn_acts = activations.get_section_activations(section="sections.section_0.2")
+sec_0_2_resid_post_attn_acts = activations.get_section_activations(section="sections.section_0.2")[
+    0
+]
 
 sec_1_1_resid_pre_mlp_acts, sec_1_1_mlp_pre_acts = activations.get_section_activations(
     section="sections.section_1.1",
-    concat=False,
 )
 # Note: Resid contains the same numbers from 0.2 to 1.2
 assert torch.allclose(sec_1_1_resid_pre_mlp_acts, sec_0_2_resid_post_attn_acts)
 
 sec_1_2_resid_parallel_acts, sec_1_2_mlp_post_acts = activations.get_section_activations(
     section="sections.section_1.2",
-    concat=False,
 )
 
 assert torch.allclose(sec_1_2_resid_parallel_acts, sec_1_1_resid_pre_mlp_acts)
 # Note: Resid contains the same numbers from 0.2 to 1.2
-sec_2_1_resid_post_mlp_acts = activations.get_section_activations(section="sections.section_2.1")
+sec_2_1_resid_post_mlp_acts = activations.get_section_activations(section="sections.section_2.1")[0]
 
 # %%
 

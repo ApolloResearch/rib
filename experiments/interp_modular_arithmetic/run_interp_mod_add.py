@@ -128,26 +128,11 @@ plot_activations(
     attention_pattern_p_to_x_svd, nrows=2, center=False, title="Attn patterns, SVD over heads"
 )
 
-plot_activations(
-    attention_pattern_p_to_x_pca, nrows=2, center=False, title="Attn patterns, PCA over heads"
-)
-
-# %%
-
-
 # Plot FFT of these
 plot_fft_activations(
-    attention_pattern_p_to_x_pca_fft,
+    attention_pattern_p_to_x_svd_fft,
     nrows=4,
     title="Attn patterns, SVD over heads, FFT'ed",
-    fftshift=True,
-    phaseplot_magnitude_threshold=0.3,
-)
-
-plot_fft_activations(
-    attention_pattern_p_to_x_pca_fft,
-    nrows=4,
-    title="Attn patterns, indiv heads, FFT'ed",
     fftshift=True,
     phaseplot_magnitude_threshold=0.3,
 )
@@ -171,77 +156,34 @@ def print_acts_and_phases(ffted_acts, index, p=113, lower=300):
                 )
 
 
+# %%
+
 print_acts_and_phases(attention_pattern_p_to_x_pca_fft, 0)
 # Confirmed same output as play_mod_arithmetic.py notebook
 
-# %%
 print_acts_and_phases(rib_acts_mlp_post_fft_z, 0, lower=200000)
 # Confirmed same output as play_mod_arithmetic.py notebook
 
-# %%
-
-
-plot_fft_activations(
-    rib_acts_embedding_x_fft,
-    nrows=10,
-    figsize=(10, 20),
-    title="Embed RIB FFT",
-    fftshift=True,
-    phaseplot_magnitude_threshold=0.3,
-)
 # %%
 
 # Plot embedding activations and compare whether RIB or SVD activations are simpler
 
 freqs = torch.fft.fftfreq(rib_acts_embedding_x_fft.shape[0])
 
-fig, axes = plt.subplots(nrows=3, ncols=2, figsize=(10, 15))
+fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 10))
 fig.suptitle(
     "SVD is applied to x and y separately, while RIB needs to find a transformation for both!"
 )
 for i in range(5):
-    axes[0, 0].set_title("RIB acts at x embedding")
-    axes[0, 0].set_xlabel("Fourier frequency")
-    axes[0, 0].set_ylabel("Magnitude")
-    axes[0, 0].plot(freqs, rib_acts_embedding_x_fft[:, :, i].mean(dim=1).abs(), label=f"i={i}")
-    axes[0, 1].set_title("RIB acts at y embedding")
-    axes[0, 1].set_xlabel("Fourier frequency")
-    axes[0, 1].set_ylabel("Magnitude")
-    axes[0, 1].plot(freqs, rib_acts_embedding_y_fft[:, :, i].mean(dim=0).abs(), label=f"i={i}")
-    axes[1, 0].set_title("SVD acts at x embedding")
-    axes[1, 0].set_xlabel("Fourier frequency")
-    axes[1, 0].set_ylabel("Magnitude")
-    axes[1, 0].plot(
-        freqs, sec_pre_2_resid_embed_acts_x_svd_fft[:, :, i].mean(dim=1), label=f"i={i}"
-    )
-    axes[1, 1].set_title("SVD acts at y embedding")
-    axes[1, 1].set_xlabel("Fourier frequency")
-    axes[1, 1].set_ylabel("Magnitude")
-    axes[1, 1].plot(
-        freqs, sec_pre_2_resid_embed_acts_y_svd_fft[:, :, i].mean(dim=0), label=f"i={i}"
-    )
-    axes[2, 0].set_title("single-SVD acts at x embedding")
-    axes[2, 0].set_xlabel("Fourier frequency")
-    axes[2, 0].set_ylabel("Magnitude")
-    axes[2, 0].plot(
+    axes[0].set_title("RIB acts at x embedding")
+    axes[0].set_xlabel("Fourier frequency")
+    axes[0].set_ylabel("Magnitude")
+    axes[0].plot(freqs, rib_acts_embedding_x_fft[:, :, i].mean(dim=1).abs(), label=f"i={i}")
+    axes[1].set_title("single-SVD acts at x embedding")
+    axes[1].set_xlabel("Fourier frequency")
+    axes[1].set_ylabel("Magnitude")
+    axes[1].plot(
         freqs, sec_pre_2_resid_embed_acts_svd_fft[:, :, 0, i].mean(dim=1).abs(), label=f"i={i}"
     )
-    axes[2, 1].set_title("single-SVD acts at y embedding")
-    axes[2, 1].set_xlabel("Fourier frequency")
-    axes[2, 1].set_ylabel("Magnitude")
-    axes[2, 1].plot(
-        freqs, sec_pre_2_resid_embed_acts_svd_fft[:, :, 1, i].mean(dim=0).abs(), label=f"i={i}"
-    )
 
-# plt.figure()
-# plt.title("Embed SVD FFT")
-# for i in range(10):
-#     plt.plot(freqs, sec_pre_2_resid_embed_acts_x_svd_fft[:, :, i].mean(dim=1), label=f"i={i}")
-# plt.legend()
-
-# plt.figure()
-# plt.title("Embed PCA FFT")
-# for i in range(10):
-#     plt.plot(freqs, sec_pre_2_resid_embed_acts_x_pca_fft[:, :, i].mean(dim=1), label=f"i={i}")
-# plt.legend()
 # %%

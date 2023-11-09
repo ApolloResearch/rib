@@ -135,6 +135,11 @@ class Config(BaseModel):
         "If None, skip evaluation.",
     )
 
+    use_us_as_cs: bool = Field(
+        False,
+        description="Whether to use the U matricies as C, in essence choosing the basis with svd",
+    )
+
     @field_validator("dtype")
     def dtype_validator(cls, v):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
@@ -320,9 +325,22 @@ def main(config_path_str: str):
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
         )
+        # TODO (nix): Currently this feature is implimented in a hacky innefficient way
+        # It's not clear that this should be a feature at all. But imo shouldn't be merged into main
+        # without a better implimentation.
+        if config.use_us_as_cs:
+            Cs = [
+                InteractionRotation(
+                    node_layer_name=U.node_layer_name,
+                    out_dim=U.out_dim,
+                    C=U.U,
+                    C_pinv=(None if U.U is None else U.U.T),
+                )
+                for U in Us
+            ]
+
         # Cs used to calculate edges
         edge_Cs = Cs
-
         calc_C_time = f"{(time.time() - c_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate Cs: %s", calc_C_time)
     else:

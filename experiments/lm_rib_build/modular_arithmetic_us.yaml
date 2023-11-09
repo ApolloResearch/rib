@@ -1,0 +1,25 @@
+exp_name: modular_arithmetic_us
+seed: 0
+tlens_pretrained: null
+tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
+interaction_matrices_path: null
+dataset:
+  source: custom
+  name: modular_arithmetic
+  return_set: train
+node_layers:
+  - ln1.0
+  - ln2.0
+  - mlp_out.0
+  - unembed
+  - output
+rotate_final_node_layer: false
+batch_size: 256
+truncation_threshold: 1e-6
+last_pos_module_type: add_resid1  # module type in which to only output the last position index
+n_intervals: 50
+out_dim_chunk_size: null
+dtype: float32
+calculate_edges: true
+eval_type: accuracy
+use_us_as_cs: true

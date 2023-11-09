@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from activations import Activations
+from jaxtyping import Float
 from plotting import annotated_fft_line_plot, plot_activations, plot_fft_activations
 from transformations import fft2, pca_activations, svd_activations
 
@@ -75,10 +76,14 @@ rib_acts_pre_unembed = activations.get_rib_activations(section="sections.section
 
 # %%
 
-importance = einops.einsum(
-    rib_acts_pre_unembed, rib_acts_pre_unembed, "x y seq node, x y seq node -> node"
-)
-plt.semilogy(importance)
+
+def get_importance(rib_acts: Float[torch.Tensor, "x y seq node"]) -> Float[torch.Tensor, "node"]:
+    return einops.einsum(rib_acts, rib_acts, "x y seq node, x y seq node -> node")
+
+
+plt.semilogy(get_importance(rib_acts_pre_unembed))
+plt.xlim(0, None)
+plt.ylim(0, None)
 
 # %%
 
@@ -226,5 +231,39 @@ plt.plot(dict(edges)["ln1.0"][9, :])  # edges: [layer l + 1 nodes, layer l nodes
 plt.xlim(0, 12)
 plt.xlabel("ln 1.0 node index")
 plt.ylabel("edge strength to ln2.0 #9")
+
+# %%
+# Nix looking at pre-unembed ffts.
+
+plot_fft_activations(rib_acts_mlp_post_fft_z)
+
+# Note: most of the high magnitude entries are on the diagonal. This makes sense!
+# Neel's claim was that sin(x+y) and cos(x+y) were the important terms
+
+# %%
+num_dims = 10
+fig, axs = plt.subplots(num_dims, 2, sharex=True)
+freqs = torch.fft.fftshift(torch.fft.fftfreq(113))
+
+# svd
+svd_shifted = torch.fft.fftshift(sec_2_1_resid_post_mlp_acts_svd_fft[:, :, 0, :], dim=[0, 1])
+svd_diag = svd_shifted[range(113), range(113), :]
+for i in range(num_dims):
+    axs[i][0].plot(freqs, svd_diag.abs()[:, i])
+axs[0][0].set_title("SVD")
+
+# rib
+rib_shifted = torch.fft.fftshift(rib_acts_mlp_post_fft_z, dim=[0, 1])
+rib_diag = rib_shifted[range(113), range(113), :]
+
+fig.set_size_inches((7, 8))
+for i in range(num_dims):
+    axs[i][1].plot(freqs, rib_diag.abs()[:, i])
+axs[0, 1].set_title("RIB")
+
+
+axs[-1, 0].set_xlabel("frequency")
+axs[-1, 1].set_xlabel("frequency")
+
 
 # %%

@@ -1,10 +1,10 @@
 #  %%
+from pathlib import Path
+
 import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from pathlib import Path
-
 from activations import Activations
 from plotting import annotated_fft_line_plot, plot_activations, plot_fft_activations
 from transformations import fft2, pca_activations, svd_activations
@@ -75,7 +75,9 @@ rib_acts_pre_unembed = activations.get_rib_activations(section="sections.section
 
 # %%
 
-importance = einops.einsum(rib_acts_pre_unembed, rib_acts_pre_unembed, "x y seq node, x y seq node -> node")
+importance = einops.einsum(
+    rib_acts_pre_unembed, rib_acts_pre_unembed, "x y seq node, x y seq node -> node"
+)
 plt.semilogy(importance)
 
 # %%
@@ -218,12 +220,11 @@ plot_fft_activations(
 # look at edges into ln2 node 9
 
 graph_path = "/mnt/ssd-apollo/stefan/rib/modular_arithmetic_interaction_graph.pt"
-edges = dict(torch.load(graph_path)['edges'])
+edges = dict(torch.load(graph_path)["edges"])
 
-plt.plot(dict(edges)['ln1.0'][9, :]) # edges: [layer l + 1 nodes, layer l nodes]
+plt.plot(dict(edges)["ln1.0"][9, :])  # edges: [layer l + 1 nodes, layer l nodes]
 plt.xlim(0, 12)
 plt.xlabel("ln 1.0 node index")
-plt.ylabel("edge strength to ln2.0 #9");
+plt.ylabel("edge strength to ln2.0 #9")
 
 # %%
-

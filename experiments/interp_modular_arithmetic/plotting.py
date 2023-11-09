@@ -1,10 +1,9 @@
 from datetime import datetime
+from pathlib import Path
 
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
-from pathlib import Path
-
 import torch
 from matplotlib.colors import LogNorm, Normalize, SymLogNorm
 
@@ -66,7 +65,10 @@ def plot_activations(acts, title="Default title", nrows=2, ncols=2, figsize=(8, 
             else:
                 kwargs = dict(cmap="viridis")
             im = ax.imshow(
-                acts[:, :, i * ncols + j].numpy(), aspect="equal", origin="lower", **kwargs
+                acts[:, :, i * ncols + j].numpy(),
+                aspect="equal",
+                origin="lower",
+                **kwargs,
             )
             fig.colorbar(im, ax=ax)
 

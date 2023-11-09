@@ -3,6 +3,8 @@ from datetime import datetime
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
+
 import torch
 from matplotlib.colors import LogNorm, Normalize, SymLogNorm
 
@@ -78,7 +80,8 @@ def plot_activations(acts, title="Default title", nrows=2, ncols=2, figsize=(8, 
         .replace(",", "")
         .replace("'", "")
     )
-    plt.savefig(f"out/{filename}.png")
+    save_path = Path(__file__).parent.joinpath(f"out/{filename}.png")
+    plt.savefig(save_path)
 
 
 def plot_fft_activations(
@@ -180,4 +183,5 @@ def plot_fft_activations(
         .replace("'", "")
     )
     dpi = 600 if annotate else 300
-    plt.savefig(f"out/{filename}.png", dpi=dpi)
+    save_path = Path(__file__).parent.joinpath(f"out/{filename}.png")
+    plt.savefig(save_path, dpi=dpi)

@@ -3,14 +3,19 @@ import einops
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from pathlib import Path
+
 from activations import Activations
 from plotting import annotated_fft_line_plot, plot_activations, plot_fft_activations
 from transformations import fft2, pca_activations, svd_activations
 
 torch.set_grad_enabled(False)
 
-activations = Activations(config_path_str="mod_arithmetic_config.yaml")
+parent_dir = Path(__file__).parent
 
+# %%
+
+activations = Activations(config_path_str=parent_dir.joinpath("mod_arithmetic_config.yaml"))
 activations.print_info()
 
 # %%
@@ -65,6 +70,9 @@ rib_acts_embedding_x, rib_acts_embedding_y, rib_acts_embedding_z = einops.rearra
 rib_acts_extended_embedding = activations.get_rib_activations(section="sections.section_0.2")
 
 # Note: mlp_post and pre_umembed are basically the same
+rib_acts_mlp_post = activations.get_rib_activations(section="sections.section_1.2")
+rib_acts_pre_unembed = activations.get_rib_activations(section="sections.section_2.2")
+
 # %%
 
 importance = einops.einsum(rib_acts_pre_unembed, rib_acts_pre_unembed, "x y seq node, x y seq node -> node")
@@ -209,7 +217,7 @@ plot_fft_activations(
 
 # look at edges into ln2 node 9
 
-graph_path = "experiments/interp_modular_arithmetic/modular_arithmetic_interaction_graph.pt"
+graph_path = "/mnt/ssd-apollo/stefan/rib/modular_arithmetic_interaction_graph.pt"
 edges = dict(torch.load(graph_path)['edges'])
 
 plt.plot(dict(edges)['ln1.0'][9, :]) # edges: [layer l + 1 nodes, layer l nodes]
@@ -218,3 +226,4 @@ plt.xlabel("ln 1.0 node index")
 plt.ylabel("edge strength to ln2.0 #9");
 
 # %%
+

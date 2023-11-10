@@ -170,3 +170,56 @@ class TestCreateSectionIdToModuleIdMapping:
         ]
 
         TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)
+
+
+@staticmethod
+def validate_node_layers(node_layers: list[str], module_ids: list[str]) -> None:
+    """Check that all the node_layers are valid module_ids, and that they appear in order."""
+    module_id_idx = 0
+    for node_layer in node_layers:
+        try:
+            node_layer_idx = module_ids.index(node_layer)
+        except ValueError:
+            raise ValueError(f"Invalid node_layer {node_layer}")
+        if node_layer_idx < module_id_idx:
+            raise ValueError(
+                f"Node layers must be in order. {node_layer} appears before {module_ids[module_id_idx]}"
+            )
+        module_id_idx = node_layer_idx
+
+
+@pytest.mark.parametrize(
+    "node_layers, module_ids",
+    [
+        (
+            ["add_resid1.0", "ln1.1"],
+            ["embed", "add_resid1.0", "mlp.0", "ln1.1"],
+        ),
+        (
+            ["add_resid1.0", "ln1.1", "mlp.3"],
+            ["add_resid1.0", "ln1.1", "ln1.2", "mlp.3"],
+        ),
+    ],
+)
+def test_validate_node_layers_valid(node_layers: list[str], module_ids: list[str]):
+    # The below should not raise an error
+    # SequentialTransformer.validate_node_layers(node_layers, module_ids)
+    SequentialTransformer.validate_node_layers(node_layers, module_ids)
+
+
+@pytest.mark.parametrize(
+    "node_layers, module_ids",
+    [
+        (
+            ["add_resid1.0", "ln1.1", "mlp.0"],
+            ["embed", "add_resid1.0", "mlp.0", "ln1.1"],  # mlp.0 appears before ln1.1
+        ),
+        (
+            ["add_resid1.0", "ln1.1", "mlp.3"],
+            ["add_resid1.0", "ln1.1", "ln1.2", "mlp.2"],  # mlp.3 does not exist
+        ),
+    ],
+)
+def test_validate_node_layers_invalid(node_layers: list[str], module_ids: list[str]):
+    with pytest.raises(ValueError):
+        SequentialTransformer.validate_node_layers(node_layers, module_ids)

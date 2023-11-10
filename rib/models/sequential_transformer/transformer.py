@@ -4,7 +4,7 @@ building of a RIB graph.
 """
 
 from functools import partial
-from typing import Callable, Iterator, Literal, Optional, Type
+from typing import Callable, Literal, Optional, Type
 
 from jaxtyping import Int
 from torch import Tensor, nn
@@ -335,7 +335,7 @@ class SequentialTransformer(nn.Module):
             for layer_idx in range(self.cfg.n_layers)
             for module_name in SequentialTransformer.LAYER_MODULE_NAMES
         ]
-        module_ids: Iterator[str] = iter(
+        module_ids: list[str] = (
             self.embed_module_names
             + layer_module_ids
             + [

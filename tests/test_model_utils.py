@@ -40,6 +40,20 @@ class TestCreatePartitions:
 
 
 class TestCreateSectionIdToModuleIdMapping:
+    @staticmethod
+    def compare_mappings(
+        seq_model: SequentialTransformer, expected_mappings: list[tuple[str, str]]
+    ):
+        for section_id, module_id in expected_mappings:
+            assert seq_model.section_id_to_module_id[section_id] == module_id, (
+                f"section_id_to_module_id[{section_id}]={seq_model.section_id_to_module_id[section_id]} "
+                f"!= {module_id}"
+            )
+            assert seq_model.module_id_to_section_id[module_id] == section_id, (
+                f"module_id_to_section_id[{module_id}]={seq_model.module_id_to_section_id[module_id]} "
+                f"!= {section_id}"
+            )
+
     def test_create_section_id_to_module_id_mapping_two_layer(self):
         node_layers = ["mlp_act.0", "unembed"]
 
@@ -64,7 +78,7 @@ class TestCreateSectionIdToModuleIdMapping:
         }
         cfg = SequentialTransformerConfig(**cfg)
         seq_model = SequentialTransformer(cfg, node_layers)
-        mappings: list[tuple[str, str]] = seq_model.create_section_id_to_module_id_mapping()
+        # mappings: list[tuple[str, str]] = seq_model.create_section_id_to_module_id_mapping()
 
         # Obtained by manually inspecting the model and counting the layers
         expected_mappings = [
@@ -72,8 +86,7 @@ class TestCreateSectionIdToModuleIdMapping:
             ("sections.pre.5", "add_resid1.0"),
             ("sections.section_0.9", "mlp_out.1"),
         ]
-        for expected in expected_mappings:
-            assert expected in mappings, f"{expected} not in {mappings}"
+        TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)
 
     def test_create_section_id_to_module_id_mapping_gpt2(self):
         # Copying the GPT2 config that can be obtained by running the slow code below
@@ -114,10 +127,7 @@ class TestCreateSectionIdToModuleIdMapping:
             ("sections.section_2.9", "mlp_out.8"),
             ("sections.section_2.29", "add_resid1.11"),
         ]
-
-        mappings: list[tuple[str, str]] = seq_model.create_section_id_to_module_id_mapping()
-        for expected in expected_mappings:
-            assert expected in mappings, f"{expected} not in {mappings}"
+        TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)
 
     def test_create_section_id_to_module_id_mapping_pythia(self):
         # Copying the pythia-14m config that can be obtained by running the slow code below
@@ -159,6 +169,4 @@ class TestCreateSectionIdToModuleIdMapping:
             ("sections.section_1.11", "unembed"),
         ]
 
-        mappings: list[tuple[str, str]] = seq_model.create_section_id_to_module_id_mapping()
-        for expected in expected_mappings:
-            assert expected in mappings, f"{expected} not in {mappings}"
+        TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)

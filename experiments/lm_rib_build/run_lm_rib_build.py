@@ -110,7 +110,7 @@ class Config(BaseModel):
     n_intervals: int = Field(
         ...,
         description="The number of intervals to use for the integrated gradient approximation."
-        "If 0, we take a point estimate (i.e. just alpha=1).",
+        "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
 
     out_dim_chunk_size: Optional[int] = Field(

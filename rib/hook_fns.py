@@ -185,7 +185,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         data_key: Name of 2nd-level keys to store in `hooked_data`.
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
-            to taking a point estimate at alpha == 1.
+            to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gram matrix.
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
@@ -233,8 +233,6 @@ def interaction_edge_pre_forward_hook_fn(
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
-    out_dim: int,
-    out_dim_chunk_size: Optional[int] = None,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -243,7 +241,7 @@ def interaction_edge_pre_forward_hook_fn(
     avoid this, we (hackily) remove the hook before running the module and then add it back after.
 
     The trapezoidal rule is used to approximate the integrated gradient. If n_intervals == 0, the
-    integrated gradient effectively takes a point estimate for the integral at alpha == 1.
+    integrated gradient effectively takes a point estimate for the integral at alpha == 0.5.
 
     Args:
         module: Module that the hook is attached to.
@@ -256,12 +254,7 @@ def interaction_edge_pre_forward_hook_fn(
         C_in_pinv: The pseudoinverse of the C matrix for the current layer ((C^l)^+ in the paper).
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
-            to taking a point estimate at alpha == 1.
-        out_dim: The number of basis vectors in the output of this module. Will be equal to
-            C_out.shape[1] if C_out is not None, otherwise it will be equal to the raw concatenated
-            output dimension of the module.
-        out_dim_chunk_size: The chunk size to use when calculating the jacobian. If None, the
-            entire jacobian is calculated at once. The chunks get applied to the output dimension.
+            to taking a point estimate at alpha == 0.5.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -276,29 +269,33 @@ def interaction_edge_pre_forward_hook_fn(
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
     f_hat = in_acts @ C_in
 
-    # Setup function for calculating the edge norm
-    edge_norm_partial = partial(
+    in_hidden_dims = [x.shape[-1] for x in inputs]
+
+    # Compute f^{l+1}(x) to which the derivative is not applied.
+    with torch.inference_mode():
+        # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
+        f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_hat @ C_in_pinv
+        input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
+
+        output_const = module(*tuple(x.detach().clone() for x in input_tuples))
+        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+
+    has_pos = f_hat.dim() == 3
+
+    jac_out = hooked_data[hook_name][data_key]
+    fn = partial(
         edge_norm,
+        outputs_const=outputs_const,
         module=module,
         C_in_pinv=C_in_pinv,
         C_out=C_out,
-        in_hidden_dims=[x.shape[-1] for x in inputs],
+        in_hidden_dims=in_hidden_dims,
         has_pos=has_pos,
     )
 
-    jac_out = integrated_gradient_trapezoidal_jacobian(
-        fn=edge_norm_partial,
-        in_tensor=f_hat,
-        n_intervals=n_intervals,
-        out_dim=out_dim,
-        out_dim_chunk_size=out_dim_chunk_size,
+    integrated_gradient_trapezoidal_jacobian(
+        fn=fn, x=f_hat, n_intervals=n_intervals, jac_out=jac_out
     )
-    einsum_pattern = "bipj,bpj->ij" if has_pos else "bij,bj->ij"
-
-    with torch.inference_mode():
-        E = torch.einsum(einsum_pattern, jac_out, f_hat)
-
-        _add_to_hooked_matrix(hooked_data, hook_name, data_key, E)
 
 
 def acts_forward_hook_fn(

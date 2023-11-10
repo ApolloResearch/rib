@@ -1,4 +1,4 @@
-exp_name: edges_pythia-14m
+exp_name: test-edges_pythia-14m
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
@@ -12,15 +12,15 @@ dataset:
   return_set_n_samples: null
   return_set_portion: first
 node_layers:
-  - mlp_out.0
-  - ln2.3
-  - mlp_out.3
+  # - mlp_out.0
+  # - ln2.3
+  # - mlp_out.3
   - ln1.5
   - mlp_out.5
-  - output
+  # - output
 batch_size: 12  #  A100 can handle 24
 gram_batch_size: 40  #  A100 can handle 80
-edge_batch_size: 1
+edge_batch_size: 6
 truncation_threshold: 1e-6
 rotate_final_node_layer: false
 n_intervals: 20

@@ -236,11 +236,14 @@ def collect_interaction_edges(
                     "C_in_pinv": C_info.C_pinv.to(device=device),  # C_pinv from current node layer
                     "C_out": C_out,
                     "n_intervals": n_intervals,
-                    "out_dim": Cs[idx + 1].out_dim,
-                    "out_dim_chunk_size": out_dim_chunk_size,
                 },
             )
         )
+        # Initialise the edge matrices to zeros to (out_dim, in_dim). These get added to in the
+        # forward hook.
+        hooked_model.hooked_data[C_info.node_layer_name] = {
+            "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.C.shape[1], dtype=dtype, device=device)
+        }
 
     run_dataset_through_model(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True

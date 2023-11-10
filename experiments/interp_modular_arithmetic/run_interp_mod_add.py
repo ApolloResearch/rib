@@ -54,6 +54,8 @@ sec_1_2_resid_parallel_acts, sec_1_2_mlp_post_acts = activations.get_section_act
 
 assert torch.allclose(sec_1_2_resid_parallel_acts, sec_1_1_resid_pre_mlp_acts)
 # Note: Resid contains the same numbers from 0.2 to 1.2
+
+
 sec_2_1_resid_post_mlp_acts = activations.get_section_activations(section="sections.section_2.1")[0]
 
 # %%
@@ -91,6 +93,11 @@ plt.ylim(0, None)
 
 # Embedding
 sec_pre_2_resid_embed_acts_svd = svd_activations(sec_pre_2_resid_embed_acts)
+
+sec_1_2_mlp_post_acts_svd = svd_activations(sec_1_2_mlp_post_acts)
+sec_1_2_mlp_post_acts_pca = pca_activations(sec_1_2_mlp_post_acts)
+sec_1_2_mlp_post_acts_svd_fft = fft2(sec_1_2_mlp_post_acts_svd)
+sec_1_2_mlp_post_acts_pca_fft = fft2(sec_1_2_mlp_post_acts_pca)
 
 # sec_pre_2_resid_embed_acts_xyz_svd = svd_activations(sec_pre_2_resid_embed_acts
 #     sec_pre_2_resid_embed_acts.reshape(113, 113, -1)
@@ -130,6 +137,12 @@ sec_0_2_resid_post_attn_acts_svd_fft = fft2(sec_0_2_resid_post_attn_acts_svd)
 sec_0_2_resid_post_attn_acts_pca_fft = fft2(sec_0_2_resid_post_attn_acts_pca)
 rib_acts_extended_embedding_fft = fft2(rib_acts_extended_embedding)
 
+# Pre ReLU
+sec_1_1_mlp_pre_acts_svd = svd_activations(sec_1_1_mlp_pre_acts)
+sec_1_1_mlp_pre_acts_pca = pca_activations(sec_1_1_mlp_pre_acts)
+sec_1_1_mlp_pre_acts_svd_fft = fft2(sec_1_1_mlp_pre_acts_svd)
+sec_1_1_mlp_pre_acts_pca_fft = fft2(sec_1_1_mlp_pre_acts_pca)
+
 # Post MLP
 sec_2_1_resid_post_mlp_acts_svd = svd_activations(sec_2_1_resid_post_mlp_acts)
 sec_2_1_resid_post_mlp_acts_pca = pca_activations(sec_2_1_resid_post_mlp_acts)
@@ -158,16 +171,16 @@ plot_fft_activations(
 # %%
 
 
-def print_acts_and_phases(ffted_acts, index, p=113, lower=300):
+def print_acts_and_phases(ffted_acts, index, p=113, lower=600):
     for x in range(p):
         for y in range(p):
-            if ffted_acts[x, y, index].abs() > lower and ffted_acts[x, y, 0].abs() < 1e10:
+            if ffted_acts[x, y, index].abs() > lower and ffted_acts[x, y, 0].abs() < 800:
                 freqs = torch.fft.fftfreq(ffted_acts.shape[0])
                 val = ffted_acts[x, y, index].abs().item()
                 phase = ffted_acts[x, y, index].angle().item()
                 print(
                     f"({freqs[x]:.3f}, {freqs[y]:.3f})",
-                    f"Value {val:.1f}",
+                    f"Value {val:.4f}",
                     f"Phase {phase/np.pi*180:.1f} deg",
                     f"Phrase as real & imag: e^(i phi) = {np.cos(phase):.3f} + i {np.sin(phase):.3f}",
                 )
@@ -178,7 +191,7 @@ def print_acts_and_phases(ffted_acts, index, p=113, lower=300):
 print_acts_and_phases(attention_pattern_p_to_x_pca_fft, 0)
 # Confirmed same output as play_mod_arithmetic.py notebook
 
-print_acts_and_phases(rib_acts_mlp_post_fft_z, 0, lower=200000)
+# print_acts_and_phases(rib_acts_mlp_post_fft_z, 0, lower=200000)
 # Confirmed same output as play_mod_arithmetic.py notebook
 
 # %%
@@ -265,5 +278,90 @@ axs[0, 1].set_title("RIB")
 axs[-1, 0].set_xlabel("frequency")
 axs[-1, 1].set_xlabel("frequency")
 
+
+# %%
+plot_fft_activations(
+    sec_1_2_mlp_post_acts_svd_fft[:, :, 0, :],
+    nrows=10,
+    figsize=(10, 50),
+    title="SVD directions, post-ReLU MLP",
+)
+
+plot_fft_activations(
+    rib_acts_mlp_post_fft_z[:, :, :],
+    nrows=10,
+    figsize=(10, 50),
+    title="RIB directions, post-ReLU MLP",
+)
+# %%
+
+
+plot_fft_activations(
+    sec_1_1_mlp_pre_acts_svd_fft[:, :, 0, :][:, :, :],
+    nrows=10,
+    figsize=(10, 50),
+    title="SVD directions, pre-ReLU MLP",
+)
+plot_fft_activations(
+    rib_acts_extended_embedding_fft[:, :, 0, :][:, :, :],
+    nrows=10,
+    figsize=(10, 50),
+    title="RIB directions post attn (should be like pre-ReLU MLP)",
+)
+# %%
+
+# FFT Demo annd experiments
+x = np.arange(0, 113)
+y = np.arange(0, 113)
+x, y = np.meshgrid(x, y)
+f = (
+    np.sin(2 * np.pi * x * 0.106)
+    + np.cos(2 * np.pi * x * 0.1504)
+    + np.sin(2 * np.pi * x * 0.2035) * np.cos(2 * np.pi * y * 0.2035)
+)
+plt.imshow(f)
+# FFT
+F = np.fft.fft2(f)
+F = np.fft.fftshift(F)
+freqs = np.fft.fftshift(np.fft.fftfreq(113))
+plt.figure(figsize=(10, 10))
+plt.imshow(np.abs(F), extent=[-0.5, 0.5, -0.5, 0.5])
+plt.axvline(0.106, color="white", alpha=0.1)
+plt.axvline(0.1504, color="white", alpha=0.1)
+plt.axvline(0.2035, color="white", alpha=0.1)
+plt.colorbar()
+# Symmetric area
+plt.plot(freqs, freqs)
+plt.fill_between(freqs, freqs, -np.max(freqs), alpha=0.1)
+
+# Print phases where abs > 100
+for i in range(113):
+    for j in range(113):
+        if np.abs(F[i, j]) > 100:
+            print(f"({freqs[i]:.3f}, {freqs[j]:.3f})")
+            print(f"Value {np.abs(F[i, j]):.1f}")
+            print(f"Phase {np.angle(F[i, j])/np.pi*180:.1f} deg")
+            print(
+                f"Phrase as real & imag: e^(i phi) = {np.cos(np.angle(F[i, j])):.3f} + i {np.sin(np.angle(F[i, j])):.3f}"
+            )
+# Convert freqs to sin and cos terms
+# F(-x, -y) = F*(x, y)
+# F(x, y) term  = cos(x)*cos(y) + i cos(x) sin(y) + i sin(x) cos(y) - sin(x) sin(y)
+# F(-x, -y) term = cos(x)*cos(y) - i cos(x) sin(y) - i sin(x) cos(y) + sin(x) sin(y)
+# Real part: Same sign in ampltiude, summed. Complex part: Opposite sign in amplitude, subtracted.
+# Sum term = 2*F.real * cos(x)*cos(y) - 2*F.real * sin(x)*sin(y) - 2*F.imag * cos(x)*sin(y) - 2*F.imag * sin(x)*cos(y)
+# = 2*F.real * (cos(x)*cos(y) - sin(x)*sin(y)) - 2*F.imag * (cos(x)*sin(y) + sin(x)*cos(y))
+# There is no further symmetry (for information theory reasons alone)
+# F(x, -y) term = cos(x)*cos(y) - i cos(x) sin(y) + i sin(x) cos(y) - sin(x) sin(y)
+# F(-x, y) term = cos(x)*cos(y) + i cos(x) sin(y) - i sin(x) cos(y) - sin(x) sin(y)
+# Sum term: 2*F.real * cos(x)*cos(y) - 2*F.real * sin(x)*sin(y) + 2*F(x,-y).imag * cos(x)*sin(y) - 2*F(x,-y).imag * sin(x)*cos(y)
+# = 2*F.real * (cos(x)*cos(y) - sin(x)*sin(y)) + 2*F(x,-y).imag * (cos(x)*sin(y) - sin(x)*cos(y))
+# Sum of both terms
+# = 2*(F++.real + F+-.real) * (cos(x)*cos(y) - sin(x)*sin(y)) - 2*(F++.imag - F+-.imag) * ... or so
+# It appears that we observe the magnitude fir F(x, y) and F(x, -y) to be almost the same, with different phases though.
+# If the phases were equal or so this would imply no sin-cos cross terms but only cos-cos and sin-sin I think (?)
+
+# There exists a formula that takes in F++ F+- F-+ F-- and outputs Fcoscos Fsinsin Fcossin Fsincos
+# Do later with clearer math
 
 # %%

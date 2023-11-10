@@ -192,7 +192,6 @@ def collect_interaction_edges(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
-    out_dim_chunk_size: Optional[int] = None,
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -208,7 +207,6 @@ def collect_interaction_edges(
         data_loader: The pytorch data loader.
         dtype: The data type to use for model computations.
         device: The device to run the model on.
-        out_dim_chunk_size: The size of the chunks to use for calculating the jacobian.
 
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes

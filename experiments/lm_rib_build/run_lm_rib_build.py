@@ -113,12 +113,6 @@ class Config(BaseModel):
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
 
-    out_dim_chunk_size: Optional[int] = Field(
-        None,
-        description="The size of the chunks to use for calculating the jacobian. If none, calculate"
-        "the jacobian on all output dimensions at once.",
-    )
-
     dtype: str = Field(..., description="The dtype to use when building the graph.")
 
     eps: float = Field(
@@ -349,7 +343,6 @@ def main(config_path_str: str):
             data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
-            out_dim_chunk_size=config.out_dim_chunk_size,
         )
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)

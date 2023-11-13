@@ -18,7 +18,10 @@ from rib.utils import set_seed
 
 @torch.inference_mode()
 def _folded_bias_comparison(
-    model_raw: SequentialTransformer, model_folded: SequentialTransformer, atol=1e-6
+    model_raw: SequentialTransformer,
+    model_folded: SequentialTransformer,
+    atol=1e-6,
+    attn_in_atol=1e-3,
 ) -> None:
     """Compare the outputs of raw model and one with biases folded into its weights.
 
@@ -36,9 +39,9 @@ def _folded_bias_comparison(
         outputsA, outputsB = cacheA[k]["acts"], cacheB[k]["acts"]
         for vA, vB in zip(outputsA, outputsB):
             if vB.shape[-1] == vA.shape[-1] + 1:
-                # Consider the final dimension (it should be our constant function)
+                # Remove the final dimension (it should be our constant function)
                 vB = vB[..., :-1]
-            if vB.shape[-1] == vA.shape[-1] + model_folded.cfg.n_heads:
+            elif vB.shape[-1] == vA.shape[-1] + model_folded.cfg.n_heads:
                 # We add a constant dimension per attention head to v and then concatenate heads
                 # This is a bit more complicated to cut out
                 vB = einops.rearrange(
@@ -47,7 +50,7 @@ def _folded_bias_comparison(
                     head_index=model_folded.cfg.n_heads,
                 )
                 assert torch.allclose(vB[..., :, -1], torch.tensor(1, dtype=vB.dtype))
-                vB = vB[..., :, :-1]
+                vB = vB[..., :-1]
                 vB = einops.rearrange(
                     vB, "... pos head_index d_head_v -> ... pos (head_index d_head_v)"
                 )
@@ -55,16 +58,17 @@ def _folded_bias_comparison(
             assert vA.shape == vB.shape, f"shape mismatch for {k}: {vA.shape} vs {vB.shape}"
 
             # Check if this is a Pythia attention module:
-            stages = k.split(".")
             if (
-                isinstance(
-                    getattr(getattr(model_raw, stages[0]), stages[1])[int(stages[2])], AttentionIn
-                )
+                isinstance(get_model_attr(model_raw, k), AttentionIn)
                 and model_raw.cfg.rotary_dim is not None
             ):
-                assert torch.allclose(vA, vB, atol=1e-3), f"WARNING: mismatched values for {k}"
+                comparison_atol = attn_in_atol
             else:
-                assert torch.allclose(vA, vB, atol=atol), f"WARNING: mismatched values for {k}"
+                comparison_atol = atol
+
+            assert torch.allclose(
+                vA, vB, atol=comparison_atol
+            ), f"WARNING: mismatched values for {k}"
 
     for outA, outB in zip(outputA, outputB):
         assert torch.allclose(outA, outB, atol=atol), "WARNING: mismatched output values"

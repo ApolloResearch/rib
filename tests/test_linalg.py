@@ -296,6 +296,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals():
         x=in_tensor,
         n_intervals=0,
         jac_out=result_point_estimate,
+        dataset_size=batch_size,
     )
     result_1: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
     integrated_gradient_trapezoidal_jacobian(
@@ -303,6 +304,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals():
         x=in_tensor,
         n_intervals=1,
         jac_out=result_1,
+        dataset_size=batch_size,
     )
 
     result_5: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
@@ -311,6 +313,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals():
         x=in_tensor,
         n_intervals=5,
         jac_out=result_5,
+        dataset_size=batch_size,
     )
 
     # Check that all results are close
@@ -322,7 +325,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals():
     ), "n_intervals==1 and n_intervals==5 are not close enough"
 
 
-def _integrated_gradient_jacobian_with_jacrev(fn, x, n_intervals):
+def _integrated_gradient_jacobian_with_jacrev(fn, x, n_intervals, dataset_size):
     """Compute the integrated gradient jacobian using jacrev."""
     alphas, interval_size = _calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon=1e-3
@@ -334,7 +337,7 @@ def _integrated_gradient_jacobian_with_jacrev(fn, x, n_intervals):
 
         scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
         # No pos dim for this test
-        E = torch.einsum("ibj,bj->ij", alpha_jac_out * interval_size * scaler, x)
+        E = torch.einsum("ibj,bj->ij", alpha_jac_out * interval_size * scaler / dataset_size, x)
         if jac_out is None:
             jac_out = -E
         else:
@@ -361,11 +364,13 @@ def test_integrated_gradient_trapezoidal_jacobian_jacrev():
         x=in_tensor,
         n_intervals=5,
         jac_out=result_ours,
+        dataset_size=batch_size,
     )
     result_jacrev: Float[Tensor, "out_dim in_dim"] = _integrated_gradient_jacobian_with_jacrev(
         fn=linear_edge_norm,
         x=in_tensor,
         n_intervals=5,
+        dataset_size=batch_size,
     )
     assert torch.allclose(
         result_ours, result_jacrev

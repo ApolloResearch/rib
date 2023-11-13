@@ -241,6 +241,7 @@ def integrated_gradient_trapezoidal_jacobian(
     x: Float[Tensor, "... out_hidden_combined_trunc"],
     n_intervals: int,
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    dataset_size: int,
 ) -> None:
     """Calculate the integrated gradient of the jacobian of a function w.r.t its input.
 
@@ -250,6 +251,7 @@ def integrated_gradient_trapezoidal_jacobian(
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
         jac_out: The output of the jacobian calculation. This is modified in-place.
+        dataset_size: The size of the dataset. Used for normalizing the gradients.
 
     """
     einsum_pattern = "bpj,bpj->j" if x.ndim == 3 else "bj,bj->j"
@@ -257,6 +259,10 @@ def integrated_gradient_trapezoidal_jacobian(
     alphas, interval_size = _calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon=1e-3
     )
+
+    # Normalize by the dataset size and the number of positions (if the input has a position dim)
+    has_pos = x.ndim == 3
+    normalization_factor = x.shape[1] * dataset_size if has_pos else dataset_size
 
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="alphas", leave=False
@@ -273,9 +279,10 @@ def integrated_gradient_trapezoidal_jacobian(
         ):
             # Get the derivative of the ith output element w.r.t alpha_f_in_hat
             i_grad = (
-                interval_size
+                torch.autograd.grad(f_out_hat_norm[i], alpha_f_in_hat, retain_graph=True)[0]
+                / normalization_factor
+                * interval_size
                 * scaler
-                * torch.autograd.grad(f_out_hat_norm[i], alpha_f_in_hat, retain_graph=True)[0]
             )
             with torch.inference_mode():
                 E = torch.einsum(einsum_pattern, i_grad, x)

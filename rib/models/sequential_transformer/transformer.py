@@ -139,6 +139,19 @@ class SequentialTransformer(nn.Module):
     )
     """
 
+    LAYER_MODULE_NAMES: list[str] = [
+        "ln1",
+        "attn",
+        "add_resid1",
+        "ln2",
+        "mlp_in",
+        "mlp_act",
+        "mlp_out",
+        "add_resid2",
+    ]
+    LN_FINAL_NAME: str = "ln_final"
+    UNEMBED_MODULE_NAME: str = "unembed"
+
     def __init__(
         self,
         cfg: SequentialTransformerConfig,
@@ -151,10 +164,13 @@ class SequentialTransformer(nn.Module):
         self.last_pos_module_type = last_pos_module_type
         self.has_folded_bias = False
 
-        assert len(node_layers) > 0, "Must have at least 1 node layer"
-        self.module_name_sections = self.create_module_name_sections(
-            cfg.n_layers, node_layers, positional_embedding_type=cfg.positional_embedding_type
+        self.embed_module_names: list[str] = (
+            ["embed"]
+            if cfg.positional_embedding_type == "rotary"
+            else ["embed", "pos_embed", "add_embed"]
         )
+        assert len(node_layers) > 0, "Must have at least 1 node layer"
+        self.module_name_sections = self.create_module_name_sections(cfg.n_layers, node_layers)
 
         assert cfg.normalization_type in [None, "LNPre"], (
             f"Normalization type {cfg.normalization_type} not supported. "
@@ -198,11 +214,15 @@ class SequentialTransformer(nn.Module):
             sections[section_name] = MultiSequential(*module_section)
         self.sections: nn.ModuleDict = nn.ModuleDict(sections)
 
-    @staticmethod
+        id_mappings: list[tuple[str, str]] = self.create_section_id_to_module_id_mapping()
+
+        self.section_id_to_module_id = dict(id_mappings)
+        self.module_id_to_section_id = {v: k for k, v in self.section_id_to_module_id.items()}
+
     def create_module_name_sections(
+        self,
         n_blocks: int,
         node_layers: list[str],
-        positional_embedding_type: Literal["rotary", "standard"],
     ) -> list[list[str]]:
         """Create ordered groups of module names.
 
@@ -220,33 +240,18 @@ class SequentialTransformer(nn.Module):
         Args:
             n_blocks: The number of layers/blocks in the model.
             node_layers: The names of the node layers to build the graph with.
-            positional_embedding_type: The type of positional embedding to use.
 
         Returns:
             A list of lists of module names, where each list is a graph section.
         """
-        embed_module_names: list[str] = ["embed"]
-        if positional_embedding_type == "standard":
-            embed_module_names.extend(["pos_embed", "add_embed"])
+        all_layers = self.embed_module_names.copy()
 
-        block_module_names: list[str] = [
-            "ln1",
-            "attn",
-            "add_resid1",
-            "ln2",
-            "mlp_in",
-            "mlp_act",
-            "mlp_out",
-            "add_resid2",
-        ]
-        ln_final_name: str = "ln_final"
-        unembed_module_name: str = "unembed"
-
-        all_layers = embed_module_names.copy()
         for i in range(n_blocks):
-            all_layers.extend([f"{module_name}.{i}" for module_name in block_module_names])
-        all_layers.append(ln_final_name)
-        all_layers.append(unembed_module_name)
+            all_layers.extend(
+                [f"{module_name}.{i}" for module_name in SequentialTransformer.LAYER_MODULE_NAMES]
+            )
+        all_layers.append(SequentialTransformer.LN_FINAL_NAME)
+        all_layers.append(SequentialTransformer.UNEMBED_MODULE_NAME)
 
         # We ignore the optional `output` layer when partitioning the model into sections
         partition_modules = [layer for layer in node_layers if layer != "output"]
@@ -315,6 +320,37 @@ class SequentialTransformer(nn.Module):
                     )
 
         self.has_folded_bias = True
+
+    def create_section_id_to_module_id_mapping(self) -> list[tuple[str, str]]:
+        """Create a list of tuples mapping `sections.section_name.section_idx` (section_id) to
+        `module_name.block_idx` (module_id).
+
+        Returns:
+            A list of tuples where each tuple is (section_id, module_id).
+        """
+        mapping: list[tuple[str, str]] = []
+
+        layer_module_ids: list[str] = [
+            f"{module_name}.{layer_idx}"
+            for layer_idx in range(self.cfg.n_layers)
+            for module_name in SequentialTransformer.LAYER_MODULE_NAMES
+        ]
+        module_ids: list[str] = (
+            self.embed_module_names
+            + layer_module_ids
+            + [
+                SequentialTransformer.LN_FINAL_NAME,
+                SequentialTransformer.UNEMBED_MODULE_NAME,
+            ]
+        )
+
+        section_ids = [
+            f"sections.{section_name}.{section_idx}"
+            for section_name, section in self.sections.items()
+            for section_idx, _ in enumerate(section)
+        ]
+        mapping = list(zip(section_ids, module_ids))
+        return mapping
 
     def forward(self, input_ids: Int[Tensor, "batch n_ctx"]) -> tuple[Tensor]:
         """Forward pass through the model.

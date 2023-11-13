@@ -214,7 +214,6 @@ class AttentionIn(nn.Module):
             residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
             x (Float[Tensor, "... pos d_model]): The normed residual stream (the input to the attention block)
         """
-        in_dtype = x.dtype
 
         def add_head_dimension(tensor):
             return einops.repeat(
@@ -269,11 +268,6 @@ class AttentionIn(nn.Module):
 
         if self.cfg.positional_embedding_type == "rotary":
             q, k = self.rotary_rotate_qk(q, k)
-
-        if in_dtype not in [torch.float32, torch.float64]:
-            # If using 16 bits, increase the precision to avoid numerical instabilities
-            q = q.to(torch.float32)
-            k = k.to(torch.float32)
 
         # Concatenate the last two dimension to keep the shapes the rest of the code is expecting
         q = einops.rearrange(q, "... pos head_index d_head -> ... pos (head_index d_head)")
@@ -424,6 +418,7 @@ class AttentionOut(nn.Module):
             k (Float[Tensor, "... pos n_head_times_d_head]): The key tensor
             v (Float[Tensor, "... pos n_head_times_d_head]): The value tensor
         """
+
         # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)
         q = einops.rearrange(
             q,
@@ -443,6 +438,10 @@ class AttentionOut(nn.Module):
 
         in_dtype = v.dtype
 
+        if in_dtype not in [torch.float32, torch.float64]:
+            # If using 16 bits, increase the precision to avoid numerical instabilities
+            q = q.to(torch.float32)
+            k = k.to(torch.float32)
         attn_scores = (
             einsum(
                 "... query_pos head_index d_head, \

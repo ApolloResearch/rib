@@ -1,6 +1,6 @@
-exp_name: rib_modular_arithmetic
+exp_name: rib_modular_arithmetic-nnA
 ablation_type: rib
-interaction_graph_path: /mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/modular_arithmetic_rib_graph.pt
+interaction_graph_path: /mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/modular_arithmetic-nnA_rib_graph.pt
 schedule:
   schedule_type: exponential
   early_stopping_threshold: null

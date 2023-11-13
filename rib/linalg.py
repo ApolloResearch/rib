@@ -288,6 +288,13 @@ def integrated_gradient_trapezoidal_norm(
     with torch.inference_mode():
         output_const = module(*tuple(x.detach().clone() for x in inputs))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+        output_zero = module(*tuple(torch.zeros_like(x) for x in inputs))
+        outputs_zero = (output_zero,) if isinstance(output_zero, torch.Tensor) else output_zero
+        # Concatenate the outputs over the hidden dimension, and apply RIB transformation
+        acts_const = torch.cat(outputs_const, dim=-1)
+        acts_const_hat = acts_const @ C_out if C_out is not None else acts_const
+        acts_zero = torch.cat(outputs_zero, dim=-1)
+        acts_zero_hat = acts_zero @ C_out if C_out is not None else acts_zero
 
     # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:
@@ -304,22 +311,25 @@ def integrated_gradient_trapezoidal_norm(
         alpha_inputs = tuple(alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
         outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
-
-        # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
-        outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
-
-        # Concatenate the outputs over the hidden dimension
-        out_acts = torch.cat(outputs, dim=-1)
-
-        f_hat = out_acts @ C_out if C_out is not None else out_acts
-
+        # Concatenate the outputs over the hidden dimension, and apply RIB transformation
+        acts_alpha = torch.cat(outputs_alpha, dim=-1)
+        acts_alpha_hat = acts_alpha @ C_out if C_out is not None else acts_alpha
         # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
         # to taking the gradient of each output element separately, but it lets us simply use
         # backward() instead of more complex (and probably less efficient) vmap operations.
-        f_hat_norm = (f_hat**2).sum()
+        new_norm = ((acts_const_hat - acts_zero_hat) * (acts_alpha_hat)).sum()
+
+        # Note that the chang introduced a 1e-4 error, presumably to chaning order of subtraction
+        # old_norm = ((acts_const_hat - acts_alpha_hat) ** 2).sum()
+        # and C_out rotation.
+        # outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
+        # out_acts = torch.cat(outputs, dim=-1)
+        # f_hat = out_acts @ C_out if C_out is not None else out_acts
+        # f_hat_norm = (f_hat**2).sum()
+        # assert torch.allclose(f_hat_norm, old_norm, atol=1e-4), "f_hat_norm should equal old_norm."
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors
-        f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
+        new_norm.backward(inputs=alpha_inputs, retain_graph=True)
 
         alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point

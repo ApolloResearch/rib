@@ -21,7 +21,7 @@ def _folded_bias_comparison(
     model_raw: SequentialTransformer,
     model_folded: SequentialTransformer,
     atol=1e-6,
-    attn_in_atol=1e-3,
+    attn_in_atol=1e-6,
 ) -> None:
     """Compare the outputs of raw model and one with biases folded into its weights.
 
@@ -94,6 +94,7 @@ def test_modular_arithmetic_folded_bias() -> None:
     }
     # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
     atol = 1e-8
+    attn_in_atol = 1e-8
 
     tlens_cfg = HookedTransformerConfig.from_dict(cfg)
     cfg = SequentialTransformerConfig(**asdict(tlens_cfg))
@@ -117,7 +118,7 @@ def test_modular_arithmetic_folded_bias() -> None:
     model_folded.fold_bias()
     model_folded.eval()
 
-    _folded_bias_comparison(model_raw, model_folded, atol=atol)
+    _folded_bias_comparison(model_raw, model_folded, atol=atol, attn_in_atol=attn_in_atol)
 
 
 def pretrained_lm_folded_bias_comparison(
@@ -125,6 +126,7 @@ def pretrained_lm_folded_bias_comparison(
     node_layers: list[str],
     positional_embedding_type: Literal["standard", "rotary"],
     atol: float = 1e-6,
+    attn_atol: float = 1e-6,
 ) -> None:
     """Test that the folded bias trick works for a pretrained language model.
 
@@ -151,7 +153,7 @@ def pretrained_lm_folded_bias_comparison(
     model_folded.to(device=device)
     model_folded.eval()
 
-    _folded_bias_comparison(model_raw, model_folded, atol=atol)
+    _folded_bias_comparison(model_raw, model_folded, atol=atol, attn_in_atol=attn_atol)
 
 
 @pytest.mark.slow()
@@ -164,6 +166,7 @@ def test_gpt2_folded_bias() -> None:
         node_layers=node_layers,
         positional_embedding_type="standard",
         atol=1e-5,
+        attn_atol=1e-5,
     )
 
 
@@ -176,5 +179,6 @@ def test_pythia_folded_bias() -> None:
         hf_model_str="pythia-14m",
         node_layers=node_layers,
         positional_embedding_type="rotary",
-        atol=1e-5,
+        atol=1e-4,
+        attn_atol=1e-3,
     )

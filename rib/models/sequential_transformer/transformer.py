@@ -1,6 +1,5 @@
 """
-Defines a Transformer based on transformer lens but with a module hierarchy that allows for easier
-building of a RIB graph.
+Defines a Transformer made from a series of modules, allowing for simple calculation of a RIB graph.
 """
 
 from functools import partial
@@ -67,7 +66,8 @@ class SequentialTransformer(nn.Module):
 
     We use the term `module_id` to refer to the naming convention `module_name[.layer_idx]`. E.g.
     "mlp_in.0" refers to the MLP in module in the 0th transformer layer (zero-indexed), and "ln2.3"
-    refers to the layer norm module before the MLP in the 3rd transformer layer.
+    refers to the layer norm module before the MLP in the 3rd transformer layer, and "embed" refers
+    to the token embedding module.
 
     This same module structure is used for both sequential (GPT2) and parallel (Pythia) attention
     models, with the difference being handled by the module classes and arguments that are
@@ -83,6 +83,16 @@ class SequentialTransformer(nn.Module):
 
     The "pre" section will not be part of the RIB graph but needs to be run with all
     forward passes in order to feed the correct data to susbequent sections.
+
+    A `section_id` is a string of the form `sections.section_name.section_idx`, where `section_name`
+    is the name of the section (e.g. "pre", "section_0", "section_1", etc.) and `section_idx` is
+    the index of the module in the section (zero-indexed). To access a module in a
+    SequentialTransformer, rib.models.utils.get_model_attr can be used with the section_id as the
+    attribute name. For example, to get the first module in the "section_0" section, use:
+    `get_model_attr(model, "sections.section_0.0")`.
+
+    To convert between a section_id and a module_id, use the `section_id_to_module_id` and
+    `module_id_to_section_id` attributes of the SequentialTransformer.
 
     The node_layers list may end in an `output` layer, meaning that the outputs of the model will
     be the first basis in our RIB graph. We ignore this `output` layer when partitioning the

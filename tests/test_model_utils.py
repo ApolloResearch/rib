@@ -78,7 +78,6 @@ class TestCreateSectionIdToModuleIdMapping:
         }
         cfg = SequentialTransformerConfig(**cfg)
         seq_model = SequentialTransformer(cfg, node_layers)
-        # mappings: list[tuple[str, str]] = seq_model.create_section_id_to_module_id_mapping()
 
         # Obtained by manually inspecting the model and counting the layers
         expected_mappings = [

@@ -194,13 +194,16 @@ def load_interaction_rotations(
     assert config.interaction_matrices_path is not None
     matrices_info = torch.load(config.interaction_matrices_path)
 
-    loaded_config = Config(**matrices_info["config"])
+    # The loaded config might have a different schema. Only pass fields that are still valid.
+    valid_fields = list(config.model_dump().keys())
+    loaded_config_dict = {k: v for k, v in matrices_info["config"].items() if k in valid_fields}
+
+    loaded_config = Config(**loaded_config_dict)
     _verify_compatible_configs(config, loaded_config)
 
-    gram_matrices = matrices_info["gram_matrices"]
     Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
     Us = [Eigenvectors(**data) for data in matrices_info["eigenvectors"]]
-    return gram_matrices, Cs, Us
+    return matrices_info["gram_matrices"], Cs, Us
 
 
 def main(config_path_str: str):

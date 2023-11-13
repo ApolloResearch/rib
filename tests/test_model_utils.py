@@ -198,11 +198,14 @@ def validate_node_layers(node_layers: list[str], module_ids: list[str]) -> None:
             ["add_resid1.0", "ln1.1", "mlp.3"],
             ["add_resid1.0", "ln1.1", "ln1.2", "mlp.3"],
         ),
+        (
+            ["add_resid1.0", "ln1.1", "mlp.3", "output"],  # output is optional
+            ["add_resid1.0", "ln1.1", "ln1.2", "mlp.3"],
+        ),
     ],
 )
 def test_validate_node_layers_valid(node_layers: list[str], module_ids: list[str]):
     # The below should not raise an error
-    # SequentialTransformer.validate_node_layers(node_layers, module_ids)
     SequentialTransformer.validate_node_layers(node_layers, module_ids)
 
 
@@ -216,6 +219,10 @@ def test_validate_node_layers_valid(node_layers: list[str], module_ids: list[str
         (
             ["add_resid1.0", "ln1.1", "mlp.3"],
             ["add_resid1.0", "ln1.1", "ln1.2", "mlp.2"],  # mlp.3 does not exist
+        ),
+        (
+            ["add_resid1.0", "ln1.1", "output", "mlp.3"],  # output in wrong position
+            ["add_resid1.0", "ln1.1", "ln1.2", "mlp.3"],
         ),
     ],
 )

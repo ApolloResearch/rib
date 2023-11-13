@@ -16,7 +16,10 @@ parent_dir = Path(__file__).parent
 
 # %%
 
-activations = Activations(config_path_str=parent_dir.joinpath("mod_arithmetic_config.yaml"))
+activations = Activations(
+    config_path_str=parent_dir.joinpath("mod_arithmetic_config.yaml"),
+    interaction_graph_path="/mnt/ssd-apollo/stefan/rib/modular_arithmetic_interaction_graph.pt",
+)
 activations.print_info()
 
 # %%
@@ -75,17 +78,6 @@ rib_acts_extended_embedding = activations.get_rib_activations(section="sections.
 # Note: mlp_post and pre_umembed are basically the same
 rib_acts_mlp_post = activations.get_rib_activations(section="sections.section_1.2")
 rib_acts_pre_unembed = activations.get_rib_activations(section="sections.section_2.2")
-
-# %%
-
-
-def get_importance(rib_acts: Float[torch.Tensor, "x y seq node"]) -> Float[torch.Tensor, "node"]:
-    return einops.einsum(rib_acts, rib_acts, "x y seq node, x y seq node -> node")
-
-
-plt.semilogy(get_importance(rib_acts_pre_unembed))
-plt.xlim(0, None)
-plt.ylim(0, None)
 
 # %%
 
@@ -153,6 +145,29 @@ rib_acts_mlp_post_fft_z = rib_acts_mlp_post_fft[:, :, -1, :]
 
 # %%
 
+
+# Plot FFT of these
+plot_fft_activations(
+    rib_acts_embedding_y_fft,
+    nrows=15,
+    figsize=(10, 50),
+    title="RIB ln1.0",
+    fftshift=True,
+    phaseplot_magnitude_threshold=0.2,
+)
+
+# %%
+
+
+def get_importance(rib_acts: Float[torch.Tensor, "x y seq node"]) -> Float[torch.Tensor, "node"]:
+    return einops.einsum(rib_acts, rib_acts, "x y seq node, x y seq node -> node")
+
+
+plt.semilogy(get_importance(rib_acts_pre_unembed))
+plt.xlim(0, None)
+plt.ylim(0, None)
+
+# %%
 # Plot PCA'ed and SVD'ed activations
 plot_activations(
     attention_pattern_p_to_x_svd, nrows=2, center=False, title="Attn patterns, SVD over heads"

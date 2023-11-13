@@ -52,11 +52,19 @@ class Activations:
 
     def __init__(
         self,
-        config_path_str: str = "mod_arithmetic_config.yaml",
+        config_path_str: str | Path = "mod_arithmetic_config.yaml",
         internal_device: Optional[str] = None,
         return_device: str = "cpu",
         dtype: Optional[str] = None,
         modulus: int = 113,
+        tlens_model_path: str
+        | Path = Path(
+            "/mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
+        ),
+        interaction_graph_path: str
+        | Path = Path(
+            "/mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt"
+        ),
     ) -> None:
         """Initialize the Activations class.
 
@@ -67,9 +75,18 @@ class Activations:
             return_device: The device to use for the return values. Defaults to "cpu".
             dtype: The dtype to use. Defaults to "float32".
             modulus: The mod add modulus (p) to use. Defaults to 113.
+            tlens_model_path: The path to the TL model checkpoint to use. Defaults to
+                "/mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt".
+            interaction_graph_path: The path to the interaction graph. Defaults to
+                "/mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt".
+
         """
         self.dtype = TORCH_DTYPES["float32"] if dtype is None else TORCH_DTYPES[dtype]
         self.p = modulus
+        self.tlens_model_path = (
+            tlens_model_path if isinstance(tlens_model_path, Path) else Path(tlens_model_path)
+        )
+        self.interaction_graph_path = interaction_graph_path
         self.internal_device = (
             "cuda"
             if torch.cuda.is_available()
@@ -86,9 +103,7 @@ class Activations:
             node_layers=["ln1.0", "ln2.0", "mlp_out.0", "unembed"],
             last_pos_module_type="add_resid1",  # module type in which to only output the last position index
             tlens_pretrained=None,
-            tlens_model_path=Path(
-                "/mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
-            ),
+            tlens_model_path=self.tlens_model_path,
             eps=1e-5,
             dtype=self.dtype,
             device=self.internal_device,
@@ -203,7 +218,7 @@ class Activations:
     def get_rib_activations(
         self,
         section: str,
-        interaction_graph_path: str = "/mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt",
+        logits_node_layer: bool = False,
         ablation_type: Literal["rib", "orthogonal"] = "rib",
     ):
         """Collect RIB-transformed activations for a section.
@@ -212,7 +227,7 @@ class Activations:
 
         Args:
             section: The section to get activations for.
-            interaction_graph_path: The path to the interaction graph.
+            logits_node_layer: TODO. Defaults to False.
             ablation_type: The type of ablation to perform. Defaults to "rib".
 
         Returns:
@@ -223,9 +238,8 @@ class Activations:
                 have the shape (token, d_embed + d_mlp), attention pattern activations have shape
                 (n_head, query, key, d_head).
         """
-        interaction_graph_info = torch.load(interaction_graph_path)
+        interaction_graph_info = torch.load(self.interaction_graph_path)
         node_layers = interaction_graph_info["config"]["node_layers"]
-        logits_node_layer = interaction_graph_info["config"]["node_layers"]
         ablation_node_layers = node_layers if logits_node_layer else node_layers[:-1]
 
         basis_matrices = load_basis_matrices(

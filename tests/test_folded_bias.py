@@ -116,9 +116,6 @@ def test_modular_arithmetic_folded_bias() -> None:
     _folded_bias_comparison(model_raw, model_folded, atol=atol)
 
 
-test_modular_arithmetic_folded_bias()
-
-
 def pretrained_lm_folded_bias_comparison(
     hf_model_str: str,
     node_layers: list[str],

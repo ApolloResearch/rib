@@ -244,7 +244,7 @@ class AttentionIn(nn.Module):
             )
             + self.b_Q
         )
-        # [..., pos, head_index, d_head]
+
         k = (
             einsum(
                 f"{qkv_einops_string}, head_index d_model d_head \
@@ -254,7 +254,9 @@ class AttentionIn(nn.Module):
             )
             + self.b_K
         )
-        # [..., pos, head_index, d_head]
+
+        # Note the d_head_v instead of d_head because when we fold in the bias of the v matrix
+        # we get d_head_v = d_head+1
         v = (
             einsum(
                 f"{qkv_einops_string}, head_index d_model d_head_v \
@@ -264,7 +266,6 @@ class AttentionIn(nn.Module):
             )
             + self.b_V
         )
-        # [..., pos, head_index, d_head]
 
         if self.cfg.positional_embedding_type == "rotary":
             q, k = self.rotary_rotate_qk(q, k)
@@ -370,7 +371,6 @@ class AttentionOut(nn.Module):
     def __init__(
         self,
         cfg: SequentialTransformerConfig,
-        layer_id: Optional[int] = None,
     ):
         """Attention Block - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
@@ -384,7 +384,6 @@ class AttentionOut(nn.Module):
 
         Args:
             cfg (SequentialTransformerConfig): Config
-            layer_id (int, optional): The index of the current layer. Used by the Mistal models (labelled here as stanford-gpt2) to scale down attention scores pre softmax for numerical stability reasons by 1/(layer_id+1). Defaults to None.
         """
         super().__init__()
         self.cfg = cfg
@@ -401,8 +400,6 @@ class AttentionOut(nn.Module):
         self.register_buffer("mask", causal_mask)
 
         self.register_buffer("IGNORE", torch.tensor(-1e5))
-
-        self.layer_id = layer_id
 
         # attn_scale is a constant that we divide the attention scores by pre-softmax.
         # I'm not entirely sure why it matters, but it's probably a mix of softmax not being

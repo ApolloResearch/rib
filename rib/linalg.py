@@ -184,15 +184,11 @@ def edge_norm(
         out_acts @ C_out if C_out is not None else out_acts
     )
 
-    # Calculate the square and sum over the pos dimension if it exists.
     f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = f_out_hat**2
     if has_pos:
-        # f_out_hat is shape (pos, hidden) if vmapped or (batch, pos, hidden) otherwise
-        assert (
-            f_out_hat.dim() == 2 or f_out_hat.dim() == 3
-        ), f"f_out_hat should have 2 or 3 dims, got {f_out_hat.dim()}"
-        pos_dim = 0 if f_out_hat.dim() == 2 else 1
-        f_out_hat_norm = f_out_hat_norm.sum(dim=pos_dim)
+        # f_out_hat is shape (batch, pos, hidden)
+        assert f_out_hat.dim() == 3, f"f_out_hat should have 3 dims, got {f_out_hat.dim()}"
+        f_out_hat_norm = f_out_hat_norm.sum(dim=1)
 
     # Sum over the batch dimension
     f_out_hat_norm = f_out_hat_norm.sum(dim=0)

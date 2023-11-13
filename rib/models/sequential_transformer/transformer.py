@@ -206,8 +206,10 @@ class SequentialTransformer(nn.Module):
     @staticmethod
     def validate_node_layers(node_layers: list[str], module_ids: list[str]) -> None:
         """Check that all the node_layers are valid module_ids, and that they appear in order."""
+        node_layers_no_output = node_layers[:-1] if node_layers[-1] == "output" else node_layers
+
         module_id_idx = 0
-        for node_layer in node_layers:
+        for node_layer in node_layers_no_output:
             try:
                 node_layer_idx = module_ids.index(node_layer)
             except ValueError:

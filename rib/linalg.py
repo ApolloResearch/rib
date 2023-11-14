@@ -262,6 +262,10 @@ def integrated_gradient_trapezoidal_jacobian(
 
     """
     has_pos = f_in_hat.ndim == 3
+    if not has_pos:
+        # Not sure why it doesn't require grad in the MNIST case
+        # TODO: Compare to main branch MNIST
+        f_in_hat.requires_grad_(True)
 
     batch_size = f_in_hat.shape[0]
     # tprime is the in position, token index of the inputs
@@ -307,12 +311,33 @@ def integrated_gradient_trapezoidal_jacobian(
         # Take the derivative of the (i, t) element (output dim and output pos) of the output
         # Note that t (output pos) is different from p (tprime, input pos)
         for out_dim in range(out_hidden_size_comb_trunc):
-            for token_index in range(out_pos_size):
-                # autograd gives us the derivative w.r.t. j (input dim) and p (tprime, input pos).
-                # We sum over p (tprime) != token_index (t) according to Lucius' formula.
-                # The sum is just a trick to get the grad for every batch index vectorized.
+            if out_pos_size > 0:
+                for token_index in range(out_pos_size):
+                    # autograd gives us the derivative w.r.t. j (input dim) and p (tprime, input pos).
+                    # We sum over p (tprime) != token_index (t) according to Lucius' formula.
+                    # The sum is just a trick to get the grad for every batch index vectorized.
+                    grad = torch.autograd.grad(
+                        f_out_alpha_hat[:, token_index, out_dim].sum(dim=0),
+                        alpha_f_in_hat,
+                        retain_graph=True,
+                    )
+                    # No idea why this is a tuple
+                    assert len(grad) == 1
+                    grad = grad[0]
+
+                    # Sum over tprime (p, input pos) as per Lucius' formula (A.18)
+                    with torch.inference_mode():
+                        inner_token_sum = torch.einsum(
+                            einsum_pattern, grad * interval_size * scaler, f_in_hat
+                        )
+                        # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
+                        # in equation (3.27)
+                        inner_token_sums[:, token_index, out_dim, :] -= inner_token_sum.to(
+                            inner_token_sums.device
+                        )
+            else:
                 grad = torch.autograd.grad(
-                    f_out_alpha_hat[:, token_index, out_dim].sum(dim=0),
+                    f_out_alpha_hat[:, out_dim].sum(dim=0),
                     alpha_f_in_hat,
                     retain_graph=True,
                 )
@@ -327,9 +352,8 @@ def integrated_gradient_trapezoidal_jacobian(
                     )
                     # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
                     # in equation (3.27)
-                    inner_token_sums[:, token_index, out_dim, :] -= inner_token_sum.to(
-                        inner_token_sums.device
-                    )
+                    inner_token_sums[:, out_dim, :] -= inner_token_sum.to(inner_token_sums.device)
+
     # Finished alpha integral, integral result present in inner_token_sums
     # Square, and sum over batch size and t (not tprime)
     inner_token_sums = inner_token_sums**2

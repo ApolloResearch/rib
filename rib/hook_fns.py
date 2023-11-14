@@ -19,7 +19,6 @@ from torch import Tensor
 
 from rib.linalg import (
     calc_gram_matrix,
-    edge_norm,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
 )
@@ -280,21 +279,23 @@ def interaction_edge_pre_forward_hook_fn(
         output_const = module(*tuple(x.detach().clone() for x in input_tuples))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
 
+    out_hidden_dims = [x.shape[-1] for x in outputs_const]
+
     has_pos = f_hat.dim() == 3
 
     jac_out = hooked_data[hook_name][data_key]
-    fn = partial(
-        edge_norm,
-        outputs_const=outputs_const,
-        module=module,
-        C_in_pinv=C_in_pinv,
-        C_out=C_out,
-        in_hidden_dims=in_hidden_dims,
-        has_pos=has_pos,
-    )
 
     integrated_gradient_trapezoidal_jacobian(
-        fn=fn, x=f_hat, n_intervals=n_intervals, jac_out=jac_out
+        module=module,
+        f_in_hat=f_hat,
+        in_hidden_dims=in_hidden_dims,
+        out_hidden_dims=out_hidden_dims,
+        out_pos_size=outputs_const[0].shape[1] if has_pos else 0,
+        C_in=C_in,
+        C_in_pinv=C_in_pinv,
+        C_out=C_out,
+        n_intervals=n_intervals,
+        jac_out=jac_out,
     )
 
 

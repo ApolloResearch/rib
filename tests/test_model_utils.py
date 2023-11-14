@@ -82,8 +82,8 @@ class TestCreateSectionIdToModuleIdMapping:
         # Obtained by manually inspecting the model and counting the layers
         expected_mappings = [
             ("sections.pre.2", "add_embed"),
-            ("sections.pre.5", "add_resid1.0"),
-            ("sections.section_0.9", "mlp_out.1"),
+            ("sections.pre.5", "attn_out.0"),
+            ("sections.section_0.9", "mlp_act.1"),
         ]
         TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)
 
@@ -122,9 +122,9 @@ class TestCreateSectionIdToModuleIdMapping:
         expected_mappings = [
             ("sections.pre.1", "pos_embed"),
             ("sections.section_0.0", "add_embed"),
-            ("sections.section_0.17", "ln1.2"),
-            ("sections.section_2.9", "mlp_out.8"),
-            ("sections.section_2.29", "add_resid1.11"),
+            ("sections.section_0.17", "mlp_out.1"),
+            ("sections.section_2.9", "mlp_act.8"),
+            ("sections.section_2.29", "add_resid2.10"),
         ]
         TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)
 
@@ -163,9 +163,9 @@ class TestCreateSectionIdToModuleIdMapping:
         expected_mappings = [
             ("sections.pre.1", "ln1.0"),
             ("sections.section_0.0", "ln2.2"),
-            ("sections.section_0.17", "mlp_in.4"),
-            ("sections.section_1.9", "add_resid2.5"),
-            ("sections.section_1.11", "unembed"),
+            ("sections.section_0.17", "add_resid1.4"),
+            ("sections.section_1.9", "mlp_out.5"),
+            ("sections.section_1.11", "ln_final"),
         ]
 
         TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)

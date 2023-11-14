@@ -1,6 +1,5 @@
 """
-Defines a Transformer based on transformer lens but with a module hierarchy that allows for easier
-building of a RIB graph.
+Defines a Transformer made from a series of modules, allowing for simple calculation of a RIB graph.
 """
 
 from functools import partial
@@ -47,12 +46,12 @@ class SequentialTransformer(nn.Module):
 
     The modules are organised into sections based on the provided `node_layers` list. Each section
     is a MultiSequential object where the outputs of each module in the section is fed as inputs to
-    the next, and the outputs of the final module in the section are the fed as inputs to the first
-    module in the next section.
+    the next module in the section, and the outputs of the final module in the section are the fed
+    as inputs to the first module in the next section.
 
-    The order of module names in the transformer must be as follows:
+    The order of modules in the transformer are as follows:
     - embed
-    - pos_embed (optional)
+    - pos_embed (optional, not included if cfg.positional_embedding_type == "rotary")
     - add_embed (optional, only if pos_embed is present)
     - ln1 (may be an identity module if cfg.normalization_type is None)
     - attn
@@ -65,20 +64,40 @@ class SequentialTransformer(nn.Module):
     - ln_final (may be an identity module if cfg.normalization_type is None)
     - unembed
 
-    The naming convention is the same as used in https://github.com/neelnanda-io/TransformerLens.
-    E.g. "attn.0" refers to the attention module in the 0th transformer block (zero-indexed), and
-    and "ln2.3" refers to the layer norm module before the MLP in the 3rd transformer block.
+    We use the term `module_id` to refer to the naming convention `module_name[.layer_idx]`. E.g.
+    "mlp_in.0" refers to the MLP in module in the 0th transformer layer (zero-indexed), and "ln2.3"
+    refers to the layer norm module before the MLP in the 3rd transformer layer, and "embed" refers
+    to the token embedding module.
 
     This same module structure is used for both sequential (GPT2) and parallel (Pythia) attention
     models, with the difference being handled by the module classes and arguments that are
     associated with each module name. See the diagram in `docs/SequentialTransformer.drawio.png`
     for a visual representation of the module structure.
 
-    The `node_layers` specify the points in which to partition the model into sections.
+    The `node_layers` argument is a list of module_ids specifying the points in which to partition
+    the model into sections.
 
-    If the first node_layer is not "embed", we will have a pre-section of modules from embed to
-    the first node_layer. This pre-section will not be part of the RIB graph but needs to be run
-    with all forward passes in order to feed the correct data to susbequent sections.
+    The first section will be labelled "pre", and includes all modules up until (BUT NOT INCLUDING)
+    the first node_layer. The next section will be labelled "section_0" and includes the modules
+    from the first node_layer up until (BUT NOT INCLUDING) the second node_layer. And so on.
+
+    The "pre" section will not be part of the RIB graph but needs to be run with all
+    forward passes in order to feed the correct data to susbequent sections.
+
+    A `section_id` is a string of the form `sections.section_name.section_idx`, where `section_name`
+    is the name of the section (e.g. "pre", "section_0", "section_1", etc.), and `section_idx` is
+    the index of the module in the section (zero-indexed). To access a module in a
+    SequentialTransformer, `rib.models.utils.get_model_attr` can be used with the section_id as the
+    attribute name. Alternatively, you can run pass `sections.section_name` to `get_model_attr`
+    which will return the MultiSequential object (which is a subclass of nn.Module) that contains
+    all the modules in that section. For example, to get the first module in the "section_0"
+    section, use: `get_model_attr(model, "sections.section_0.0")`. To get the section itself, use:
+    `get_model_attr(model, "sections.section_0")`.
+
+    To convert between a section_id and a module_id, use the `section_id_to_module_id` and
+    `module_id_to_section_id` attributes of the SequentialTransformer.
+
+    Every `sections.section_name` is be a MultiSequential object (i.e. a module in itself).
 
     The node_layers list may end in an `output` layer, meaning that the outputs of the model will
     be the first basis in our RIB graph. We ignore this `output` layer when partitioning the
@@ -92,7 +111,7 @@ class SequentialTransformer(nn.Module):
 
     Args:
         cfg (SequentialTransformerConfig): The SequentialTransformer config.
-        node_layers (list[str]): The names of the node layers used to partition the transformer.
+        node_layers (list[str]): The module_ids indicating where to partition the transformer.
         last_pos_module_type (Optional[Literal["add_resid1", "unembed"]]): The name of the module
             in which to only output the last position index. This is used for modular addition.
 
@@ -159,47 +178,105 @@ class SequentialTransformer(nn.Module):
         last_pos_module_type: Optional[Literal["add_resid1", "unembed"]] = None,
     ):
         super().__init__()
-        self.cfg = cfg
-        self.node_layers = node_layers
-        self.last_pos_module_type = last_pos_module_type
-        self.has_folded_bias = False
-
-        self.embed_module_names: list[str] = (
-            ["embed"]
-            if cfg.positional_embedding_type == "rotary"
-            else ["embed", "pos_embed", "add_embed"]
-        )
-        assert len(node_layers) > 0, "Must have at least 1 node layer"
-        self.module_name_sections = self.create_module_name_sections(cfg.n_layers, node_layers)
 
         assert cfg.normalization_type in [None, "LNPre"], (
             f"Normalization type {cfg.normalization_type} not supported. "
             "Only LayerNormPre and None are currently supported."
         )
 
-        has_pre_section = node_layers[0] != "embed"
-        # Initialize the modules, creating a ModuleList of Sequential modules for each graph section
+        self.cfg = cfg
+        self.node_layers = node_layers
+        self.last_pos_module_type = last_pos_module_type
+        self.has_folded_bias = False
+
+        module_ids: list[str] = self.get_module_ids()
+
+        SequentialTransformer.validate_node_layers(node_layers, module_ids)
+
+        self.sections: nn.ModuleDict = self.create_sections(module_ids)
+
+        id_mappings: list[tuple[str, str]] = self.create_section_id_to_module_id_mapping(module_ids)
+        self.section_id_to_module_id = dict(id_mappings)
+        self.module_id_to_section_id = {v: k for k, v in self.section_id_to_module_id.items()}
+
+    @staticmethod
+    def validate_node_layers(node_layers: list[str], module_ids: list[str]) -> None:
+        """Check that all the node_layers are valid.
+
+        We check that:
+        1. There is at least 1 node layer.
+        2. The first node layer is not an embedding layer.
+        3. There are no duplicate node_layers.
+        4. All are valid module_ids.
+        5. They appear in order.
+        6. There are no duplicates.
+        """
+        assert len(node_layers) > 0, "Must have at least 1 node layer"
+        assert node_layers[0] not in ["embed", "pos_embed"], (
+            f"The first node layer must be a node layer in the transformer, not an embedding layer "
+            f"that takes in token IDs. Got {node_layers[0]}"
+        )
+        assert len(node_layers) == len(set(node_layers)), "Duplicate node layers provided"
+
+        node_layers_no_output = node_layers[:-1] if node_layers[-1] == "output" else node_layers
+
+        module_id_idx = 0
+        for node_layer in node_layers_no_output:
+            try:
+                node_layer_idx = module_ids.index(node_layer)
+            except ValueError:
+                raise ValueError(f"Provided node_layer: {node_layer} is not a valid module_id")
+            if node_layer_idx < module_id_idx:
+                raise ValueError(
+                    f"Node layers must be in order. {node_layer} appears before "
+                    f"{module_ids[module_id_idx]}"
+                )
+            module_id_idx = node_layer_idx
+
+    def create_sections(
+        self,
+        module_ids: list[str],
+    ) -> nn.ModuleDict:
+        """Create ordered sections of module_ids.
+
+        Each section spans the start-end of an edge in a RIB graph.
+
+        Note that the first section, labelled "pre", will not be part of the graph but needs to be
+        run with all forward passes regardless.
+
+        Args:
+            module_ids: The names (and layer indices) of all modules of the model, in order.
+
+        Returns:
+            A ModuleDict where each key is the name of the section and each value is a
+            MultiSequential object containing the modules in the section.
+        """
+
+        # We ignore the optional `output` layer when partitioning the model into sections
+        node_layers_no_output = [layer for layer in self.node_layers if layer != "output"]
+        paritioned_module_ids = create_list_partitions(module_ids, node_layers_no_output)
+
         sections: dict[str, MultiSequential] = {}
-        # If has_pre_section, we need to start at -1 because the first section will be the
-        # pre-section which should not be part of the graph
-        for i, module_names in enumerate(self.module_name_sections, -1 if has_pre_section else 0):
-            section_name = "pre" if node_layers[0] != "embed" and i == -1 else f"section_{i}"
+        # We need to start at -1 because the first section is the pre-section which should not be
+        # part of the graph
+        for i, module_names in enumerate(paritioned_module_ids, -1):
+            section_name = "pre" if i == -1 else f"section_{i}"
 
             module_section: list[nn.Module] = []
             for module_name in module_names:
                 module_type = module_name.split(".")[0]
                 module_class: Type[nn.Module]
                 kwargs = {}
-                if module_type == last_pos_module_type:
+                if module_type == self.last_pos_module_type:
                     # Used for modular addition where we only care about the last position index
                     kwargs["last_pos_only"] = True
-                if module_type == "embed" and cfg.positional_embedding_type == "rotary":
+                if module_type == "embed" and self.cfg.positional_embedding_type == "rotary":
                     kwargs["return_tokens"] = False
-                if module_type == "add_resid1" and cfg.parallel_attn_mlp:
+                if module_type == "add_resid1" and self.cfg.parallel_attn_mlp:
                     kwargs["return_residual"] = True
                 if module_type in ["ln1", "ln2", "ln_final"]:
-                    if cfg.normalization_type == "LNPre":
-                        if cfg.parallel_attn_mlp and module_type == "ln2":
+                    if self.cfg.normalization_type == "LNPre":
+                        if self.cfg.parallel_attn_mlp and module_type == "ln2":
                             module_class = DualLayerNormPre
                         else:
                             module_class = LayerNormPre
@@ -209,54 +286,11 @@ class SequentialTransformer(nn.Module):
                         module_class = nn.Identity if module_type == "ln_final" else IdentitySplit
                 else:
                     module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
-                module = module_class(cfg, **kwargs)
+                module = module_class(self.cfg, **kwargs)
                 module_section.append(module)
             sections[section_name] = MultiSequential(*module_section)
-        self.sections: nn.ModuleDict = nn.ModuleDict(sections)
 
-        id_mappings: list[tuple[str, str]] = self.create_section_id_to_module_id_mapping()
-
-        self.section_id_to_module_id = dict(id_mappings)
-        self.module_id_to_section_id = {v: k for k, v in self.section_id_to_module_id.items()}
-
-    def create_module_name_sections(
-        self,
-        n_blocks: int,
-        node_layers: list[str],
-    ) -> list[list[str]]:
-        """Create ordered groups of module names.
-
-        Each group will be a section of a RIB graph, with the exception that, if the first
-        node_layer is not "embed", the first group will be all of the modules from embed to the
-        first node layer (which will not make up part of the graph).
-
-        We first create a flat list of all module names. We then iterate through this list,
-        appending each module name to a group until we reach the next node layer, and repeat.
-
-        If the first node_layer is not "embed", we will have a pre-section of modules from embed to
-        the first node_layer. This pre-section will not be part of the graph but needs to be run
-        with all forward passes regardless.
-
-        Args:
-            n_blocks: The number of layers/blocks in the model.
-            node_layers: The names of the node layers to build the graph with.
-
-        Returns:
-            A list of lists of module names, where each list is a graph section.
-        """
-        all_layers = self.embed_module_names.copy()
-
-        for i in range(n_blocks):
-            all_layers.extend(
-                [f"{module_name}.{i}" for module_name in SequentialTransformer.LAYER_MODULE_NAMES]
-            )
-        all_layers.append(SequentialTransformer.LN_FINAL_NAME)
-        all_layers.append(SequentialTransformer.UNEMBED_MODULE_NAME)
-
-        # We ignore the optional `output` layer when partitioning the model into sections
-        partition_modules = [layer for layer in node_layers if layer != "output"]
-        module_name_sections = create_list_partitions(all_layers, partition_modules)
-        return module_name_sections
+        return nn.ModuleDict(sections)
 
     def fold_bias(self) -> None:
         """Fold the bias parameters into the weight parameters.
@@ -321,36 +355,51 @@ class SequentialTransformer(nn.Module):
 
         self.has_folded_bias = True
 
-    def create_section_id_to_module_id_mapping(self) -> list[tuple[str, str]]:
-        """Create a list of tuples mapping `sections.section_name.section_idx` (section_id) to
-        `module_name.block_idx` (module_id).
+    def create_section_id_to_module_id_mapping(
+        self, module_ids: list[str]
+    ) -> list[tuple[str, str]]:
+        """Create a list of tuples mapping `sections.section_name.section_idx` (section_ids) to
+        `module_name[.layer_idx]` (module_ids).
+
+        Args:
+            module_ids: The names of the modules (and their layer index) in the model.
 
         Returns:
-            A list of tuples where each tuple is (section_id, module_id).
+            A list of tuples where each tuple is a (section_id, module_id) pair.
         """
-        mapping: list[tuple[str, str]] = []
-
-        layer_module_ids: list[str] = [
-            f"{module_name}.{layer_idx}"
-            for layer_idx in range(self.cfg.n_layers)
-            for module_name in SequentialTransformer.LAYER_MODULE_NAMES
-        ]
-        module_ids: list[str] = (
-            self.embed_module_names
-            + layer_module_ids
-            + [
-                SequentialTransformer.LN_FINAL_NAME,
-                SequentialTransformer.UNEMBED_MODULE_NAME,
-            ]
-        )
-
-        section_ids = [
+        section_ids: list[str] = [
             f"sections.{section_name}.{section_idx}"
             for section_name, section in self.sections.items()
             for section_idx, _ in enumerate(section)
         ]
-        mapping = list(zip(section_ids, module_ids))
+        mapping: list[tuple[str, str]] = list(zip(section_ids, module_ids))
         return mapping
+
+    def get_module_ids(self) -> list[str]:
+        """Create a flat list of all module_ids in the model.
+
+        Recall that module_ids take the form `module_name[.layer_idx]`. For example:
+        `embed`, `ln1.0`, `mlp_in.2`.
+
+        Returns:
+            A list of module_ids.
+        """
+        module_ids: list[str] = []
+
+        # Embed module_ids
+        module_ids.extend(
+            ["embed"]
+            if self.cfg.positional_embedding_type == "rotary"
+            else ["embed", "pos_embed", "add_embed"]
+        )
+
+        for i in range(self.cfg.n_layers):
+            module_ids.extend(
+                [f"{module_name}.{i}" for module_name in SequentialTransformer.LAYER_MODULE_NAMES]
+            )
+        module_ids.append(SequentialTransformer.LN_FINAL_NAME)
+        module_ids.append(SequentialTransformer.UNEMBED_MODULE_NAME)
+        return module_ids
 
     def forward(self, input_ids: Int[Tensor, "batch n_ctx"]) -> tuple[Tensor]:
         """Forward pass through the model.

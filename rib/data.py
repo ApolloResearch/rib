@@ -35,7 +35,7 @@ class HFDatasetConfig(BaseModel):
 
     @field_validator("return_set_frac")
     def check_return_set_frac(cls, v):
-        # Check that 0.01 <= v <= 1
+        # v must be None or >= 0.01 and <= 1
         if v is not None and (v < 0.01 or v > 1):
             raise ValueError(
                 f"return_set_frac must be > 0.01 and < 1 since huggingface dataset `split` "

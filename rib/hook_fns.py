@@ -283,7 +283,7 @@ def interaction_edge_pre_forward_hook_fn(
     has_pos = f_hat.dim() == 3
 
     jac_out = hooked_data[hook_name][data_key]
-    fn = partial(
+    edge_norm_partial = partial(
         edge_norm,
         outputs_const=outputs_const,
         module=module,
@@ -294,7 +294,7 @@ def interaction_edge_pre_forward_hook_fn(
     )
 
     integrated_gradient_trapezoidal_jacobian(
-        fn=fn, x=f_hat, n_intervals=n_intervals, jac_out=jac_out
+        fn=edge_norm_partial, x=f_hat, n_intervals=n_intervals, jac_out=jac_out
     )
 
 

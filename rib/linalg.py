@@ -148,7 +148,8 @@ def edge_norm(
     in_hidden_dims: list[int],
     has_pos: bool,
 ) -> Float[Tensor, "out_hidden_combined_trunc"]:
-    """Calculates the norm of the alpha * in_acts @ C_in @ C_in_pinv when passed through the model.
+    """Calculates the norm (square, and sum over batch and position) of the difference
+    `module(alpha_f_in_hat @ C_in_pinv) - outputs_const`.
 
     Since the module may take a tuple of inputs, we need to split the `x` tensor into a tuple
     based on the `in_hidden_dims` of each input.
@@ -156,7 +157,8 @@ def edge_norm(
     Args:
         alpha_f_in_hat: The alpha-adjusted concatenated inputs to the model.
             i.e. alpha * in_acts @ C_in (included in grad)
-        outputs_const: The non-adjusted outputs of the model.
+        outputs_const: The non-adjusted outputs of the module, i.e.
+            module(in_acts) = module(f_in_hat @ C_in_pinv). Not in RIB basis.
         module: The model to pass the f_in_hat through.
         C_in_pinv: The pseudoinverse of C_in.
         C_out: The truncated interaction rotation matrix for the output node layer.
@@ -164,7 +166,8 @@ def edge_norm(
         has_pos: Whether the module has a position dimension.
 
     Returns:
-        The norm of the output of the module.
+        The norm (over batch and position) of the output of the module for every
+            out-(RIB)-dimension i.
     """
 
     # Compute f^{l+1}(f^l(alpha x))
@@ -259,7 +262,7 @@ def integrated_gradient_trapezoidal_jacobian(
     )
 
     for alpha_index, alpha in tqdm(
-        enumerate(alphas), total=len(alphas), desc="alphas", leave=False
+        enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
         alpha_f_in_hat = alpha * x
         f_out_hat_norm = fn(alpha_f_in_hat)
@@ -269,7 +272,7 @@ def integrated_gradient_trapezoidal_jacobian(
         # estimate at alpha=1)
         scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
         for i in tqdm(
-            range(len(f_out_hat_norm)), total=len(f_out_hat_norm), desc="outputs", leave=False
+            range(len(f_out_hat_norm)), total=len(f_out_hat_norm), desc="Output idxs", leave=False
         ):
             # Get the derivative of the ith output element w.r.t alpha_f_in_hat
             i_grad = (
@@ -281,6 +284,8 @@ def integrated_gradient_trapezoidal_jacobian(
                 E = torch.einsum(einsum_pattern, i_grad, x)
                 # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
                 # in equation (3.27)
+                # Note that jac_out is initialised to zeros in
+                # `rib.data_accumulator.collect_interaction_edges`
                 jac_out[i] -= E
 
 

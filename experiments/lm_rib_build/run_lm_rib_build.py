@@ -48,7 +48,12 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
-from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
+from rib.loader import (
+    create_data_loader,
+    get_subset_of_dataset,
+    load_dataset,
+    load_sequential_transformer,
+)
 from rib.log import logger
 from rib.types import TORCH_DTYPES
 from rib.utils import (
@@ -237,7 +242,7 @@ def main(config_path_str: str):
         out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
     else:
         out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if out_file.exists() and not overwrite_output(out_file):
+    if out_file.exists() and mpi_is_main_process and not overwrite_output(out_file):
         logger.info("Exiting.")
         return None
 
@@ -286,6 +291,7 @@ def main(config_path_str: str):
     # Don't build the graph for the section of the model before the first node layer
     section_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
+    mpi_comm.Barrier()
     if config.interaction_matrices_path is None:
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
@@ -336,21 +342,21 @@ def main(config_path_str: str):
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
         edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
 
+    mpi_comm.Barrier()
     if not config.calculate_edges:
         logger.info("Skipping edge calculation.")
         E_hats = {}
     else:
+        full_dataset_len = len(dataset)  # type: ignore
+        # no-op if only 1 process
+        data_subset = get_subset_of_dataset(dataset, mpi_rank, mpi_num_processes)
+
         edge_train_loader = create_data_loader(
-            dataset,
+            data_subset,
             shuffle=False,
             batch_size=config.edge_batch_size or config.batch_size,
             seed=config.seed,
         )
-        total_edge_dataset_size = len(edge_train_loader)
-        if mpi_num_processes > 1:
-            dataset_idx_start = int(total_edge_dataset_size * mpi_rank / mpi_num_processes)
-            dataset_idx_end = int(total_edge_dataset_size * (mpi_rank + 1) / mpi_num_processes)
-            edge_train_loader = edge_train_loader[dataset_idx_start:dataset_idx_end]  # type: ignore
 
         logger.info("Calculating edges.")
         edges_start_time = time.time()
@@ -362,7 +368,7 @@ def main(config_path_str: str):
             data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
-            data_set_size=total_edge_dataset_size,
+            data_set_size=full_dataset_len,  # includes data for other processes
         )
 
         if mpi_num_processes > 1:

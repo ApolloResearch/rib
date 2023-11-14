@@ -1,12 +1,12 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union, overload
+from typing import Literal, Optional, Sized, Union, overload
 
 import torch
 import yaml
 from datasets import load_dataset as hf_load_dataset
-from torch.utils.data import DataLoader, Dataset, TensorDataset
+from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
 
@@ -321,3 +321,12 @@ def create_data_loader(
         return train_loader, test_loader
     else:
         return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+
+
+def get_subset_of_dataset(dataset: Dataset, subset_idx: int, total_subsets: int) -> Dataset:
+    if total_subsets == 1:
+        return dataset
+    assert isinstance(dataset, Sized), "dataset doesn't impliment __len__"
+    dataset_idx_start = len(dataset) * subset_idx // total_subsets
+    dataset_idx_end = len(dataset) * (subset_idx + 1) // total_subsets
+    return Subset(dataset, range(dataset_idx_start, dataset_idx_end))

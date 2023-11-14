@@ -195,7 +195,14 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    in_grads = integrated_gradient_trapezoidal_B(
+    in_grads = integrated_gradient_trapezoidal_norm(
+        module=module,
+        inputs=inputs,
+        C_out=C_out,
+        n_intervals=n_intervals,
+    )
+
+    in_grads_B = integrated_gradient_trapezoidal_B(
         module=module,
         inputs=inputs,
         C_out=C_out,
@@ -204,21 +211,22 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
     has_pos = inputs[0].dim() == 3
 
-    einsum_pattern = (
+    einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
+    einsum_pattern_B = (
         "batch i t tprime j, batch i t tprime jprime -> j jprime"
         if has_pos
         else "batch i j, batch i jprime -> j jprime"
     )
-    pos_size = in_grads.shape[2] if has_pos else 1
+    pos_size = in_grads_B.shape[2] if has_pos else 1
     normalization_factor = pos_size * dataset_size
 
     with torch.inference_mode():
         # Old in_grads shape: batch pos j, batch pos jprime
-        # New in_grads shape: batch i t tprime j, batch i t tprime jprime
+        # New in_grads_B shape: batch i t tprime j, batch i t tprime jprime
         # extra i and tprime index.
         # Old sum after product: batch pos
         # New sum after product: batch, i, t, tprime
-        M_dash = einops.einsum(in_grads / normalization_factor, in_grads, einsum_pattern)
+        M_dash = einops.einsum(in_grads_B / normalization_factor, in_grads_B, einsum_pattern_B)
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
         Lambda_dash = torch.einsum(einsum_pattern, in_grads / normalization_factor, in_acts)

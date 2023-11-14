@@ -483,12 +483,18 @@ def integrated_gradient_trapezoidal_B(
         n_intervals, integral_boundary_relative_epsilon
     )
 
-    batch_size, pos_size, out_hidden_size = out_acts_const.shape
+    batch_size, out_pos_size, out_hidden_size = out_acts_const.shape
+    _, _, out_hat_hidden_size = out_acts_const_hat.shape
     in_hidden_size = sum(x.shape[-1] for x in inputs)
+    in_pos_size = inputs[0].shape[1]
+    for x in inputs:
+        assert (
+            in_pos_size == x.shape[1]
+        ), "All inputs must have the same position dimension."  # I think?
 
-    grads = torch.zeros(batch_size, out_hidden_size, pos_size, pos_size, in_hidden_size)
-
-    # TODO What about that U transformation of Mprime?
+    grads = torch.zeros(
+        batch_size, out_hat_hidden_size, out_pos_size, in_pos_size, in_hidden_size
+    ).to(out_acts_const.device)
 
     # Old in_grads shape: batch pos j
     # New in_grads shape: batch i t tprime j
@@ -513,8 +519,8 @@ def integrated_gradient_trapezoidal_B(
         # assert torch.allclose(f_hat_norm, old_norm, atol=1e-4), "f_hat_norm should equal old_norm."
 
         # Calculate the grads
-        for i in range(out_hidden_size):
-            for t in range(pos_size):
+        for i in range(out_hat_hidden_size):
+            for t in range(out_pos_size):
                 # Sum over batch only, trick to get the grad for every batch index vectorized.
                 out_acts_alpha_hat[:, t, i].sum(dim=0).backward(
                     inputs=alpha_inputs, retain_graph=True
@@ -534,7 +540,7 @@ def integrated_gradient_trapezoidal_B(
                     assert x.grad is not None, "Input grad should not be None."
                     x.grad.zero_()
 
-    return grads
+    return grads.to(out_acts_const.device)
 
 
 def calc_gram_matrix(

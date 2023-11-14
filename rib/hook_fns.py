@@ -13,12 +13,14 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 from functools import partial
 from typing import Any, Optional, Union
 
+import einops
 import torch
 from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
     calc_gram_matrix,
+    integrated_gradient_trapezoidal_B,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
 )
@@ -193,7 +195,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    in_grads = integrated_gradient_trapezoidal_norm(
+    in_grads = integrated_gradient_trapezoidal_B(
         module=module,
         inputs=inputs,
         C_out=C_out,
@@ -202,11 +204,21 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
     has_pos = inputs[0].dim() == 3
 
-    einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
-    normalization_factor = in_grads.shape[1] * dataset_size if has_pos else dataset_size
+    einsum_pattern = (
+        "batch i t tprime j, batch i t tprime jprime -> j jprime"
+        if has_pos
+        else "batch i j, batch i jprime -> j jprime"
+    )
+    pos_size = in_grads.shape[2] if has_pos else 1
+    normalization_factor = pos_size * dataset_size
 
     with torch.inference_mode():
-        M_dash = torch.einsum(einsum_pattern, in_grads / normalization_factor, in_grads)
+        # Old in_grads shape: batch pos j, batch pos jprime
+        # New in_grads shape: batch i t tprime j, batch i t tprime jprime
+        # extra i and tprime index.
+        # Old sum after product: batch pos
+        # New sum after product: batch, i, t, tprime
+        M_dash = einops.einsum(in_grads / normalization_factor, in_grads, einsum_pattern)
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
         Lambda_dash = torch.einsum(einsum_pattern, in_grads / normalization_factor, in_acts)

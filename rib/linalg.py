@@ -432,6 +432,111 @@ def integrated_gradient_trapezoidal_norm(
     return in_grads
 
 
+def integrated_gradient_trapezoidal_B(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
+    n_intervals: int,
+    integral_boundary_relative_epsilon: float = 1e-3,
+) -> Float[Tensor, "... in_hidden_combined"]:
+    """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
+    following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
+    derivative of f^{l+1}(x) - f^{l+1}(f^l(alpha x)) where module(·) is f^{l+1}(·).
+
+    Uses the trapezoidal rule to approximate the integral between 0+eps and 1-eps.
+
+    Unlike in the integrated gradient calculation for the edge weights, this function takes the norm
+    of the output of the module, condensing the output to a single number which we can run backward
+    on. (Thus we do not need to use jacrev.)
+
+    Args:
+        module: The module to calculate the integrated gradient of.
+        inputs: The inputs to the module. May or may not include a position dimension.
+        C_out: The truncated interaction rotation matrix for the module's outputs.
+        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+    """
+    # Compute f^{l+1}(x) to which the derivative is not applied.
+    with torch.inference_mode():
+        output_const = module(*tuple(x.detach().clone() for x in inputs))
+        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+        output_zero = module(*tuple(torch.zeros_like(x) for x in inputs))
+        outputs_zero = (output_zero,) if isinstance(output_zero, torch.Tensor) else output_zero
+        # Concatenate the outputs over the hidden dimension, and apply RIB transformation
+        out_acts_const = torch.cat(outputs_const, dim=-1)
+        out_acts_const_hat = out_acts_const @ C_out if C_out is not None else out_acts_const
+        out_acts_zero = torch.cat(outputs_zero, dim=-1)
+        out_acts_zero_hat = out_acts_zero @ C_out if C_out is not None else out_acts_zero
+
+    # Ensure that the inputs have requires_grad=True from now on
+    for x in inputs:
+        x.requires_grad_(True)
+
+    alphas, interval_size = _calc_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon
+    )
+
+    batch_size, pos_size, out_hidden_size = out_acts_const.shape
+    in_hidden_size = sum(x.shape[-1] for x in inputs)
+
+    grads = torch.zeros(batch_size, out_hidden_size, pos_size, pos_size, in_hidden_size)
+
+    # TODO What about that U transformation of Mprime?
+
+    # Old in_grads shape: batch pos j
+    # New in_grads shape: batch i t tprime j
+    for alpha_index, alpha in enumerate(alphas):
+        # Compute f^{l+1}(f^l(alpha x))
+        alpha_inputs = tuple(alpha * x for x in inputs)
+        output_alpha = module(*alpha_inputs)
+        outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
+        # Concatenate the outputs over the hidden dimension, and apply RIB transformation
+        out_acts_alpha = torch.cat(outputs_alpha, dim=-1)
+        out_acts_alpha_hat = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha
+        # out_acts_alpha_hat.shape: batch (pos) i
+        # Old sum over pos and i are no longer desired (the extra dims we're getting)
+
+        # Note that the change introduced a 1e-4 error, presumably to chaning order of subtraction
+        # old_norm = ((acts_const_hat - acts_alpha_hat) ** 2).sum()
+        # and C_out rotation.
+        # outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
+        # out_acts = torch.cat(outputs, dim=-1)
+        # f_hat = out_acts @ C_out if C_out is not None else out_acts
+        # f_hat_norm = (f_hat**2).sum()
+        # assert torch.allclose(f_hat_norm, old_norm, atol=1e-4), "f_hat_norm should equal old_norm."
+
+        # Calculate the grads
+        for i in range(out_hidden_size):
+            for t in range(pos_size):
+                # Sum over batch only, trick to get the grad for every batch index vectorized.
+                out_acts_alpha_hat[:, t, i].sum(dim=0).backward(
+                    inputs=alpha_inputs, retain_graph=True
+                )
+                alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
+                # alpha_in_grads.shape: batch in_pos (tprime) in_hidden_comb
+
+                # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
+                # estimate at alpha=1)
+                if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+                    alpha_in_grads = 0.5 * alpha_in_grads
+
+                # grads.shape: batch i t tprime j
+                grads[:, i, t, :, :] -= alpha_in_grads.to(grads.device) * interval_size
+
+                for x in alpha_inputs:
+                    assert x.grad is not None, "Input grad should not be None."
+                    x.grad.zero_()
+
+    return grads
+
+
 def calc_gram_matrix(
     acts: Union[
         Float[Tensor, "batch pos d_hidden"],

@@ -136,6 +136,11 @@ class Config(BaseModel):
         "If None, skip evaluation.",
     )
 
+    out_dir: Optional[Path] = Field(
+        None,
+        description="Directory for the output files. If not provided it is `./out/` relative to this file.",
+    )
+
     @field_validator("dtype")
     def dtype_validator(cls, v):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
@@ -228,15 +233,13 @@ def main(config_path_str: str):
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
-    # mpi handling, incase script is run in parallel
-    # mpi rank will be 0 if this is the main process
-    # it will also be 0 if parallelism isn't being used
+    # mpi handling, for running script in parallel
     mpi_comm = MPI.COMM_WORLD
     mpi_rank = mpi_comm.Get_rank()
     mpi_num_processes = mpi_comm.Get_size()
-    mpi_is_main_process = mpi_comm.Get_rank() == 0
+    mpi_is_main_process = mpi_rank == 0  # rank is also 0 when this is the only process
 
-    out_dir = Path(__file__).parent / "out"
+    out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     if config.calculate_edges:
         out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
@@ -274,6 +277,7 @@ def main(config_path_str: str):
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
+    mpi_comm.Barrier()
 
     logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
     if config.eval_type is not None:
@@ -291,7 +295,6 @@ def main(config_path_str: str):
     # Don't build the graph for the section of the model before the first node layer
     section_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
-    mpi_comm.Barrier()
     if config.interaction_matrices_path is None:
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer

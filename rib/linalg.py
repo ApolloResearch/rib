@@ -260,6 +260,7 @@ def integrated_gradient_trapezoidal_jacobian(
     alphas, interval_size = _calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon=1e-3
     )
+    x.requires_grad_(True)
 
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False

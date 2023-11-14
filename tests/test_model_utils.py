@@ -171,22 +171,6 @@ class TestCreateSectionIdToModuleIdMapping:
         TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)
 
 
-@staticmethod
-def validate_node_layers(node_layers: list[str], module_ids: list[str]) -> None:
-    """Check that all the node_layers are valid module_ids, and that they appear in order."""
-    module_id_idx = 0
-    for node_layer in node_layers:
-        try:
-            node_layer_idx = module_ids.index(node_layer)
-        except ValueError:
-            raise ValueError(f"Invalid node_layer {node_layer}")
-        if node_layer_idx < module_id_idx:
-            raise ValueError(
-                f"Node layers must be in order. {node_layer} appears before {module_ids[module_id_idx]}"
-            )
-        module_id_idx = node_layer_idx
-
-
 @pytest.mark.parametrize(
     "node_layers, module_ids",
     [

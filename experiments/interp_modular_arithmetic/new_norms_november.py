@@ -18,7 +18,7 @@ parent_dir = Path(__file__).parent
 
 activations = Activations(
     config_path_str=parent_dir.joinpath("mod_arithmetic_config.yaml"),
-    interaction_graph_path="/mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/modular_arithmetic_rib_graph.pt",
+    interaction_graph_path="/mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_rib_graph.pt",
     # interaction_graph_path="/mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/modular_arithmetic-nnA_rib_graph.pt",
 )
 activations.print_info()
@@ -31,7 +31,7 @@ rib_acts_embedding_fft = fft2(rib_acts_embedding)
 
 
 # %%
-def plot_fft_1d(acts, n_rows=15, figsize=(8, 40), axes=None, **kwargs):
+def plot_fft_1d(acts, n_rows=15, figsize=(16, 40), axes=None, **kwargs):
     if axes is None:
         fig, axes = plt.subplots(n_rows, 2, constrained_layout=True, figsize=figsize)
     else:
@@ -55,8 +55,17 @@ activations_nnA = Activations(
 )
 
 rib_acts_embedding_nnA_fft = fft2(activations_nnA.get_rib_activations(section="sections.pre.2"))
-fig, axes = plot_fft_1d(rib_acts_embedding_nnA_fft, axes=axes, ls=":")
-
-fig.show()
+# fig, axes = plot_fft_1d(rib_acts_embedding_nnA_fft, axes=axes, ls=":")
 
 # %%
+
+activations_nnB = Activations(
+    config_path_str=parent_dir.joinpath("mod_arithmetic_config.yaml"),
+    interaction_graph_path="/mnt/ssd-apollo/stefan/mod_add_graph_nnB.pt",
+)
+
+rib_acts_embedding_nnB_fft = fft2(activations_nnB.get_rib_activations(section="sections.pre.2"))
+fig, axes = plot_fft_1d(rib_acts_embedding_nnB_fft, axes=axes, ls="--")
+
+# %%
+fig

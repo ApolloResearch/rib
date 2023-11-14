@@ -33,7 +33,7 @@ def run_dataset_through_model(
     assert len(hooks) > 0, "Hooks have not been applied to this model."
     loader: Union[tqdm, DataLoader]
     if use_tqdm:
-        loader = tqdm(dataloader, total=len(dataloader), desc="Passing data through model")
+        loader = tqdm(dataloader, total=len(dataloader), desc="Batches through entire model")
     else:
         loader = dataloader
 
@@ -241,7 +241,7 @@ def collect_interaction_edges(
         # Initialise the edge matrices to zeros to (out_dim, in_dim). These get added to in the
         # forward hook.
         hooked_model.hooked_data[C_info.node_layer_name] = {
-            "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.C.shape[1], dtype=dtype, device=device)
+            "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.out_dim, dtype=dtype, device=device)
         }
 
     run_dataset_through_model(

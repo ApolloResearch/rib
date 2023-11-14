@@ -102,6 +102,7 @@ def calculate_interaction_rotations(
     dtype: torch.dtype,
     device: str,
     n_intervals: int,
+    matmul_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
@@ -126,6 +127,8 @@ def calculate_interaction_rotations(
         dtype: The data type to use for model computations.
         device: The device to run the model on.
         n_intervals: The number of intervals to use for integrated gradients.
+        matmul_dtype: The data type to use for the M_dash -> M transformation. Needs to be float64
+            for Pythia-14m (empirically). Defaults to float64.
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
@@ -185,10 +188,19 @@ def calculate_interaction_rotations(
     Cs.append(
         InteractionRotation(
             node_layer_name=node_layers[-1],
-            out_dim=C_output.shape[1] if C_output is not None else final_node_dim,
+            out_dim=final_node_dim,
             C=C_output,
         )
     )
+    if U_output is not None:
+        assert U_output is not None
+        assert C_output is not None
+        assert (
+            C_output.shape[1] == final_node_dim
+        ), f"Expected C_output to have shape (_, {final_node_dim}). Got {C_output.shape}."
+        assert (
+            U_output.shape[1] == final_node_dim
+        ), f"Expected U_output to have shape (_, {final_node_dim}). Got {U_output.shape}."
 
     # We only need to calculate C for the final section if there is no output node layer
     section_names_to_calculate = (
@@ -234,9 +246,11 @@ def calculate_interaction_rotations(
         )
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
-        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
-        _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
-
+        in_dtype = M_dash.dtype
+        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
+            U_D_sqrt.T.to(matmul_dtype) @ M_dash.to(matmul_dtype) @ U_D_sqrt.to(matmul_dtype)
+        ).to(in_dtype)
+        V = eigendecompose(M)[1]  # V has size (d_hidden_trunc, d_hidden_trunc)
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
         D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())

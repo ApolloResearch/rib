@@ -36,6 +36,7 @@ from typing import Literal, Optional, Union, cast
 import fire
 import torch
 from jaxtyping import Float
+from mpi4py import MPI
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch import Tensor
 
@@ -70,7 +71,8 @@ class Config(BaseModel):
         None, description="Path to saved transformer lens model."
     )
     interaction_matrices_path: Optional[Path] = Field(
-        None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
+        None,
+        description="Path to pre-saved interaction matrices. If provided, we don't recompute.",
     )
     node_layers: list[str] = Field(
         ...,
@@ -221,6 +223,14 @@ def main(config_path_str: str):
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
+    # mpi handling, incase script is run in parallel
+    # mpi rank will be 0 if this is the main process
+    # it will also be 0 if parallelism isn't being used
+    mpi_comm = MPI.COMM_WORLD
+    mpi_rank = mpi_comm.Get_rank()
+    mpi_num_processes = mpi_comm.Get_size()
+    mpi_is_main_process = mpi_comm.Get_rank() == 0
+
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
     if config.calculate_edges:
@@ -336,6 +346,12 @@ def main(config_path_str: str):
             batch_size=config.edge_batch_size or config.batch_size,
             seed=config.seed,
         )
+        total_edge_dataset_size = len(edge_train_loader)
+        if mpi_num_processes > 1:
+            dataset_idx_start = int(total_edge_dataset_size * mpi_rank / mpi_num_processes)
+            dataset_idx_end = int(total_edge_dataset_size * (mpi_rank + 1) / mpi_num_processes)
+            edge_train_loader = edge_train_loader[dataset_idx_start:dataset_idx_end]  # type: ignore
+
         logger.info("Calculating edges.")
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
@@ -346,7 +362,21 @@ def main(config_path_str: str):
             data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
+            data_set_size=total_edge_dataset_size,
         )
+
+        if mpi_num_processes > 1:
+            for m_name, edge_vals in E_hats.items():
+                receiver_tensor = None
+                if mpi_is_main_process:
+                    receiver_tensor = torch.empty(
+                        (mpi_num_processes,) + edge_vals.shape, dtype=edge_vals.dtype
+                    )
+                mpi_comm.Gather(edge_vals.cpu(), receiver_tensor, root=0)
+                if mpi_is_main_process:
+                    assert receiver_tensor is not None
+                    E_hats[m_name] = receiver_tensor.sum(0)
+
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)
 
@@ -372,9 +402,10 @@ def main(config_path_str: str):
         "calc_edges_time": calc_edges_time,
     }
 
-    # Save the results (which include torch tensors) to file
-    torch.save(results, out_file)
-    logger.info("Saved results to %s", out_file)
+    if mpi_is_main_process:
+        # Save the results (which include torch tensors) to file
+        torch.save(results, out_file)
+        logger.info("Saved results to %s", out_file)
 
 
 if __name__ == "__main__":

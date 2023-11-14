@@ -110,13 +110,7 @@ class Config(BaseModel):
     n_intervals: int = Field(
         ...,
         description="The number of intervals to use for the integrated gradient approximation."
-        "If 0, we take a point estimate (i.e. just alpha=1).",
-    )
-
-    out_dim_chunk_size: Optional[int] = Field(
-        None,
-        description="The size of the chunks to use for calculating the jacobian. If none, calculate"
-        "the jacobian on all output dimensions at once.",
+        "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
 
     dtype: str = Field(..., description="The dtype to use when building the graph.")
@@ -200,13 +194,27 @@ def load_interaction_rotations(
     assert config.interaction_matrices_path is not None
     matrices_info = torch.load(config.interaction_matrices_path)
 
-    loaded_config = Config(**matrices_info["config"])
+    config_dict = config.model_dump()
+    # The loaded config might have a different schema. Only pass fields that are still valid.
+    valid_fields = list(config_dict.keys())
+
+    # If not all fields are valid, log a warning
+    loaded_config_dict: dict = {}
+    for loaded_key in matrices_info["config"]:
+        if loaded_key in valid_fields:
+            loaded_config_dict[loaded_key] = matrices_info["config"][loaded_key]
+        else:
+            logger.warning(
+                "The following field in the loaded config is no longer supported and will be ignored:"
+                f" {loaded_key}"
+            )
+
+    loaded_config = Config(**loaded_config_dict)
     _verify_compatible_configs(config, loaded_config)
 
-    gram_matrices = matrices_info["gram_matrices"]
     Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
     Us = [Eigenvectors(**data) for data in matrices_info["eigenvectors"]]
-    return gram_matrices, Cs, Us
+    return matrices_info["gram_matrices"], Cs, Us
 
 
 def main(config_path_str: str):
@@ -349,7 +357,6 @@ def main(config_path_str: str):
             data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
-            out_dim_chunk_size=config.out_dim_chunk_size,
         )
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)

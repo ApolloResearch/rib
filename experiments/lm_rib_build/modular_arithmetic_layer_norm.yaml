@@ -18,7 +18,6 @@ rotate_final_node_layer: false
 truncation_threshold: 1e-6
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
 n_intervals: 50
-out_dim_chunk_size: null
 dtype: float32
 calculate_edges: true
 eps: 1e-5  # Default is 1e-5

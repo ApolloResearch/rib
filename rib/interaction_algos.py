@@ -188,10 +188,19 @@ def calculate_interaction_rotations(
     Cs.append(
         InteractionRotation(
             node_layer_name=node_layers[-1],
-            out_dim=C_output.shape[1] if C_output is not None else final_node_dim,
+            out_dim=final_node_dim,
             C=C_output,
         )
     )
+    if U_output is not None:
+        assert U_output is not None
+        assert C_output is not None
+        assert (
+            C_output.shape[1] == final_node_dim
+        ), f"Expected C_output to have shape (_, {final_node_dim}). Got {C_output.shape}."
+        assert (
+            U_output.shape[1] == final_node_dim
+        ), f"Expected U_output to have shape (_, {final_node_dim}). Got {U_output.shape}."
 
     # We only need to calculate C for the final section if there is no output node layer
     section_names_to_calculate = (

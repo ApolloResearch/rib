@@ -20,11 +20,10 @@ node_layers:
   - output
 batch_size: 12  #  A100 can handle 24
 gram_batch_size: 40  #  A100 can handle 80
-edge_batch_size: 1
+edge_batch_size: 6
 truncation_threshold: 1e-6
 rotate_final_node_layer: false
 n_intervals: 20
-out_dim_chunk_size: 40  # A6000 can handle 40 with edge_batch_size=1
 dtype: float32
 calculate_edges: true
 eval_type: null

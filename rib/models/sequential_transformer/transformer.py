@@ -54,7 +54,8 @@ class SequentialTransformer(nn.Module):
     - pos_embed (optional, not included if cfg.positional_embedding_type == "rotary")
     - add_embed (optional, only if pos_embed is present)
     - ln1 (may be an identity module if cfg.normalization_type is None)
-    - attn
+    - attn_in
+    - attn_out
     - add_resid1
     - ln2 (may be an identity module if cfg.normalization_type is None)
     - mlp_in
@@ -92,7 +93,6 @@ class SequentialTransformer(nn.Module):
     which will return the MultiSequential object (which is a subclass of nn.Module) that contains
     all the modules in that section. For example, to get the first module in the "section_0"
     section, use: `get_model_attr(model, "sections.section_0.0")`. To get the section itself, use:
-    `get_model_attr(model, "sections.section_0")`.
 
     To convert between a section_id and a module_id, use the `section_id_to_module_id` and
     `module_id_to_section_id` attributes of the SequentialTransformer.
@@ -126,33 +126,28 @@ class SequentialTransformer(nn.Module):
             (pre): MultiSequential(
                 (0): Embed()
                 (1): LayerNormPreFolded()
-                (2): Attention()
-                (3): Add()
-                (4): DualLayerNormPreFolded()
-                (5): MLPIn()
-                (6): MLPAct()
+                (2): AttentionIn()
+                (3): AttentionOut()
+                (4): Add()
+                (5): DualLayerNormPreFolded()
+                (6): MLPIn()
+                (7): MLPAct()
             )
             (section_0): MultiSequential(
                 (0): MLPOut()
                 (1): Add()
                 (2): LayerNormPreFolded()
                 ...
-                (19): Attention()
-                (20): Add()
+                (22): AttentionOut()
+                (23): Add()
             )
             (section_1): MultiSequential(
                 (0): DualLayerNormPreFolded()
                 (1): MLPIn()
                 (2): MLPAct()
-            )
-            (section_2): MultiSequential(
-                (0): MLPOut()
-                (1): Add()
-                (2): LayerNormPreFolded()
-                (3): Attention()
                 ...
-                (18): LayerNormPreFolded()
-                (19): Unembed()
+                (23): LayerNormPreFolded()
+                (24): Unembed()
             )
         )
     )
@@ -160,7 +155,8 @@ class SequentialTransformer(nn.Module):
 
     LAYER_MODULE_NAMES: list[str] = [
         "ln1",
-        "attn",
+        "attn_in",
+        "attn_out",
         "add_resid1",
         "ln2",
         "mlp_in",

@@ -208,9 +208,20 @@ def load_interaction_rotations(
     assert config.interaction_matrices_path is not None
     matrices_info = torch.load(config.interaction_matrices_path)
 
+    config_dict = config.model_dump()
     # The loaded config might have a different schema. Only pass fields that are still valid.
-    valid_fields = list(config.model_dump().keys())
-    loaded_config_dict = {k: v for k, v in matrices_info["config"].items() if k in valid_fields}
+    valid_fields = list(config_dict.keys())
+
+    # If not all fields are valid, log a warning
+    loaded_config_dict: dict = {}
+    for loaded_key in matrices_info["config"]:
+        if loaded_key in valid_fields:
+            loaded_config_dict[loaded_key] = matrices_info["config"][loaded_key]
+        else:
+            logger.warning(
+                "The following field in the loaded config is no longer supported and will be ignored:"
+                f" {loaded_key}"
+            )
 
     loaded_config = Config(**loaded_config_dict)
     _verify_compatible_configs(config, loaded_config)

@@ -1,3 +1,5 @@
+from typing import Callable
+
 import numpy as np
 import pytest
 import torch
@@ -325,7 +327,9 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals():
     ), "n_intervals==1 and n_intervals==5 are not close enough"
 
 
-def _integrated_gradient_jacobian_with_jacrev(fn, x, n_intervals, dataset_size):
+def _integrated_gradient_jacobian_with_jacrev(
+    fn: Callable, x: Float[Tensor, "batch in_dim"], n_intervals: int, dataset_size: int
+) -> Float[Tensor, "out_dim in_dim"]:
     """Compute the integrated gradient jacobian using jacrev."""
     alphas, interval_size = _calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon=1e-3

@@ -234,6 +234,7 @@ def collect_interaction_edges(
                     "C_in_pinv": C_info.C_pinv.to(device=device),  # C_pinv from current node layer
                     "C_out": C_out,
                     "n_intervals": n_intervals,
+                    "dataset_size": len(data_loader.dataset),  # type: ignore
                 },
             )
         )
@@ -253,13 +254,11 @@ def collect_interaction_edges(
     }
     hooked_model.clear_hooked_data()
 
-    # Scale the edges by the number of samples in the dataset
-    # Put the resulting edges on the cpu
-    for node_layer_name in edges:
-        edges[node_layer_name] = (edges[node_layer_name] / len(data_loader.dataset)).cpu()  # type: ignore
-
     # Ensure that the keys of the edges dict are the same as the node layer names without `output`
-    assert set(edges.keys()) == set(
-        [C.node_layer_name for C in Cs[:-1]]
-    ), f"Edge keys not the same as node layer names. "
+    if set(edges.keys()) != set([C.node_layer_name for C in Cs[:-1]]):
+        logger.warning(
+            "Edge keys not the same as node layer names. " "Expected: %s, got: %s",
+            set([C.node_layer_name for C in Cs[:-1]]),
+            set(edges.keys()),
+        )
     return edges

@@ -32,7 +32,6 @@ This file also support parallelization to compute edge values across multiple pr
 import json
 import time
 from dataclasses import asdict
-from logging import WARNING
 from pathlib import Path
 from typing import Literal, Optional, Union, cast
 
@@ -58,6 +57,7 @@ from rib.loader import (
     load_sequential_transformer,
 )
 from rib.log import logger
+from rib.mpi_utils import adjust_logger_mpi, get_device_mpi, get_mpi_info
 from rib.types import TORCH_DTYPES
 from rib.utils import (
     eval_cross_entropy_loss,
@@ -246,15 +246,9 @@ def main(config_path_str: str):
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
-    # mpi handling, for running script in parallel
-    mpi_comm = MPI.COMM_WORLD
-    mpi_rank = mpi_comm.Get_rank()
-    mpi_num_processes = mpi_comm.Get_size()
-    mpi_is_main_process = mpi_rank == 0  # rank is also 0 when this is the only process
-
-    # don't have subprocesses print INFO logging
-    if not mpi_is_main_process:
-        logger.setLevel(WARNING)
+    mpi_info = get_mpi_info()
+    adjust_logger_mpi(logger)
+    device = get_device_mpi(logger)
 
     out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -262,21 +256,11 @@ def main(config_path_str: str):
         out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
     else:
         out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if out_file.exists() and mpi_is_main_process and not overwrite_output(out_file):
+    if out_file.exists() and mpi_info.is_main_process and not overwrite_output(out_file):
         logger.info("Exiting.")
-        mpi_comm.Abort()  # stop all other processes
-        return None
+        mpi_info.comm.Abort()  # stop this and other processes
+        return None  # this is unreachable as Abort will terminate
 
-    if torch.cuda.is_available():
-        if mpi_num_processes > 1:
-            device = f"cuda:{mpi_rank % torch.cuda.device_count()}"
-            logger.info(
-                f"Distributing {mpi_num_processes} processes over {torch.cuda.device_count()} gpus"
-            )
-        else:
-            device = "cuda"
-    else:
-        device = "cpu"
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
     calc_edges_time = None
@@ -304,7 +288,6 @@ def main(config_path_str: str):
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
-    mpi_comm.Barrier()  # requires all processes to reach this point before continuing
 
     logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
     if config.eval_type is not None:
@@ -372,14 +355,15 @@ def main(config_path_str: str):
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
         edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
 
-    mpi_comm.Barrier()
     if not config.calculate_edges:
         logger.info("Skipping edge calculation.")
         E_hats = {}
     else:
         full_dataset_len = len(dataset)  # type: ignore
         # no-op if only 1 process
-        data_subset = get_subset_of_dataset(dataset, mpi_rank, mpi_num_processes)
+        data_subset = get_subset_of_dataset(
+            dataset, subset_idx=mpi_info.rank, total_subsets=mpi_info.size
+        )
 
         edge_train_loader = create_data_loader(
             data_subset,
@@ -401,15 +385,15 @@ def main(config_path_str: str):
             data_set_size=full_dataset_len,  # includes data for other processes
         )
 
-        if mpi_num_processes > 1:
+        if mpi_info.is_parallelised:
             for m_name, edge_vals in E_hats.items():
                 receiver_tensor = None
-                if mpi_is_main_process:
+                if mpi_info.is_main_process:
                     receiver_tensor = torch.empty_like(edge_vals).cpu()
                 # we sum across the edge_val tensors in each process, putting the result in
                 # the root process's reciever_tensor.
-                mpi_comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
-                if mpi_is_main_process:
+                mpi_info.comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
+                if mpi_info.is_main_process:
                     assert receiver_tensor is not None
                     E_hats[m_name] = receiver_tensor
 
@@ -438,7 +422,7 @@ def main(config_path_str: str):
         "calc_edges_time": calc_edges_time,
     }
 
-    if mpi_is_main_process:
+    if mpi_info.is_main_process:
         # Save the results (which include torch tensors) to file
         torch.save(results, out_file)
         logger.info("Saved results to %s", out_file)

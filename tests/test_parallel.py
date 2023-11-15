@@ -40,7 +40,6 @@ def test_distributed_calc_gives_same_edges():
             f.write(config_str)
         return config_path
 
-
     run_file = rib_dir + "/experiments/lm_rib_build/run_lm_rib_build.py"
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -57,4 +56,6 @@ def test_distributed_calc_gives_same_edges():
         double_edges = torch.load(f"{temp_dir}/test_double_rib_graph.pt")["edges"]
 
         for (module, s_edges), (_, d_edges) in zip(single_edges, double_edges):
-            assert torch.allclose(s_edges, d_edges, atol=1e-10), (module, s_edges, d_edges)
+            assert torch.allclose(
+                s_edges, d_edges, atol=1e-10
+            ), f"on {module} mean error {(s_edges-d_edges).abs().mean().item()}"

@@ -326,7 +326,7 @@ def create_data_loader(
 def get_subset_of_dataset(dataset: Dataset, subset_idx: int, total_subsets: int) -> Dataset:
     if total_subsets == 1:
         return dataset
-    assert isinstance(dataset, Sized), "dataset doesn't impliment __len__"
-    dataset_idx_start = len(dataset) * subset_idx // total_subsets
-    dataset_idx_end = len(dataset) * (subset_idx + 1) // total_subsets
+    dataset_len = len(dataset)  # type: ignore
+    dataset_idx_start = dataset_len * subset_idx // total_subsets
+    dataset_idx_end = dataset_len * (subset_idx + 1) // total_subsets
     return Subset(dataset, range(dataset_idx_start, dataset_idx_end))

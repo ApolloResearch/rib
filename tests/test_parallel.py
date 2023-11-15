@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 import torch
 
+from rib.log import logger
+
 
 @pytest.mark.slow
 def test_distributed_calc_gives_same_edges():
-    rib_dir = str(Path(__file__).parent.parent)
-
-    def make_config(name: str, temp_dir: str):
+    def make_config(exp_name: str, temp_dir: str, rib_dir: str):
         config_str = f"""
-        exp_name: {name}
+        exp_name: {exp_name}
         seed: 0
         tlens_pretrained: null
         tlens_model_path: {rib_dir}/experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
@@ -35,22 +35,23 @@ def test_distributed_calc_gives_same_edges():
         eval_type: accuracy
         out_dir: {temp_dir}
         """
-        config_path = f"{temp_dir}/{name}.yaml"
+        config_path = f"{temp_dir}/{exp_name}.yaml"
         with open(config_path, "w") as f:
             f.write(config_str)
         return config_path
 
+    rib_dir = str(Path(__file__).parent.parent)
     run_file = rib_dir + "/experiments/lm_rib_build/run_lm_rib_build.py"
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        single_config_path = make_config("test_single", temp_dir)
-        double_config_path = make_config("test_double", temp_dir)
+        single_config_path = make_config("test_single", temp_dir=temp_dir, rib_dir=rib_dir)
+        double_config_path = make_config("test_double", temp_dir=temp_dir, rib_dir=rib_dir)
         subprocess.run(["python", run_file, single_config_path], capture_output=True)
-        print("done with single!")
+        logger.info("done with single!")
         subprocess.run(
             ["mpiexec", "-n", "2", "python", run_file, double_config_path], capture_output=True
         )
-        print("done with double!")
+        logger.info("done with double!")
 
         single_edges = torch.load(f"{temp_dir}/test_single_rib_graph.pt")["edges"]
         double_edges = torch.load(f"{temp_dir}/test_double_rib_graph.pt")["edges"]

@@ -76,8 +76,7 @@ class Config(BaseModel):
         None, description="Path to saved transformer lens model."
     )
     interaction_matrices_path: Optional[Path] = Field(
-        None,
-        description="Path to pre-saved interaction matrices. If provided, we don't recompute.",
+        None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
     node_layers: list[str] = Field(
         ...,

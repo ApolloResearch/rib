@@ -253,7 +253,16 @@ def main(config_path_str: str):
         logger.info("Exiting.")
         return None
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        if mpi_num_processes > 1:
+            device = f"cuda:{mpi_rank % torch.cuda.device_count()}"
+            logger.info(
+                f"Distributing {mpi_num_processes} processes over {torch.cuda.device_count()} gpus"
+            )
+        else:
+            device = "cuda"
+    else:
+        device = "cpu"
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
     calc_edges_time = None

@@ -404,13 +404,13 @@ def main(config_path_str: str):
             for m_name, edge_vals in E_hats.items():
                 receiver_tensor = None
                 if mpi_is_main_process:
-                    receiver_tensor = torch.empty(
-                        (mpi_num_processes,) + edge_vals.shape, dtype=edge_vals.dtype
-                    )
-                mpi_comm.Gather(edge_vals.cpu(), receiver_tensor, root=0)
+                    receiver_tensor = torch.empty_like(edge_vals).cpu()
+                # we sum across the edge_val tensors in each process, putting the result in
+                # the root process's reciever_tensor.
+                mpi_comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
                 if mpi_is_main_process:
                     assert receiver_tensor is not None
-                    E_hats[m_name] = receiver_tensor.sum(0)
+                    E_hats[m_name] = receiver_tensor
 
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)

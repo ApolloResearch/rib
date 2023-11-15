@@ -195,7 +195,7 @@ def main(config_path_str: str) -> tuple[float, float]:
 
     datasets = load_dataset(dataset_config=config.dataset, return_set=config.dataset.return_set)
     train_loader, test_loader = create_data_loader(
-        datasets, shuffle=True, batch_size=config.train.batch_size
+        datasets, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
     )
 
     # Initialize the Transformer model

@@ -20,7 +20,7 @@ The core functionality of RIB is contained in the `rib` package. Experiments tha
 contained in the experiments directory, with the directory encapsulating related files such as
 configs, scripts, and outputs.
 
-Many scripts take in a yaml config file or a json data file as cli argument. These files reside in
+Most experiment scripts take in a yaml config file or a json data file as cli argument. These files reside in
 either the same directory as the script or a child directory. The docstrings of the
 scripts describe how to use them.
 
@@ -38,22 +38,27 @@ Supported experiments:
 
 ### LMs
 
+Language models are implemented in the `rib.models.transformer.SequentialTransformer` class. This
+is a sequential version of a transformer consisting of a series of modules. The inputs to a module
+are the unmodified outputs to the previous module.
+
+An image of the Sequential Transformer architecture is provided [here](docs/SequentialTransformer.drawio.png).
+
 Supported experiments:
 
-- Training a 1-layer LM on the modular addition task: `experiments/train_modular_arithmetic/`
+- Training a 1-layer LM on a modular arithmetic task: `experiments/train_modular_arithmetic/`
 - Ablating vectors from the interaction or orthogonal basis: `experiments/lm_ablations/`
 - Building an interaction graph: `experiments/lm_rib_build/`
 
 As can be seen in `experiments/lm_rib_build/run_lm_rib_build.py`, the process for building a graph
 for an LM is as follows:
 
-- Load a pretrained LM (currently only supports some transformer-lens models)
+- Load a pretrained LM (currently only supports some transformer-lens models and modular arithmetic).
 - Map the LM to a SequentialTransformer model, which allows us to analyse (e.g. take jacobians of)
 arbitrary sections of the LM.
-- Fold in the model's biases into the weights. This is required for the RIB decompositions to
-consider all the relevant interactions.
-- Run the RIB algorithm, outlined in the Code Implementation section of [this writeup](https://www.overleaf.com/project/6437d0bde0eaf2e8c7ac3649).
-- Plot the graph using `experiments/lm_rib_build/plot_rib_graph.py`, passing the path to the
+- Fold in the model's biases into the weights. This is required for our integrated gradient formalism.
+- Run the RIB algorithm, outlined in the Code Implementation section of [this writeup](https://www.overleaf.com/project/6516ddc99f52dd99cab58d8d).
+- Plot the RIB graph using `experiments/lm_rib_build/plot_lm_graph.py`, passing in the path to the
 results file generated from `experiments/lm_rib_build/run_lm_rib_build.py`
 
 ## Development

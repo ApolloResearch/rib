@@ -1,7 +1,13 @@
+import numpy as np
 import pytest
 import torch
+from jaxtyping import Float
+from torch import Tensor
+from torch.func import jacrev
 
 from rib.linalg import (
+    _calc_integration_intervals,
+    calc_gram_matrix,
     calc_rotation_matrix,
     eigendecompose,
     integrated_gradient_trapezoidal_jacobian,
@@ -126,7 +132,7 @@ def test_intergrated_gradient_trapezoidal_norm_linear():
     """Check integrated gradient values over a linear module without bias for different intervals.
 
     We check three cases:
-        1. Point estimate (n_intervals=0), leads to alpha=1
+        1. Point estimate (n_intervals=0), leads to alpha=0.5
         2. n_intervals=1
         3. n_intervals=5
 
@@ -155,8 +161,8 @@ def test_intergrated_gradient_trapezoidal_norm_linear():
     )
 
     assert torch.allclose(
-        result_point_estimate, result_1 * 2
-    ), "Point estimate and double the n_intervals==1 estimate are not close enough"
+        result_point_estimate, result_1 * 1
+    ), "Point estimate and n_intervals==1 estimate are not close enough"
     assert torch.allclose(
         result_1, result_5
     ), "n_intervals==1 and n_intervals==5 are not close enough"
@@ -167,8 +173,11 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
 
     Assume we have a polynomial function f = x^3. Our normed function for the integrated gradient
     is then:
-    f_norm = integral_{0}^{1} day(((alpha * x)^3 @ C_out)^2) / day(alpha * x) d_alpha.
-           = [x^5 C_out^2 alpha^6]^1_0
+    f_norm = - integral_{0}^{1} day(((x^3 - (alpha * x)^3) @ C_out)^2) / day(alpha * x) d_alpha.
+           = - integral_{0}^{1} 2 * (x^3 - (alpha * x)^3) @ C_out) * (3 * (alpha * x)^2) @ C_out) d_alpha
+           = 6 * integral_{0}^{1} (x^3 - (alpha * x)^3)) ((alpha * x)^2)) d_alpha
+           = 6 * integral_{0}^{1} (x^5 alpha^2 - alpha^5 x^5) d_alpha
+           = [ 2 * x^5 alpha^3 - x^5 alpha^6 ]_{0}^{1}
            = x^5 C_out^2
 
     We show that this analytical solution is approached as n_intervals increases.
@@ -212,7 +221,59 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
     ), "Integrated grad norms are not decreasing"
 
 
-def test_integrated_gradient_trapezoidal_jacobian_linear():
+def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
+    """Show that our integrated gradient of our norm function converges to the analytical
+    solution for a polynomial, with the special feature that act(0) != 0. Earlier code made this
+    assumption, and this test checks that our new code also holds without the assumption
+
+    Assume we have a polynomial function f = x^3. Our normed function for the integrated gradient
+    is then:
+    f_norm = integral_{0}^{1} day((((alpha * x)^3 + 1) @ C_out)^2) / day(alpha * x) d_alpha.
+           = (x^5 + 2 * x^2) C_out^2
+
+    We show that this analytical solution is approached as n_intervals increases.
+    """
+
+    torch.manual_seed(0)
+    batch_size = 2
+    hidden = 3
+
+    poly_module = torch.nn.Module()
+    poly_module.forward = lambda x: x**3 + 1
+
+    # Let C_out be a square identity matrix to avoid issues with partial derivative dimensions
+    # TODO: Handle non-identity C_out
+    C_out = torch.eye(hidden)
+    inputs = (torch.randn(batch_size, hidden),)
+
+    result_2 = integrated_gradient_trapezoidal_norm(
+        module=poly_module, inputs=inputs, C_out=C_out, n_intervals=2
+    )
+    result_20 = integrated_gradient_trapezoidal_norm(
+        module=poly_module, inputs=inputs, C_out=C_out, n_intervals=20
+    )
+
+    result_200 = integrated_gradient_trapezoidal_norm(
+        module=poly_module, inputs=inputs, C_out=C_out, n_intervals=200
+    )
+
+    analytical_result = inputs[0] ** 5 @ C_out**2
+    # Old formula gave (inputs[0] ** 5 + 2 * inputs[0] ** 2) @ C_out**2
+
+    assert torch.allclose(
+        result_200, analytical_result, atol=1e-2
+    ), "Integrated grad norms are not close enough"
+
+    # Check that the results approach inputs[0]**5 as n_intervals increases
+    differences = [
+        (result - analytical_result).sum().abs() for result in [result_2, result_20, result_200]
+    ]  # Check that differences is decreasing
+    assert (
+        differences[0] > differences[1] > differences[2]
+    ), "Integrated grad norms are not decreasing"
+
+
+def test_integrated_gradient_trapezoidal_jacobian_n_intervals():
     """Check independence of n_intervals for integrated gradient jacobian over a linear module
     without bias.
 
@@ -223,24 +284,33 @@ def test_integrated_gradient_trapezoidal_jacobian_linear():
     in_hidden = 3
     out_hidden = 4
 
-    in_tensor = torch.randn(batch_size, in_hidden)
+    in_tensor = torch.randn(batch_size, in_hidden, requires_grad=True)
 
     linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+    linear_edge_norm = lambda x: (linear(x) ** 2).sum(dim=0)  # Sum over batch dimension
 
-    result_point_estimate = integrated_gradient_trapezoidal_jacobian(
-        fn=linear,
-        in_tensor=in_tensor,
+    result_point_estimate: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
+
+    integrated_gradient_trapezoidal_jacobian(
+        fn=linear_edge_norm,
+        x=in_tensor,
         n_intervals=0,
+        jac_out=result_point_estimate,
     )
-    result_1 = integrated_gradient_trapezoidal_jacobian(
-        fn=linear,
-        in_tensor=in_tensor,
+    result_1: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
+    integrated_gradient_trapezoidal_jacobian(
+        fn=linear_edge_norm,
+        x=in_tensor,
         n_intervals=1,
+        jac_out=result_1,
     )
-    result_5 = integrated_gradient_trapezoidal_jacobian(
-        fn=linear,
-        in_tensor=in_tensor,
-        n_intervals=2,
+
+    result_5: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
+    integrated_gradient_trapezoidal_jacobian(
+        fn=linear_edge_norm,
+        x=in_tensor,
+        n_intervals=5,
+        jac_out=result_5,
     )
 
     # Check that all results are close
@@ -250,3 +320,102 @@ def test_integrated_gradient_trapezoidal_jacobian_linear():
     assert torch.allclose(
         result_1, result_5
     ), "n_intervals==1 and n_intervals==5 are not close enough"
+
+
+def _integrated_gradient_jacobian_with_jacrev(fn, x, n_intervals):
+    """Compute the integrated gradient jacobian using jacrev."""
+    alphas, interval_size = _calc_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon=1e-3
+    )
+    jac_out = None
+    for alpha_index, alpha in enumerate(alphas):
+        alpha_x = alpha * x
+        alpha_jac_out = jacrev(fn)(alpha_x)  # [out_dim, batch_size, in_dim]
+
+        scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
+        # No pos dim for this test
+        E = torch.einsum("ibj,bj->ij", alpha_jac_out * interval_size * scaler, x)
+        if jac_out is None:
+            jac_out = -E
+        else:
+            jac_out -= E
+
+    return jac_out
+
+
+def test_integrated_gradient_trapezoidal_jacobian_jacrev():
+    """Check that our custom jacobian in the integrated gradient matches torch.func.jacrev."""
+    torch.manual_seed(0)
+    batch_size = 2
+    in_hidden = 3
+    out_hidden = 4
+
+    in_tensor = torch.randn(batch_size, in_hidden, requires_grad=True)
+
+    linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+    linear_edge_norm = lambda x: (linear(x) ** 2).sum(dim=0)  # Sum over batch dimension
+
+    result_ours: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
+    integrated_gradient_trapezoidal_jacobian(
+        fn=linear_edge_norm,
+        x=in_tensor,
+        n_intervals=5,
+        jac_out=result_ours,
+    )
+    result_jacrev: Float[Tensor, "out_dim in_dim"] = _integrated_gradient_jacobian_with_jacrev(
+        fn=linear_edge_norm,
+        x=in_tensor,
+        n_intervals=5,
+    )
+    assert torch.allclose(
+        result_ours, result_jacrev
+    ), "integrated_gradient_trapezoidal_jacobian and jacrev are not close enough"
+
+
+@pytest.mark.parametrize(
+    "n_intervals,integral_boundary_relative_epsilon,expected_alphas,expected_interval_size",
+    [
+        # Testing for n_intervals=0
+        (0, 1e-3, [0.5], 1.0),
+        # Testing for n_intervals=1
+        (1, 1e-3, [5e-4, 1 - 5e-4], 1.0),
+        # Testing for n_intervals=2 and small epsilon
+        (2, 1e-4, [1e-4 / 3, 0.5, 1 - 1e-4 / 3], 0.5),
+    ],
+)
+def test_calc_integration_intervals(
+    n_intervals, integral_boundary_relative_epsilon, expected_alphas, expected_interval_size
+):
+    alphas, interval_size = _calc_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon
+    )
+
+    # Assert that the returned alphas are close to the expected values
+    assert np.allclose(alphas, expected_alphas), f"alphas: {alphas} != {expected_alphas}"
+
+    # Assert that the returned interval_size is close to the expected value
+    assert np.isclose(
+        interval_size, expected_interval_size
+    ), f"interval_size: {interval_size} != {expected_interval_size}"
+
+
+@pytest.mark.parametrize(
+    "input_tensor, dataset_size, expected_output",
+    [
+        # Tensor without positional indices
+        (torch.tensor([[1.0, 2.0], [3.0, 4.0]]), 2, torch.tensor([[5.0, 7.0], [7.0, 10.0]])),
+        # Tensor with positional indices (scaled by number of positions = 2)
+        (
+            torch.tensor([[[1.0, 2.0], [3.0, 4.0]], [[1.0, 2.0], [3.0, 4.0]]]),
+            4,
+            torch.tensor([[2.5, 3.5], [3.5, 5.0]]),
+        ),
+    ],
+)
+def test_calc_gram_matrix(input_tensor, dataset_size, expected_output):
+    gram_matrix = calc_gram_matrix(input_tensor, dataset_size)
+
+    # Check if the output tensor matches the expected tensor
+    assert torch.allclose(
+        gram_matrix, expected_output
+    ), f"gram_matrix: {gram_matrix} != {expected_output}"

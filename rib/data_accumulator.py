@@ -15,6 +15,7 @@ from rib.hook_fns import (
     interaction_edge_pre_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
+from rib.log import logger
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -32,7 +33,7 @@ def run_dataset_through_model(
     assert len(hooks) > 0, "Hooks have not been applied to this model."
     loader: Union[tqdm, DataLoader]
     if use_tqdm:
-        loader = tqdm(dataloader, total=len(dataloader), desc="Passing data through model")
+        loader = tqdm(dataloader, total=len(dataloader), desc="Batches through entire model")
     else:
         loader = dataloader
 
@@ -79,6 +80,7 @@ def collect_gram_matrices(
     else:
         hook_names = module_names
 
+    dataset_size = len(data_loader.dataset)  # type: ignore
     gram_hooks: list[Hook] = []
     # Add input hooks
     for module_name, hook_name in zip(module_names, hook_names):
@@ -88,20 +90,24 @@ def collect_gram_matrices(
                 data_key="gram",
                 fn=gram_pre_forward_hook_fn,
                 module_name=module_name,
+                fn_kwargs={"dataset_size": dataset_size},
             )
         )
     if collect_output_gram:
-        # Add output hook
+        # Add hook to collect model output
         gram_hooks.append(
             Hook(
                 name="output",
                 data_key="gram",
                 fn=gram_forward_hook_fn,
                 module_name=module_names[-1],
+                fn_kwargs={"dataset_size": dataset_size},
             )
         )
 
-    run_dataset_through_model(hooked_model, data_loader, gram_hooks, dtype=dtype, device=device)
+    run_dataset_through_model(
+        hooked_model, data_loader, gram_hooks, dtype=dtype, device=device, use_tqdm=True
+    )
 
     gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["gram"]
@@ -109,16 +115,11 @@ def collect_gram_matrices(
     }
     hooked_model.clear_hooked_data()
 
-    # Scale the gram matrix by the number of samples in the dataset.
-    for hook_name in gram_matrices:
-        gram_matrices[hook_name] /= len(data_loader.dataset)  # type: ignore
-
-    # Ensure that the gram_matrix keys are the same as the module names (optionally with an
-    # additional "output" if collect_output_gram is True).
-    if collect_output_gram:
-        assert set(gram_matrices.keys()) == set(hook_names + ["output"])
-    else:
-        assert set(gram_matrices.keys()) == set(hook_names)
+    expected_gram_keys = set(hook_names + ["output"]) if collect_output_gram else set(hook_names)
+    assert set(gram_matrices.keys()) == expected_gram_keys, (
+        f"Gram matrix keys not the same as the module names that were hooked. "
+        f"Expected: {expected_gram_keys}, got: {set(gram_matrices.keys())}"
+    )
 
     return gram_matrices
 
@@ -163,6 +164,7 @@ def collect_M_dash_and_Lambda_dash(
         fn_kwargs={
             "C_out": C_out,
             "n_intervals": n_intervals,
+            "dataset_size": len(data_loader.dataset),  # type: ignore
         },
     )
 
@@ -179,11 +181,6 @@ def collect_M_dash_and_Lambda_dash(
     Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
     hooked_model.clear_hooked_data()
 
-    # Scale the matrices by the number of samples in the dataset.
-    len_dataset = len(data_loader.dataset)  # type: ignore
-    M_dash = M_dash / len_dataset
-    Lambda_dash = Lambda_dash / len_dataset
-
     return M_dash, Lambda_dash
 
 
@@ -191,25 +188,22 @@ def collect_interaction_edges(
     Cs: list["InteractionRotation"],
     hooked_model: HookedModel,
     n_intervals: int,
-    module_names: list[str],
+    section_names: list[str],
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
-    Recall that the node layers correspond to the positions at the input to each module specified in
-    module_names, as well as the output of the final module.
-
     Note that there is no edge weight that uses the position of the final interaction matrix as a
-    starting node. This means that, if we did not collect the output logits, we don't apply any
-    hooks to the final module list in module_names.
+    starting node. This means that, unless node_layers contained the model output, we ignore the
+    final section name in section_names when calculating the edges.
 
     Args:
         Cs: The interaction rotation matrix and its pseudoinverse, order by node layer.
         hooked_model: The hooked model.
         n_intervals: The number of integrated gradient intervals to use.
-        module_names: The names of the modules to apply the hooks to.
+        section_names: The names of the modules to apply the hooks to.
         data_loader: The pytorch data loader.
         dtype: The data type to use for model computations.
         device: The device to run the model on.
@@ -219,9 +213,16 @@ def collect_interaction_edges(
         through.
     """
 
-    edge_modules = module_names if Cs[-1].node_layer_name == "output" else module_names[:-1]
+    edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
+    logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
     edge_hooks: list[Hook] = []
     for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
+        # C from the next node layer
+        assert C_info.C is not None, "C matrix is None."
+        assert C_info.C_pinv is not None, "C_pinv matrix is None."
+        C_out = Cs[idx + 1].C
+        if C_out is not None:
+            C_out = C_out.to(device=device)
         edge_hooks.append(
             Hook(
                 name=C_info.node_layer_name,
@@ -229,15 +230,22 @@ def collect_interaction_edges(
                 fn=interaction_edge_pre_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={
-                    "C_in": C_info.C,  # C from the current node layer
-                    "C_in_pinv": C_info.C_pinv,  # C_pinv from the current node layer
-                    "C_out": Cs[idx + 1].C,  # C from the next node layer
+                    "C_in": C_info.C.to(device=device),  # C from the current node layer
+                    "C_in_pinv": C_info.C_pinv.to(device=device),  # C_pinv from current node layer
+                    "C_out": C_out,
                     "n_intervals": n_intervals,
                 },
             )
         )
+        # Initialise the edge matrices to zeros to (out_dim, in_dim). These get added to in the
+        # forward hook.
+        hooked_model.hooked_data[C_info.node_layer_name] = {
+            "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.out_dim, dtype=dtype, device=device)
+        }
 
-    run_dataset_through_model(hooked_model, data_loader, edge_hooks, dtype=dtype, device=device)
+    run_dataset_through_model(
+        hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
+    )
 
     edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {
         node_layer_name: hooked_model.hooked_data[node_layer_name]["edge"]
@@ -246,8 +254,9 @@ def collect_interaction_edges(
     hooked_model.clear_hooked_data()
 
     # Scale the edges by the number of samples in the dataset
+    # Put the resulting edges on the cpu
     for node_layer_name in edges:
-        edges[node_layer_name] = edges[node_layer_name] / len(data_loader.dataset)  # type: ignore
+        edges[node_layer_name] = (edges[node_layer_name] / len(data_loader.dataset)).cpu()  # type: ignore
 
     # Ensure that the keys of the edges dict are the same as the node layer names without `output`
     assert set(edges.keys()) == set(

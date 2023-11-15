@@ -154,11 +154,10 @@ class Add(nn.Module):
             return summed
 
 
-class Attention(nn.Module):
+class AttentionIn(nn.Module):
     def __init__(
         self,
         cfg: SequentialTransformerConfig,
-        layer_id: Optional[int] = None,
     ):
         """Attention Block - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
@@ -172,7 +171,6 @@ class Attention(nn.Module):
 
         Args:
             cfg (SequentialTransformerConfig): Config
-            layer_id (int, optional): The index of the current layer. Used by the Mistal models (labelled here as stanford-gpt2) to scale down attention scores pre softmax for numerical stability reasons by 1/(layer_id+1). Defaults to None.
         """
         super().__init__()
         self.cfg = cfg
@@ -185,32 +183,9 @@ class Attention(nn.Module):
         self.W_V = nn.Parameter(
             torch.empty(self.cfg.n_heads, self.cfg.d_model, self.cfg.d_head, dtype=cfg.dtype)
         )
-        self.W_O = nn.Parameter(
-            torch.empty(self.cfg.n_heads, self.cfg.d_head, self.cfg.d_model, dtype=cfg.dtype)
-        )
         self.b_Q = nn.Parameter(torch.zeros(self.cfg.n_heads, self.cfg.d_head, dtype=cfg.dtype))
         self.b_K = nn.Parameter(torch.zeros(self.cfg.n_heads, self.cfg.d_head, dtype=cfg.dtype))
         self.b_V = nn.Parameter(torch.zeros(self.cfg.n_heads, self.cfg.d_head, dtype=cfg.dtype))
-        self.b_O = nn.Parameter(torch.zeros(self.cfg.d_model, dtype=cfg.dtype))
-
-        # Create a max_ctx x max_ctx mask, with True iff that query position
-        # can attend to that key position (query is first axis, key is second axis)
-        causal_mask: Bool[Tensor, "pos pos"] = torch.tril(
-            torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool()
-        )
-        self.register_buffer("mask", causal_mask)
-
-        self.register_buffer("IGNORE", torch.tensor(-1e5))
-
-        self.layer_id = layer_id
-
-        # attn_scale is a constant that we divide the attention scores by pre-softmax.
-        # I'm not entirely sure why it matters, but it's probably a mix of softmax not being
-        # scale invariant and numerical stability?
-        if self.cfg.use_attn_scale:
-            self.attn_scale = np.sqrt(self.cfg.d_head)
-        else:
-            self.attn_scale = 1.0
 
         if self.cfg.positional_embedding_type == "rotary":
             assert (
@@ -227,16 +202,18 @@ class Attention(nn.Module):
         self,
         residual: Float[Tensor, "... pos d_model"],
         x: Float[Tensor, "... pos d_model"],
-    ) -> tuple[Float[Tensor, "... pos d_model"], Float[Tensor, "... pos d_model"]]:
+    ) -> tuple[
+        Float[Tensor, "... pos d_model"],
+        Float[Tensor, "... pos n_head_times_d_head"],
+        Float[Tensor, "... pos n_head_times_d_head"],
+        Float[Tensor, "... pos n_head_times_d_head"],
+    ]:
         """Forward through the entire attention block.
 
         Args:
             residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
             x (Float[Tensor, "... pos d_model]): The normed residual stream (the input to the attention block)
-
-        TODO: Split into multiple modules so we can create graphs at each layer.
         """
-        in_dtype = x.dtype
 
         def add_head_dimension(tensor):
             return einops.repeat(
@@ -266,7 +243,7 @@ class Attention(nn.Module):
             )
             + self.b_Q
         )
-        # [..., pos, head_index, d_head]
+
         k = (
             einsum(
                 f"{qkv_einops_string}, head_index d_model d_head \
@@ -276,80 +253,28 @@ class Attention(nn.Module):
             )
             + self.b_K
         )
-        # [..., pos, head_index, d_head]
+
+        # Note the d_head_v instead of d_head because when we fold in the bias of the v matrix
+        # we get d_head_v = d_head+1
         v = (
             einsum(
-                f"{qkv_einops_string}, head_index d_model d_head \
-                -> ... pos head_index d_head",
+                f"{qkv_einops_string}, head_index d_model d_head_v \
+                -> ... pos head_index d_head_v",
                 value_input,
                 self.W_V,
             )
             + self.b_V
         )
-        # [..., pos, head_index, d_head]
 
         if self.cfg.positional_embedding_type == "rotary":
             q, k = self.rotary_rotate_qk(q, k)
 
-        if in_dtype not in [torch.float32, torch.float64]:
-            # If using 16 bits, increase the precision to avoid numerical instabilities
-            q = q.to(torch.float32)
-            k = k.to(torch.float32)
+        # Concatenate the last two dimension to keep the shapes the rest of the code is expecting
+        q = einops.rearrange(q, "... pos head_index d_head -> ... pos (head_index d_head)")
+        k = einops.rearrange(k, "... pos head_index d_head -> ... pos (head_index d_head)")
+        v = einops.rearrange(v, "... pos head_index d_head_v -> ... pos (head_index d_head_v)")
 
-        attn_scores = (
-            einsum(
-                "... query_pos head_index d_head, \
-                        ... key_pos head_index d_head \
-                        -> ... head_index query_pos key_pos",
-                q,
-                k,
-            )
-            / self.attn_scale
-        )  # [..., head_index, query_pos, key_pos]
-
-        # Only supports causal attention (not bidirectional)
-        # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
-        attn_scores = self.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
-
-        pattern = F.softmax(attn_scores, dim=-1)  # [..., head_index, query_pos, key_pos]
-        pattern = pattern.to(in_dtype)
-        z = einsum(
-            "... key_pos head_index d_head, \
-                ... head_index query_pos key_pos -> \
-                ... query_pos head_index d_head",
-            v,
-            pattern,
-        )  # [..., pos, head_index, d_head]
-
-        out = (
-            (
-                einsum(
-                    "... pos head_index d_head, \
-                            head_index d_head d_model -> \
-                            ... pos d_model",
-                    z,
-                    self.W_O,
-                )
-            )
-            + self.b_O
-        )  # [..., pos, d_model]
-
-        return residual, out
-
-    def apply_causal_mask(
-        self,
-        attn_scores: Float[Tensor, "... head_index pos pos_plus_past_kv_pos_offset"],
-    ):
-        # The key context length is the number of positions in the past - this includes all positions in the cache
-        # If not caching, query_ctx_length == key_ctx_length
-        key_ctx_length = attn_scores.size(-1)
-
-        mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
-        return torch.where(
-            mask[:key_ctx_length],
-            attn_scores,
-            cast(Tensor, self.IGNORE),
-        )
+        return residual, q, k, v
 
     def calculate_sin_cos_rotary(
         self,
@@ -434,6 +359,143 @@ class Attention(nn.Module):
             + x_flip * rotary_sin[past_kv_pos_offset : past_kv_pos_offset + x_pos, None, :]
         )
         return torch.cat([x_rotated, x_pass], dim=-1)
+
+
+class AttentionOut(nn.Module):
+    def __init__(
+        self,
+        cfg: SequentialTransformerConfig,
+    ):
+        """Attention Block - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
+
+        Convention: All attention pattern-style matrices have shape [..., head_index, query_pos,
+        key_pos]
+
+        Supports rotary attention.
+
+        This code was taken mostly verbatim from:
+        https://github.com/neelnanda-io/TransformerLens/blob/main/transformer_lens/components.py
+
+        Args:
+            cfg (SequentialTransformerConfig): Config
+        """
+        super().__init__()
+        self.cfg = cfg
+        self.W_O = nn.Parameter(
+            torch.empty(self.cfg.n_heads, self.cfg.d_head, self.cfg.d_model, dtype=cfg.dtype)
+        )
+        self.b_O = nn.Parameter(torch.zeros(self.cfg.d_model, dtype=cfg.dtype))
+
+        # Create a max_ctx x max_ctx mask, with True iff that query position
+        # can attend to that key position (query is first axis, key is second axis)
+        causal_mask: Bool[Tensor, "pos pos"] = torch.tril(
+            torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool()
+        )
+        self.register_buffer("mask", causal_mask)
+
+        self.register_buffer("IGNORE", torch.tensor(-1e5))
+
+        # attn_scale is a constant that we divide the attention scores by pre-softmax.
+        # I'm not entirely sure why it matters, but it's probably a mix of softmax not being
+        # scale invariant and numerical stability?
+        if self.cfg.use_attn_scale:
+            self.attn_scale = np.sqrt(self.cfg.d_head)
+        else:
+            self.attn_scale = 1.0
+
+    def forward(
+        self,
+        residual: Float[Tensor, "... pos d_model"],
+        q: Float[Tensor, "... pos n_head_times_d_head"],
+        k: Float[Tensor, "... pos n_head_times_d_head"],
+        v: Float[Tensor, "... pos n_head_times_d_head"],
+    ) -> tuple[Float[Tensor, "... pos d_model"], Float[Tensor, "... pos d_model"]]:
+        """Forward through the entire attention block.
+
+        Args:
+            residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
+            q (Float[Tensor, "... pos n_head_times_d_head]): The query tensor
+            k (Float[Tensor, "... pos n_head_times_d_head]): The key tensor
+            v (Float[Tensor, "... pos n_head_times_d_head]): The value tensor
+        """
+
+        # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)
+        q = einops.rearrange(
+            q,
+            "... pos (head_index d_head) -> ... pos head_index d_head",
+            head_index=self.cfg.n_heads,
+        )
+        k = einops.rearrange(
+            k,
+            "... pos (head_index d_head) -> ... pos head_index d_head",
+            head_index=self.cfg.n_heads,
+        )
+        v = einops.rearrange(
+            v,
+            "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
+            head_index=self.cfg.n_heads,
+        )
+
+        in_dtype = v.dtype
+
+        if in_dtype not in [torch.float32, torch.float64]:
+            # If using 16 bits, increase the precision to avoid numerical instabilities
+            q = q.to(torch.float32)
+            k = k.to(torch.float32)
+        attn_scores = (
+            einsum(
+                "... query_pos head_index d_head, \
+                        ... key_pos head_index d_head \
+                        -> ... head_index query_pos key_pos",
+                q,
+                k,
+            )
+            / self.attn_scale
+        )  # [..., head_index, query_pos, key_pos]
+
+        # Only supports causal attention (not bidirectional)
+        # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
+        attn_scores = self.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
+
+        pattern = F.softmax(attn_scores, dim=-1)  # [..., head_index, query_pos, key_pos]
+        pattern = pattern.to(in_dtype)
+        z = einsum(
+            "... key_pos head_index d_head, \
+                ... head_index query_pos key_pos -> \
+                ... query_pos head_index d_head",
+            v,
+            pattern,
+        )  # [..., pos, head_index, d_head]
+
+        out = (
+            (
+                einsum(
+                    "... pos head_index d_head, \
+                            head_index d_head d_model -> \
+                            ... pos d_model",
+                    z,
+                    self.W_O,
+                )
+            )
+            + self.b_O
+        )  # [..., pos, d_model]
+
+        return residual, out
+
+    def apply_causal_mask(
+        self,
+        attn_scores: Float[Tensor, "... head_index pos pos_plus_past_kv_pos_offset"],
+    ):
+        # The key context length is the number of positions in the past - this includes all positions in the cache
+        # If not caching, query_ctx_length == key_ctx_length
+        key_ctx_length = attn_scores.size(-1)
+
+        mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
+        return torch.where(
+            mask[:key_ctx_length],
+            attn_scores,
+            cast(Tensor, self.IGNORE),
+        )
 
 
 class MLPIn(nn.Module):
@@ -630,7 +692,8 @@ SEQUENTIAL_COMPONENT_REGISTRY = {
     "embed": Embed,
     "pos_embed": PosEmbed,
     "add_embed": Add,
-    "attn": Attention,
+    "attn_in": AttentionIn,
+    "attn_out": AttentionOut,
     "add_resid1": Add,
     "mlp_in": MLPIn,
     "mlp_act": MLPAct,

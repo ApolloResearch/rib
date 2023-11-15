@@ -26,7 +26,12 @@ import fire
 import torch
 from pydantic import BaseModel, Field, field_validator
 
-from rib.ablations import load_basis_matrices, run_ablations
+from rib.ablations import (
+    ExponentialScheduleConfig,
+    LinearScheduleConfig,
+    load_basis_matrices,
+    run_ablations,
+)
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.hook_manager import HookedModel
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
@@ -45,17 +50,17 @@ class Config(BaseModel):
     exp_name: Optional[str]
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
-    ablate_every_vec_cutoff: Optional[int] = Field(
-        None,
-        description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
+    schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
+        ...,
+        discriminator="schedule_type",
+        description="The schedule to use for ablations.",
     )
-    exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
     dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig] = Field(
         ...,
         discriminator="source",
         description="The dataset to use to build the graph.",
     )
-    node_layers: list[str]
+    ablation_node_layers: list[str]
     batch_size: int
     dtype: str
     eps: Optional[float] = 1e-5
@@ -64,14 +69,10 @@ class Config(BaseModel):
         ...,
         description="The type of evaluation to perform on the model before building the graph.",
     )
-    early_stopping_threshold: Optional[float] = Field(
-        None,
-        description="The threshold to use for stopping the ablation calculations early. If None,"
-        "we don't use early stopping.",
-    )
 
     @field_validator("dtype")
-    def dtype_validator(cls, v):
+    @classmethod
+    def dtype_validator(cls, v: str):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
         return v
 
@@ -91,16 +92,18 @@ def main(config_path_str: str) -> None:
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
-    assert set(config.node_layers) <= set(
+    assert set(config.ablation_node_layers) <= set(
         interaction_graph_info["config"]["node_layers"]
     ), "The node layers in the config must be a subset of the node layers in the interaction graph."
+
+    assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
     basis_matrices = load_basis_matrices(
         interaction_graph_info=interaction_graph_info,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         ablation_type=config.ablation_type,
         dtype=dtype,
         device=device,
@@ -112,8 +115,12 @@ def main(config_path_str: str) -> None:
         else None
     )
 
+    # Note that we specify node_layers as config.ablation_node_layers, even though the original
+    # graph was built with interaction_graph_info["config"]["node_layers"]. This is because
+    # changing the sections in the model has no effect on the computation, and we would like the
+    # sections to match ablation_node_layers so we can hook them easily.
     seq_model, _ = load_sequential_transformer(
-        node_layers=config.node_layers,
+        node_layers=config.ablation_node_layers,
         last_pos_module_type=interaction_graph_info["config"]["last_pos_module_type"],
         tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
         tlens_model_path=tlens_model_path,
@@ -127,14 +134,16 @@ def main(config_path_str: str) -> None:
     seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
-    # This script doesn't need both train and test sets
+    # This script doesn't need train and test sets (i.e. the "both" argument)
     return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
         return_set=return_set,
         tlens_model_path=tlens_model_path,
     )
-    data_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size)
+    data_loader = create_data_loader(
+        dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+    )
 
     # Test model accuracy/loss before graph building, ta be sure
     eval_fn: Callable = (
@@ -147,26 +156,27 @@ def main(config_path_str: str) -> None:
 
     ablation_results: dict[str, dict[int, float]] = run_ablations(
         basis_matrices=basis_matrices,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         hooked_model=hooked_model,
         data_loader=data_loader,
         eval_fn=eval_fn,
         graph_module_names=graph_module_names,
-        ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
-        exp_base=config.exp_base,
+        schedule_config=config.schedule,
         device=device,
-        early_stopping_threshold=config.early_stopping_threshold,
     )
+
+    time_taken = f"{(time.time() - start_time) / 60:.1f} minutes"
+    logger.info("Finished in %s.", time_taken)
 
     if config.exp_name is not None:
         results = {
             "config": json.loads(config.model_dump_json()),
             "results": ablation_results,
+            "time_taken": time_taken,
         }
         with open(out_file, "w") as f:
             json.dump(results, f)
         logger.info("Wrote results to %s", out_file)
-    logger.info("Finished in %.2f seconds.", time.time() - start_time)
 
 
 if __name__ == "__main__":

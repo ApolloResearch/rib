@@ -18,6 +18,7 @@ from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
+    calc_gram_matrix,
     edge_norm,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
@@ -63,8 +64,11 @@ def gram_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
+    dataset_size: int,
 ) -> None:
     """Hook function for calculating and updating the gram matrix.
+
+    The tuple of outputs is concatenated over the hidden dimension.
 
     Args:
         module: Module that the hook is attached to (not used).
@@ -74,22 +78,17 @@ def gram_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
+
     """
     assert isinstance(data_key, str), "data_key must be a string."
-    # Output may be tuple of tensors if there are two outputs
+
     outputs = output if isinstance(output, tuple) else (output,)
 
     # Concat over the hidden dimension
     out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
-    if out_acts.dim() == 3:  # tensor with pos dimension
-        einsum_pattern = "bpi, bpj -> ij"
-    elif out_acts.dim() == 2:  # tensor without pos dimension
-        einsum_pattern = "bi, bj -> ij"
-    else:
-        raise ValueError("Unexpected tensor rank")
-
-    gram_matrix = torch.einsum(einsum_pattern, out_acts, out_acts)
+    gram_matrix = calc_gram_matrix(out_acts, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
@@ -104,11 +103,11 @@ def gram_pre_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
+    dataset_size: int,
 ) -> None:
     """Calculate the gram matrix for inputs with positional indices and add it to the global.
 
-    First, we concatenate all inputs along the d_hidden dimension. Our gram matrix is then
-    calculated by summing over the batch and position dimension (if there is a pos dimension).
+    The tuple of inputs is concatenated over the hidden dimension.
 
     Args:
         module: Module that the hook is attached to (not used).
@@ -117,20 +116,13 @@ def gram_pre_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
-    # Concat over the hidden dimension
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
 
-    if in_acts.dim() == 3:  # tensor with pos dimension
-        einsum_pattern = "bpi, bpj -> ij"
-    elif in_acts.dim() == 2:  # tensor without pos dimension
-        einsum_pattern = "bi, bj -> ij"
-    else:
-        raise ValueError("Unexpected tensor rank")
-
-    gram_matrix = torch.einsum(einsum_pattern, in_acts, in_acts)
+    gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
@@ -180,6 +172,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     data_key: Union[str, list[str]],
     C_out: Optional[Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"]],
     n_intervals: int,
+    dataset_size: int,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -192,7 +185,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         data_key: Name of 2nd-level keys to store in `hooked_data`.
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
-            to taking a point estimate at alpha == 1.
+            to taking a point estimate at alpha == 0.5.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -210,15 +204,20 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     has_pos = inputs[0].dim() == 3
 
     einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
+    normalization_factor = in_grads.shape[1] * dataset_size if has_pos else dataset_size
 
     with torch.inference_mode():
-        M_dash = torch.einsum(einsum_pattern, in_grads, in_grads)
+        M_dash = torch.einsum(einsum_pattern, in_grads / normalization_factor, in_grads)
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
-        Lambda_dash = torch.einsum(einsum_pattern, in_grads, in_acts)
+        Lambda_dash = torch.einsum(einsum_pattern, in_grads / normalization_factor, in_acts)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
+
+    assert (
+        Lambda_dash.std() > 0
+    ), "Lambda_dash cannot be all zeros otherwise everything will be truncated"
 
 
 def interaction_edge_pre_forward_hook_fn(
@@ -242,7 +241,7 @@ def interaction_edge_pre_forward_hook_fn(
     avoid this, we (hackily) remove the hook before running the module and then add it back after.
 
     The trapezoidal rule is used to approximate the integrated gradient. If n_intervals == 0, the
-    integrated gradient effectively takes a point estimate for the integral at alpha == 1.
+    integrated gradient effectively takes a point estimate for the integral at alpha == 0.5.
 
     Args:
         module: Module that the hook is attached to.
@@ -255,7 +254,7 @@ def interaction_edge_pre_forward_hook_fn(
         C_in_pinv: The pseudoinverse of the C matrix for the current layer ((C^l)^+ in the paper).
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
-            to taking a point estimate at alpha == 1.
+            to taking a point estimate at alpha == 0.5.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -270,27 +269,33 @@ def interaction_edge_pre_forward_hook_fn(
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
     f_hat = in_acts @ C_in
 
-    # Setup function for calculating the edge norm
+    in_hidden_dims = [x.shape[-1] for x in inputs]
+
+    # Compute f^{l+1}(x) to which the derivative is not applied.
+    with torch.inference_mode():
+        # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
+        f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_hat @ C_in_pinv
+        input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
+
+        output_const = module(*tuple(x.detach().clone() for x in input_tuples))
+        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+
+    has_pos = f_hat.dim() == 3
+
+    jac_out = hooked_data[hook_name][data_key]
     edge_norm_partial = partial(
         edge_norm,
+        outputs_const=outputs_const,
         module=module,
         C_in_pinv=C_in_pinv,
         C_out=C_out,
-        in_hidden_dims=[x.shape[-1] for x in inputs],
+        in_hidden_dims=in_hidden_dims,
         has_pos=has_pos,
     )
 
-    jac_out = integrated_gradient_trapezoidal_jacobian(
-        fn=edge_norm_partial,
-        in_tensor=f_hat,
-        n_intervals=n_intervals,
+    integrated_gradient_trapezoidal_jacobian(
+        fn=edge_norm_partial, x=f_hat, n_intervals=n_intervals, jac_out=jac_out
     )
-    einsum_pattern = "bipj,bpj->ij" if has_pos else "bij,bj->ij"
-
-    with torch.inference_mode():
-        E = torch.einsum(einsum_pattern, jac_out, f_hat)
-
-        _add_to_hooked_matrix(hooked_data, hook_name, data_key, E)
 
 
 def acts_forward_hook_fn(

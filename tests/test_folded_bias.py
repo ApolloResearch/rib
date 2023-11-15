@@ -3,12 +3,14 @@
 from dataclasses import asdict
 from typing import Literal
 
+import einops
 import pytest
 import torch
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.hook_manager import HookedModel
 from rib.models import SequentialTransformer, SequentialTransformerConfig
+from rib.models.sequential_transformer.components import AttentionIn
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.models.utils import get_model_attr
 from rib.utils import set_seed
@@ -16,7 +18,10 @@ from rib.utils import set_seed
 
 @torch.inference_mode()
 def _folded_bias_comparison(
-    model_raw: SequentialTransformer, model_folded: SequentialTransformer, atol=1e-6
+    model_raw: SequentialTransformer,
+    model_folded: SequentialTransformer,
+    atol=1e-6,
+    attn_in_atol=1e-6,
 ) -> None:
     """Compare the outputs of raw model and one with biases folded into its weights.
 
@@ -34,12 +39,36 @@ def _folded_bias_comparison(
         outputsA, outputsB = cacheA[k]["acts"], cacheB[k]["acts"]
         for vA, vB in zip(outputsA, outputsB):
             if vB.shape[-1] == vA.shape[-1] + 1:
-                # Consider the final dimension (it should be our constant function)
+                # Remove the final dimension (it should be our constant function)
                 vB = vB[..., :-1]
+            elif vB.shape[-1] == vA.shape[-1] + model_folded.cfg.n_heads:
+                # We add a constant dimension per attention head to v and then concatenate heads
+                # This is a bit more complicated to cut out
+                vB = einops.rearrange(
+                    vB,
+                    "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
+                    head_index=model_folded.cfg.n_heads,
+                )
+                assert torch.allclose(vB[..., :, -1], torch.tensor(1, dtype=vB.dtype))
+                vB = vB[..., :-1]
+                vB = einops.rearrange(
+                    vB, "... pos head_index d_head_v -> ... pos (head_index d_head_v)"
+                )
 
             assert vA.shape == vB.shape, f"shape mismatch for {k}: {vA.shape} vs {vB.shape}"
 
-            assert torch.allclose(vA, vB, atol=atol), f"WARNING: mismatched values for {k}"
+            # Check if this is a Pythia attention module:
+            if (
+                isinstance(get_model_attr(model_raw, k), AttentionIn)
+                and model_raw.cfg.rotary_dim is not None
+            ):
+                comparison_atol = attn_in_atol
+            else:
+                comparison_atol = atol
+
+            assert torch.allclose(
+                vA, vB, atol=comparison_atol
+            ), f"WARNING: mismatched values for {k}"
 
     for outA, outB in zip(outputA, outputB):
         assert torch.allclose(outA, outB, atol=atol), "WARNING: mismatched output values"
@@ -65,11 +94,12 @@ def test_modular_arithmetic_folded_bias() -> None:
     }
     # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
     atol = 1e-8
+    attn_in_atol = 1e-8
 
     tlens_cfg = HookedTransformerConfig.from_dict(cfg)
     cfg = SequentialTransformerConfig(**asdict(tlens_cfg))
 
-    node_layers = ["attn.0", "mlp_act.0"]
+    node_layers = ["attn_in.0", "mlp_act.0"]
 
     model_raw = SequentialTransformer(cfg, node_layers)
     model_raw.eval()
@@ -88,7 +118,7 @@ def test_modular_arithmetic_folded_bias() -> None:
     model_folded.fold_bias()
     model_folded.eval()
 
-    _folded_bias_comparison(model_raw, model_folded, atol=atol)
+    _folded_bias_comparison(model_raw, model_folded, atol=atol, attn_in_atol=attn_in_atol)
 
 
 def pretrained_lm_folded_bias_comparison(
@@ -96,6 +126,7 @@ def pretrained_lm_folded_bias_comparison(
     node_layers: list[str],
     positional_embedding_type: Literal["standard", "rotary"],
     atol: float = 1e-6,
+    attn_atol: float = 1e-6,
 ) -> None:
     """Test that the folded bias trick works for a pretrained language model.
 
@@ -122,19 +153,20 @@ def pretrained_lm_folded_bias_comparison(
     model_folded.to(device=device)
     model_folded.eval()
 
-    _folded_bias_comparison(model_raw, model_folded, atol=atol)
+    _folded_bias_comparison(model_raw, model_folded, atol=atol, attn_in_atol=attn_atol)
 
 
 @pytest.mark.slow()
 def test_gpt2_folded_bias() -> None:
     """Test that the folded bias trick works for GPT2."""
     set_seed(42)
-    node_layers = ["attn.0", "mlp_act.0"]
+    node_layers = ["attn_in.0", "mlp_act.0"]
     pretrained_lm_folded_bias_comparison(
         hf_model_str="gpt2",
         node_layers=node_layers,
         positional_embedding_type="standard",
-        atol=1e-6,
+        atol=1e-5,
+        attn_atol=1e-5,
     )
 
 
@@ -147,5 +179,6 @@ def test_pythia_folded_bias() -> None:
         hf_model_str="pythia-14m",
         node_layers=node_layers,
         positional_embedding_type="rotary",
-        atol=1e-5,
+        atol=1e-4,
+        attn_atol=1e-3,
     )

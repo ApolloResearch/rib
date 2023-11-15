@@ -36,6 +36,7 @@ def test_register_hook_with_bad_name():
             data_key="gram",
             fn=mock_fn,
             module_name="linear",
+            fn_kwargs={"dataset_size": 1},
         )
         # Check that we get an assertion error with 'pre_forward' in the name
         mock_fn.__name__ = "mock_fn_pre_forward"
@@ -44,6 +45,7 @@ def test_register_hook_with_bad_name():
             data_key="gram",
             fn=mock_fn,
             module_name="linear",
+            fn_kwargs={"dataset_size": 1},
         )
         # Check that we get an assertion error with 'forward' in the name but the signature is wrong
         mock_fn.__name__ = "mock_fn_forward"
@@ -53,6 +55,7 @@ def test_register_hook_with_bad_name():
             data_key="gram",
             fn=mock_fn,
             module_name="linear",
+            fn_kwargs={"dataset_size": 1},
         )
 
 
@@ -72,6 +75,7 @@ def test_hooked_model_add_and_remove_hooks(model):
             data_key="gram",
             fn=mock_fn,
             module_name="linear",
+            fn_kwargs={"dataset_size": 3},
         ),
     ]
 
@@ -101,6 +105,7 @@ def test_gram_forward_hook_fn_accumulates_over_forward_passes(model):
             data_key="gram",
             fn=gram_forward_hook_fn,
             module_name="linear",
+            fn_kwargs={"dataset_size": 4},
         ),
     ]
 
@@ -109,10 +114,10 @@ def test_gram_forward_hook_fn_accumulates_over_forward_passes(model):
     data_2 = torch.randn((1, 3))
     hooked_model(data_2, hooks=hooks)
 
-    # Compute the expected Gram matrix
+    # Compute the expected Gram matrix (and scale by 1 / dataset_size)
     output_1 = model.linear(data)
     output_2 = model.linear(data_2)
-    expected_gram = output_1.T @ output_1 + output_2.T @ output_2
+    expected_gram = (output_1.T @ output_1 + output_2.T @ output_2) / 4
 
     # Compare hooked_data with the expected gram matrix
     assert torch.allclose(hooked_model.hooked_data["test_forward"]["gram"], expected_gram)

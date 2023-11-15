@@ -18,7 +18,7 @@ def main(results_file: str) -> None:
     """Plot an interaction graph given a results file contain the graph edges."""
     results = torch.load(results_file)
     out_dir = Path(__file__).parent / "out"
-    out_file = out_dir / f"{results['exp_name']}_interaction_graph.png"
+    out_file = out_dir / f"{results['exp_name']}_rib_graph.png"
 
     if out_file.exists() and not overwrite_output(out_file):
         print("Exiting.")

@@ -19,7 +19,7 @@ Usage:
 
 import json
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import fire
 import torch
@@ -27,7 +27,12 @@ from pydantic import BaseModel, Field, field_validator
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from rib.ablations import load_basis_matrices, run_ablations
+from rib.ablations import (
+    ExponentialScheduleConfig,
+    LinearScheduleConfig,
+    load_basis_matrices,
+    run_ablations,
+)
 from rib.hook_manager import HookedModel
 from rib.log import logger
 from rib.models import MLP
@@ -45,18 +50,19 @@ class Config(BaseModel):
     exp_name: Optional[str]
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
-    ablate_every_vec_cutoff: Optional[int] = Field(
-        None,
-        description="The point at which we start ablating every individual vector. If None, always ablate every vector.",
+    schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
+        ...,
+        discriminator="schedule_type",
+        description="The schedule to use for ablations.",
     )
-    exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
     dtype: str
-    node_layers: list[str]
+    ablation_node_layers: list[str]
     batch_size: int
     seed: int
 
     @field_validator("dtype")
-    def dtype_validator(cls, v):
+    @classmethod
+    def dtype_validator(cls, v: str):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
         return v
 
@@ -97,16 +103,18 @@ def main(config_path_str: str) -> None:
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
-    assert set(config.node_layers) <= set(
+    assert set(config.ablation_node_layers) <= set(
         interaction_graph_info["config"]["node_layers"]
     ), "The node layers in the config must be a subset of the node layers in the interaction graph."
+
+    assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
     basis_matrices = load_basis_matrices(
         interaction_graph_info=interaction_graph_info,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         ablation_type=config.ablation_type,
         dtype=dtype,
         device=device,
@@ -130,13 +138,12 @@ def main(config_path_str: str) -> None:
 
     accuracies: dict[str, dict[int, float]] = run_ablations(
         basis_matrices=basis_matrices,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         hooked_model=hooked_mlp,
         data_loader=test_loader,
-        graph_module_names=config.node_layers,
-        ablate_every_vec_cutoff=config.ablate_every_vec_cutoff,
         eval_fn=eval_model_accuracy,
-        exp_base=config.exp_base,
+        graph_module_names=config.ablation_node_layers,
+        schedule_config=config.schedule,
         device=device,
         dtype=dtype,
     )

@@ -3,12 +3,14 @@ from typing import Literal, Optional
 
 import torch
 from jaxtyping import Int
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from torch import Tensor
 from torch.utils.data import Dataset
 
 
 class HFDatasetConfig(BaseModel):
+    """Config for the HuggingFace datasets library."""
+
     source: Literal["huggingface"]
     name: str = Field(
         ..., description="The name of the dataset to load from the HuggingFace datasets library."
@@ -30,6 +32,16 @@ class HFDatasetConfig(BaseModel):
     return_set_portion: Literal["first", "last"] = Field(
         "first", description="Whether to load the first or last portion of the return_set."
     )
+
+    @field_validator("return_set_frac")
+    def check_return_set_frac(cls, v):
+        # v must be None or >= 0.01 and <= 1
+        if v is not None and (v < 0.01 or v > 1):
+            raise ValueError(
+                f"return_set_frac must be > 0.01 and < 1 since huggingface dataset `split` "
+                f"method does not correctly convert other values to perecentages."
+            )
+        return v
 
 
 class ModularArithmeticDatasetConfig(BaseModel):

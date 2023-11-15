@@ -264,6 +264,7 @@ def main(config_path_str: str):
         out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
     if out_file.exists() and mpi_is_main_process and not overwrite_output(out_file):
         logger.info("Exiting.")
+        mpi_comm.Abort()  # stop all other processes
         return None
 
     if torch.cuda.is_available():

@@ -1,4 +1,4 @@
-exp_name: pythia-14m
+exp_name: pythia-14m-gf2
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
@@ -18,7 +18,7 @@ node_layers:
   - ln1.5
   - mlp_out.5
 batch_size: 12  #  A100 can handle 24
-gram_batch_size: 80  #  A100 can handle 80
+gram_batch_size: 40  #  A100 can handle 80
 truncation_threshold: 1e-6
 logits_node_layer: true
 rotate_final_node_layer: false

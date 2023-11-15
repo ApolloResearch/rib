@@ -30,6 +30,7 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 import json
 import time
 from dataclasses import asdict
+from logging import WARNING
 from pathlib import Path
 from typing import Literal, Optional, Union, cast
 
@@ -237,6 +238,10 @@ def main(config_path_str: str):
     mpi_rank = mpi_comm.Get_rank()
     mpi_num_processes = mpi_comm.Get_size()
     mpi_is_main_process = mpi_rank == 0  # rank is also 0 when this is the only process
+
+    # don't have subprocesses print INFO logging
+    if not mpi_is_main_process:
+        logger.setLevel(WARNING)
 
     out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)

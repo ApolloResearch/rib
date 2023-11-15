@@ -200,7 +200,7 @@ def plot_ablation_results(
     node_layers_per_exp = [set(result.keys()) for result in results]
     assert all(
         node_layers == node_layers_per_exp[0] for node_layers in node_layers_per_exp[1:]
-    ), "All results must have the same node layers."
+    ), f"All results must have the same node layers but got {node_layers_per_exp}."
 
     node_layers = results[0].keys()
     n_plots = len(node_layers)

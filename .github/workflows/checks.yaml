@@ -69,6 +69,7 @@ jobs:
 
     - name: check mpi
       run: |
+        source venv/bin/activate
         mpiexec -n 2 python experiments/lm_rib_build/run_lm_rib_build.py experiments/lm_ablations/rib_modular_arithmetic.yaml
 
     - name: Run tests

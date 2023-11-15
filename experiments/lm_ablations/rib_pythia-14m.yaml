@@ -1,6 +1,6 @@
-exp_name: rib_pythia-14m
+exp_name: rib_pythia-14m-v3-equivalent
 ablation_type: rib
-interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/pythia-14m_rib_Cs.pt
+interaction_graph_path: /mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/pythia-14m-gf3-equivalent_rib_Cs.pt
 schedule:
   schedule_type: linear
   early_stopping_threshold: 1.5
@@ -15,6 +15,7 @@ dataset:
   return_set_n_samples: null
   return_set_portion: first
 ablation_node_layers:
+  - ln1.0
   - mlp_out.0
   - ln2.3
   - mlp_out.3

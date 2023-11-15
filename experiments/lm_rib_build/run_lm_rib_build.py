@@ -26,6 +26,8 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 - One on the input to "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_in.0".
 - (If logits_node_layer is True:) One on the output of the model, i.e. the logits.
+
+This file also support parallelization to compute edge values across multiple processes using mpi. To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data and output it as a single file.
 """
 import json
 import time
@@ -290,7 +292,7 @@ def main(config_path_str: str):
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
-    mpi_comm.Barrier()
+    mpi_comm.Barrier()  # requires all processes to reach this point before continuing
 
     logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
     if config.eval_type is not None:

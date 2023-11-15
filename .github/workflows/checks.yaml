@@ -67,6 +67,10 @@ jobs:
         source venv/bin/activate
         mypy rib experiments
 
+    - name: check mpi
+      run: |
+        mpiexec -n 2 python experiments/lm_rib_build/run_lm_rib_build.py experiments/lm_ablations/rib_modular_arithmetic.yaml
+
     - name: Run tests
       run: |
         source venv/bin/activate

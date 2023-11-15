@@ -13,8 +13,6 @@ as well as the output of the final node layer. For example, if `node_layers` is 
     with the output of ln1.0.
 - One on the input to "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_in.0".
-- One on the output of "mlp_act.0". This will include the residual stream concatenated with the
-    output of "mlp_act.0".
 """
 import json
 import time
@@ -53,11 +51,9 @@ class Config(BaseModel):
         None, description="Path to saved transformer lens model."
     )
     node_layers: list[str] = Field(
-        ..., description="Names of the modules whose inputs correspond to node layers in the graph."
-    )
-    logits_node_layer: bool = Field(
         ...,
-        description="Whether to build an extra output node layer for the logits.",
+        description="Names of the modules whose inputs correspond to node layers in the graph."
+        "`output` is a special node layer that corresponds to the output of the model.",
     )
     rotate_final_node_layer: bool = Field(
         ...,
@@ -74,18 +70,25 @@ class Config(BaseModel):
         description="The batch size to use when calculating the gram matrices. If None, use the same"
         "batch size as the one used to build the graph.",
     )
+    edge_batch_size: Optional[int] = Field(
+        None,
+        description="The batch size to use when calculating the edges. If None, use the same batch"
+        "size as the one used to build the graph.",
+    )
     truncation_threshold: float = Field(
         ...,
         description="Remove eigenvectors with eigenvalues below this threshold.",
     )
     last_pos_module_type: Optional[Literal["add_resid1", "unembed"]] = Field(
         None,
-        description="Module type in which to only output the last position index.",
+        description="Module type in which to only output the last position index. For modular"
+        "arithmetic only.",
     )
 
     n_intervals: int = Field(
         ...,
-        description="The number of intervals to use for the integrated gradient approximation.",
+        description="The number of intervals to use for the integrated gradient approximation."
+        "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
 
     dtype: str = Field(..., description="The dtype to use when building the graph.")
@@ -118,16 +121,67 @@ class Config(BaseModel):
         return self
 
 
+def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
+    """Ensure that the config for calculating edges is compatible with that used to calculate Cs.
+
+    TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
+    path management nice with this Config being defined in this file in the experiments dir.
+    """
+
+    # config.node_layers must be a subsequence of loaded_config.node_layers
+    assert "|".join(config.node_layers) in "|".join(loaded_config.node_layers), (
+        "node_layers in the config must be a subsequence of the node layers in the config used to"
+        "calculate the C matrices. Otherwise, the C matrices won't match those needed to correctly"
+        "calculate the edges."
+    )
+
+    # The following attributes must exactly match across configs
+    for attr in [
+        "tlens_model_path",
+        "tlens_pretrained",
+    ]:
+        assert getattr(config, attr) == getattr(loaded_config, attr), (
+            f"{attr} in config ({getattr(config, attr)}) does not match "
+            f"{attr} in loaded matrices ({getattr(loaded_config, attr)})"
+        )
+
+    # Verify that, for huggingface datasets, we're not trying to calculate edges on data that
+    # wasn't used to calculate the Cs
+    assert config.dataset.name == loaded_config.dataset.name, "Dataset names must match"
+    assert config.dataset.return_set == loaded_config.dataset.return_set, "Return sets must match"
+    if isinstance(config.dataset, HFDatasetConfig):
+        assert isinstance(loaded_config.dataset, HFDatasetConfig)
+        if config.dataset.return_set_frac is not None:
+            assert loaded_config.dataset.return_set_frac is not None
+            assert (
+                config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
+            ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
+        elif config.dataset.return_set_n_samples is not None:
+            assert loaded_config.dataset.return_set_n_samples is not None
+            assert (
+                config.dataset.return_set_n_samples <= loaded_config.dataset.return_set_n_samples
+            ), "Cannot use a larger return_set_n_samples for edges than to calculate the Cs"
+
+
 def main(config_path_str: str):
-    """Build the interaction graph and store it on disk."""
+    """Build the interaction graph and store it on disk.
+
+    Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
+    E_hats using pre-saved Cs, we need to ensure, among other things, that the pre-saved Cs were
+    calculated for the same node_layers that we wish to draw edges between (i.e. config.node_layers
+    should be a subsequence of the node_layers used to calculate the Cs).
+
+    We use the variable edge_Cs to indicate the Cs that are needed to calculate the edges. If
+    the Cs were pre-calculated and loaded from file, edge_Cs may be a subsequence of Cs.
+    """
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
-    if out_interaction_graph_file.exists() and not overwrite_output(out_interaction_graph_file):
+    out_file = out_dir / f"{config.exp_name}_gradientflow_graph.pt"
+    if out_file.exists() and not overwrite_output(out_file):
         logger.info("Exiting.")
         return None
 
@@ -152,7 +206,7 @@ def main(config_path_str: str):
         # Time each stage
         start_time = time.time()
         seq_model, tlens_cfg_dict = load_sequential_transformer(
-            node_layers=[node_layer],
+            node_layers=[node_layer, "output"],
             last_pos_module_type=config.last_pos_module_type,
             tlens_pretrained=config.tlens_pretrained,
             tlens_model_path=config.tlens_model_path,
@@ -168,16 +222,16 @@ def main(config_path_str: str):
         logger.info("Time to load model and dataset: %.2f", time.time() - start_time)
 
         # Don't build the graph for the section of the model before the first node layer
-        graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
+        section_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
         # Only need gram matrix for logits if we're rotating the final node layer
-        collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+        collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
         start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
         gram_matrices = collect_gram_matrices(
             hooked_model=hooked_model,
-            module_names=graph_module_names,
+            module_names=section_names,
             data_loader=gram_train_loader,
             dtype=dtype,
             device=device,
@@ -192,20 +246,19 @@ def main(config_path_str: str):
         logger.info("Calculating interaction rotations.")
         Cs, Us = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
-            module_names=graph_module_names,
+            section_names=section_names,
+            node_layers=[node_layer, "output"],
             hooked_model=hooked_model,
             data_loader=graph_train_loader,
             dtype=dtype,
             device=device,
             n_intervals=config.n_intervals,
-            logits_node_layer=config.logits_node_layer,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
-            hook_names=[node_layer],
         )
         Cs_list.append(Cs[0])
         Us_list.append(Us[0])
-        if node_layer_index == len(config.node_layers) - 1 and config.logits_node_layer:
+        if node_layer_index == len(config.node_layers) - 1:
             Cs_list.append(Cs[1])
             Us_list.append(Us[1])
 
@@ -229,8 +282,8 @@ def main(config_path_str: str):
     }
 
     # Save the results (which include torch tensors) to file
-    torch.save(results, out_interaction_graph_file)
-    logger.info("Saved results to %s", out_interaction_graph_file)
+    torch.save(results, out_file)
+    logger.info("Saved results to %s", out_file)
 
 
 if __name__ == "__main__":

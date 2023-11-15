@@ -233,6 +233,7 @@ def interaction_edge_pre_forward_hook_fn(
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
+    dataset_size: int,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -255,6 +256,7 @@ def interaction_edge_pre_forward_hook_fn(
         C_out: The C matrix for the next layer (C^{l+1} in the paper).
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
+        dataset_size: Size of the dataset. Used to normalize the gradients.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -294,7 +296,11 @@ def interaction_edge_pre_forward_hook_fn(
     )
 
     integrated_gradient_trapezoidal_jacobian(
-        fn=edge_norm_partial, x=f_hat, n_intervals=n_intervals, jac_out=jac_out
+        fn=edge_norm_partial,
+        x=f_hat,
+        n_intervals=n_intervals,
+        jac_out=jac_out,
+        dataset_size=dataset_size,
     )
 
 

@@ -376,7 +376,7 @@ def main(config_path_str: str):
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(node_layer, E_hats[node_layer]) for node_layer in E_hats],
+        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
         "calc_C_time": calc_C_time,

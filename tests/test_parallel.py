@@ -46,10 +46,12 @@ def test_distributed_calc_gives_same_edges():
     with tempfile.TemporaryDirectory() as temp_dir:
         single_config_path = make_config("test_single", temp_dir=temp_dir, rib_dir=rib_dir)
         double_config_path = make_config("test_double", temp_dir=temp_dir, rib_dir=rib_dir)
-        subprocess.run(["python", run_file, single_config_path], capture_output=True)
+        subprocess.run(["python", run_file, single_config_path], capture_output=False, check=True)
         logger.info("done with single!")
         subprocess.run(
-            ["mpiexec", "-n", "2", "python", run_file, double_config_path], capture_output=True
+            ["mpiexec", "-n", "2", "python", run_file, double_config_path],
+            capture_output=False,
+            check=True,
         )
         logger.info("done with double!")
 

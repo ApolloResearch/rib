@@ -1,6 +1,6 @@
-exp_name: rib_gradient_flow_pythia-14m-v2
+exp_name: rib_gradient_flow_pythia-14m-v3
 ablation_type: rib
-interaction_graph_path: /mnt/ssd-apollo/stefan/rib/experiments/lm_gradient_flow_build/out/pythia-14m-gf2_interaction_graph.pt
+interaction_graph_path: /mnt/ssd-apollo/stefan/rib/experiments/lm_gradient_flow_build/out/pythia-14m-gf3_gradientflow_graph.pt
 schedule:
   schedule_type: linear
   early_stopping_threshold: 1.5

@@ -1,4 +1,4 @@
-exp_name: pythia-14m-gf
+exp_name: pythia-14m-gf3
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null

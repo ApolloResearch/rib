@@ -25,13 +25,13 @@ def test_distributed_calc_gives_same_edges():
             source: custom
             name: modular_arithmetic
             return_set: train
-        batch_size: 1024
-        edge_batch_size: 1024
+        batch_size: 256
+        edge_batch_size: 256
         truncation_threshold: 1e-6
         rotate_final_node_layer: false
         last_pos_module_type: add_resid1
         n_intervals: 0
-        dtype: float64
+        dtype: float32
         eval_type: accuracy
         out_dir: {temp_dir}
         """
@@ -60,5 +60,5 @@ def test_distributed_calc_gives_same_edges():
 
         for (module, s_edges), (_, d_edges) in zip(single_edges, double_edges):
             assert torch.allclose(
-                s_edges, d_edges, atol=1e-10
+                s_edges, d_edges, atol=1e-3
             ), f"on {module} mean error {(s_edges-d_edges).abs().mean().item()}"

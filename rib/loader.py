@@ -342,7 +342,9 @@ def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Da
     if total_chunks == 1:
         return dataset
     dataset_len = len(dataset)  # type: ignore
-    assert total_chunks < dataset_len, "more chunks than elements of the dataset"
+    assert (
+        total_chunks <= dataset_len
+    ), f"more chunks than elements of the dataset ({total_chunks} > {dataset_len})"
     dataset_idx_start = dataset_len * chunk_idx // total_chunks
     dataset_idx_end = dataset_len * (chunk_idx + 1) // total_chunks
     return Subset(dataset, range(dataset_idx_start, dataset_idx_end))

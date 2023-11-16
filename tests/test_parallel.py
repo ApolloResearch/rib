@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 import torch
+from torch.utils.data import ConcatDataset, TensorDataset
 
+from rib.loader import get_dataset_chunk
 from rib.log import logger
 
 
@@ -99,3 +101,15 @@ def same_edges_when_parallel():
             assert torch.allclose(
                 s_edges, d_edges, atol=1e-9
             ), f"on {module} mean error {(s_edges-d_edges).abs().mean().item()}"
+
+
+@pytest.mark.parametrize("num_chunks", [1, 3, 5, 7, 10])
+def test_get_dataset_chunk(num_chunks):
+    original = TensorDataset(torch.arange(10))
+
+    chunks = [get_dataset_chunk(original, i, num_chunks) for i in range(num_chunks)]
+    reconstructed = ConcatDataset(chunks)
+
+    assert len(original) == len(reconstructed)
+    for i in range(len(original)):
+        assert original[i] == reconstructed[i]

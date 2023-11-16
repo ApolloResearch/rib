@@ -121,7 +121,7 @@ def eval_cross_entropy_loss(
     return loss / n_batches
 
 
-def load_config(config_path_or_obj: Union[Path, str, T], config_model: Type[T], **kwargs) -> T:
+def load_config(config_path_or_obj: Union[Path, str, T], config_model: Type[T]) -> T:
     """Load the config of class `config_model`, either from YAML file or existing config object.
     Additionally apply updates according to kwargs.
 
@@ -129,30 +129,22 @@ def load_config(config_path_or_obj: Union[Path, str, T], config_model: Type[T], 
         config_path_or_obj (Union[Path, str, `config_model`]): if config object, must be instance
             of `config_model`. If str or Path, this must be the path to a .yaml.
         config_model: the class of the config that we are loading
-        kwargs: modifications to the config. Will overwrite settings defined in config.
     """
     if isinstance(config_path_or_obj, config_model):
-        if len(kwargs) == 0:  # no updates needed
-            return config_path_or_obj
-        # there's no built in way to update a pydantic model that validates the update
-        config_dict = config_path_or_obj.model_dump()
-    else:
-        if isinstance(config_path_or_obj, str):
-            config_path_or_obj = Path(config_path_or_obj)
+        return config_path_or_obj
 
-        assert isinstance(
-            config_path_or_obj, Path
-        ), f"passed config is of invalid type {type(config_path_or_obj)}"
-        assert (
-            config_path_or_obj.suffix == ".yaml"
-        ), f"Config file {config_path_or_obj} must be a YAML file."
-        assert Path(
-            config_path_or_obj
-        ).exists(), f"Config file {config_path_or_obj} does not exist."
-        with open(config_path_or_obj, "r") as f:
-            config_dict = yaml.safe_load(f)
+    if isinstance(config_path_or_obj, str):
+        config_path_or_obj = Path(config_path_or_obj)
 
-    config_dict |= kwargs
+    assert isinstance(
+        config_path_or_obj, Path
+    ), f"passed config is of invalid type {type(config_path_or_obj)}"
+    assert (
+        config_path_or_obj.suffix == ".yaml"
+    ), f"Config file {config_path_or_obj} must be a YAML file."
+    assert Path(config_path_or_obj).exists(), f"Config file {config_path_or_obj} does not exist."
+    with open(config_path_or_obj, "r") as f:
+        config_dict = yaml.safe_load(f)
     return config_model(**config_dict)
 
 

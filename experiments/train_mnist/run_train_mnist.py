@@ -147,8 +147,8 @@ def evaluate_model(model: MLP, test_loader: DataLoader, device: str) -> float:
     return accuracy
 
 
-def main(config_path_or_obj: Union[str, Config], **kwargs) -> float:
-    config = load_config(config_path_or_obj, config_model=Config, **kwargs)
+def main(config_path_or_obj: Union[str, Config]) -> float:
+    config = load_config(config_path_or_obj, config_model=Config)
 
     set_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"

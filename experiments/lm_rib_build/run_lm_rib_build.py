@@ -236,7 +236,7 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config: Union[str, Config], **kwargs):
+def main(config: Union[str, Config]):
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
@@ -251,7 +251,7 @@ def main(config: Union[str, Config], **kwargs):
         config: a str or Config object. If str must point at YAML config file
         kwargs: modifications to passed config
     """
-    config = load_config(config, config_model=Config, **kwargs)
+    config = load_config(config, config_model=Config)
     set_seed(config.seed)
 
     mpi_info = get_mpi_info()

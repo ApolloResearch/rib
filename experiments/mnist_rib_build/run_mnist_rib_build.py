@@ -74,9 +74,9 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return data_loader
 
 
-def main(config_path_or_obj: Union[str, Config], **kwargs) -> None:
+def main(config_path_or_obj: Union[str, Config]) -> None:
     """Implement the main algorithm and store the graph to disk."""
-    config = load_config(config_path_or_obj, config_model=Config, **kwargs)
+    config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
 
     with open(config.mlp_path.parent / "config.yaml", "r") as f:

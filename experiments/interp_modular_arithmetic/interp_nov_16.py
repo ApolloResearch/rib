@@ -69,40 +69,6 @@ sec_2_1_resid_post_mlp_acts = (
     .to(torch.float64)
     .to("cpu")
 )
-# %%
-
-
-def rib_ln20_to_mlpout0(five, rib_ln20_acts=rib_acts_extended_embedding, dtype=torch.float64):
-    # Take in RIB acts
-    ln20_acts = rib_ln20_acts.to(dtype)
-    ln20_acts[:, :, 5] *= five
-    # Convert to normal activations
-    C, Cinv = activations.rib_basis_matrices[1]
-    Cinv = Cinv.to("cpu")
-    Cinv = Cinv.to(dtype)
-    normal_acts = einops.einsum(ln20_acts, Cinv, "x y rib, rib embed -> x y embed")
-    # TODO Is the inaccuracy due to truncation?
-    assert torch.allclose(normal_acts, sec_0_2_resid_post_attn_acts, atol=0.01)
-    # Apply W_in (could be skipped if we had chosed a nearer node_layer)
-    mlp_pre_act = einops.einsum(normal_acts, W_in, "x y embed, embed mlp -> x y mlp")
-    assert torch.allclose(mlp_pre_act, sec_1_1_mlp_pre_acts, atol=0.01)
-    # Apply ReLU
-    mlp_post_act = torch.relu(mlp_pre_act)
-    assert torch.allclose(mlp_post_act, sec_1_2_mlp_post_acts, atol=0.01)
-
-    # Convert back to RIB
-    C, Cinv = activations.rib_basis_matrices[2]
-    C = C.to("cpu").to(dtype)
-    concat = torch.concat([sec_1_2_resid_parallel_acts, mlp_post_act], dim=-1)
-    rib_acts_mlp_post_comparison = einops.einsum(concat, C, "x y mlp, mlp rib -> x y rib")
-    assert torch.allclose(rib_acts_mlp_post, rib_acts_mlp_post_comparison, atol=0.01)
-
-    # Also calculate resid_post for completeness
-    resid_post = einops.einsum(mlp_post_act, W_out, "x y mlp, mlp embed -> x y embed")
-    assert torch.allclose(
-        resid_post + sec_1_2_resid_parallel_acts, sec_2_1_resid_post_mlp_acts, atol=0.01
-    )
-
 
 # %%
 
@@ -162,13 +128,132 @@ plt.xlabel(r"$\tilde{W}_{\rm in} C^{\ell_2}$")
 np.where(naive_mlp.abs() > 0.3)
 
 plt.figure()
-plt.imshow(naive_mlp)
+plt.title("Naive MLP")
+plt.imshow(naive_mlp, cmap="RdBu", vmin=-0.7, vmax=0.7)
 plt.xlabel("RIB out")
 plt.ylabel("RIB in")
 plt.colorbar()
-# plt.xlim(0, 15)
-# plt.ylim(00, 40)
+
 # %%
+
+# Compare to random
+
+
+def random_permutation_matrix(n):
+    perm = torch.randperm(n)
+    identity = torch.eye(n)
+    permutation_matrix = identity[perm]
+    return permutation_matrix
+
+
+naive_mlp_randperm = Wtilde @ random_permutation_matrix(513).to(torch.float64) @ C_l2[:-129, :]
+
+plt.figure()
+plt.imshow(naive_mlp_randperm, cmap="RdBu", vmin=-0.7, vmax=0.7)
+plt.title("Random permutation of ReLUs")
+plt.xlabel("RIB out")
+plt.ylabel("RIB in")
+plt.colorbar()
+
+# %%
+
+# Try including ReLU averages
+relus = (sec_1_2_mlp_post_acts + 1e-20) / (sec_1_1_mlp_pre_acts + 1e-20)
+relu_means = torch.mean(relus, dim=(0, 1))
+relu_mean_diagonal = torch.diag(relu_means)
+naive_mlp_relu_mean = einops.einsum(
+    Wtilde, relu_mean_diagonal, C_l2[:-129, :], "in mlp, mlp mlp, mlp out -> in out"
+)
+# Wtilde @ relu_mean_diagonal @ C_l2[:-129, :]
+
+plt.figure()
+plt.imshow(naive_mlp_relu_mean, cmap="RdBu", vmin=-0.7, vmax=0.7)
+plt.title("Using ReLU means")
+plt.xlabel("RIB_out")
+plt.ylabel("RIB_in")
+plt.colorbar()
+
+naive_mlp_relu_mean_randperm = (
+    Wtilde @ random_permutation_matrix(513).to(torch.float64) @ relu_mean_diagonal @ C_l2[:-129, :]
+)
+
+plt.figure()
+plt.imshow(naive_mlp_relu_mean_randperm, cmap="RdBu", vmin=-0.7, vmax=0.7)
+plt.title("Using ReLU means, randperm")
+plt.xlabel("RIB_out")
+plt.ylabel("RIB_in")
+plt.colorbar()
+
+# %%
+
+
+def rib_ln20_to_mlpout0(five, rib_ln20_acts=rib_acts_extended_embedding, dtype=torch.float64):
+    # Take in RIB acts
+    ln20_acts = rib_ln20_acts.to(dtype)
+    ln20_acts[:, :, 5] *= five
+    # Convert to normal activations
+    C, Cinv = activations.rib_basis_matrices[1]
+    Cinv = Cinv.to("cpu")
+    Cinv = Cinv.to(dtype)
+    normal_acts = einops.einsum(ln20_acts, Cinv, "x y rib, rib embed -> x y embed")
+    # TODO Is the inaccuracy due to truncation?
+    assert five != 1 or torch.allclose(normal_acts, sec_0_2_resid_post_attn_acts, atol=0.01)
+    # Apply W_in (could be skipped if we had chosed a nearer node_layer)
+    mlp_pre_act = einops.einsum(normal_acts, W_in, "x y embed, embed mlp -> x y mlp")
+    assert five != 1 or torch.allclose(mlp_pre_act, sec_1_1_mlp_pre_acts, atol=0.01)
+    # Apply ReLU
+    mlp_post_act = torch.relu(mlp_pre_act)
+    assert five != 1 or torch.allclose(mlp_post_act, sec_1_2_mlp_post_acts, atol=0.01)
+
+    # Convert back to RIB
+    C, Cinv = activations.rib_basis_matrices[2]
+    C = C.to("cpu").to(dtype)
+    concat = torch.concat([sec_1_2_resid_parallel_acts, mlp_post_act], dim=-1)
+    rib_acts_mlp_post_comparison = einops.einsum(concat, C, "x y mlp, mlp rib -> x y rib")
+    assert five != 1 or torch.allclose(rib_acts_mlp_post, rib_acts_mlp_post_comparison, atol=0.01)
+    return rib_acts_mlp_post_comparison, rib_acts_mlp_post
+    # Also calculate resid_post for completeness
+    resid_post = einops.einsum(mlp_post_act, W_out, "x y mlp, mlp embed -> x y embed")
+    assert five != 1 or torch.allclose(
+        resid_post + sec_1_2_resid_parallel_acts, sec_2_1_resid_post_mlp_acts, atol=0.01
+    )
+
+
+plt.figure()
+scaled_out, orig_out = rib_ln20_to_mlpout0(1)
+# plt.plot(scaled_out[0,0], color="k")
+data_point = (0, 0)
+plt.title(f"Scaling up input number 5, observing first 20 outputs at data point x,y={data_point}")
+plt.ylabel("Absolute change in output")
+plt.xticks(range(20))
+cmap = plt.get_cmap("viridis")
+for scale in np.geomspace(0.1, 50, 100):
+    scaled_out, _ = rib_ln20_to_mlpout0(scale)
+    plt.plot((scaled_out - orig_out)[data_point[0], data_point[1], :20], color=cmap(scale / 50))
+
+# %%
+
+# Now plot output 2 as a function of input 5
+f = lambda five: rib_ln20_to_mlpout0(five)[0][0, 0, 2]
+plt.figure()
+x = np.linspace(21.90085, 21.9009, 200)
+y = [f(five) for five in x]
+plt.scatter(x[1:], np.diff(y), marker=".", s=1)
+plt.grid()
+plt.savefig("diffs2.png", dpi=600)
+
+# %%
+
+# Now plot output 2 as a function of input 5
+f = lambda five: rib_ln20_to_mlpout0(five)[0][0, 0, 2]
+plt.figure()
+x = np.linspace(-10, 10, 200)
+y = [f(five) for five in x]
+# plt.scatter(x[1:], np.diff(y), marker=".", s=1)
+plt.scatter(x, y, marker=".", s=1)
+plt.grid()
+plt.savefig("diffs2.png", dpi=600)
+
 
 # %%
 
@@ -181,7 +266,6 @@ plt.hist(activations.rib_basis_matrices[1][1].flatten().cpu(), bins=100)
 # Plot C_i entries (the non MLP one but ln2)
 
 
-normal_acts = rib_ln20_to_mlpout0(1)
 # sec_0_2_resid_post_attn_acts = sec_0_2_resid_post_attn_acts.to(torch.float64)
 
 # plt.plot(normal_acts[34][67])

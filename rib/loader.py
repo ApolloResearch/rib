@@ -45,8 +45,8 @@ def load_sequential_transformer(
         tlens_model_path (Optional[Path]): The path to a transformerlens model.
         eps (Optional[float]): The epsilon value to use for the layernorms in the model.
         fold_bias (bool): Whether to fold the bias into the weights.
-        dtype (torch.dtype): The dtype to use for the model.
-        device (str): The device to use for the model.
+        dtype (Optional[torch.dtype]): The dtype to use for the model.
+        device (Optional[str]): The device to use for the model.
 
     Returns:
         - SequentialTransformer: The SequentialTransformer model.

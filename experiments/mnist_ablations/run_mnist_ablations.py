@@ -89,9 +89,8 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def main(config_path_str: str) -> None:
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+def main(config: Union[str, Config], **kwargs) -> None:
+    config = load_config(config, config_model=Config, **kwargs)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
     if out_file.exists() and not overwrite_output(out_file):

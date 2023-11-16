@@ -8,7 +8,7 @@ Usage:
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import fire
 import torch
@@ -182,9 +182,8 @@ def evaluate_model(model, test_loader: DataLoader, device: str) -> float:
     return accuracy
 
 
-def main(config_path_str: str) -> tuple[float, float]:
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+def main(config_path_or_obj: Union[str, Config], **kwargs) -> tuple[float, float]:
+    config = load_config(config_path_or_obj, config_model=Config, **kwargs)
 
     set_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"

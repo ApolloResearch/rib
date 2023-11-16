@@ -17,6 +17,7 @@ Usage:
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import Union
 
 import fire
 import torch
@@ -73,10 +74,9 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return data_loader
 
 
-def main(config_path_str: str) -> None:
+def main(config_path_or_obj: Union[str, Config], **kwargs) -> None:
     """Implement the main algorithm and store the graph to disk."""
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+    config = load_config(config_path_or_obj, config_model=Config, **kwargs)
     set_seed(config.seed)
 
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
@@ -160,4 +160,5 @@ def main(config_path_str: str) -> None:
 
 
 if __name__ == "__main__":
+    fire.Fire(main)
     fire.Fire(main)

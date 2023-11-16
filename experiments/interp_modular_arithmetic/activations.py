@@ -63,7 +63,7 @@ class Activations:
         ),
         interaction_graph_path: str
         | Path = Path(
-            "/mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt"
+            "/mnt/ssd-apollo/stefan/rib/experiments/lm_rib_build/out/modular_arithmetic-fp64-alpha50-83fcf85_rib_graph.pt"
         ),
     ) -> None:
         """Initialize the Activations class.
@@ -125,7 +125,7 @@ class Activations:
 
         self.interaction_graph_info = torch.load(self.interaction_graph_path)
         self.node_layers = self.interaction_graph_info["config"]["node_layers"]
-        self.ablation_node_layers = [l for l in self.node_layers if l != "outputs"]
+        self.ablation_node_layers = [l for l in self.node_layers if l != "output"]
 
         self.rib_basis_matrices = load_basis_matrices(
             interaction_graph_info=self.interaction_graph_info,
@@ -259,7 +259,7 @@ class Activations:
         """
 
         node_layer = self.node_layer_dict[section]
-        node_index = np.where(node_layer == np.array(node_layers))[0][0]
+        node_index = np.where(node_layer == np.array(self.node_layers))[0][0]
         basis_matrices = (
             self.rib_basis_matrices if ablation_type == "rib" else self.orthog_basis_matrices
         )

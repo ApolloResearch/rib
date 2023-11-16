@@ -161,4 +161,3 @@ def main(config_path_or_obj: Union[str, Config], **kwargs) -> None:
 
 if __name__ == "__main__":
     fire.Fire(main)
-    fire.Fire(main)

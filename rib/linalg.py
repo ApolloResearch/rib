@@ -269,6 +269,16 @@ def integrated_gradient_trapezoidal_jacobian(
     has_pos = x.ndim == 3
     normalization_factor = x.shape[1] * dataset_size if has_pos else dataset_size
 
+    @torch.compile
+    def compute_E(f_out_hat_norm_i, alpha_f_in_hat, grad_factor):
+        # Get the derivative of the ith output element w.r.t alpha_f_in_hat
+        i_grad = (
+            torch.autograd.grad(f_out_hat_norm_i, alpha_f_in_hat, retain_graph=True)[0]
+            * grad_factor
+        )
+        with torch.inference_mode():
+            return torch.einsum(einsum_pattern, i_grad, x)
+
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
@@ -279,23 +289,15 @@ def integrated_gradient_trapezoidal_jacobian(
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=1)
         scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
+        grad_factor = interval_size * scaler / normalization_factor
         for i in tqdm(
             range(len(f_out_hat_norm)), total=len(f_out_hat_norm), desc="Output idxs", leave=False
         ):
-            # Get the derivative of the ith output element w.r.t alpha_f_in_hat
-            i_grad = (
-                torch.autograd.grad(f_out_hat_norm[i], alpha_f_in_hat, retain_graph=True)[0]
-                / normalization_factor
-                * interval_size
-                * scaler
-            )
-            with torch.inference_mode():
-                E = torch.einsum(einsum_pattern, i_grad, x)
-                # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
-                # in equation (3.27)
-                # Note that jac_out is initialised to zeros in
-                # `rib.data_accumulator.collect_interaction_edges`
-                jac_out[i] -= E
+            # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
+            # in equation (3.27)
+            # Note that jac_out is initialised to zeros in
+            # `rib.data_accumulator.collect_interaction_edges`
+            jac_out[i] -= compute_E(f_out_hat_norm[i], alpha_f_in_hat, grad_factor)
 
 
 def integrated_gradient_trapezoidal_norm(

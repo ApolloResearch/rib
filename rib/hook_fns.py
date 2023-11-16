@@ -14,11 +14,13 @@ from functools import partial
 from typing import Any, Optional, Union
 
 import torch
+from einops import repeat
 from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
     calc_gram_matrix,
+    calc_integration_intervals,
     edge_norm,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
@@ -273,6 +275,11 @@ def interaction_edge_pre_forward_hook_fn(
 
     in_hidden_dims = [x.shape[-1] for x in inputs]
 
+    alphas, interval_size = calc_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon=1e-3
+    )
+    alphas = alphas.to(in_acts.device)
+
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
@@ -281,6 +288,11 @@ def interaction_edge_pre_forward_hook_fn(
 
         output_const = module(*tuple(x.detach().clone() for x in input_tuples))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+        # Our outputs will be repeated for each alpha value because they're all computed in the
+        # same forward pass.
+        outputs_const = tuple(
+            repeat(x, "batch ... -> (alpha batch) ...", alpha=len(alphas)) for x in outputs_const
+        )
 
     has_pos = f_hat.dim() == 3
 
@@ -298,7 +310,8 @@ def interaction_edge_pre_forward_hook_fn(
     integrated_gradient_trapezoidal_jacobian(
         fn=edge_norm_partial,
         x=f_hat,
-        n_intervals=n_intervals,
+        alphas=alphas,
+        interval_size=interval_size,
         jac_out=jac_out,
         dataset_size=dataset_size,
     )

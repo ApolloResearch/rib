@@ -8,8 +8,8 @@ from torch import Tensor
 from torch.func import jacrev
 
 from rib.linalg import (
-    _calc_integration_intervals,
     calc_gram_matrix,
+    calc_integration_intervals,
     calc_rotation_matrix,
     eigendecompose,
     integrated_gradient_trapezoidal_jacobian,
@@ -331,7 +331,7 @@ def _integrated_gradient_jacobian_with_jacrev(
     fn: Callable, x: Float[Tensor, "batch in_dim"], n_intervals: int, dataset_size: int
 ) -> Float[Tensor, "out_dim in_dim"]:
     """Compute the integrated gradient jacobian using jacrev."""
-    alphas, interval_size = _calc_integration_intervals(
+    alphas, interval_size = calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon=1e-3
     )
     jac_out = None
@@ -392,10 +392,10 @@ def test_integrated_gradient_trapezoidal_jacobian_jacrev():
         (2, 1e-4, [1e-4 / 3, 0.5, 1 - 1e-4 / 3], 0.5),
     ],
 )
-def test_calc_integration_intervals(
+def testcalc_integration_intervals(
     n_intervals, integral_boundary_relative_epsilon, expected_alphas, expected_interval_size
 ):
-    alphas, interval_size = _calc_integration_intervals(
+    alphas, interval_size = calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon
     )
 

@@ -139,6 +139,7 @@ def calculate_interaction_rotations(
         - A list of objects containing the eigenvectors of each node layer, ordered by node layer
         appearance in model.
     """
+    assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate Cs."
     assert len(section_names) > 0, "No sections specified."
 
     non_output_node_layers = [node_layer for node_layer in node_layers if node_layer != "output"]

@@ -212,7 +212,7 @@ def collect_interaction_edges(
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes
         through.
     """
-
+    assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate Cs."
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
     edge_hooks: list[Hook] = []

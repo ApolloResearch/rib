@@ -123,6 +123,25 @@ class Activations:
             self.datasets, shuffle=True, batch_size=11, seed=0
         )
 
+        self.interaction_graph_info = torch.load(self.interaction_graph_path)
+        self.node_layers = self.interaction_graph_info["config"]["node_layers"]
+        self.ablation_node_layers = [l for l in self.node_layers if l != "outputs"]
+
+        self.rib_basis_matrices = load_basis_matrices(
+            interaction_graph_info=self.interaction_graph_info,
+            ablation_node_layers=self.ablation_node_layers,
+            ablation_type="rib",
+            dtype=self.dtype,
+            device=self.internal_device,
+        )
+        self.orthog_basis_matrices = load_basis_matrices(
+            interaction_graph_info=self.interaction_graph_info,
+            ablation_node_layers=self.ablation_node_layers,
+            ablation_type="orthogonal",
+            dtype=self.dtype,
+            device=self.internal_device,
+        )
+
     def print_info(self):
         """Print some info about the model and dataset."""
         random_input, random_label = self.train_loader.dataset[np.random.randint(0, self.p)]
@@ -238,27 +257,20 @@ class Activations:
                 have the shape (token, d_embed + d_mlp), attention pattern activations have shape
                 (n_head, query, key, d_head).
         """
-        interaction_graph_info = torch.load(self.interaction_graph_path)
-        node_layers = interaction_graph_info["config"]["node_layers"]
-        ablation_node_layers = node_layers if logits_node_layer else node_layers[:-1]
-
-        basis_matrices = load_basis_matrices(
-            interaction_graph_info=interaction_graph_info,
-            ablation_node_layers=ablation_node_layers,
-            ablation_type=ablation_type,
-            dtype=self.dtype,
-            device=self.internal_device,
-        )
 
         node_layer = self.node_layer_dict[section]
         node_index = np.where(node_layer == np.array(node_layers))[0][0]
+        basis_matrices = (
+            self.rib_basis_matrices if ablation_type == "rib" else self.orthog_basis_matrices
+        )
         assert (
             len(basis_matrices[node_index]) == 2
         ), f"basis_matrices should contain C and C_inv matrices, but contains {len(basis_matrices[node_index])} elements"
         basis_matrices_index = 0  # get C rather than C_inv
 
         print(
-            "Got rotation matrix of shape", basis_matrices[node_index][basis_matrices_index].shape
+            "Got rotation matrix of shape",
+            basis_matrices[node_index][basis_matrices_index].shape,
         )
 
         acts = torch.cat(

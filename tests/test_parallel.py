@@ -10,12 +10,19 @@ from rib.log import logger
 
 @pytest.mark.slow
 def test_distributed_calc_gives_same_edges():
-    def make_config(exp_name: str, temp_dir: str, rib_dir: str):
+    def make_config(
+        exp_name: str,
+        temp_dir: str,
+        rib_dir: str,
+        compute_edges: bool,
+        interaction_matrices_path: str = "null",
+    ):
         config_str = f"""
         exp_name: {exp_name}
         seed: 0
         tlens_pretrained: null
         tlens_model_path: {rib_dir}/experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
+        interaction_matrices_path: {interaction_matrices_path}
         node_layers:
             - ln1.0
             - mlp_in.0
@@ -26,7 +33,6 @@ def test_distributed_calc_gives_same_edges():
             name: modular_arithmetic
             return_set: train
         batch_size: 256
-        edge_batch_size: 256
         truncation_threshold: 1e-6
         rotate_final_node_layer: false
         last_pos_module_type: add_resid1
@@ -34,6 +40,7 @@ def test_distributed_calc_gives_same_edges():
         dtype: float32
         eval_type: accuracy
         out_dir: {temp_dir}
+        calculate_edges: {'true' if compute_edges else 'false'}
         """
         config_path = f"{temp_dir}/{exp_name}.yaml"
         with open(config_path, "w") as f:
@@ -44,12 +51,29 @@ def test_distributed_calc_gives_same_edges():
     run_file = rib_dir + "/experiments/lm_rib_build/run_lm_rib_build.py"
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        single_config_path = make_config("test_single", temp_dir=temp_dir, rib_dir=rib_dir)
-        double_config_path = make_config("test_double", temp_dir=temp_dir, rib_dir=rib_dir)
+        cs_config_path = make_config(
+            "compute_cs", temp_dir=temp_dir, rib_dir=rib_dir, compute_edges=False
+        )
+        subprocess.run(["python", run_file, cs_config_path], capture_output=False, check=True)
+
+        single_config_path = make_config(
+            "test_single",
+            temp_dir=temp_dir,
+            rib_dir=rib_dir,
+            compute_edges=True,
+            interaction_matrices_path=f"{temp_dir}/compute_cs_rib_Cs.pt",
+        )
+        double_config_path = make_config(
+            "test_double",
+            temp_dir=temp_dir,
+            rib_dir=rib_dir,
+            compute_edges=True,
+            interaction_matrices_path=f"{temp_dir}/compute_cs_rib_Cs.pt",
+        )
         subprocess.run(["python", run_file, single_config_path], capture_output=True, check=True)
         logger.info("done with single!")
         subprocess.run(
-            ["mpiexec", "--verbose", "-n", "1", "python", run_file, double_config_path],
+            ["mpiexec", "--verbose", "-n", "2", "python", run_file, double_config_path],
             capture_output=True,
             check=True,
         )

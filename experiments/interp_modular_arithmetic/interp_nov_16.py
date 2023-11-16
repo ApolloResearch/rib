@@ -81,6 +81,7 @@ def rib_ln20_to_mlpout0(five, rib_ln20_acts=rib_acts_extended_embedding, dtype=t
     Cinv = Cinv.to("cpu")
     Cinv = Cinv.to(dtype)
     normal_acts = einops.einsum(ln20_acts, Cinv, "x y rib, rib embed -> x y embed")
+    # TODO Is the inaccuracy due to truncation?
     assert torch.allclose(normal_acts, sec_0_2_resid_post_attn_acts, atol=0.01)
     # Apply W_in (could be skipped if we had chosed a nearer node_layer)
     mlp_pre_act = einops.einsum(normal_acts, W_in, "x y embed, embed mlp -> x y mlp")
@@ -103,7 +104,82 @@ def rib_ln20_to_mlpout0(five, rib_ln20_acts=rib_acts_extended_embedding, dtype=t
     )
 
 
-# TODO Is the inaccuracy due to truncation?
+# %%
+
+plt.figure()
+plt.hist((activations.rib_basis_matrices[1][1].cpu().to(torch.float64) @ W_in).flatten(), bins=100)
+plt.semilogy()
+plt.xlabel(r"$C^{\ell_1} W_{\rm in}$")
+
+plt.figure()
+plt.hist(activations.rib_basis_matrices[2][0].cpu().flatten(), bins=100)
+plt.semilogy()
+plt.xlabel(r"$C^{\ell_2}$")
+
+# %%
+
+plt.figure()
+plt.hist(
+    (activations.rib_basis_matrices[1][1].cpu().to(torch.float64) @ W_in[:, :-1]).flatten(),
+    bins=100,
+)
+plt.semilogy()
+plt.xlabel(r"$C^{\ell_1} W_{\rm in}$ (without bias)")
+
+plt.figure()
+plt.hist((W_in[:, :-1]).flatten(), bins=100)
+plt.semilogy()
+plt.xlabel(r"$W_{\rm in}$")
+
+plt.figure()
+plt.hist((activations.rib_basis_matrices[1][1].cpu().to(torch.float64)).flatten(), bins=100)
+plt.semilogy()
+plt.xlabel(r"$C^{\ell_1}$")
+
+# %%
+
+np.where((activations.rib_basis_matrices[1][1].cpu().to(torch.float64) @ W_in).abs() > 0.1)
+# Seem to come mostly from RIB entry 13
+# (array([13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+#         13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 16]),
+#  array([ 15,  24,  49,  52,  80,  87,  92, 120, 127, 136, 180, 194, 213,
+#         226, 230, 241, 270, 273, 293, 294, 299, 317, 334, 389, 391, 409,
+#         419, 442, 466, 503, 512]))
+
+# %%
+
+# Now let's do the naive multiplication assuming ReLU == 1
+C_l1_inv = activations.rib_basis_matrices[1][1].cpu().to(torch.float64)
+Wtilde = C_l1_inv @ W_in
+C_l2 = activations.rib_basis_matrices[2][0].cpu().to(torch.float64)
+naive_mlp = Wtilde @ C_l2[:-129, :]
+
+plt.figure()
+plt.hist(naive_mlp.flatten(), bins=100)
+plt.semilogy()
+plt.xlabel(r"$\tilde{W}_{\rm in} C^{\ell_2}$")
+
+np.where(naive_mlp.abs() > 0.3)
+
+plt.figure()
+plt.imshow(naive_mlp)
+plt.xlabel("RIB out")
+plt.ylabel("RIB in")
+plt.colorbar()
+# plt.xlim(0, 15)
+# plt.ylim(00, 40)
+# %%
+
+# %%
+
+plt.hist(activations.rib_basis_matrices[1][1].flatten().cpu(), bins=100)
+
+# neuron in RIBin  -> direction in resid_mid -> direction in ReLU-in
+# neuron in RIBout -> direction in ReLU-out
+# 2(give) = sum C_i ReLU_i preact_i = sum_ij C_i ReLU_i W_in_i5 RIBin_5 + other RIBs
+
+# Plot C_i entries (the non MLP one but ln2)
+
 
 normal_acts = rib_ln20_to_mlpout0(1)
 # sec_0_2_resid_post_attn_acts = sec_0_2_resid_post_attn_acts.to(torch.float64)

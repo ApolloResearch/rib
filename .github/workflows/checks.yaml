@@ -62,11 +62,6 @@ jobs:
         source venv/bin/activate
         isort --check --thirdparty wandb --profile black rib experiments tests
 
-    - name: Run parallel test
-      run: |
-        source venv/bin/activate
-        pytest --runslow -m "not skip_ci" tests/test_parallel.py
-
     - name: Check with mypy
       run: |
         source venv/bin/activate

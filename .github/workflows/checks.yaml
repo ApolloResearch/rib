@@ -65,7 +65,7 @@ jobs:
     - name: Run parallel test
       run: |
         source venv/bin/activate
-        pytest --runslow -m "not skip_ci" tests/test_parallel
+        pytest --runslow -m "not skip_ci" tests/test_parallel.py
 
     - name: Check with mypy
       run: |

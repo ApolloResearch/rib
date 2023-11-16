@@ -429,4 +429,5 @@ def main(config_path_str: str):
 
 
 if __name__ == "__main__":
+    print("running!!!")
     fire.Fire(main)

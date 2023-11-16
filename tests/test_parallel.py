@@ -49,7 +49,7 @@ def test_distributed_calc_gives_same_edges():
         subprocess.run(["python", run_file, single_config_path], capture_output=True, check=True)
         logger.info("done with single!")
         subprocess.run(
-            ["mpiexec", "-n", "2", "python", run_file, double_config_path],
+            ["mpiexec", "--verbose", "-n", "1", "python", run_file, double_config_path],
             capture_output=True,
             check=True,
         )

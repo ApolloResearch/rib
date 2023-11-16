@@ -57,7 +57,12 @@ from rib.loader import (
     load_sequential_transformer,
 )
 from rib.log import logger
-from rib.mpi_utils import adjust_logger_mpi, get_device_mpi, get_mpi_info
+from rib.mpi_utils import (
+    adjust_logger_mpi,
+    check_sizes_mpi,
+    get_device_mpi,
+    get_mpi_info,
+)
 from rib.types import TORCH_DTYPES
 from rib.utils import (
     eval_cross_entropy_loss,
@@ -387,6 +392,7 @@ def main(config_path_str: str):
 
         if mpi_info.is_parallelised:
             for m_name, edge_vals in E_hats.items():
+                check_sizes_mpi(edge_vals)
                 receiver_tensor = None
                 if mpi_info.is_main_process:
                     receiver_tensor = torch.empty_like(edge_vals).cpu()

@@ -45,3 +45,15 @@ def get_device_mpi(logger):
 
     logger.info(f"Distributing {info.size} processes over {n_gpus} gpus")
     return f"cuda:{info.rank % n_gpus}"
+
+
+def check_sizes_mpi(tensor: torch.Tensor):
+    info = get_mpi_info()
+    assert info.is_parallelised
+    sizes = info.comm.gather(tensor.shape, root=0)
+    if info.rank == 0:
+        assert sizes is not None
+        # data[i] holds the shape of the tensor in rank i. They should all be equal shapes!
+        assert (
+            len(set(sizes)) == 1
+        ), f"mismatched shape of tensors across processes, shapes = {sizes}"

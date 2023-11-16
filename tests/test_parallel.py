@@ -70,11 +70,11 @@ def test_distributed_calc_gives_same_edges():
             compute_edges=True,
             interaction_matrices_path=f"{temp_dir}/compute_cs_rib_Cs.pt",
         )
-        subprocess.run(["python", run_file, single_config_path], capture_output=True, check=True)
+        subprocess.run(["python", run_file, single_config_path], capture_output=False, check=True)
         logger.info("done with single!")
         subprocess.run(
             ["mpiexec", "--verbose", "-n", "2", "python", run_file, double_config_path],
-            capture_output=True,
+            capture_output=False,
             check=True,
         )
         logger.info("done with double!")

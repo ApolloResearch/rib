@@ -58,7 +58,11 @@ def test_distributed_calc_gives_same_edges():
         single_edges = torch.load(f"{temp_dir}/test_single_rib_graph.pt")["edges"]
         double_edges = torch.load(f"{temp_dir}/test_double_rib_graph.pt")["edges"]
 
+        print([(m, e.shape) for m, e in single_edges])
+        print([(m, e.shape) for m, e in double_edges])
+
         for (module, s_edges), (_, d_edges) in zip(single_edges, double_edges):
+            print(s_edges.shape, d_edges.shape)
             assert torch.allclose(
                 s_edges, d_edges, atol=1e-3
             ), f"on {module} mean error {(s_edges-d_edges).abs().mean().item()}"

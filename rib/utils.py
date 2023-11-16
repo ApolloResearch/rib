@@ -123,7 +123,6 @@ def eval_cross_entropy_loss(
 
 def load_config(config_path_or_obj: Union[Path, str, T], config_model: Type[T]) -> T:
     """Load the config of class `config_model`, either from YAML file or existing config object.
-    Additionally apply updates according to kwargs.
 
     Args:
         config_path_or_obj (Union[Path, str, `config_model`]): if config object, must be instance

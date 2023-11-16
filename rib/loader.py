@@ -323,10 +323,26 @@ def create_data_loader(
         return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
 
-def get_subset_of_dataset(dataset: Dataset, subset_idx: int, total_subsets: int) -> Dataset:
-    if total_subsets == 1:
+def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Dataset:
+    """
+    Returns a subset of the dataset, determined by the `chunk_idx` and `total_chunks`.
+
+    Useful for dataparellism, if we want each process to use a different dataset chunk.
+
+    Args:
+        dataset (Dataset): The dataset to use. Must be a Map-style dataset (implements `__len__`
+            and `__get_item__`).
+        chunk_idx (int): The id
+        total_chunks (int): Total number of chunks. If this is exactly 1, we return all of `dataset`.
+
+    Returns:
+        The DataLoader or a tuple of DataLoaders.
+    """
+    assert chunk_idx < total_chunks, "chunk_idx greater than total number of chunks"
+    if total_chunks == 1:
         return dataset
     dataset_len = len(dataset)  # type: ignore
-    dataset_idx_start = dataset_len * subset_idx // total_subsets
-    dataset_idx_end = dataset_len * (subset_idx + 1) // total_subsets
+    assert total_chunks < dataset_len, "more chunks than elements of the dataset"
+    dataset_idx_start = dataset_len * chunk_idx // total_chunks
+    dataset_idx_end = dataset_len * (chunk_idx + 1) // total_chunks
     return Subset(dataset, range(dataset_idx_start, dataset_idx_end))

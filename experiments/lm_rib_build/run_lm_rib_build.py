@@ -52,7 +52,7 @@ from rib.interaction_algos import (
 )
 from rib.loader import (
     create_data_loader,
-    get_subset_of_dataset,
+    get_dataset_chunk,
     load_dataset,
     load_sequential_transformer,
 )
@@ -366,8 +366,8 @@ def main(config_path_str: str):
     else:
         full_dataset_len = len(dataset)  # type: ignore
         # no-op if only 1 process
-        data_subset = get_subset_of_dataset(
-            dataset, subset_idx=mpi_info.rank, total_subsets=mpi_info.size
+        data_subset = get_dataset_chunk(
+            dataset, chunk_idx=mpi_info.rank, total_chunks=mpi_info.size
         )
 
         edge_train_loader = create_data_loader(

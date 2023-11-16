@@ -7,3 +7,7 @@ tqdm~=4.65.0
 jaxtyping~=0.2.20
 matplotlib~=3.7.2
 transformer-lens~=1.5.0
+# sometimes mpi4py has trouble installing with pip into conda enviroments
+# if you have trouble try `conda install mpi4py`
+# You will also need to have a proper mpi installation (should be in the docker)
+mpi4py~=3.1.4

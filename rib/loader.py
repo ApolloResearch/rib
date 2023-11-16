@@ -26,6 +26,7 @@ def load_sequential_transformer(
     tlens_pretrained: Optional[str],
     tlens_model_path: Optional[Path],
     eps: Optional[float],
+    fold_bias: bool = True,
     dtype: torch.dtype = torch.float32,
     device: str = "cpu",
 ) -> tuple[SequentialTransformer, dict]:
@@ -43,6 +44,7 @@ def load_sequential_transformer(
         tlens_pretrained (Optional[str]): The name of a pretrained transformerlens model.
         tlens_model_path (Optional[Path]): The path to a transformerlens model.
         eps (Optional[float]): The epsilon value to use for the layernorms in the model.
+        fold_bias (bool): Whether to fold the bias into the weights.
         dtype (Optional[torch.dtype]): The dtype to use for the model.
         device (Optional[str]): The device to use for the model.
 
@@ -91,6 +93,9 @@ def load_sequential_transformer(
         positional_embedding_type=seq_cfg.positional_embedding_type,
     )
     seq_model.load_state_dict(state_dict)
+
+    if fold_bias:
+        seq_model.fold_bias()
 
     return seq_model, tlens_cfg_dict
 

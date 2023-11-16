@@ -129,6 +129,7 @@ class MLP(nn.Module):
                     concat_bias_to_output=concat_bias_to_output,
                 )
             )
+        self.has_folded_bias = fold_bias
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the MLP on the input.

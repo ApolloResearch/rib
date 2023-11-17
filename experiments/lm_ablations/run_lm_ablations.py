@@ -77,10 +77,9 @@ class Config(BaseModel):
         return v
 
 
-def main(config_path_str: str) -> None:
+def main(config_path_or_obj: Union[str, Config]) -> None:
     start_time = time.time()
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+    config = load_config(config_path_or_obj, config_model=Config)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
     if out_file.exists() and not overwrite_output(out_file):

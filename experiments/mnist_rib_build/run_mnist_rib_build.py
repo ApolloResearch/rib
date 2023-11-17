@@ -32,7 +32,7 @@ from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
-from rib.utils import REPO_ROOT, load_config, overwrite_output, set_seed
+from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 
 
 class Config(BaseModel):
@@ -75,7 +75,7 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return data_loader
 
 
-def main(config_path_str: str) -> None:
+def main(config_path_str: str, force: bool = False) -> None:
     """Implement the main algorithm and store the graph to disk."""
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
@@ -87,14 +87,8 @@ def main(config_path_str: str) -> None:
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
-    if out_file.exists():
-        if config.force_overwrite_output:
-            logger.info("Overwriting %s (forced by config)", out_file)
-        elif not overwrite_output(out_file):
-            print("Exiting.")
-            return
-        else:
-            logger.info("Overwriting %s (based on user prompt)", out_file)
+    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
+        return
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]

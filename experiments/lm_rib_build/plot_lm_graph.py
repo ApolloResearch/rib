@@ -11,7 +11,7 @@ import fire
 import torch
 
 from rib.plotting import plot_interaction_graph
-from rib.utils import overwrite_output
+from rib.utils import check_outfile_overwrite
 
 
 def main(results_file: str, force: bool = False) -> None:
@@ -20,14 +20,8 @@ def main(results_file: str, force: bool = False) -> None:
     out_dir = Path(__file__).parent / "out"
     out_file = out_dir / f"{results['exp_name']}_rib_graph.png"
 
-    if out_file.exists():
-        if force:
-            print(f"Overwriting {out_file} (based on cmdline argument)")
-        elif not overwrite_output(out_file):
-            print("Exiting.")
-            return
-        else:
-            print(f"Overwriting {out_file} (based on user prompt)")
+    if not check_outfile_overwrite(out_file, force):
+        return
 
     # Ensure that we have edges
     assert results["edges"], "The results file does not contain any edges."

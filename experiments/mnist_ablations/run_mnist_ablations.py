@@ -39,9 +39,9 @@ from rib.models import MLP
 from rib.types import TORCH_DTYPES
 from rib.utils import (
     REPO_ROOT,
+    check_outfile_overwrite,
     eval_model_accuracy,
     load_config,
-    overwrite_output,
     set_seed,
 )
 
@@ -90,19 +90,13 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def main(config_path_str: str) -> None:
+def main(config_path_str: str, force: bool = False) -> None:
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if out_file.exists():
-        if config.force_overwrite_output:
-            logger.info("Overwriting %s (forced by config)", out_file)
-        elif not overwrite_output(out_file):
-            print("Exiting.")
-            return
-        else:
-            logger.info("Overwriting %s (based on user prompt)", out_file)
+    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
+        return
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
 

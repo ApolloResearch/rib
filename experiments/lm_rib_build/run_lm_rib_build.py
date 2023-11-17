@@ -51,10 +51,10 @@ from rib.loader import create_data_loader, load_dataset, load_sequential_transfo
 from rib.log import logger
 from rib.types import TORCH_DTYPES
 from rib.utils import (
+    check_outfile_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
     load_config,
-    overwrite_output,
     set_seed,
 )
 
@@ -218,7 +218,7 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config_path_str: str):
+def main(config_path_str: str, force: bool = False) -> None:
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
@@ -239,14 +239,8 @@ def main(config_path_str: str):
         out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
     else:
         out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if out_file.exists():
-        if config.force_overwrite_output:
-            logger.info("Overwriting %s (forced by config)", out_file)
-        elif not overwrite_output(out_file):
-            print("Exiting.")
-            return
-        else:
-            logger.info("Overwriting %s (based on user prompt)", out_file)
+    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
+        return
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]

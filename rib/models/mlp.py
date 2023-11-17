@@ -64,11 +64,8 @@ class MLPLayer(nn.Module):
         return x
 
     def fold_bias(self) -> None:
-        if self.b is None:
-            warn("trying to fold a bias on an MLP layer that has none")
-            # create a 0 bias to fold in
-            self.b = torch.zeros(self.out_features, dtype=self.W.dtype, device=self.W.device)
-        assert not self.has_folded_bias
+        assert not self.has_folded_bias, "bias already folded"
+        assert self.b is not None, "trying to fold bias on a layer that has no bias"
         fold_mlp_in(self.activation_fn, self.W, self.b)
         self.b = None  # fold_mlp_in sets to 0, but None is clearer
         self.has_folded_bias = True

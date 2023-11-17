@@ -11,8 +11,7 @@ from rib.models.utils import ACTIVATION_MAP
 
 @pytest.mark.parametrize("hidden_sizes", [[], [4, 3]])
 @pytest.mark.parametrize("activation_fn", ["relu", "gelu", "sigmoid"])
-@pytest.mark.parametrize("bias", [False, True])
-@pytest.mark.parametrize("fold_bias", [False, True])
+@pytest.mark.parametrize("bias, fold_bias", [(False, False), (True, False), (True, True)])
 def test_mlp_layers(
     hidden_sizes: list[int],
     activation_fn: str,
@@ -21,8 +20,8 @@ def test_mlp_layers(
 ) -> None:
     """Test the MLP constructor for fixed input and output sizes.
 
-    Verifies the created layers' types, sizes and bias. Also checks whether the
-    layers are instances of LinearFoldedBias when fold_bias is True, and nn.Linear when it's False.
+    Verifies the created layers' shapes and bias.
+    Also tests that when folding the bias in the forward and backward passes remain the same.
 
     Args:
         hidden_sizes: A list of hidden layer sizes. If None, no hidden layers are added.
@@ -79,10 +78,14 @@ def test_mlp_layers(
     in_grad = torch.autograd.grad(output.sum(), rand_input)[0]
     assert output.shape == (batch_size, output_size)
 
-    if not fold_bias and (activation_fn not in ["sigmoid", "tanh"]):
+    if bias and not fold_bias and (activation_fn not in ["sigmoid", "tanh"]):
         model.fold_bias()
         assert model.has_folded_bias
         folded_output = model(rand_input)
         folded_in_grad = torch.autograd.grad(folded_output.sum(), rand_input)[0]
         assert torch.allclose(output, folded_output)
         assert torch.allclose(in_grad, folded_in_grad)
+
+    if not bias and not fold_bias:
+        with pytest.raises(AssertionError):
+            model.fold_bias()

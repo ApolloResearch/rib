@@ -48,6 +48,7 @@ from rib.utils import (
 
 class Config(BaseModel):
     exp_name: Optional[str]
+    force_overwrite_output: Optional[bool] = False
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
@@ -94,9 +95,14 @@ def main(config_path_str: str) -> None:
     config = load_config(config_path, config_model=Config)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if out_file.exists() and not overwrite_output(out_file):
-        print("Exiting.")
-        return
+    if out_file.exists():
+        if config.force_overwrite_output:
+            logger.info("Overwriting %s (forced by config)", out_file)
+        elif not overwrite_output(out_file):
+            print("Exiting.")
+            return
+        else:
+            logger.info("Overwriting %s (based on user prompt)", out_file)
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
 

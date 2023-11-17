@@ -17,6 +17,7 @@ Usage:
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import Optional
 
 import fire
 import torch
@@ -36,6 +37,7 @@ from rib.utils import REPO_ROOT, load_config, overwrite_output, set_seed
 
 class Config(BaseModel):
     exp_name: str
+    force_overwrite_output: Optional[bool] = False
     mlp_path: Path
     batch_size: int
     seed: int
@@ -85,9 +87,14 @@ def main(config_path_str: str) -> None:
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
-    if out_file.exists() and not overwrite_output(out_file):
-        logger.info("Exiting.")
-        return None
+    if out_file.exists():
+        if config.force_overwrite_output:
+            logger.info("Overwriting %s (forced by config)", out_file)
+        elif not overwrite_output(out_file):
+            print("Exiting.")
+            return
+        else:
+            logger.info("Overwriting %s (based on user prompt)", out_file)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]

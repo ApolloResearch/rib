@@ -20,7 +20,7 @@ from rib.plotting import plot_ablation_results
 from rib.utils import overwrite_output
 
 
-def main(*results_files: str) -> None:
+def main(*results_files: str, force: bool = False) -> None:
     results_list = []
     exp_names = []
     ablation_types = []
@@ -50,9 +50,14 @@ def main(*results_files: str) -> None:
     out_filename = "_".join(exp_names)
     out_file = Path(__file__).parent / "out" / f"{out_filename}_{eval_type}_vs_ablated_vecs.png"
 
-    if out_file.exists() and not overwrite_output(out_file):
-        print("Exiting.")
-        return
+    if out_file.exists():
+        if force:
+            print(f"Overwriting {out_file} (based on cmdline argument)")
+        elif not overwrite_output(out_file):
+            print("Exiting.")
+            return
+        else:
+            print(f"Overwriting {out_file} (based on user prompt)")
 
     plot_ablation_results(
         results=results_list,

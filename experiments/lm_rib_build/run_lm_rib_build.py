@@ -26,6 +26,8 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 - One on the input to "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_in.0".
 - (If logits_node_layer is True:) One on the output of the model, i.e. the logits.
+
+This file also support parallelization to compute edge values across multiple processes using mpi. To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data and output it as a single file.
 """
 import json
 import time
@@ -36,6 +38,7 @@ from typing import Literal, Optional, Union, cast
 import fire
 import torch
 from jaxtyping import Float
+from mpi4py import MPI
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch import Tensor
 
@@ -47,8 +50,19 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
-from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
+from rib.loader import (
+    create_data_loader,
+    get_dataset_chunk,
+    load_dataset,
+    load_sequential_transformer,
+)
 from rib.log import logger
+from rib.mpi_utils import (
+    adjust_logger_mpi,
+    check_sizes_mpi,
+    get_device_mpi,
+    get_mpi_info,
+)
 from rib.types import TORCH_DTYPES
 from rib.utils import (
     check_outfile_overwrite,
@@ -128,6 +142,11 @@ class Config(BaseModel):
         None,
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
+    )
+
+    out_dir: Optional[Path] = Field(
+        None,
+        description="Directory for the output files. If not provided it is `./out/` relative to this file.",
     )
 
     @field_validator("dtype")
@@ -233,16 +252,22 @@ def main(config_path_str: str, force: bool = False) -> None:
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
-    out_dir = Path(__file__).parent / "out"
+    mpi_info = get_mpi_info()
+    adjust_logger_mpi(logger)
+    device = get_device_mpi(logger)
+
+    out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     if config.calculate_edges:
         out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
     else:
         out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
-        return
+    if mpi_info.is_main_process and not check_outfile_overwrite(
+        out_file, config.force_overwrite_output or force, logger=logger
+    ):
+        mpi_info.comm.Abort()  # stop this and other processes
+        return None  # this is unreachable as Abort will terminate
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
     calc_edges_time = None
@@ -255,12 +280,12 @@ def main(config_path_str: str, force: bool = False) -> None:
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
         eps=config.eps,
+        fold_bias=True,
         dtype=dtype,
         device=device,
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need both train and test sets
@@ -341,12 +366,19 @@ def main(config_path_str: str, force: bool = False) -> None:
         logger.info("Skipping edge calculation.")
         E_hats = {}
     else:
+        full_dataset_len = len(dataset)  # type: ignore
+        # no-op if only 1 process
+        data_subset = get_dataset_chunk(
+            dataset, chunk_idx=mpi_info.rank, total_chunks=mpi_info.size
+        )
+
         edge_train_loader = create_data_loader(
-            dataset,
+            data_subset,
             shuffle=False,
             batch_size=config.edge_batch_size or config.batch_size,
             seed=config.seed,
         )
+
         logger.info("Calculating edges.")
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
@@ -357,7 +389,22 @@ def main(config_path_str: str, force: bool = False) -> None:
             data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
+            data_set_size=full_dataset_len,  # includes data for other processes
         )
+
+        if mpi_info.is_parallelised:
+            for m_name, edge_vals in E_hats.items():
+                check_sizes_mpi(edge_vals)
+                receiver_tensor = None
+                if mpi_info.is_main_process:
+                    receiver_tensor = torch.empty_like(edge_vals).cpu()
+                # we sum across the edge_val tensors in each process, putting the result in
+                # the root process's reciever_tensor.
+                mpi_info.comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
+                if mpi_info.is_main_process:
+                    assert receiver_tensor is not None
+                    E_hats[m_name] = receiver_tensor
+
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)
 
@@ -383,10 +430,12 @@ def main(config_path_str: str, force: bool = False) -> None:
         "calc_edges_time": calc_edges_time,
     }
 
-    # Save the results (which include torch tensors) to file
-    torch.save(results, out_file)
-    logger.info("Saved results to %s", out_file)
+    if mpi_info.is_main_process:
+        # Save the results (which include torch tensors) to file
+        torch.save(results, out_file)
+        logger.info("Saved results to %s", out_file)
 
 
 if __name__ == "__main__":
+    print("running!!!")
     fire.Fire(main)

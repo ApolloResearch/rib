@@ -1,12 +1,12 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union, overload
+from typing import Literal, Optional, Sized, Union, overload
 
 import torch
 import yaml
 from datasets import load_dataset as hf_load_dataset
-from torch.utils.data import DataLoader, Dataset, TensorDataset
+from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
 
@@ -26,6 +26,7 @@ def load_sequential_transformer(
     tlens_pretrained: Optional[str],
     tlens_model_path: Optional[Path],
     eps: Optional[float],
+    fold_bias: bool = True,
     dtype: torch.dtype = torch.float32,
     device: str = "cpu",
 ) -> tuple[SequentialTransformer, dict]:
@@ -43,6 +44,7 @@ def load_sequential_transformer(
         tlens_pretrained (Optional[str]): The name of a pretrained transformerlens model.
         tlens_model_path (Optional[Path]): The path to a transformerlens model.
         eps (Optional[float]): The epsilon value to use for the layernorms in the model.
+        fold_bias (bool): Whether to fold the bias into the weights.
         dtype (Optional[torch.dtype]): The dtype to use for the model.
         device (Optional[str]): The device to use for the model.
 
@@ -91,6 +93,9 @@ def load_sequential_transformer(
         positional_embedding_type=seq_cfg.positional_embedding_type,
     )
     seq_model.load_state_dict(state_dict)
+
+    if fold_bias:
+        seq_model.fold_bias()
 
     return seq_model, tlens_cfg_dict
 
@@ -321,3 +326,30 @@ def create_data_loader(
         return train_loader, test_loader
     else:
         return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+
+
+def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Dataset:
+    """
+    Returns a subset of the dataset, determined by the `chunk_idx` and `total_chunks`.
+
+    Useful for dataparellism, if we want each process to use a different dataset chunk.
+
+    Args:
+        dataset (Dataset): The dataset to use. Must be a Map-style dataset (implements `__len__`
+            and `__get_item__`).
+        chunk_idx (int): The id
+        total_chunks (int): Total number of chunks. If this is exactly 1, we return all of `dataset`.
+
+    Returns:
+        The DataLoader or a tuple of DataLoaders.
+    """
+    assert chunk_idx < total_chunks, "chunk_idx greater than total number of chunks"
+    if total_chunks == 1:
+        return dataset
+    dataset_len = len(dataset)  # type: ignore
+    assert (
+        total_chunks <= dataset_len
+    ), f"more chunks than elements of the dataset ({total_chunks} > {dataset_len})"
+    dataset_idx_start = dataset_len * chunk_idx // total_chunks
+    dataset_idx_end = dataset_len * (chunk_idx + 1) // total_chunks
+    return Subset(dataset, range(dataset_idx_start, dataset_idx_end))

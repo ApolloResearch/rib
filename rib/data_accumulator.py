@@ -192,6 +192,7 @@ def collect_interaction_edges(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
+    data_set_size: Optional[int] = None,
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -207,12 +208,14 @@ def collect_interaction_edges(
         data_loader: The pytorch data loader.
         dtype: The data type to use for model computations.
         device: The device to run the model on.
+        data_set_size: the total size of the dataset, used to normalize. Defaults to
+        `len(data_loader)`. Important to set when parallelizing over the dataset.
 
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes
         through.
     """
-
+    assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
     edge_hooks: list[Hook] = []
@@ -234,7 +237,7 @@ def collect_interaction_edges(
                     "C_in_pinv": C_info.C_pinv.to(device=device),  # C_pinv from current node layer
                     "C_out": C_out,
                     "n_intervals": n_intervals,
-                    "dataset_size": len(data_loader.dataset),  # type: ignore
+                    "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
                 },
             )
         )

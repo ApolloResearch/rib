@@ -142,7 +142,7 @@ def check_outfile_overwrite(out_file: Path, force: bool = False, logger=None) ->
 
     def _response():
         response = input(f"Output file {out_file} already exists. Overwrite? (y/n) ")
-        response.lower() == "y"
+        return response.lower() == "y"
 
     if out_file.exists():
         if force:

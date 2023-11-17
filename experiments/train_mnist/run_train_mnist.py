@@ -28,7 +28,6 @@ class ModelConfig(BaseModel):
     hidden_sizes: Optional[list[int]]
     activation_fn: str = "relu"
     bias: bool = True
-    fold_bias: bool = True
 
 
 class TrainConfig(BaseModel):
@@ -186,9 +185,6 @@ def main(config_path_str: str) -> float:
         )
 
     trained_model = train_model(config, model, train_loader, device, run_name)
-
-    if config.model.fold_bias:
-        trained_model.fold_bias()
 
     # Evaluate the model on the test set
     test_data = datasets.MNIST(

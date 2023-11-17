@@ -27,6 +27,10 @@ from pydantic import BaseModel, Field, field_validator
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
+from experiments.mnist_rib_build.run_mnist_rib_build import (
+    load_mlp,
+    load_mnist_dataloader,
+)
 from rib.ablations import (
     ExponentialScheduleConfig,
     LinearScheduleConfig,
@@ -67,26 +71,29 @@ class Config(BaseModel):
         return v
 
 
-def load_mlp(config_dict: dict, mlp_path: Path, device: str) -> MLP:
+def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
+    print(config_dict["model"])
     mlp = MLP(
         hidden_sizes=config_dict["model"]["hidden_sizes"],
         input_size=784,
         output_size=10,
         activation_fn=config_dict["model"]["activation_fn"],
         bias=config_dict["model"]["bias"],
-        fold_bias=config_dict["model"]["fold_bias"],
+        fold_bias=False,
     )
     mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
+    if fold_bias:
+        mlp.fold_bias()
     return mlp
 
 
 def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
     transform = transforms.ToTensor()
-    test_data = datasets.MNIST(
+    dataset = datasets.MNIST(
         root=REPO_ROOT / ".data", train=train, download=True, transform=transform
     )
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-    return test_loader
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    return data_loader
 
 
 def main(config_path_str: str) -> None:

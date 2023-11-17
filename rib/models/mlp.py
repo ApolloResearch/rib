@@ -42,8 +42,10 @@ class MLPLayer(nn.Module):
         self.activation_fn: Optional[str] = activation_fn
 
         def make_param(size: Tuple[int, ...]):
+            # consistent init with nn.Linear
+            bound = 1 / (self.in_features**0.5)
             p = nn.Parameter(torch.empty(size=size, dtype=dtype))
-            nn.init.normal_(p, mean=0, std=size[0] ** 0.5)
+            nn.init.uniform_(p, a=-bound, b=bound)
             return p
 
         self.W = make_param((self.in_features, self.out_features))

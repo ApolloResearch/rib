@@ -63,10 +63,12 @@ class MLPLayer(nn.Module):
             x = self.activation(x)
         return x
 
-    def fold_bias(self) -> None:
+    def fold_bias(self, include_ones_in_out=True) -> None:
         assert not self.has_folded_bias, "bias already folded"
         assert self.b is not None, "trying to fold bias on a layer that has no bias"
         fold_mlp_in(self.activation_fn, self.W, self.b)
+        if not include_ones_in_out:  # for last layer
+            self.W.data = self.W.data[..., :-1]
         self.b = None  # fold_mlp_in sets to 0, but None is clearer
         self.has_folded_bias = True
 
@@ -129,8 +131,8 @@ class MLP(nn.Module):
         We first flatten the input to a single feature dimension (preserving batch dimension)
 
         If we have folded biases in, we add an extra 1 to each intermediate output between layers.
-        This is handled within each layer, but we need to concat it to the input and remove it from
-        the output.
+        This is handled within each layer, but we need to concat it to the input. The last layer
+        excludes this automatically.
         """
         # Flatten input
         x = x.view(x.size(0), -1)
@@ -139,14 +141,11 @@ class MLP(nn.Module):
 
         for layer in self.layers:
             x = layer(x)
-
-        if self.has_folded_bias:
-            # output has an extra 1 at the end
-            x = x[..., :-1]
         return x
 
     def fold_bias(self):
         for layer in self.layers:
-            layer.fold_bias()
+            last_layer = layer is self.layers[-1]
+            layer.fold_bias(include_ones_in_out=not last_layer)
 
         self.has_folded_bias = True

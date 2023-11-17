@@ -27,10 +27,6 @@ from pydantic import BaseModel, Field, field_validator
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from experiments.mnist_rib_build.run_mnist_rib_build import (
-    load_mlp,
-    load_mnist_dataloader,
-)
 from rib.ablations import (
     ExponentialScheduleConfig,
     LinearScheduleConfig,

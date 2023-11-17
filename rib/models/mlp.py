@@ -56,7 +56,7 @@ class MLPLayer(nn.Module):
         self.has_folded_bias = False
 
     def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
-        x = einsum("... d_model, d_model d_mlp -> ... d_mlp", x, self.W)
+        x = einsum("... d_in, d_in d_out -> ... d_out", x, self.W)
         if self.b is not None:
             x += self.b
         if self.activation_fn is not None:
@@ -77,15 +77,13 @@ class MLP(nn.Module):
 
     Args:
         hidden_sizes: A list of integers specifying the sizes of the hidden layers.
-        input_size: The size of each input sample.
+        input_size: The size of each input sample (after flattening)
         output_size: The size of each output sample.
         activation_fn: The activation function to use for all but the last layer. Default is "relu".
         bias: Whether to add a bias term to the linear transformations. Default is True.
-        fold_bias: Whether to use the LinearFoldedBias class for linear layers. If true (and if
-            bias is True), the biases are folded into the weight matrices and the forward pass
-            is modified to add a vector of 1s to the output of each layer, except the last layer.
-            Default is True.
-
+        fold_bias: Whether to fold the bias in after initialization. If done, model is no longer
+            valid to train! Doesn't change the input / output behavior or input / output gradients,
+            but will append a 1 to intermediate activations between layers.
     """
 
     def __init__(
@@ -125,15 +123,14 @@ class MLP(nn.Module):
         if fold_bias:
             self.fold_bias()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Float[Tensor, "batch ..."]) -> Float[Tensor, "batch outdim"]:
         """Run the MLP on the input.
 
-        We first flatten the input to a single feature dimension.
+        We first flatten the input to a single feature dimension (preserving batch dimension)
 
-        If self.fold_bias is True, each layer will need to ensure that a vector of 1s is
-        concatenated to each layer's input. This is done automatically in the output of each
-        LinearFoldedBias layer except the final layer. Therefore, we just need to add a vector
-        of 1s to the input of the first layer.
+        If we have folded biases in, we add an extra 1 to each intermediate output between layers.
+        This is handled within each layer, but we need to concat it to the input and remove it from
+        the output.
         """
         # Flatten input
         x = x.view(x.size(0), -1)
@@ -145,7 +142,7 @@ class MLP(nn.Module):
 
         if self.has_folded_bias:
             # output has an extra 1 at the end
-            x = x[:, :-1]
+            x = x[..., :-1]
         return x
 
     def fold_bias(self):

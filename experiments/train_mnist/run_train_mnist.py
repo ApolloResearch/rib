@@ -172,7 +172,7 @@ def main(config_path_str: str) -> float:
         output_size=10,
         activation_fn=config.model.activation_fn,
         bias=config.model.bias,
-        fold_bias=config.model.fold_bias,
+        fold_bias=False,  # false even if config.model.fold_bias is true; we fold after training
     )
     model = model.to(device)
 
@@ -186,6 +186,9 @@ def main(config_path_str: str) -> float:
         )
 
     trained_model = train_model(config, model, train_loader, device, run_name)
+
+    if config.model.fold_bias:
+        trained_model.fold_bias()
 
     # Evaluate the model on the test set
     test_data = datasets.MNIST(

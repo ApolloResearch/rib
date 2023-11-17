@@ -121,6 +121,8 @@ class MLP(nn.Module):
                     dtype=dtype,
                 )
             )
+
+        self.has_folded_bias = False
         if fold_bias:
             self.fold_bias()
 
@@ -150,3 +152,5 @@ class MLP(nn.Module):
     def fold_bias(self):
         for layer in self.layers:
             layer.fold_bias()
+
+        self.has_folded_bias = True

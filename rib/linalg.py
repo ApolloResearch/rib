@@ -277,7 +277,7 @@ def integrated_gradient_trapezoidal_jacobian(
 
         assert f_out_hat_norm.ndim == 1, f"f_out_hat_norm should be 1d, got {f_out_hat_norm.ndim}"
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
-        # estimate at alpha=1)
+        # estimate at alpha=0.5)
         scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
         for i in tqdm(
             range(len(f_out_hat_norm)), total=len(f_out_hat_norm), desc="Output idxs", leave=False
@@ -368,7 +368,7 @@ def integrated_gradient_trapezoidal_norm(
 
         alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
-        # estimate at alpha=1)
+        # estimate at alpha=0.5)
         if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
             alpha_in_grads = 0.5 * alpha_in_grads
 

@@ -48,7 +48,9 @@ from rib.utils import (
 
 class Config(BaseModel):
     exp_name: Optional[str]
-    force_overwrite_output: Optional[bool] = False
+    force_overwrite_output: Optional[bool] = Field(
+        False, description="Don't ask before overwriting the output file."
+    )
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
@@ -90,9 +92,8 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def main(config_path_str: str, force: bool = False) -> None:
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
+    config = load_config(config_path_or_obj, config_model=Config)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
     if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):

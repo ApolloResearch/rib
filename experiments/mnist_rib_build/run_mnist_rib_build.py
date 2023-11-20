@@ -17,12 +17,12 @@ Usage:
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import fire
 import torch
 import yaml
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -37,7 +37,9 @@ from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 
 class Config(BaseModel):
     exp_name: str
-    force_overwrite_output: Optional[bool] = False
+    force_overwrite_output: Optional[bool] = Field(
+        False, description="Don't ask before overwriting the output file."
+    )
     mlp_path: Path
     batch_size: int
     seed: int
@@ -75,10 +77,9 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return data_loader
 
 
-def main(config_path_str: str, force: bool = False) -> None:
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     """Implement the main algorithm and store the graph to disk."""
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+    config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
 
     with open(config.mlp_path.parent / "config.yaml", "r") as f:

@@ -41,6 +41,11 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-venv-
 
+    - name: Install mpi
+      run: |
+        sudo apt-get update
+        sudo apt-get install libopenmpi-dev
+
     - name: Install dependencies
       run: |
         source venv/bin/activate

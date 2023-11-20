@@ -26,6 +26,8 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 - One on the input to "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_in.0".
 - (If logits_node_layer is True:) One on the output of the model, i.e. the logits.
+
+This file also support parallelization to compute edge values across multiple processes using mpi. To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data and output it as a single file.
 """
 import json
 import time
@@ -36,6 +38,7 @@ from typing import Literal, Optional, Union, cast
 import fire
 import torch
 from jaxtyping import Float
+from mpi4py import MPI
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch import Tensor
 
@@ -47,14 +50,25 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
-from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
+from rib.loader import (
+    create_data_loader,
+    get_dataset_chunk,
+    load_dataset,
+    load_sequential_transformer,
+)
 from rib.log import logger
+from rib.mpi_utils import (
+    adjust_logger_mpi,
+    check_sizes_mpi,
+    get_device_mpi,
+    get_mpi_info,
+)
 from rib.types import TORCH_DTYPES
 from rib.utils import (
+    check_outfile_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
     load_config,
-    overwrite_output,
     set_seed,
 )
 
@@ -62,6 +76,9 @@ from rib.utils import (
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exp_name: str = Field(..., description="The name of the experiment")
+    force_overwrite_output: Optional[bool] = Field(
+        False, description="Don't ask before overwriting the output file."
+    )
     seed: int = Field(..., description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."
@@ -131,6 +148,11 @@ class Config(BaseModel):
         "If None, skip evaluation.",
     )
 
+    out_dir: Optional[Path] = Field(
+        None,
+        description="Directory for the output files. If not provided it is `./out/` relative to this file.",
+    )
+
     @field_validator("dtype")
     def dtype_validator(cls, v):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
@@ -146,12 +168,17 @@ class Config(BaseModel):
 
 
 def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
-    """Ensure that the config for calculating edges is compatible with that used to calculate Cs."""
+    """Ensure that the config for calculating edges is compatible with that used to calculate Cs.
 
-    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
+    TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
+    path management nice with this Config being defined in this file in the experiments dir.
+    """
+
+    # config.node_layers must be a subsequence of loaded_config.node_layers
+    assert "|".join(config.node_layers) in "|".join(loaded_config.node_layers), (
         "node_layers in the config must be a subsequence of the node layers in the config used to"
-        "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
-        "match those needed to correctly calculate the edges."
+        "calculate the C matrices. Otherwise, the C matrices won't match those needed to correctly"
+        "calculate the edges."
     )
 
     # The following attributes must exactly match across configs
@@ -191,33 +218,66 @@ def load_interaction_rotations(
     assert config.interaction_matrices_path is not None
     matrices_info = torch.load(config.interaction_matrices_path)
 
-    loaded_config = Config(**matrices_info["config"])
+    config_dict = config.model_dump()
+    # The loaded config might have a different schema. Only pass fields that are still valid.
+    valid_fields = list(config_dict.keys())
+
+    # If not all fields are valid, log a warning
+    loaded_config_dict: dict = {}
+    for loaded_key in matrices_info["config"]:
+        if loaded_key in valid_fields:
+            loaded_config_dict[loaded_key] = matrices_info["config"][loaded_key]
+        else:
+            logger.warning(
+                "The following field in the loaded config is no longer supported and will be ignored:"
+                f" {loaded_key}"
+            )
+
+    loaded_config = Config(**loaded_config_dict)
     _verify_compatible_configs(config, loaded_config)
 
-    gram_matrices = matrices_info["gram_matrices"]
     Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
     Us = [Eigenvectors(**data) for data in matrices_info["eigenvectors"]]
-    return gram_matrices, Cs, Us
+    return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config_path_str: str):
-    """Build the interaction graph and store it on disk."""
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+def main(config_path_or_obj: Union[str, Config], force: bool = False):
+    """Build the interaction graph and store it on disk.
+
+    Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
+    E_hats using pre-saved Cs, we need to ensure, among other things, that the pre-saved Cs were
+    calculated for the same node_layers that we wish to draw edges between (i.e. config.node_layers
+    should be a subsequence of the node_layers used to calculate the Cs).
+
+    We use the variable edge_Cs to indicate the Cs that are needed to calculate the edges. If
+    the Cs were pre-calculated and loaded from file, edge_Cs may be a subsequence of Cs.
+
+    Args:
+        config: a str or Config object. If str must point at YAML config file
+        kwargs: modifications to passed config
+    """
+    config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
 
-    out_dir = Path(__file__).parent / "out"
+    mpi_info = get_mpi_info()
+    adjust_logger_mpi(logger)
+    device = get_device_mpi(logger)
+
+    out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     if config.calculate_edges:
         out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
     else:
         out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if out_file.exists() and not overwrite_output(out_file):
-        logger.info("Exiting.")
-        return None
+    if mpi_info.is_main_process and not check_outfile_overwrite(
+        out_file, config.force_overwrite_output or force, logger=logger
+    ):
+        mpi_info.comm.Abort()  # stop this and other processes
+        return None  # this is unreachable as Abort will terminate
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
+    calc_C_time = None
+    calc_edges_time = None
 
     # Time each stage
     load_model_data_start_time = time.time()
@@ -227,12 +287,12 @@ def main(config_path_str: str):
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
         eps=config.eps,
+        fold_bias=True,
         dtype=dtype,
         device=device,
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need both train and test sets
@@ -300,33 +360,60 @@ def main(config_path_str: str):
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
         )
-        logger.info("Time to calculate Cs: %.2f", time.time() - c_start_time)
+        # Cs used to calculate edges
+        edge_Cs = Cs
+
+        calc_C_time = f"{(time.time() - c_start_time) / 60:.1f} minutes"
+        logger.info("Time to calculate Cs: %s", calc_C_time)
     else:
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
+        edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
 
     if not config.calculate_edges:
         logger.info("Skipping edge calculation.")
         E_hats = {}
     else:
+        full_dataset_len = len(dataset)  # type: ignore
+        # no-op if only 1 process
+        data_subset = get_dataset_chunk(
+            dataset, chunk_idx=mpi_info.rank, total_chunks=mpi_info.size
+        )
+
         edge_train_loader = create_data_loader(
-            dataset,
+            data_subset,
             shuffle=False,
             batch_size=config.edge_batch_size or config.batch_size,
             seed=config.seed,
         )
+
         logger.info("Calculating edges.")
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
-            Cs=Cs,
+            Cs=edge_Cs,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
             section_names=section_names,
             data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
-            out_dim_chunk_size=config.out_dim_chunk_size,
+            data_set_size=full_dataset_len,  # includes data for other processes
         )
-        logger.info("Time to calculate edges: %.2f", time.time() - edges_start_time)
+
+        if mpi_info.is_parallelised:
+            for m_name, edge_vals in E_hats.items():
+                check_sizes_mpi(edge_vals)
+                receiver_tensor = None
+                if mpi_info.is_main_process:
+                    receiver_tensor = torch.empty_like(edge_vals).cpu()
+                # we sum across the edge_val tensors in each process, putting the result in
+                # the root process's reciever_tensor.
+                mpi_info.comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
+                if mpi_info.is_main_process:
+                    assert receiver_tensor is not None
+                    E_hats[m_name] = receiver_tensor
+
+        calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
+        logger.info("Time to calculate edges: %s", calc_edges_time)
 
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []
@@ -343,14 +430,17 @@ def main(config_path_str: str):
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(node_layer, E_hats[node_layer]) for node_layer in E_hats],
+        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
+        "calc_C_time": calc_C_time,
+        "calc_edges_time": calc_edges_time,
     }
 
-    # Save the results (which include torch tensors) to file
-    torch.save(results, out_file)
-    logger.info("Saved results to %s", out_file)
+    if mpi_info.is_main_process:
+        # Save the results (which include torch tensors) to file
+        torch.save(results, out_file)
+        logger.info("Saved results to %s", out_file)
 
 
 if __name__ == "__main__":

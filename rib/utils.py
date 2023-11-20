@@ -183,20 +183,57 @@ def eval_model_metrics(
     return accuracy, average_loss
 
 
-def load_config(config_path: Path, config_model: Type[T]) -> T:
-    """Load the config from a YAML file into a Pydantic model."""
-    assert config_path.suffix == ".yaml", f"Config file {config_path} must be a YAML file."
-    assert Path(config_path).exists(), f"Config file {config_path} does not exist."
-    with open(config_path, "r") as f:
+def load_config(config_path_or_obj: Union[Path, str, T], config_model: Type[T]) -> T:
+    """Load the config of class `config_model`, either from YAML file or existing config object.
+
+    Args:
+        config_path_or_obj (Union[Path, str, `config_model`]): if config object, must be instance
+            of `config_model`. If str or Path, this must be the path to a .yaml.
+        config_model: the class of the config that we are loading
+    """
+    if isinstance(config_path_or_obj, config_model):
+        return config_path_or_obj
+
+    if isinstance(config_path_or_obj, str):
+        config_path_or_obj = Path(config_path_or_obj)
+
+    assert isinstance(
+        config_path_or_obj, Path
+    ), f"passed config is of invalid type {type(config_path_or_obj)}"
+    assert (
+        config_path_or_obj.suffix == ".yaml"
+    ), f"Config file {config_path_or_obj} must be a YAML file."
+    assert Path(config_path_or_obj).exists(), f"Config file {config_path_or_obj} does not exist."
+    with open(config_path_or_obj, "r") as f:
         config_dict = yaml.safe_load(f)
-    config = config_model(**config_dict)
-    return config
+    return config_model(**config_dict)
 
 
-def overwrite_output(out_file: Path) -> bool:
-    """Check if the user wants to overwrite the output file."""
-    response = input(f"Output file {out_file} already exists. Overwrite? (y/n) ")
-    return response.lower() == "y"
+def check_outfile_overwrite(out_file: Path, force: bool = False, logger=None) -> bool:
+    """Check if out_file exists and whether it should be overwritten."""
+
+    def _log(message):
+        if logger is not None:
+            logger.info(message)
+        else:
+            print(message)
+
+    def _response():
+        response = input(f"Output file {out_file} already exists. Overwrite? (y/n) ")
+        return response.lower() == "y"
+
+    if out_file.exists():
+        if force:
+            _log(f"Overwriting {out_file} (reason: config or cmdline)")
+            return True
+        elif _response():
+            _log(f"Overwriting {out_file} (based on user prompt)")
+            return True
+        else:
+            _log("Exiting.")
+            return False
+    else:
+        return True
 
 
 def calc_exponential_ablation_schedule(

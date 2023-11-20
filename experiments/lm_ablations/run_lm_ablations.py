@@ -38,16 +38,19 @@ from rib.loader import create_data_loader, load_dataset, load_sequential_transfo
 from rib.log import logger
 from rib.types import TORCH_DTYPES
 from rib.utils import (
+    check_outfile_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
     load_config,
-    overwrite_output,
     set_seed,
 )
 
 
 class Config(BaseModel):
     exp_name: Optional[str]
+    force_overwrite_output: Optional[bool] = Field(
+        False, description="Don't ask before overwriting the output file."
+    )
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
@@ -77,14 +80,12 @@ class Config(BaseModel):
         return v
 
 
-def main(config_path_str: str) -> None:
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     start_time = time.time()
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+    config = load_config(config_path_or_obj, config_model=Config)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if out_file.exists() and not overwrite_output(out_file):
-        print("Exiting.")
+    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
         return
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -125,13 +126,13 @@ def main(config_path_str: str) -> None:
         tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
         tlens_model_path=tlens_model_path,
         eps=config.eps,
+        fold_bias=True,
         dtype=dtype,
         device=device,
     )
 
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need train and test sets (i.e. the "both" argument)
@@ -165,15 +166,18 @@ def main(config_path_str: str) -> None:
         device=device,
     )
 
+    time_taken = f"{(time.time() - start_time) / 60:.1f} minutes"
+    logger.info("Finished in %s.", time_taken)
+
     if config.exp_name is not None:
         results = {
             "config": json.loads(config.model_dump_json()),
             "results": ablation_results,
+            "time_taken": time_taken,
         }
         with open(out_file, "w") as f:
             json.dump(results, f)
         logger.info("Wrote results to %s", out_file)
-    logger.info("Finished in %.2f seconds.", time.time() - start_time)
 
 
 if __name__ == "__main__":

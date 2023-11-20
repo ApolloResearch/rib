@@ -680,7 +680,6 @@ def collect_clustered_relu_P_mats(
 
     P_dict = {}
     for i, (module_name, hook_name, layer_cluster_idxs) in enumerate(zip(module_names, hook_names, all_cluster_idxs)):
-        print(f"current i {i}")
         layer_P_dict = {}
         for cluster_idxs in layer_cluster_idxs:
             C_next_layer_cluster = C_list[i][cluster_idxs, :] # Cols C in overleaf = rows C in code

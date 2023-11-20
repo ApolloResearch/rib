@@ -105,11 +105,8 @@ def get_model_weight(model: torch.nn.Module, attr_path: str) -> list[torch.Tenso
     """
     weights = None
     modules: list[nn.Module] = [module for module in get_model_attr(model, attr_path)]
-    print(modules)
     for module in modules:
-        print(f"module {module}")
         for name, param in module.named_parameters():
-            print(name)
             if "W" in name: weights = param
 
     return weights

@@ -26,18 +26,18 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 - One on the output of "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_act.0".
 """
-from pathlib import Path
-from typing import Any, List, Literal, Optional, Union, cast
-
 import fire
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
+import re
 from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
+from pathlib import Path
+from typing import Any, List, Literal, Optional, Union, Iterable, cast
 
 from experiments.relu_interactions.relu_interaction_utils import (
     edit_weights_fn,
@@ -75,7 +75,6 @@ from rib.utils import (
     eval_cross_entropy_loss,
     eval_model_accuracy,
     load_config,
-    overwrite_output,
     set_seed,
 )
 
@@ -387,50 +386,50 @@ def get_rotated_Ws(
     device: str,
     hooked_model: HookedModel,
     C_pinv_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
-) -> list[Float[Tensor, "layer_count d_hidden d_hidden"]]:
+) -> dict[str, Float[Tensor, "layer_count d_hidden d_hidden"]]:
     """Extract W^l, perform paper-equivalent right multiplication of psuedoinverse of C^l.
 
-    Has to be called on config with node_layers edited to include linear layer.
+    Has to be called on config with node_layers edited to include the weight matrix layers.
+    This must start at the same place as the node layers to calculate the C_pinvs did.
 
     Quick explanation on how this works:
     - graph_module_names passes in automatically named sections based on node_layers in config.
     - These are MultiSequential objects with modules inside, and they are iterable.
-    - Pass into get_model_weight (from rib.models.utils) - explanation of this function in docstring
-    there.
+    - Iterate through and extract weights, put in dictionary with key being the submodules in that
+    section
+    - NOTE: This code is not happy if you have more than one submodule in that section with a valid weight
     - Append returned weight to weight list only if it is not None.
-    - Because C_pinv_list
+    - Zip with the C list, cutting off first C since we match weight to C in next layer.
+    - Append identity to bottom of weight matrix for residual stream and left-multiply by C_pinv
+
+    Returns:
+        rotated_weights_dict: Keys are module names from section we extracted weight from. Should
+            never have two submodules in section with valid weights, making this function only valid for
+            MLPs and not attention layers. Values are weight tensors, with dimensions [in_dim, out_dim]
     """
     graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
     weights_dict: dict[list[str], float[Tensor, "d_hidden1, d_hidden2"]] = {}
     for module_name in graph_module_names:
-        module = getattr(model, module_name)
-        # Sometimes can return None if module_classes instance doesn't match the module
-        str_module_names = [submodule.__class__.__name__ for _, submodule in module.named_children()]
+        module: Iterable = get_model_attr(model, module_name) # From rib.models.utils
+        str_module_names: str = ", ".join([submodule.__class__.__name__ for submodule in module])
         weight = get_model_weight(model, attr_path=module_name)
-        if weight is not None:
+    # Returns None if module_classes instance doesn't match the module
+    # Also only consider mlp_out for now
+    # Note the regex is needed because you need two node layers if you want the section to end
+    # before the unembed (so you're not accidentally appending the unembed layer)
+        if weight is not None and re.search(r'\bMLPOut\b', str_module_names):
             weights_dict[str_module_names] = weight
 
     rotated_weights_dict = {}
-    # idxs_list = check_matrix_multiplication(C_pinv_list, weights_list)
-    # for idxs in idxs_list:
-    #     rotated_weights_list.append((C_pinv_list[idxs[0]] @ weights_list[idxs[1]]).to(device))
-
-    # with open(file_path, "wb") as f:
-    #     torch.save(rotated_weights_list, f)
+    for (str_module_name, weight), C_pinv in zip(list(weights_dict.items()), C_pinv_list[1:]):
+        # Cut off first C matrix because need to use C in next layer
+        resid_stream_size = C_pinv.shape[1] - weight.shape[0]
+        assert resid_stream_size > 0, "Weight and C mats don't match"
+        weight = torch.cat((weight, torch.eye(resid_stream_size)))
+        rotated_weights_dict[str_module_name] = C_pinv @ weight
 
     return rotated_weights_dict
-
-
-# def check_matrix_multiplication(list_A, list_B):
-#     """Return all multipliable matrix pairs in two lists of matrices, via A @ B."""
-#     results = []
-#     for i, A in enumerate(list_A):
-#         if A is not None:
-#             for j, B in enumerate(list_B):
-#                 if B is not None and A.size(1) == B.size(0):
-#                     results.append((i, j))
-#     return results
 
 
 def get_P_matrices(
@@ -563,7 +562,6 @@ def transformer_relu_main(config_path_str: str):
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    seq_model.fold_bias()
     print_all_modules(seq_model) # Check module names were correctly defined
     hooked_model = HookedModel(seq_model)
 
@@ -617,7 +615,7 @@ def transformer_relu_main(config_path_str: str):
     # So redefine node_layers to create a new model
 
     seq_model, tlens_cfg_dict = load_sequential_transformer(
-        node_layers=["mlp_out.0"], # CHANGE LAYERS FOR MLP - NOTE THIS AT LEAST NEEDS TO START WHERE THE PREVIOUS MODEL LIST DID, SO THAT MULTIPLYING BY THE PREVIOUSLY CALCULATED C WITH ZIP WORKS
+        node_layers=["mlp_out.0", "unembed"], # CHANGE LAYERS FOR MLP - NOTE THIS AT LEAST NEEDS TO START WHERE THE PREVIOUS MODEL LIST DID, SO THAT MULTIPLYING BY THE PREVIOUSLY CALCULATED C WITH ZIP WORKS
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
@@ -627,11 +625,10 @@ def transformer_relu_main(config_path_str: str):
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    seq_model.fold_bias()
     hooked_model = HookedModel(seq_model)
 
     # Has to be after editing node_layers so this contains the linear layers to extract weights from
-    W_hat_list = check_and_open_file(
+    W_hat_dict: dict[str, float[Tensor, "d_trunc_C_pinv, d_out_W"]] = check_and_open_file(
         get_var_fn=get_rotated_Ws,
         model=seq_model,
         config=config,
@@ -668,7 +665,7 @@ def transformer_relu_main(config_path_str: str):
         device=device,
         hooked_model=hooked_model,
         C_list=Cs_and_Lambdas["C"],
-        W_hat_list=W_hat_list,
+        W_hat_list=list(W_hat_dict.values()),
         all_cluster_idxs=all_cluster_idxs,
     )
 

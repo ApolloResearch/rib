@@ -19,7 +19,6 @@ model:
   hidden_sizes: [30, 30]
   activation_fn: relu
   bias: true
-  fold_bias: true
 train:
   learning_rate: 0.001
   batch_size: 64

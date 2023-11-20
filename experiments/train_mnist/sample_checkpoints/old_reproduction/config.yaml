@@ -1,0 +1,15 @@
+model:
+  activation_fn: relu
+  bias: true
+  fold_bias: true
+  hidden_sizes:
+  - 100
+  - 100
+seed: 0
+train:
+  batch_size: 64
+  epochs: 3
+  learning_rate: 0.001
+  save_dir: local/path/to/sample_checkpoints/dir
+  save_every_n_epochs: null
+wandb: null

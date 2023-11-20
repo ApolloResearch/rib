@@ -55,16 +55,19 @@ class Config(BaseModel):
         return v
 
 
-def load_mlp(config_dict: dict, mlp_path: Path, device: str) -> MLP:
+def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
+    print(config_dict["model"])
     mlp = MLP(
         hidden_sizes=config_dict["model"]["hidden_sizes"],
         input_size=784,
         output_size=10,
         activation_fn=config_dict["model"]["activation_fn"],
         bias=config_dict["model"]["bias"],
-        fold_bias=config_dict["model"]["fold_bias"],
+        fold_bias=False,
     )
     mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
+    if fold_bias:
+        mlp.fold_bias()
     return mlp
 
 
@@ -94,6 +97,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+    assert mlp.has_folded_bias
     mlp.eval()
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)

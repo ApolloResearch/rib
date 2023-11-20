@@ -11,17 +11,16 @@ import fire
 import torch
 
 from rib.plotting import plot_interaction_graph
-from rib.utils import overwrite_output
+from rib.utils import check_outfile_overwrite
 
 
-def main(results_file: str) -> None:
+def main(results_file: str, force: bool = False) -> None:
     """Plot an interaction graph given a results file contain the graph edges."""
     results = torch.load(results_file)
     out_dir = Path(__file__).parent / "out"
     out_file = out_dir / f"{results['exp_name']}_rib_graph.png"
 
-    if out_file.exists() and not overwrite_output(out_file):
-        print("Exiting.")
+    if not check_outfile_overwrite(out_file, force):
         return
 
     # Ensure that we have edges

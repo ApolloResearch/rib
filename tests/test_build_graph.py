@@ -198,7 +198,7 @@ def test_mnist_build_graph():
     n_intervals: 0
     dtype: float32
     node_layers:
-        - layers.1
+        - layers.0
         - layers.2
         - output
     """

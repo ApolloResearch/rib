@@ -7,6 +7,7 @@ from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
 from torch.func import jacrev, vmap
+from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES
 
@@ -139,43 +140,46 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
 
 
 def edge_norm(
-    f_in_hat: Float[Tensor, "... in_hidden_combined"],
+    alpha_f_in_hat: Float[Tensor, "... in_hidden_combined"],
+    outputs_const: tuple[Float[Tensor, "... out_hidden_combined"]],
     module: torch.nn.Module,
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     in_hidden_dims: list[int],
-    out_dim_start_idx: int,
-    out_dim_end_idx: int,
-    has_pos: bool = False,
-) -> Float[Tensor, "batch pos in_hidden_combined_trunc out_hidden_combined_trunc"]:
-    """Calculates the norm of the alpha * in_acts @ C_in @ C_in_pinv when passed through the model.
+    has_pos: bool,
+) -> Float[Tensor, "out_hidden_combined_trunc"]:
+    """Calculates the norm (square, and sum over batch and position) of the difference
+    `module(alpha_f_in_hat @ C_in_pinv) - outputs_const`.
 
     Since the module may take a tuple of inputs, we need to split the `x` tensor into a tuple
     based on the `in_hidden_dims` of each input.
 
-    Note that f_in_hat may be a GradTensor resulting from a vmap operation over the batch dim.
-    If this is the case, it will not have a batch dimension.
-
     Args:
-        f_in_hat: The alpha-adjusted concatenated inputs to the model.
-            i.e. alpha * in_acts @ C_in
+        alpha_f_in_hat: The alpha-adjusted concatenated inputs to the model.
+            i.e. alpha * in_acts @ C_in (included in grad)
+        outputs_const: The non-adjusted outputs of the module, i.e.
+            module(in_acts) = module(f_in_hat @ C_in_pinv). Not in RIB basis.
         module: The model to pass the f_in_hat through.
         C_in_pinv: The pseudoinverse of C_in.
         C_out: The truncated interaction rotation matrix for the output node layer.
         in_hidden_dims: The hidden dimension of the original inputs to the module.
-        out_dim_start_idx: The start index of the output dimension to calculate the norm for.
-            Used for chunking to avoid memory issues.
-        out_dim_end_idx: The end index of the output dimension to calculate the norm for.
         has_pos: Whether the module has a position dimension.
 
+    Returns:
+        The norm (over batch and position) of the output of the module for every
+            out-(RIB)-dimension i.
     """
-    # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
-    f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_in_hat @ C_in_pinv
-    input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
 
-    output = module(*input_tuples)
+    # Compute f^{l+1}(f^l(alpha x))
+    alpha_f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = alpha_f_in_hat @ C_in_pinv
+    alpha_input_tuples = torch.split(alpha_f_in_adjusted, in_hidden_dims, dim=-1)
 
-    outputs = (output,) if isinstance(output, torch.Tensor) else output
+    output_alpha = module(*alpha_input_tuples)
+    outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
+
+    # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
+    outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
+
     # Concatenate the outputs over the hidden dimension
     out_acts = torch.cat(outputs, dim=-1)
 
@@ -183,19 +187,115 @@ def edge_norm(
         out_acts @ C_out if C_out is not None else out_acts
     )
 
-    # Calculate the square and sum over the pos dimension if it exists.
     f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = f_out_hat**2
     if has_pos:
-        # f_out_hat is shape (pos, hidden) if vmapped or (batch, pos, hidden) otherwise
-        assert (
-            f_out_hat.dim() == 2 or f_out_hat.dim() == 3
-        ), f"f_out_hat should have 2 or 3 dims, got {f_out_hat.dim()}"
-        pos_dim = 0 if f_out_hat.dim() == 2 else 1
-        f_out_hat_norm = f_out_hat_norm.sum(dim=pos_dim)
+        # f_out_hat is shape (batch, pos, hidden)
+        assert f_out_hat.dim() == 3, f"f_out_hat should have 3 dims, got {f_out_hat.dim()}"
+        f_out_hat_norm = f_out_hat_norm.sum(dim=1)
 
-    # Just take the output dimensions that are part of this chunk
-    f_out_hat_norm = f_out_hat_norm[..., out_dim_start_idx:out_dim_end_idx]
+    # Sum over the batch dimension
+    f_out_hat_norm = f_out_hat_norm.sum(dim=0)
+
     return f_out_hat_norm
+
+
+def _calc_integration_intervals(
+    n_intervals: int,
+    integral_boundary_relative_epsilon: float = 1e-3,
+) -> tuple[np.ndarray, float]:
+    """Calculate the integration steps for n_intervals between 0+eps and 1-eps.
+
+    Args:
+        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+
+    Returns:
+        alphas: The integration steps.
+        interval_size: The size of each integration step, including a correction factor to account
+            for integral_boundary_epsilon.
+    """
+    # Scale accuracy of the integral boundaries with the number of intervals
+    integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
+    # Integration samples
+    if n_intervals == 0:
+        alphas = np.array([0.5])
+        interval_size = 1.0
+        n_alphas = 1
+    else:
+        # Integration steps for n_intervals intervals
+        n_alphas = n_intervals + 1
+        alphas = np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_alphas)
+        assert np.allclose(np.diff(alphas), alphas[1] - alphas[0]), "alphas must be equally spaced."
+        # Multiply the interval sizes by (1 + 2 eps) to balance out the smaller integration interval
+        interval_size = (alphas[1] - alphas[0]) / (1 - 2 * integral_boundary_epsilon)
+        assert np.allclose(
+            n_intervals * interval_size,
+            1,
+        ), f"n_intervals * interval_size ({n_intervals * interval_size}) != 1"
+    return alphas, interval_size
+
+
+def integrated_gradient_trapezoidal_jacobian(
+    fn: Callable,
+    x: Float[Tensor, "... out_hidden_combined_trunc"],
+    n_intervals: int,
+    jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    dataset_size: int,
+) -> None:
+    """Calculate the integrated gradient of the jacobian of a function w.r.t its input.
+
+    Args:
+        fn: The function to calculate the jacobian of.
+        x: The input to the function.
+        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        jac_out: The output of the jacobian calculation. This is modified in-place.
+        dataset_size: The size of the dataset. Used for normalizing the gradients.
+
+    """
+    einsum_pattern = "bpj,bpj->j" if x.ndim == 3 else "bj,bj->j"
+
+    alphas, interval_size = _calc_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon=1e-3
+    )
+
+    x.requires_grad_(True)
+
+    # Normalize by the dataset size and the number of positions (if the input has a position dim)
+    has_pos = x.ndim == 3
+    normalization_factor = x.shape[1] * dataset_size if has_pos else dataset_size
+
+    for alpha_index, alpha in tqdm(
+        enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
+    ):
+        alpha_f_in_hat = alpha * x
+        f_out_hat_norm = fn(alpha_f_in_hat)
+
+        assert f_out_hat_norm.ndim == 1, f"f_out_hat_norm should be 1d, got {f_out_hat_norm.ndim}"
+        # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
+        # estimate at alpha=0.5)
+        scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
+        for i in tqdm(
+            range(len(f_out_hat_norm)), total=len(f_out_hat_norm), desc="Output idxs", leave=False
+        ):
+            # Get the derivative of the ith output element w.r.t alpha_f_in_hat
+            i_grad = (
+                torch.autograd.grad(f_out_hat_norm[i], alpha_f_in_hat, retain_graph=True)[0]
+                / normalization_factor
+                * interval_size
+                * scaler
+            )
+            with torch.inference_mode():
+                E = torch.einsum(einsum_pattern, i_grad, x)
+                # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
+                # in equation (3.27)
+                # Note that jac_out is initialised to zeros in
+                # `rib.data_accumulator.collect_interaction_edges`
+                jac_out[i] -= E
 
 
 def integrated_gradient_trapezoidal_norm(
@@ -206,39 +306,52 @@ def integrated_gradient_trapezoidal_norm(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
+    integral_boundary_relative_epsilon: float = 1e-3,
 ) -> Float[Tensor, "... in_hidden_combined"]:
-    """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs.
+    """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
+    following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
+    derivative of f^{l+1}(x) - f^{l+1}(f^l(alpha x)) where module(·) is f^{l+1}(·).
 
-    Uses the trapezoidal rule to approximate the integral between 0 and 1.
+    Uses the trapezoidal rule to approximate the integral between 0+eps and 1-eps.
 
     Unlike in the integrated gradient calculation for the edge weights, this function takes the norm
     of the output of the module, condensing the output to a single number which we can run backward
-    on.
+    on. (Thus we do not need to use jacrev.)
 
     Args:
         module: The module to calculate the integrated gradient of.
         inputs: The inputs to the module. May or may not include a position dimension.
         C_out: The truncated interaction rotation matrix for the module's outputs.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=1 instead of using the trapezoidal rule.
-        concat_input: Whether to concatenate the input along the last dimension (used for
-        transformer functionality)
+            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
     """
-    # Ensure that the inputs have requires_grad=True
+    # Compute f^{l+1}(x) to which the derivative is not applied.
+    with torch.inference_mode():
+        output_const = module(*tuple(x.detach().clone() for x in inputs))
+        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+
+    # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:
         x.requires_grad_(True)
 
-    # Use an interval size of 1/n_intervals (unless n_intervals == 0, in which case we use 1 so
-    # that our multiplication by interval_size below doesn't change the result)
-    interval_size = 1.0 / max(n_intervals, 1)
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    alphas = np.array([1]) if n_intervals == 0 else np.arange(0, 1 + interval_size, interval_size)
+    alphas, interval_size = _calc_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon
+    )
 
-    for alpha in alphas:
+    for alpha_index, alpha in enumerate(alphas):
+        # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
-        output = module(*alpha_inputs)
-        outputs = (output,) if isinstance(output, torch.Tensor) else output
+        output_alpha = module(*alpha_inputs)
+        outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
+
+        # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
+        outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
 
         # Concatenate the outputs over the hidden dimension
         out_acts = torch.cat(outputs, dim=-1)
@@ -255,8 +368,8 @@ def integrated_gradient_trapezoidal_norm(
 
         alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
-        # estimate at alpha=1)
-        if alpha == 0 or (alpha == 1 and n_intervals > 0):
+        # estimate at alpha=0.5)
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
             alpha_in_grads = 0.5 * alpha_in_grads
 
         in_grads += alpha_in_grads * interval_size
@@ -265,76 +378,40 @@ def integrated_gradient_trapezoidal_norm(
             assert x.grad is not None, "Input grad should not be None."
             x.grad.zero_()
 
+    # Add the minus sign in front of the IG integral, see e.g. the definition of g_j in equation (3.27)
+    in_grads *= -1
+
     return in_grads
 
 
-def integrated_gradient_trapezoidal_jacobian(
-    fn: Callable[[Float[Tensor, "... in_hidden"]], Float[Tensor, "... out_hidden"]],
-    in_tensor: Float[Tensor, "... in_hidden"],
-    n_intervals: int,
-    out_dim: int,
-    out_dim_chunk_size: Optional[int] = None,
-) -> Float[Tensor, "... in_hidden out_hidden"]:
-    """Calculate the integrated gradient of the batched jacobian of a function w.r.t its input.
+def calc_gram_matrix(
+    acts: Union[
+        Float[Tensor, "batch pos d_hidden"],
+        Float[Tensor, "batch d_hidden"],
+    ],
+    dataset_size: int,
+) -> Float[Tensor, "d_hidden d_hidden"]:
+    """Calculate the gram matrix for a given tensor.
 
-    Uses the trapezoidal rule to approximate the integral between 0 and 1.
+    The gram is normalized by the number of positions if the tensor has a position dimension.
+
+    Note that the inputs must contain a batch dimension, otherwise the normalization will not be
+    correct.
 
     Args:
-        fn: The function to calculate the integrated gradient of.
-        in_tensor: The input to the function.
-        n_intervals: The number of intervals to use for the integral approximation.
-        out_dim: The (concatenated) dimension of the output of the module computed by `fn`.
-        out_dim_chunk_size: The number of output dimensions to chunk together when calculating the
-            jacobian. This is to avoid memory issues when calculating the jacobian of a large
-            function.
+        acts: The tensor to calculate the gram matrix for. May or may not have a position dimension.
+        dataset_size: The size of the dataset. Used for scaling the gram matrix.
+
+    Returns:
+        The gram matrix.
     """
-    # Create a list of out_dim chunks. We use these to index the output of the function.
-    # E.g. output[start_idx:end_idx] will give the output corresponding to the chunk.
-    # Add out_dim to the list to ensure that the last chunk grabs the remaining elements
-    out_dim_chunks = list(range(0, out_dim, out_dim_chunk_size or out_dim)) + [out_dim]
+    if acts.dim() == 3:  # tensor with pos dimension
+        einsum_pattern = "bpi, bpj -> ij"
+        normalization_factor = acts.shape[1] * dataset_size
+    elif acts.dim() == 2:  # tensor without pos dimension
+        einsum_pattern = "bi, bj -> ij"
+        normalization_factor = dataset_size
+    else:
+        raise ValueError("Unexpected tensor rank")
 
-    # Use an interval size of 1/n_intervals (unless n_intervals == 0, in which case we use 1 so
-    # that our multiplication by interval_size below doesn't change the result)
-    interval_size = 1.0 / max(n_intervals, 1)
-    jac_out: Optional[
-        Union[
-            Float[Tensor, "batch out_hidden_trunc in_hidden_trunc"],
-            Float[Tensor, "batch out_hidden_trunc pos in_hidden_trunc"],
-        ]
-    ] = None
-    alphas = np.array([1]) if n_intervals == 0 else np.arange(0, 1 + interval_size, interval_size)
-    for alpha in alphas:
-        chunked_jac_outs: list[
-            Union[
-                Float[Tensor, "batch out_hidden_trunc_chunk in_hidden_trunc"],
-                Float[Tensor, "batch out_hidden_trunc_chunk pos in_hidden_trunc"],
-            ]
-        ] = []
-        for i in range(len(out_dim_chunks) - 1):
-            fn_chunked = partial(
-                fn, out_dim_start_idx=out_dim_chunks[i], out_dim_end_idx=out_dim_chunks[i + 1]
-            )
-            # Need to detach the output to avoid a memory leak
-            alpha_jac_out_chunk = vmap(jacrev(fn_chunked))(alpha * in_tensor).detach()
-            chunked_jac_outs.append(alpha_jac_out_chunk)
-
-        # Concatenate the chunks together over the out_hidden_trunc_chunk dimension (i.e. dim=1)
-        alpha_jac_out = torch.cat(chunked_jac_outs, dim=1)
-
-        assert (
-            alpha_jac_out.shape[1] == out_dim
-        ), f"Error in chunking: alpha_jac_out.shape[1] ({alpha_jac_out.shape[1]}) != out_dim "
-
-        # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
-        # estimate at alpha=1)
-        if alpha == 0 or (alpha == 1 and n_intervals > 0):
-            alpha_jac_out = 0.5 * alpha_jac_out
-
-        if jac_out is None:
-            jac_out = alpha_jac_out * interval_size
-        else:
-            jac_out += alpha_jac_out * interval_size
-
-    assert jac_out is not None, "jac_out should not be None."
-
-    return jac_out
+    return torch.einsum(einsum_pattern, acts / normalization_factor, acts)

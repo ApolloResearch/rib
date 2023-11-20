@@ -48,7 +48,9 @@ from rib.utils import (
 
 class Config(BaseModel):
     exp_name: Optional[str]
-    force_overwrite_output: Optional[bool] = False
+    force_overwrite_output: Optional[bool] = Field(
+        False, description="Don't ask before overwriting the output file."
+    )
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(

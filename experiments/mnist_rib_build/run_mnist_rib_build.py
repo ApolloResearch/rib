@@ -22,7 +22,7 @@ from typing import Optional
 import fire
 import torch
 import yaml
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -37,7 +37,9 @@ from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 
 class Config(BaseModel):
     exp_name: str
-    force_overwrite_output: Optional[bool] = False
+    force_overwrite_output: Optional[bool] = Field(
+        False, description="Don't ask before overwriting the output file."
+    )
     mlp_path: Path
     batch_size: int
     seed: int

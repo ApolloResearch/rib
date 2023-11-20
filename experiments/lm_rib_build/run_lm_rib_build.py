@@ -76,7 +76,9 @@ from rib.utils import (
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exp_name: str = Field(..., description="The name of the experiment")
-    force_overwrite_output: Optional[bool] = False
+    force_overwrite_output: Optional[bool] = Field(
+        False, description="Don't ask before overwriting the output file."
+    )
     seed: int = Field(..., description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."

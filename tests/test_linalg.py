@@ -212,7 +212,20 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
     ), "Integrated grad norms are not decreasing"
 
 
-def test_integrated_gradient_trapezoidal_jacobian_linear():
+class CustomLinear(torch.nn.Linear):
+    """A regular linear layer with a chunking of the output dimension.
+
+    This resembles the behaviour of rib.linalg.edge_norm.
+    """
+
+    def forward(self, x, out_dim_start_idx: int = None, out_dim_end_idx: int = None):
+        result = super().forward(x)
+        if out_dim_start_idx is not None and out_dim_end_idx is not None:
+            result = result[..., out_dim_start_idx:out_dim_end_idx]
+        return result
+
+
+def test_integrated_gradient_trapezoidal_jacobian_n_intervals():
     """Check independence of n_intervals for integrated gradient jacobian over a linear module
     without bias.
 
@@ -225,22 +238,68 @@ def test_integrated_gradient_trapezoidal_jacobian_linear():
 
     in_tensor = torch.randn(batch_size, in_hidden)
 
-    linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+    linear = CustomLinear(in_hidden, out_hidden, bias=False)
 
     result_point_estimate = integrated_gradient_trapezoidal_jacobian(
         fn=linear,
         in_tensor=in_tensor,
         n_intervals=0,
+        out_dim=out_hidden,
     )
     result_1 = integrated_gradient_trapezoidal_jacobian(
         fn=linear,
         in_tensor=in_tensor,
         n_intervals=1,
+        out_dim=out_hidden,
     )
     result_5 = integrated_gradient_trapezoidal_jacobian(
         fn=linear,
         in_tensor=in_tensor,
         n_intervals=2,
+        out_dim=out_hidden,
+    )
+
+    # Check that all results are close
+    assert torch.allclose(
+        result_point_estimate, result_1
+    ), "Point estimate and n_intervals==1 are not close enough"
+    assert torch.allclose(
+        result_1, result_5
+    ), "n_intervals==1 and n_intervals==5 are not close enough"
+
+
+def test_integrated_gradient_trapezoidal_jacobian_chunks():
+    """Check independence of chunk size for integrated gradient jacobian over a linear module."""
+    torch.manual_seed(0)
+    batch_size = 2
+    in_hidden = 3
+    out_hidden = 4
+    n_intervals = 1
+
+    in_tensor = torch.randn(batch_size, in_hidden)
+
+    linear = CustomLinear(in_hidden, out_hidden, bias=False)
+
+    result_point_estimate = integrated_gradient_trapezoidal_jacobian(
+        fn=linear,
+        in_tensor=in_tensor,
+        n_intervals=n_intervals,
+        out_dim=4,
+        out_dim_chunk_size=None,  # Will default to out_dim
+    )
+    result_1 = integrated_gradient_trapezoidal_jacobian(
+        fn=linear,
+        in_tensor=in_tensor,
+        n_intervals=n_intervals,
+        out_dim=4,
+        out_dim_chunk_size=1,
+    )
+    result_5 = integrated_gradient_trapezoidal_jacobian(
+        fn=linear,
+        in_tensor=in_tensor,
+        n_intervals=n_intervals,
+        out_dim=4,
+        out_dim_chunk_size=3,
     )
 
     # Check that all results are close

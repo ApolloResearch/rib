@@ -40,7 +40,6 @@ class Config(BaseModel):
     batch_size: int
     seed: int
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
-    logits_node_layer: bool  # Whether to build an extra output node layer for the logits.
     rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
@@ -70,7 +69,7 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     dataset = datasets.MNIST(
         root=REPO_ROOT / ".data", train=train, download=True, transform=transform
     )
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     return data_loader
 
 
@@ -85,8 +84,8 @@ def main(config_path_str: str) -> None:
 
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_interaction_graph_file = out_dir / f"{config.exp_name}_interaction_graph.pt"
-    if out_interaction_graph_file.exists() and not overwrite_output(out_interaction_graph_file):
+    out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
+    if out_file.exists() and not overwrite_output(out_file):
         logger.info("Exiting.")
         return None
 
@@ -99,12 +98,13 @@ def main(config_path_str: str) -> None:
 
     train_loader = load_mnist_dataloader(train=True, batch_size=config.batch_size)
 
+    non_output_node_layers = [layer for layer in config.node_layers if layer != "output"]
     # Only need gram matrix for logits if we're rotating the final node layer
-    collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+    collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
-        module_names=config.node_layers,
+        module_names=non_output_node_layers,
         data_loader=train_loader,
         dtype=dtype,
         device=device,
@@ -113,7 +113,8 @@ def main(config_path_str: str) -> None:
 
     Cs, Us, _, _, _, _, = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
-        module_names=config.node_layers,
+        section_names=non_output_node_layers,
+        node_layers=config.node_layers,
         hooked_model=hooked_mlp,
         data_loader=train_loader,
         dtype=dtype,
@@ -127,7 +128,7 @@ def main(config_path_str: str) -> None:
         Cs=Cs,
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
-        module_names=config.node_layers,
+        section_names=config.node_layers,
         data_loader=train_loader,
         dtype=dtype,
         device=device,
@@ -148,14 +149,14 @@ def main(config_path_str: str) -> None:
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(module, E_hats[module].cpu()) for module in config.node_layers],
+        "edges": [(module, E_hats[module].cpu()) for module in E_hats],
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": model_config_dict,
     }
 
     # Save the results (which include torch tensors) to file
-    torch.save(results, out_interaction_graph_file)
-    logger.info("Saved results to %s", out_interaction_graph_file)
+    torch.save(results, out_file)
+    logger.info("Saved results to %s", out_file)
 
 
 if __name__ == "__main__":

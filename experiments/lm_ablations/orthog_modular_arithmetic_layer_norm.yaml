@@ -1,12 +1,15 @@
-exp_name: orthog_eps1e-4_ln_intervals50_modular_arithmetic
+exp_name: orthog_ln_intervals50_modular_arithmetic
 ablation_type: orthogonal
-interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/eps1e-4_ln_intervals50_modular_arithmetic_interaction_graph.pt
-ablate_every_vec_cutoff: 10
+interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/ln_intervals50_modular_arithmetic_rib_graph.pt
+schedule:
+  schedule_type: linear
+  early_stopping_threshold: 0.3
+  n_points: 30
 dataset:
   source: custom
   name: modular_arithmetic
-  return_set: test
-node_layers:  # Rotate the input to these modules into the orthogonal basis
+  return_set: train
+ablation_node_layers:  # Rotate the input to these modules into the orthogonal basis
   - ln1.0
   - ln2.0
   - mlp_out.0
@@ -14,5 +17,5 @@ node_layers:  # Rotate the input to these modules into the orthogonal basis
 batch_size: 128
 dtype: float32
 eval_type: accuracy
-eps: 1e-4
+eps: 1e-5
 seed: 0

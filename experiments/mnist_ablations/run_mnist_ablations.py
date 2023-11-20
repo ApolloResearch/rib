@@ -56,7 +56,7 @@ class Config(BaseModel):
         description="The schedule to use for ablations.",
     )
     dtype: str
-    node_layers: list[str]
+    ablation_node_layers: list[str]
     batch_size: int
     seed: int
 
@@ -103,16 +103,18 @@ def main(config_path_str: str) -> None:
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
-    assert set(config.node_layers) <= set(
+    assert set(config.ablation_node_layers) <= set(
         interaction_graph_info["config"]["node_layers"]
     ), "The node layers in the config must be a subset of the node layers in the interaction graph."
+
+    assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
     basis_matrices = load_basis_matrices(
         interaction_graph_info=interaction_graph_info,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         ablation_type=config.ablation_type,
         dtype=dtype,
         device=device,
@@ -136,11 +138,11 @@ def main(config_path_str: str) -> None:
 
     accuracies: dict[str, dict[int, float]] = run_ablations(
         basis_matrices=basis_matrices,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         hooked_model=hooked_mlp,
         data_loader=test_loader,
         eval_fn=eval_model_accuracy,
-        graph_module_names=config.node_layers,
+        graph_module_names=config.ablation_node_layers,
         schedule_config=config.schedule,
         device=device,
         dtype=dtype,

@@ -60,7 +60,7 @@ class Config(BaseModel):
         discriminator="source",
         description="The dataset to use to build the graph.",
     )
-    node_layers: list[str]
+    ablation_node_layers: list[str]
     batch_size: int
     dtype: str
     eps: Optional[float] = 1e-5
@@ -92,16 +92,18 @@ def main(config_path_str: str) -> None:
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
 
-    assert set(config.node_layers) <= set(
+    assert set(config.ablation_node_layers) <= set(
         interaction_graph_info["config"]["node_layers"]
     ), "The node layers in the config must be a subset of the node layers in the interaction graph."
+
+    assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
     basis_matrices = load_basis_matrices(
         interaction_graph_info=interaction_graph_info,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         ablation_type=config.ablation_type,
         dtype=dtype,
         device=device,
@@ -113,8 +115,12 @@ def main(config_path_str: str) -> None:
         else None
     )
 
+    # Note that we specify node_layers as config.ablation_node_layers, even though the original
+    # graph was built with interaction_graph_info["config"]["node_layers"]. This is because
+    # changing the sections in the model has no effect on the computation, and we would like the
+    # sections to match ablation_node_layers so we can hook them easily.
     seq_model, _ = load_sequential_transformer(
-        node_layers=config.node_layers,
+        node_layers=config.ablation_node_layers,
         last_pos_module_type=interaction_graph_info["config"]["last_pos_module_type"],
         tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
         tlens_model_path=tlens_model_path,
@@ -135,7 +141,9 @@ def main(config_path_str: str) -> None:
         return_set=return_set,
         tlens_model_path=tlens_model_path,
     )
-    data_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size)
+    data_loader = create_data_loader(
+        dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+    )
 
     # Test model accuracy/loss before graph building, ta be sure
     eval_fn: Callable = (
@@ -148,7 +156,7 @@ def main(config_path_str: str) -> None:
 
     ablation_results: dict[str, dict[int, float]] = run_ablations(
         basis_matrices=basis_matrices,
-        node_layers=config.node_layers,
+        ablation_node_layers=config.ablation_node_layers,
         hooked_model=hooked_model,
         data_loader=data_loader,
         eval_fn=eval_fn,

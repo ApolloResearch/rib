@@ -265,10 +265,12 @@ def main(
 
     out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
+    # If we are using multiprocessing, append a pod_rank to all output files
+    pod_rank_suffix = f"_pod{dist_info.pod_rank}" if dist_info.n_pods > 1 else ""
     if config.calculate_edges:
-        out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
+        out_file = out_dir / f"{config.exp_name}_rib_graph{pod_rank_suffix}.pt"
     else:
-        out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
+        out_file = out_dir / f"{config.exp_name}_rib_Cs{pod_rank_suffix}.pt"
     if dist_info.is_main_process and not check_outfile_overwrite(
         out_file, config.force_overwrite_output or force, logger=logger
     ):

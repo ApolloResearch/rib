@@ -92,19 +92,19 @@ class Config:
     n_intervals: float # The number of intervals to use for integrated gradients.
     dtype: type # Data type of all tensors (except those overriden in certain functions).
     rotate_final_node_layer: bool = True # Whether to rotate the final node layer.
-#%%
-mlp = SmallDNN(4,4,2)
-dataset = RandomVectorDataset(4,128)
-train_loader = DataLoader(dataset, batch_size=32, shuffle=True)
-criterion = nn.CrossEntropyLoss()
-for batch, labels in train_loader:
-    print(criterion(mlp(batch),labels))
+# #%%
+# mlp = SmallDNN(4,4,2)
+# dataset = RandomVectorDataset(4,128)
+# train_loader = DataLoader(dataset, batch_size=32, shuffle=True)
+# criterion = nn.CrossEntropyLoss()
+# for batch, labels in train_loader:
+#     print(criterion(mlp(batch),labels))
 
-mlphooked = HookedModel(mlp)
-print(mlphooked)
+# mlphooked = HookedModel(mlp)
+# print(mlphooked)
 
 
-node_layers(mlphooked)
+# node_layers(mlphooked)
 
 
 #%%
@@ -204,7 +204,7 @@ def main(config: Config) -> None:
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    main(config)
 
 
 # # Parameters

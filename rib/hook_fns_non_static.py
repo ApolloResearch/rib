@@ -1,20 +1,11 @@
 """Contains hook functions whose only purpose is to change the model's activations on forward pass,
 not store data."""
-from functools import partial
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import torch
-import torch.nn as nn
 from einops import rearrange, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
-
-from rib.linalg import (
-    edge_norm,
-    integrated_gradient_trapezoidal_jacobian,
-    integrated_gradient_trapezoidal_norm,
-)
-from rib.models.utils import get_model_attr
 
 
 def relu_swap_forward_hook_fn(
@@ -35,6 +26,7 @@ def relu_swap_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     replacement_idxs: Int[Tensor, "d_hidden"],
+    use_residual_stream: bool = False,
 ) -> Union[
         tuple[Float[Tensor, "batch d_hidden"]],
         tuple[Float[Tensor, "batch pos d_hidden"]],
@@ -45,33 +37,46 @@ def relu_swap_forward_hook_fn(
     depends on the indices you pass in.
 
     Hook activation layers.
+
+    This function has to work with all possible modules, including those that don't have tuple as
+    output. By default it is easier to work with the residual stream being present even if it is not
+    modified.
+    Hidden dimension of operators and intermediate tensor in this function should be d_resid + d_hidden_MLP.
+
+    Args:
+        module: Module whose activations are being hooked.
+        inputs: Inputs to the module.
+        output: Output of the module.
+        hooked_data: Dictionary containing the hook data.
+        hook_name: Name of the hook.
+        data_key: Key of the data to be stored.
+        replacement_idxs: Indices to replace the original indices with.
+        use_residual_stream: Whether residual stream is included in similarity metrics and
+        clustering and subsequent replacement. Default False until I figured out whether this is principled.
     """
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
 
-    output_is_tuple: bool = True if isinstance(output, tuple) else False
+    output_is_tuple = True if isinstance(output, tuple) else False
+    is_lm = True if inputs[0].dim() == 3 else False
     outputs = output if output_is_tuple else (output,)
     out_hidden_dims = [x.shape[-1] for x in outputs]
 
-    inputs = torch.cat([x for x in inputs], dim=-1)
-    outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
+    # Once again, fold in token dimension into batch
+    if is_lm and not use_residual_stream:
+        inputs = rearrange(torch.cat([x for x in inputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
+        outputs = rearrange(torch.cat([x for x in outputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
 
     operator: Float[Tensor, "batch d_hidden_out"] = torch.div(outputs, inputs)
-    if operator.dim() == 2:
-        batch_size, d_hidden = operator.shape # [256, 101]
-    elif operator.dim() == 3:
-        batch_size, token_len, d_hidden = operator.shape
+    _, d_hidden = operator.shape
 
-    edited_operator = operator.clone()
     # `replacement_idxs` is shorter than `operator` by however large residual stream dim is
-    # Trivially extend for residual stream by avoiding replacing these indices
+    # Extend this code for residual stream by avoiding replacing these indices
     extended_replacement_idxs = torch.arange(d_hidden)
     extended_replacement_idxs[:len(replacement_idxs)] = replacement_idxs
     operator[..., torch.arange(d_hidden)] = operator[..., extended_replacement_idxs]
-
     edited_output = operator * inputs
 
-    # Split back into tuple form if the ouput should have been tuple
-    if output_is_tuple:
+    if output_is_tuple:     # Split back into tuple form if the ouput should have been tuple
         edited_output = tuple(torch.split(edited_output, out_hidden_dims, dim=-1))
 
     return edited_output

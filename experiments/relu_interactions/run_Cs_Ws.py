@@ -20,6 +20,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
+from experiments.relu_interactions.relu_interaction_utils import plot_matrix_list
 from rib.data_accumulator import (
     collect_activations_and_rotate,
     collect_gram_matrices,
@@ -136,18 +137,6 @@ def extract_weights(model: torch.nn.Module) -> list[torch.Tensor]:
 
 
 # Helper functions for main ========================================================
-
-def plot(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_name: str, out_dir: Path) -> None:
-    for i, matrix in enumerate(list(matrix_list)):
-        # Calculate figsize based on matrix dimensions and the given figsize_per_unit
-        nrows, ncols = matrix.shape
-        figsize = (int(ncols * 0.1), int(nrows * 0.1))
-        plt.figure(figsize=figsize)
-        sns.heatmap(matrix.detach().cpu(), annot=False,
-                    cmap="YlGnBu", cbar=True, square=True)
-        plt.savefig(
-            out_dir / f"{var_name}_{i}.png")
-
 
 def get_Cs(
     model: nn.Module,
@@ -275,9 +264,9 @@ def Cs_Ws_main(config_path_str: str) -> None:
     """MAIN FUNCTION 2. Check how sparse Cs and rotated Ws are in equation:
     C^{l+1} O(x) W C+^l C^l f(x)
     """
-    Cs_save_file = Path(__file__).parent / "Cs"
-    Ws_save_file = Path(__file__).parent / "Ws"
-    edges_save_file = Path(__file__).parent / "edges"
+    Cs_save_file = Path(__file__).parent / "Cs_mlp"
+    Ws_save_file = Path(__file__).parent / "Ws_mlp"
+    edges_save_file = Path(__file__).parent / "edges_mlp"
 
     config_path = Path(config_path_str)
     config = load_config(config_path, config_model=Config)
@@ -314,7 +303,7 @@ def Cs_Ws_main(config_path_str: str) -> None:
         rescaled_C_pinv_list.append(Lambda_abs_sqrt @ C_pinv)
 
     # Can either use original or rescaled C list in fn below
-    W_list = check_and_open_file(
+    W_hat_list = check_and_open_file(
         file_path=Ws_save_file,
         get_var_fn=get_rotated_Ws,
         config=config,
@@ -329,15 +318,15 @@ def Cs_Ws_main(config_path_str: str) -> None:
         model=model,
         Cs_list=C_list,
         Cs_unscaled_list=U_D_sqrt_pinv_Vs_list,
-        W_hat_list=W_list,
+        W_hat_list=W_hat_list,
     )
     edges = list(edges_dict.values())
 
-    plot(rescaled_C_list, "C", out_dir)
-    plot(W_list, "W", out_dir)
-    plot(U_D_sqrt_Vs_list, "U_D_sqrt_V", out_dir)
-    plot(U_D_sqrt_pinv_Vs_list, "U_D_sqrt_pinv_V", out_dir)
-    plot(edges, "edges", out_dir)
+    plot_matrix_list(rescaled_C_list, "C", out_dir)
+    plot_matrix_list(W_hat_list, "W", out_dir)
+    plot_matrix_list(U_D_sqrt_Vs_list, "U_D_sqrt_V", out_dir)
+    plot_matrix_list(U_D_sqrt_pinv_Vs_list, "U_D_sqrt_pinv_V", out_dir)
+    plot_matrix_list(edges, "edges", out_dir)
 
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []

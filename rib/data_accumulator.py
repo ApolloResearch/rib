@@ -304,7 +304,6 @@ def collect_relu_interactions(
     device: str,
     relu_metric_type: int,
     Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
-    Lambda_dashes: list[Float[Tensor, "d_hidden d_hidden"]],
     layer_module_names: list[str],
     n_intervals: int,
     unhooked_model: nn.Module,
@@ -315,8 +314,6 @@ def collect_relu_interactions(
     This currently only works for piecewise linear functions and modules must be activation type modules.
     Recall that the node layers correspond to the positions at the input to each module specified in
     module_names, as well as the output of the final module.
-
-    TODO: change ReLU metric type naming system to Enum rather than having integers floating around.
 
     Most of my code assumes hook_names = model_names.
 
@@ -363,13 +360,7 @@ def collect_relu_interactions(
         hook_name: hooked_model.hooked_data[hook_name]["relu_num"].cpu()
         for hook_name in hooked_model.hooked_data
     }
-    if relu_metric_type == 3:
-        relu_similarity_whole_numerators = {
-            hook_name: hooked_model.hooked_data[hook_name]["whole_relu_num"].cpu()
-            for hook_name in hooked_model.hooked_data
-        }
-        for i, mat in enumerate(Lambda_dashes):
-            plot_temp(mat, f"Lambda_dash_{i}")
+
     # Plot preactivations for debugging
     preactivations = {
         hook_name: torch.div(hooked_model.hooked_data[hook_name]["preactivations"], len(data_loader.dataset))
@@ -381,10 +372,8 @@ def collect_relu_interactions(
     hooked_model.clear_hooked_data()
 
     match relu_metric_type:
-        case 0 | 1 | 3:
-            rotate = False
-        case 2:
-            rotate = True
+        case 0 | 1 | 3: rotate = False
+        case 2: rotate = True
 
     denominators: list[float] = collect_function_sizes(
         hooked_model=hooked_model,
@@ -400,22 +389,19 @@ def collect_relu_interactions(
     match relu_metric_type:
         case 0: relu_similarity_matrices = relu_similarity_numerators / len(data_loader.dataset)
         case 1 | 2: # We don't normalise either numerator or denominator by dataset size
-            relu_similarity_matrices = {hook_name: torch.div(relu_similarity_numerators[hook_name], denominators[i]) for i, hook_name in enumerate(module_names)
-            }
+            relu_similarity_matrices = {hook_name: torch.div(relu_similarity_numerators[hook_name], denominators[i]) for i, hook_name in enumerate(module_names)}
         case 3:
             """Todo: normalise by Lambda and fix g_j in last term."""
-            # num_2_shapes = [mat.shape for mat in list(relu_similarity_numerators.values())]
-            # lambda_shapes = [mat.shape for mat in Lambda_dashes]
             relu_similarity_matrices = {}
             for i, key in enumerate(module_names):
-            ## Lambda code DOES work, but you'd need to multiply by dataset size here
+            ## Lambda code to check first term of numerator DOES work, but need to multiply by dataset size
             ## if not normalising by dataset size on both numerator and denominator
             #     vectorised_Lambda_dash = torch.diag(Lambda_dashes[i+1])
             #     d_hidden = vectorised_Lambda_dash.shape[0]
             #     numerator_term_1 = repeat(vectorised_Lambda_dash, 'd1 -> d1 d2', d2=d_hidden).cpu()
             #     numerator = numerator_term_1 - relu_similarity_numerators[key]
 
-                numerator = relu_similarity_whole_numerators[key]
+                numerator = relu_similarity_numerators[key]
                 relu_similarity_matrices[key] = numerator / denominators[i+1]
 
     return relu_similarity_matrices
@@ -452,14 +438,13 @@ def collect_function_sizes(
                 for hook_name in hooked_model.hooked_data]
     hooked_model.clear_hooked_data()
 
-
     return fn_sizes
 
 
 def collect_test_edges(
-    Cs_unscaled: list[Float[Tensor, "d_hidden1 d_hidden2"]],
-    Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
-    W_hats: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    C_unscaled_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    C_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    W_hat_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
     hooked_model: HookedModel,
     module_names: list[str],
     data_loader: DataLoader,
@@ -477,8 +462,8 @@ def collect_test_edges(
 
     test_edges_hooks = []
     for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
-        if i == len(module_names) - 1: # Can't collect test edges for output layer
-            break
+        # if i == len(module_names) - 1: # Can't collect test edges for output layer
+        #     break
         test_edges_hooks.append(
             Hook(
                 name=hook_name,
@@ -486,9 +471,9 @@ def collect_test_edges(
                 fn=test_edges_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={
-                    'C_unscaled': Cs_unscaled[i].detach().cpu(),
-                    'C_next_layer': Cs[i+1].detach().cpu(),
-                    'W_hat': W_hats[i]
+                    'C_unscaled': C_unscaled_list[i],
+                    'C_next_layer': C_list[i+1],
+                    'W_hat': W_hat_list[i]
                 }
             )
         )
@@ -496,7 +481,7 @@ def collect_test_edges(
     run_dataset_through_model(hooked_model, data_loader, hooks=test_edges_hooks, dtype=dtype, device=device)
 
     edges = {
-        hook_name: torch.div(hooked_model.hooked_data[hook_name]["test_edge"], len(data_loader.dataset)) for hook_name in hooked_model.hooked_data
+        hook_name: torch.div(hooked_model.hooked_data[hook_name]["test_edge"], len(data_loader.dataset)).detach().cpu() for hook_name in hooked_model.hooked_data
     }
     hooked_model.clear_hooked_data()
 
@@ -669,7 +654,7 @@ def collect_clustered_relu_P_mats(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
-    Cs_list: list[Float[Tensor, "d_hidden_out d_hidden_truncated"]],
+    C_list: list[Float[Tensor, "d_hidden_out d_hidden_truncated"]],
     W_hat_list: list[Float[Tensor, "d_hidden_out d_hiddden_in"]],
     all_cluster_idxs: list[list[Int[Tensor, "cluster_size"]]],
     hook_names: Optional[list[str]] = None,
@@ -682,35 +667,16 @@ def collect_clustered_relu_P_mats(
     else:
         hook_names = module_names
 
-    # relu_swap_hooks = []
-    # for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
-    #     relu_swap_hooks.append(
-    #         Hook(
-    #             name=hook_name,
-    #             data_key="Ps_clustered",
-    #             fn=clustered_relu_P_hook_fn,
-    #             module_name=module_name,
-    #             fn_kwargs={"C_next_layer": Cs_list[i+1], "W_hat": W_hats_list[i], "layer_cluster_idxs": all_cluster_idxs[i]}
-    #         )
-    #     )
-
-    # run_dataset_through_model(hooked_model, data_loader, hooks=relu_swap_hooks, dtype=dtype, device=device)
-
-    # Ps = {
-    #     hook_name: torch.div(hooked_model.hooked_data[hook_name]["Ps_clustered"], len(data_loader.dataset))
-    #     for hook_name in hooked_model.hooked_data
-    # }
-    # hooked_model.clear_hooked_data()
-
     P_dict = {}
     for i, (module_name, hook_name, layer_cluster_idxs) in enumerate(zip(module_names, hook_names, all_cluster_idxs)):
+        print(f"current i {i}")
         layer_P_dict = {}
         for cluster_idxs in layer_cluster_idxs:
-            C_next_layer_cluster = Cs_list[i][cluster_idxs, :] # Cols C in overleaf = rows C in code
+            C_next_layer_cluster = C_list[i][cluster_idxs, :] # Cols C in overleaf = rows C in code
             W_hat_t = W_hat_list[i].T
             W_hat_cluster = W_hat_t[:, cluster_idxs] # Rows W overleaf = cols C in code
             P: Float[Tensor, "d_hidden_next_layer d_hidden"] = W_hat_cluster @ C_next_layer_cluster
-            layer_P_dict[f"{cluster_idxs}"] = P.detach().cpu()
+            layer_P_dict[f"{cluster_idxs}"] = P
         P_dict[module_name] = layer_P_dict
 
     return P_dict

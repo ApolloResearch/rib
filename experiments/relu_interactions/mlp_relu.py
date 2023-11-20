@@ -207,7 +207,7 @@ def mlp_relu_main(config_path_str: str) -> None:
     config = load_config(config_path, config_model=Config)
     set_seed(config.seed)
 
-    relu_matrices_save_file = Path(__file__).parent / f"mlp_type_{config.relu_metric_type}"
+    relu_matrices_save_file = Path(__file__).parent / f"similarity_metric_{config.relu_metric_type}_mlp"
     Cs_save_file = Path(__file__).parent / "Cs"
 
     out_dir = Path(__file__).parent / f"out_mlp_relu/type_{config.relu_metric_type}"

@@ -81,7 +81,7 @@ def get_model_attr(model: torch.nn.Module, attr_path: str) -> torch.nn.Module:
     return attr
 
 
-def get_model_weight(model: torch.nn.Module, attr_path: str, module_class: str, module_class_map: dict[str, nn.Module]) -> list[torch.Tensor]:
+def get_model_weight(model: torch.nn.Module, attr_path: str) -> list[torch.Tensor]:
     """Retrieve the weight matrix of a specific layer in a PyTorch model. Call on get_model_attr to
     do so.
 
@@ -89,10 +89,8 @@ def get_model_weight(model: torch.nn.Module, attr_path: str, module_class: str, 
     they do.
 
     Quick explanation:
-    - Obtain the higher level Sequential objects then iterates over
+    - Obtain the higher level Sequential objects then iterates over.
     their members to check if the module class matches the assigned module class.
-    - This is zipped, which means Sequential object at list idx 2 will only be checked for module class at
-    module_classes list idx 2.
     - Then check if this thing has a "W" in the name, suggesting it contains a valid weight
     vector.
     - If one of the above conditions is not True, then return None and set weights to None.
@@ -106,11 +104,12 @@ def get_model_weight(model: torch.nn.Module, attr_path: str, module_class: str, 
     """
     weights = None
     modules: list[nn.Module] = [module for module in get_model_attr(model, attr_path)]
+    print(modules)
     for module in modules:
-        if isinstance(module, module_class_map[module_class]):
-            for name, param in module.named_parameters():
-                if "W" in name:
-                    weights = param
+        print(f"module {module}")
+        for name, param in module.named_parameters():
+            print(name)
+            if "W" in name: weights = param
 
     return weights
 

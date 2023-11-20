@@ -37,38 +37,21 @@ from jaxtyping import Float, Int
 from einops import rearrange, repeat
 import torch
 from torch import Tensor
-import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from scipy.cluster.hierarchy import dendrogram, fcluster, leaves_list, linkage, cophenet
-from scipy.ndimage import label
-from scipy.spatial.distance import squareform, pdist
+from scipy.cluster.hierarchy import dendrogram, fcluster, leaves_list, linkage
+from scipy.spatial.distance import squareform
 from sklearn.metrics import silhouette_score, davies_bouldin_score
 from sklearn.cluster import AffinityPropagation
-from sklearn.datasets import make_blobs
 
 from rib.data_accumulator import (
     calculate_all_swapped_iterative_relu_loss,
     calculate_swapped_relu_loss,
-    collect_gram_matrices,
-    collect_relu_interactions,
 )
 from rib.hook_manager import HookedModel
-from rib.interaction_algos import (
-    Eigenvectors,
-    InteractionRotation,
-    calculate_interaction_rotations,
-)
-from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
+
 from rib.log import logger
 from rib.types import TORCH_DTYPES
-from rib.utils import (
-    eval_cross_entropy_loss,
-    eval_model_accuracy,
-    load_config,
-    overwrite_output,
-    set_seed,
-)
 
 if TYPE_CHECKING:   # Prevent circular import to import type annotations
     from experiments.relu_interactions.mlp_relu import Config
@@ -110,12 +93,12 @@ def relu_plot_and_cluster(
 
         match config.relu_metric_type:
             case 0:
-                threshold = 0.95
+                threshold = 1
                 similarity_matrix[similarity_matrix < threshold] = 0
                 distance_matrix = 1 - similarity_matrix
             case 1 | 2:
                 distance_matrix = torch.max(similarity_matrix, similarity_matrix.T) # Make symmetric
-                threshold = 15
+                threshold = 1
                 distance_matrix[distance_matrix > threshold] = threshold
             case 3:
                 distance_matrix = torch.max(torch.abs(similarity_matrix), torch.abs(similarity_matrix).T)
@@ -151,13 +134,10 @@ def relu_plot_and_cluster(
             cluster_distances = distance_matrix[np.ix_(cluster_idx, cluster_idx)]
             # Use symmetry of matrix, sum only over one dimension to compute total distance to all
             # other members
-            # print(f"cluster distances {cluster_distances}")
             # And find minimum index in this cluster subarray
             centroid_idx_in_cluster = np.argmin(cluster_distances.sum(axis=1))
-            # print(f"centroid idx in cluster {centroid_idx_in_cluster}")
             # Map this back to indices of original array
             centroid_idx_original = cluster_idx[centroid_idx_in_cluster]
-            # print(f"original idx {centroid_idx_original}")
             # Set all index elements to cluster centroid index (note we do not return or manipulate
             # *distance matrix values*)
             # Want instead indices with which to permute the O(x) vector in forward hook
@@ -169,6 +149,8 @@ def relu_plot_and_cluster(
         print(f"swaps {layer_num_valid_swaps}")
         # Cast indices to tensor and add to list of returns - one item per layer
         return_index_list.append(torch.tensor(indices_of_original_O))
+        layer_num_swaps_dict = {i: swap_num for i, swap_num in enumerate(layer_num_valid_swaps)}
+        print(f"swaps dict {layer_num_swaps_dict}")
 
         rearranged_similarity_matrix = distance_matrix[order, :][:, order]
 
@@ -392,11 +374,12 @@ def find_indices_to_replace(matrix: Float[Tensor, "d1 d1"], tol: float) -> tuple
 # Weights/ Models ========================================================
 
 def edit_weights_fn(model: HookedModel, layer_name: str) -> None:
-    """Weight matrix dimensions are rows=output, cols=input."""
+    """Make the bias really big.
+    Weight matrix dimensions are (output, input).
+    """
     layer = get_nested_attribute(model, layer_name)
 
     weights = layer.weight.data.clone()
-    print(f"Weights shape{weights.shape}")
     output_neurons, input_neurons = weights.shape
     weights[:output_neurons//2, -1] = 1e8
     layer.weight.data.copy_(weights)
@@ -411,7 +394,9 @@ def get_nested_attribute(obj, attr_name):
 
 
 def extract_weights_mlp(model: torch.nn.Module) -> list[torch.Tensor]:
-    """Recursively extract weights from each layer of the model and return them as a list."""
+    """Recursively extract weights from each layer of the model and return them as a list.
+    This works for an MLP but not SequentialTransformer.
+    """
     weights_list = []
 
     for name, layer in model.named_children():
@@ -419,12 +404,9 @@ def extract_weights_mlp(model: torch.nn.Module) -> list[torch.Tensor]:
             weights = get_nested_attribute(model, name + '.weight').data.clone().cpu()
 
             batch_size, d_hidden = weights.shape
-            # Create vector with last element 1
             to_append_weights = torch.zeros(d_hidden)
-            to_append_weights[-1] = 1
-            # Append as row of W (dims output, input)
-            # N.B. will tranpose weights later for multiplication
-            # Since canonical code form will be (input, output)
+            to_append_weights[-1] = 1  # Create vector with last element 1, append as row of W (dims output, input)
+            # Tranpose weights later for multiplication since canonical code form (input, output)
             weights = torch.cat([weights, rearrange(to_append_weights, 'd -> 1 d')], dim=0)
             assert weights[-1, -1] == 1
 
@@ -499,31 +481,13 @@ def plot_temp(matrix: Float[Tensor, "d1 d2"], title: str) -> None:
     plt.close()
 
 
-## Deprecated code for automated cluster number calculation
-# """Method 1: silhouette point."""
-# t_min = (mean_distance - 1.6 * std_distance)
-# t_max = (mean_distance + 1 * std_distance)
-# max_silhouette_score = -1 # Initialise at lowest value possible
-# optimal_t = None
-# for t in np.linspace(t_min, t_max, 50):
-#     clusters = fcluster(Z, t=t, criterion='distance')
-#     if len(set(clusters)) > 1:  # Silhouette score requires at least 2 clusters
-#         silhouette_avg = silhouette_score(distance_matrix, clusters, metric='precomputed')
-#         if silhouette_avg > max_silhouette_score:
-#             max_silhouette_score = silhouette_avg
-#             optimal_t = t
-# silhouette_cluster_num = len(np.unique(clusters))
-# print(f"Silhouette point optimised cluster count {silhouette_cluster_num}")
-
-# """Method 2 - Davies-Bouldin index."""
-# min_db_index = float('inf')
-# optimal_t = None
-# for t in np.linspace(t_min, t_max, 50):
-#     clusters = fcluster(Z, t=t, criterion='distance')
-#     if len(set(clusters)) > 1:  # Davies-Bouldin index requires at least 2 clusters
-#         db_index = davies_bouldin_score(distance_matrix, clusters)
-#         if db_index < min_db_index:
-#             min_db_index = db_index
-#             optimal_t = t
-# db_cluster_num = len(np.unique(clusters))
-# print(f"Davies-Bouldin optimised cluster count {db_cluster_num}")
+def plot_matrix_list(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_name: str, out_dir: Path) -> None:
+    for i, matrix in enumerate(list(matrix_list)):
+        # Calculate figsize based on matrix dimensions and the given figsize_per_unit
+        nrows, ncols = matrix.shape
+        figsize = (int(ncols * 0.1), int(nrows * 0.1))
+        plt.figure(figsize=figsize)
+        sns.heatmap(matrix.detach().cpu(), annot=False,
+                    cmap="YlGnBu", cbar=True, square=True)
+        plt.savefig(
+            out_dir / f"{var_name}_{i}.png")

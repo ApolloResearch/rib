@@ -39,15 +39,18 @@ from rib.models import MLP
 from rib.types import TORCH_DTYPES
 from rib.utils import (
     REPO_ROOT,
+    check_outfile_overwrite,
     eval_model_accuracy,
     load_config,
-    overwrite_output,
     set_seed,
 )
 
 
 class Config(BaseModel):
     exp_name: Optional[str]
+    force_overwrite_output: Optional[bool] = Field(
+        False, description="Don't ask before overwriting the output file."
+    )
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
@@ -89,12 +92,11 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return test_loader
 
 
-def main(config_path_or_obj: Union[str, Config]) -> None:
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     config = load_config(config_path_or_obj, config_model=Config)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if out_file.exists() and not overwrite_output(out_file):
-        print("Exiting.")
+    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
         return
 
     out_file.parent.mkdir(parents=True, exist_ok=True)

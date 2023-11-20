@@ -65,10 +65,10 @@ from rib.mpi_utils import (
 )
 from rib.types import TORCH_DTYPES
 from rib.utils import (
+    check_outfile_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
     load_config,
-    overwrite_output,
     set_seed,
 )
 
@@ -76,6 +76,9 @@ from rib.utils import (
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exp_name: str = Field(..., description="The name of the experiment")
+    force_overwrite_output: Optional[bool] = Field(
+        False, description="Don't ask before overwriting the output file."
+    )
     seed: int = Field(..., description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."
@@ -236,7 +239,7 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config_path_or_obj: Union[str, Config]):
+def main(config_path_or_obj: Union[str, Config], force: bool = False):
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
@@ -264,8 +267,9 @@ def main(config_path_or_obj: Union[str, Config]):
         out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
     else:
         out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if out_file.exists() and mpi_info.is_main_process and not overwrite_output(out_file):
-        logger.info("Exiting.")
+    if mpi_info.is_main_process and not check_outfile_overwrite(
+        out_file, config.force_overwrite_output or force, logger=logger
+    ):
         mpi_info.comm.Abort()  # stop this and other processes
         return None  # this is unreachable as Abort will terminate
 

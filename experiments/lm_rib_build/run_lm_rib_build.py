@@ -44,6 +44,12 @@ from torch import Tensor
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.distributed_utils import (
+    adjust_logger_dist,
+    check_sizes_mpi,
+    get_device_mpi,
+    get_dist_info,
+)
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,
@@ -57,12 +63,6 @@ from rib.loader import (
     load_sequential_transformer,
 )
 from rib.log import logger
-from rib.mpi_utils import (
-    adjust_logger_mpi,
-    check_sizes_mpi,
-    get_device_mpi,
-    get_mpi_info,
-)
 from rib.types import TORCH_DTYPES
 from rib.utils import (
     check_outfile_overwrite,
@@ -239,7 +239,9 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False):
+def main(
+    config_path_or_obj: Union[str, Config], force: bool = False, n_pods: int = 1, pod_rank: int = 0
+) -> None:
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
@@ -252,14 +254,14 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
 
     Args:
         config: a str or Config object. If str must point at YAML config file
-        kwargs: modifications to passed config
     """
     config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
 
-    mpi_info = get_mpi_info()
-    adjust_logger_mpi(logger)
-    device = get_device_mpi(logger)
+    dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
+
+    adjust_logger_dist(dist_info, logger)
+    device = get_device_mpi(dist_info, logger)
 
     out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -267,11 +269,10 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
         out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
     else:
         out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if mpi_info.is_main_process and not check_outfile_overwrite(
+    if dist_info.is_main_process and not check_outfile_overwrite(
         out_file, config.force_overwrite_output or force, logger=logger
     ):
-        mpi_info.comm.Abort()  # stop this and other processes
-        return None  # this is unreachable as Abort will terminate
+        dist_info.local_comm.Abort()  # stop this and other processes
 
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
@@ -374,7 +375,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
         full_dataset_len = len(dataset)  # type: ignore
         # no-op if only 1 process
         data_subset = get_dataset_chunk(
-            dataset, chunk_idx=mpi_info.rank, total_chunks=mpi_info.size
+            dataset, chunk_idx=dist_info.global_rank, total_chunks=dist_info.global_size
         )
 
         edge_train_loader = create_data_loader(
@@ -397,16 +398,17 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
             data_set_size=full_dataset_len,  # includes data for other processes
         )
 
-        if mpi_info.is_parallelised:
+        if dist_info.is_parallelised:
+            # Reduce the edge values across local processes
             for m_name, edge_vals in E_hats.items():
-                check_sizes_mpi(edge_vals)
+                check_sizes_mpi(dist_info, edge_vals)
                 receiver_tensor = None
-                if mpi_info.is_main_process:
+                if dist_info.is_main_process:
                     receiver_tensor = torch.empty_like(edge_vals).cpu()
                 # we sum across the edge_val tensors in each process, putting the result in
                 # the root process's reciever_tensor.
-                mpi_info.comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
-                if mpi_info.is_main_process:
+                dist_info.local_comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
+                if dist_info.is_main_process:
                     assert receiver_tensor is not None
                     E_hats[m_name] = receiver_tensor
 
@@ -429,13 +431,14 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
         "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
+        "dist_info": dist_info.to_dict(),
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
         "calc_C_time": calc_C_time,
         "calc_edges_time": calc_edges_time,
     }
 
-    if mpi_info.is_main_process:
+    if dist_info.is_main_process:
         # Save the results (which include torch tensors) to file
         torch.save(results, out_file)
         logger.info("Saved results to %s", out_file)

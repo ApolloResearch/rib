@@ -424,12 +424,15 @@ def collect_function_sizes(
     Cs: list[Float[Tensor, "d_hidden d_hidden"]],
     hook_names: Optional[str] = None,
 ) -> list[float]:
-    """Calculate denominator for ReLU similarity metrics as l2 norm of function sizes in layer l+1."""
+    """Calculate denominator for ReLU similarity metrics as l2 norm of function sizes in layer l+1.
+
+    Args:
+        rotate: Whether to rotate the functions to make f_hat.
+    """
     assert len(module_names) > 0, "No modules specified."
 
     fn_size_hooks = []
-    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
-        # if i == 2: break # This number should be changed to total number of activation function layers analysed + 1
+    for i, (module_name, hook_name) in enumerate(zip(module_names[:-1], hook_names)):
         fn_size_hooks.append(
             Hook(
                 name=hook_name,

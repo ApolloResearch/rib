@@ -116,6 +116,7 @@ def calculate_interaction_rotations(
     dtype: torch.dtype,
     device: str,
     n_intervals: int,
+    matmul_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
@@ -140,6 +141,8 @@ def calculate_interaction_rotations(
         dtype: The data type to use for model computations.
         device: The device to run the model on.
         n_intervals: The number of intervals to use for integrated gradients.
+        matmul_dtype: The data type to use for the M_dash -> M transformation. Needs to be float64
+            for Pythia-14m (empirically). Defaults to float64.
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
@@ -150,6 +153,7 @@ def calculate_interaction_rotations(
         - A list of objects containing the eigenvectors of each node layer, ordered by node layer
         appearance in model.
     """
+    assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate Cs."
     assert len(section_names) > 0, "No sections specified."
 
     non_output_node_layers = [node_layer for node_layer in node_layers if node_layer != "output"]
@@ -178,9 +182,6 @@ def calculate_interaction_rotations(
         U_output.detach().cpu() if U_output is not None else None
     )
 
-    Us.append(U_output)
-    Cs.append(C_output)
-
     if node_layers[-1] not in gram_matrices:
         # Technically we don't actually need the final node layer to be in gram_matrices if we're
         # not rotating it, but for now, our implementation assumes that it always is unless
@@ -208,7 +209,7 @@ def calculate_interaction_rotations(
     Cs.append(
         InteractionRotation(
             node_layer_name=node_layers[-1],
-            out_dim=C_output.shape[1] if C_output is not None else final_node_dim,
+            out_dim=final_node_dim,
             C=C_output,
         )
     )
@@ -230,8 +231,8 @@ def calculate_interaction_rotations(
     ):
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
 
-        n_small_eigenvals: int = int(
-            torch.sum(D_dash < truncation_threshold).item())
+        n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
+
         # Truncate the D matrix to remove small eigenvalues
         D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
             torch.diag(D_dash)[:-n_small_eigenvals, :-n_small_eigenvals]
@@ -259,17 +260,18 @@ def calculate_interaction_rotations(
         Lambda_dashes.append(Lambda_dash)
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
-        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = U_D_sqrt.T @ M_dash @ U_D_sqrt
-        _, V = eigendecompose(M)  # V has size (d_hidden_trunc, d_hidden_trunc)
+        in_dtype = M_dash.dtype
+        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
+            U_D_sqrt.T.to(matmul_dtype) @ M_dash.to(matmul_dtype) @ U_D_sqrt.to(matmul_dtype)
+        ).to(in_dtype)
+        V = eigendecompose(M)[1]  # V has size (d_hidden_trunc, d_hidden_trunc)
 
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
         U_D_sqrt_Vs.append(U_D_sqrt_V)
 
-        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(
-            D.sqrt())
-        U_D_sqrt_pinv_V: Float[Tensor,
-                               "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
+        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
+        U_D_sqrt_pinv_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
         U_D_sqrt_pinv_Vs.append(U_D_sqrt_pinv_V)
 
         Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (

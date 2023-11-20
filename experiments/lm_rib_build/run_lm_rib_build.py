@@ -106,21 +106,17 @@ class Config(BaseModel):
         description="Module type in which to only output the last position index. For modular"
         "arithmetic only.",
     )
-
     n_intervals: int = Field(
         ...,
         description="The number of intervals to use for the integrated gradient approximation."
         "If 0, we take a point estimate (i.e. just alpha=1).",
     )
-
     out_dim_chunk_size: Optional[int] = Field(
         None,
         description="The size of the chunks to use for calculating the jacobian. If none, calculate"
         "the jacobian on all output dimensions at once.",
     )
-
     dtype: str = Field(..., description="The dtype to use when building the graph.")
-
     eps: float = Field(
         1e-5,
         description="The epsilon value to use for numerical stability in layernorm layers.",

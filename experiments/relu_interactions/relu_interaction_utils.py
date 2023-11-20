@@ -26,9 +26,6 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 - One on the output of "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_act.0".
 """
-from pathlib import Path
-from typing import TYPE_CHECKING
-
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
@@ -38,6 +35,9 @@ from einops import rearrange, repeat
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 
 from scipy.cluster.hierarchy import dendrogram, fcluster, leaves_list, linkage
 from scipy.spatial.distance import squareform

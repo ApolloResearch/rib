@@ -466,7 +466,7 @@ def relu_interaction_forward_hook_fn(
             """Compare every operator element to every other element - resulting matrix entries either 0 or 1."""
             operator_expanded_i: Float[Tensor, "batch 1 d_hidden"] = rearrange(operator, 'b d -> b 1 d')
             operator_expanded_j: Float[Tensor, "batch d_hidden 1"] = rearrange(operator, 'b d -> b d 1')
-            relu_interaction_matrix = torch.einsum('bik -> ik', operator_expanded_i == operator_expanded_j)
+            numerator = torch.einsum('bik -> ik', operator_expanded_i == operator_expanded_j)
 
         case 1:
             with torch.no_grad():
@@ -532,11 +532,11 @@ def relu_interaction_forward_hook_fn(
 
                 ## First term of numerator
                 numerator_term_1: Float[Tensor, "batch d_hidden d_hidden"] = repeat(g_j_next_layer * outputs, 'b d1 -> b d1 d2', d2=d_hidden)
-                whole_numerator: Float[Tensor, "batch d_hidden d_hidden"] = numerator_term_1 - numerator_term_2
+                numerator: Float[Tensor, "batch d_hidden d_hidden"] = numerator_term_1 - numerator_term_2
 
-                [numerator_term_2, whole_numerator, numerator_term_1] = apply_batch_einsum(numerator_term_2, whole_numerator, numerator_term_1)
+                [numerator_term_2, numerator, numerator_term_1] = apply_batch_einsum(numerator_term_2, numerator, numerator_term_1)
 
-    _add_to_hooked_matrix(hooked_data, hook_name, "relu_num", whole_numerator)
+    _add_to_hooked_matrix(hooked_data, hook_name, "relu_num", numerator)
     _add_to_hooked_matrix(hooked_data, hook_name, "preactivations", inputs.sum(dim=0)) # For debugging purposes
 
 

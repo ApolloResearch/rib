@@ -90,15 +90,14 @@ class Config(BaseModel):
     tlens_model_path: Optional[Path] = Field(
         None, description="Path to saved transformer lens model."
     )
+    interaction_matrices_path: Optional[Path] = Field(
+        None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
+    )
     node_layers: list[str] = Field(
         ..., description="Names of the modules whose inputs correspond to node layers in the graph."
     )
     activation_layers: list[str] = Field(
         ..., description="Names of activation modules to hook ReLUs in."
-    )
-    logits_node_layer: bool = Field(
-        ...,
-        description="Whether to build an extra output node layer for the logits.",
     )
     rotate_final_node_layer: bool = Field(
         ...,
@@ -115,6 +114,11 @@ class Config(BaseModel):
         description="The batch size to use when calculating the gram matrices. If None, use the same"
         "batch size as the one used to build the graph.",
     )
+    edge_batch_size: Optional[int] = Field(
+        None,
+        description="The batch size to use when calculating the edges. If None, use the same batch"
+        "size as the one used to build the graph.",
+    )
     truncation_threshold: float = Field(
         ...,
         description="Remove eigenvectors with eigenvalues below this threshold.",
@@ -123,14 +127,16 @@ class Config(BaseModel):
         None,
         description="Module type in which to only output the last position index.",
     )
-
     n_intervals: int = Field(
         ...,
         description="The number of intervals to use for the integrated gradient approximation.",
     )
-
+    out_dim_chunk_size: Optional[int] = Field(
+        None,
+        description="The size of the chunks to use for calculating the jacobian. If none, calculate"
+        "the jacobian on all output dimensions at once.",
+    )
     dtype: str = Field(..., description="The dtype to use when building the graph.")
-
     eps: float = Field(
         1e-5,
         description="The epsilon value to use for numerical stability in layernorm layers.",
@@ -169,6 +175,61 @@ class Config(BaseModel):
                 "Exactly one of [tlens_pretrained, tlens_model_path] must be specified"
             )
         return self
+
+
+def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
+    """Ensure that the config for calculating edges is compatible with that used to calculate Cs."""
+
+    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
+        "node_layers in the config must be a subsequence of the node layers in the config used to"
+        "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
+        "match those needed to correctly calculate the edges."
+    )
+
+    # The following attributes must exactly match across configs
+    for attr in [
+        "tlens_model_path",
+        "tlens_pretrained",
+    ]:
+        assert getattr(config, attr) == getattr(loaded_config, attr), (
+            f"{attr} in config ({getattr(config, attr)}) does not match "
+            f"{attr} in loaded matrices ({getattr(loaded_config, attr)})"
+        )
+
+    # Verify that, for huggingface datasets, we're not trying to calculate edges on data that
+    # wasn't used to calculate the Cs
+    assert config.dataset.name == loaded_config.dataset.name, "Dataset names must match"
+    assert config.dataset.return_set == loaded_config.dataset.return_set, "Return sets must match"
+    if isinstance(config.dataset, HFDatasetConfig):
+        assert isinstance(loaded_config.dataset, HFDatasetConfig)
+        if config.dataset.return_set_frac is not None:
+            assert loaded_config.dataset.return_set_frac is not None
+            assert (
+                config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
+            ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
+        elif config.dataset.return_set_n_samples is not None:
+            assert loaded_config.dataset.return_set_n_samples is not None
+            assert (
+                config.dataset.return_set_n_samples <= loaded_config.dataset.return_set_n_samples
+            ), "Cannot use a larger return_set_n_samples for edges than to calculate the Cs"
+
+
+def load_interaction_rotations(
+    config: Config,
+) -> tuple[
+    dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]
+]:
+    logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
+    assert config.interaction_matrices_path is not None
+    matrices_info = torch.load(config.interaction_matrices_path)
+
+    loaded_config = Config(**matrices_info["config"])
+    _verify_compatible_configs(config, loaded_config)
+
+    gram_matrices = matrices_info["gram_matrices"]
+    Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
+    Us = [Eigenvectors(**data) for data in matrices_info["eigenvectors"]]
+    return gram_matrices, Cs, Us
 
 
 # Helper functions for main ========================================================
@@ -221,58 +282,56 @@ def get_Cs(
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
-    gram_train_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.gram_batch_size or config.batch_size
-    )
-    if config.eval_type is not None:
-        # Test model accuracy/loss before graph building, to be sure
-        if config.eval_type == "accuracy":
-            accuracy = eval_model_accuracy(
-                hooked_model, gram_train_loader, dtype=dtype, device=device
-            )
-            logger.info("Model accuracy on dataset: %.2f%%", accuracy * 100)
-        elif config.eval_type == "ce_loss":
-            loss = eval_cross_entropy_loss(
-                hooked_model, gram_train_loader, dtype=dtype, device=device
-            )
-            logger.info("Model per-token loss on dataset: %.2f", loss)
 
     # Don't build the graph for the section of the model before the first node layer
-    # The names below are *defined from* the node_layers dictionary in the config file
-    graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
-    # Only need gram matrix for logits if we're rotating the final node layer
-    collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+    section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
-    logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
-    gram_matrices = collect_gram_matrices(
-        hooked_model=hooked_model,
-        module_names=graph_module_names,
-        data_loader=gram_train_loader,
-        dtype=dtype,
-        device=device,
-        collect_output_gram=collect_output_gram,
-        hook_names=config.node_layers,
-    )
+    if config.interaction_matrices_path is None:
+        # Only need gram matrix for output if we're rotating the final node layer
+        collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
-    # Calls on collect_M_dash_and_Lambda_dash
-    # Builds sqrt sorted Lambda matrix and its inverse
-    Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs, Lambda_dashes = calculate_interaction_rotations(
-        gram_matrices=gram_matrices,
-        module_names=graph_module_names,
-        hooked_model=hooked_model,
-        data_loader=graph_train_loader,
-        dtype=dtype,
-        device=device,
-        n_intervals=config.n_intervals,
-        logits_node_layer=config.logits_node_layer,
-        truncation_threshold=config.truncation_threshold,
-        rotate_final_node_layer=config.rotate_final_node_layer,
-        hook_names=config.node_layers,
-    )
+        gram_train_loader = create_data_loader(
+            dataset,
+            shuffle=False,
+            batch_size=config.gram_batch_size or config.batch_size,
+            seed=config.seed,
+        )
 
-    C_list = [C_info.C for C_info in Cs]
-    C_pinv_list = [C_info.C_pinv for C_info in Cs]
+        logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
+        gram_matrices = collect_gram_matrices(
+            hooked_model=hooked_model,
+            module_names=section_names,
+            data_loader=gram_train_loader,
+            dtype=dtype,
+            device=device,
+            collect_output_gram=collect_output_gram,
+            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
+        )
+
+        graph_train_loader = create_data_loader(
+            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+        )
+
+        logger.info("Calculating interaction rotations (Cs).")
+        # Calls on collect_M_dash_and_Lambda_dash
+        # Builds sqrt sorted Lambda matrix and its inverse
+        Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs, Lambda_dashes = calculate_interaction_rotations(
+            gram_matrices=gram_matrices,
+            section_names=section_names,
+            node_layers=config.node_layers,
+            hooked_model=hooked_model,
+            data_loader=graph_train_loader,
+            dtype=dtype,
+            device=device,
+            n_intervals=config.n_intervals,
+            truncation_threshold=config.truncation_threshold,
+            rotate_final_node_layer=config.rotate_final_node_layer,
+        )
+    else:
+        gram_matrices, Cs, Us = load_interaction_rotations(config=config)
+
+    C_list = [C_info.C for C_info in Cs if C_info is not None] # C_info may be None for final (output) layer if rotate_output_logits=False
+    C_pinv_list = [C_info.C_pinv for C_info in Cs if C_info is not None]
 
     with open(file_path, "wb") as f:
         torch.save({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices,}, f)
@@ -343,32 +402,35 @@ def get_rotated_Ws(
     """
     graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
-    weights_list = []
-    print(f"graph module names {graph_module_names}")
+    weights_dict: dict[list[str], float[Tensor, "d_hidden1, d_hidden2"]] = {}
     for module_name in graph_module_names:
+        module = getattr(model, module_name)
         # Sometimes can return None if module_classes instance doesn't match the module
-        weights_list.append(get_model_weight(model, attr_path=module_name))
+        str_module_names = [submodule.__class__.__name__ for _, submodule in module.named_children()]
+        weight = get_model_weight(model, attr_path=module_name)
+        if weight is not None:
+            weights_dict[str_module_names] = weight
 
-    rotated_weights_list = []
-    idxs_list = check_matrix_multiplication(C_pinv_list, weights_list)
-    for idxs in idxs_list:
-        rotated_weights_list.append((C_pinv_list[idxs[0]] @ weights_list[idxs[1]]).to(device))
+    rotated_weights_dict = {}
+    # idxs_list = check_matrix_multiplication(C_pinv_list, weights_list)
+    # for idxs in idxs_list:
+    #     rotated_weights_list.append((C_pinv_list[idxs[0]] @ weights_list[idxs[1]]).to(device))
 
-    with open(file_path, "wb") as f:
-        torch.save(rotated_weights_list, f)
+    # with open(file_path, "wb") as f:
+    #     torch.save(rotated_weights_list, f)
 
-    return rotated_weights_list
+    return rotated_weights_dict
 
 
-def check_matrix_multiplication(list_A, list_B):
-    """Return all multipliable matrix pairs in two lists of matrices, via A @ B."""
-    results = []
-    for i, A in enumerate(list_A):
-        if A is not None:
-            for j, B in enumerate(list_B):
-                if B is not None and A.size(1) == B.size(0):
-                    results.append((i, j))
-    return results
+# def check_matrix_multiplication(list_A, list_B):
+#     """Return all multipliable matrix pairs in two lists of matrices, via A @ B."""
+#     results = []
+#     for i, A in enumerate(list_A):
+#         if A is not None:
+#             for j, B in enumerate(list_B):
+#                 if B is not None and A.size(1) == B.size(0):
+#                     results.append((i, j))
+#     return results
 
 
 def get_P_matrices(
@@ -503,7 +565,6 @@ def transformer_relu_main(config_path_str: str):
     seq_model.to(device=torch.device(device), dtype=dtype)
     seq_model.fold_bias()
     print_all_modules(seq_model) # Check module names were correctly defined
-    print("===============================================")
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need both train and test sets
@@ -555,20 +616,19 @@ def transformer_relu_main(config_path_str: str):
     # However, for next task, need whole MLP input + activation segment
     # So redefine node_layers to create a new model
 
-    # seq_model, tlens_cfg_dict = load_sequential_transformer(
-    #     node_layers=["mlp_out.0"],
-    #     last_pos_module_type=config.last_pos_module_type,
-    #     tlens_pretrained=config.tlens_pretrained,
-    #     tlens_model_path=config.tlens_model_path,
-    #     eps=config.eps,
-    #     dtype=dtype,
-    #     device=device,
-    # )
-    # seq_model.eval()
-    # seq_model.to(device=torch.device(device), dtype=dtype)
-    # seq_model.fold_bias()
-    # print_all_modules(seq_model) # Check module names were correctly defined
-    # hooked_model = HookedModel(seq_model)
+    seq_model, tlens_cfg_dict = load_sequential_transformer(
+        node_layers=["mlp_out.0"], # CHANGE LAYERS FOR MLP - NOTE THIS AT LEAST NEEDS TO START WHERE THE PREVIOUS MODEL LIST DID, SO THAT MULTIPLYING BY THE PREVIOUSLY CALCULATED C WITH ZIP WORKS
+        last_pos_module_type=config.last_pos_module_type,
+        tlens_pretrained=config.tlens_pretrained,
+        tlens_model_path=config.tlens_model_path,
+        eps=config.eps,
+        dtype=dtype,
+        device=device,
+    )
+    seq_model.eval()
+    seq_model.to(device=torch.device(device), dtype=dtype)
+    seq_model.fold_bias()
+    hooked_model = HookedModel(seq_model)
 
     # Has to be after editing node_layers so this contains the linear layers to extract weights from
     W_hat_list = check_and_open_file(

@@ -250,56 +250,6 @@ plt.savefig("diffs2.png", dpi=600)
 
 
 # %%
-# class run_rib_model_scaling:
-#     def __init__(self, dtype=torch.float64):
-#         # 1 is ln2.0
-#         self.C_ell, self.Cinv_ell = activations.rib_basis_matrices[1]
-#         # self.C_ell = self.C_ell.to("cpu").to(dtype)
-#         self.Cinv_ell = self.Cinv_ell.to("cpu").to(dtype)
-#         self.C_ellp1, _ = activations.rib_basis_matrices[2]
-#         self.C_ellp1 = self.C_ellp1.to("cpu").to(dtype)
-
-#         self.in_acts = rib_acts_extended_embedding.to(dtype)
-#         self.parallel_acts = sec_1_2_resid_parallel_acts
-#         self.parallel_acts = torch.unsqueeze(self.parallel_acts, 0)
-#         self.W_hat = einops.einsum(W_in, self.Cinv_ell, "embed mlp, rib embed -> rib mlp")
-
-#     def forward(self, scaling):
-#         scaled_in_acts = einops.einsum(self.in_acts, scaling, "x y rib, rib ... -> ... x y rib")
-#         scaled_parallel_acts = einops.einsum(
-#             scaled_in_acts, self.Cinv_ell, "... x y rib, rib emb -> ... x y emb"
-#         )
-#         # Fake
-#         scaled_parallel_acts = einops.einsum(
-#             self.parallel_acts,
-#             torch.ones([self.parallel_acts.shape[-1], scaling.shape[-1]]),
-#             "x y emb, emb ... -> ... x y emb",
-#         )
-#         pre_relu_acts = einops.einsum(
-#             scaled_in_acts, self.W_hat, "... x y rib, rib mlp -> ... x y mlp"
-#         )
-
-#         post_relu_acts = torch.relu(pre_relu_acts)
-
-#         post_relu_concat_acts = torch.concat([post_relu_acts, scaled_parallel_acts], dim=-1)
-
-#         post_relu_rib_acts = einops.einsum(
-#             post_relu_concat_acts, self.C_ellp1, "... x y mlp, mlp rib -> ... x y rib"
-#         )
-#         return post_relu_rib_acts
-
-
-# rib_model = run_rib_model_scaling()
-# rib_in_len = rib_acts_extended_embedding.shape[-1]
-# batch_size = 100
-# five_scaling = torch.ones([rib_in_len, batch_size])
-# five_scaling[5] = torch.linspace(0.3, 23, batch_size)
-
-# res_by_neuron = rib_model.forward(five_scaling)
-# res = res_by_neuron  # .sum(dim=-1)
-# plt.scatter(five_scaling[5], res[:, 1, 8, 2], marker=".", s=1)
-
-# %%
 
 
 def plot_function(x, y, output=2, xlim=(0.5, 2)):

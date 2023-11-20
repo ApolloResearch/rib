@@ -116,7 +116,7 @@ def rib_ln20_to_mlpout0(five, rib_ln20_acts=rib_acts_extended_embedding, dtype=t
 class run_rib_model_scaling:
     def __init__(self, dtype=torch.float64):
         # 1 is ln2.0
-        self.C_ell, self.Cinv_ell = activations.rib_basis_matrices[1]
+        _, self.Cinv_ell = activations.rib_basis_matrices[1]
         # self.C_ell = self.C_ell.to("cpu").to(dtype)
         self.Cinv_ell = self.Cinv_ell.to("cpu").to(dtype)
         self.C_ellp1, _ = activations.rib_basis_matrices[2]
@@ -126,44 +126,145 @@ class run_rib_model_scaling:
         self.parallel_acts = sec_1_2_resid_parallel_acts
         # self.parallel_acts = torch.unsqueeze(self.parallel_acts, 0)
         self.W_hat = einops.einsum(W_in, self.Cinv_ell, "embed mlp, rib embed -> rib mlp")
+        self.d_mlp = self.W_hat.shape[-1]
+        self.d_concat = self.C_ellp1.shape[0]
 
-    def forward(self, scaling):
+    def forward(self, scaling, mlp_filter=None):
+        if mlp_filter is None:
+            mlp_filter = torch.ones([self.d_concat])
+        elif isinstance(mlp_filter, int):
+            # one hot
+            tmp = torch.zeros([self.d_concat])
+            tmp[mlp_filter] = 1
+            mlp_filter = tmp
+        else:
+            mlp_filter = mlp_filter
+
         scaled_in_acts = einops.einsum(self.in_acts, scaling, "x y rib, rib ... -> ... x y rib")
         scaled_parallel_acts = einops.einsum(
             scaled_in_acts, self.Cinv_ell, "... x y rib, rib emb -> ... x y emb"
         )
         # Fake
-        scaled_parallel_acts = einops.einsum(
-            self.parallel_acts,
-            torch.ones([self.parallel_acts.shape[-1], scaling.shape[-1]]),
-            "x y emb, emb ... -> ... x y emb",
-        )
+        # scaled_parallel_acts = einops.einsum(
+        #     self.parallel_acts,
+        #     torch.ones([self.parallel_acts.shape[-1], scaling.shape[-1]]),
+        #     "x y emb, emb ... -> ... x y emb",
+        # )
         pre_relu_acts = einops.einsum(
             scaled_in_acts, self.W_hat, "... x y rib, rib mlp -> ... x y mlp"
         )
 
         post_relu_acts = torch.relu(pre_relu_acts)
 
-        post_relu_concat_acts = torch.concat([post_relu_acts, scaled_parallel_acts], dim=-1)
+        post_relu_concat_acts = torch.concat([scaled_parallel_acts, post_relu_acts], dim=-1)
 
         post_relu_rib_acts = einops.einsum(
-            post_relu_concat_acts, self.C_ellp1, "... x y mlp, mlp rib -> ... x y rib"
+            post_relu_concat_acts,
+            mlp_filter,
+            self.C_ellp1,
+            "... x y mlp, mlp, mlp rib -> ... x y rib",
         )
         return post_relu_rib_acts
 
 
+def plot(scaling, post_relu_rib_acts, output=2, x=0, y=0, filename="diffs.png"):
+    fig, [ax1, ax2] = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+    ax1.scatter(scaling, post_relu_rib_acts[:, x, y, output], s=1, marker=".")
+    ax2.scatter(scaling[1:], np.diff(post_relu_rib_acts[:, x, y, output]), s=1, marker=".")
+    fig.suptitle(f"Scaling up input number 5, observing output {output} at data point x,y={x},{y}")
+    ax1.set_xlabel("Scaling of RIB dimension 5")
+    ax2.set_xlabel("Scaling of RIB dimension 5")
+    ax1.set_ylabel(f"Output RIB dimension {output}")
+    ax2.set_ylabel(f"Derivative of output RIB dimension {output}")
+    ax1.grid()
+    ax2.grid()
+    fig.savefig(filename, dpi=600)
+
+
 rib_model = run_rib_model_scaling()
+# %%
+
 rib_in_len = rib_acts_extended_embedding.shape[-1]
 batch_size = 100
 five_scaling = torch.ones([rib_in_len, batch_size])
-five_scaling[5] = torch.linspace(0.3, 23, batch_size)
+five_scaling[5] = torch.linspace(0.3, 5, batch_size)
 
-res_by_neuron = rib_model.forward(five_scaling)
-res = res_by_neuron  # .sum(dim=-1)
+res = rib_model.forward(five_scaling)
+res_n0 = rib_model.forward(five_scaling, mlp_filter=130)
+res_n1 = rib_model.forward(five_scaling, mlp_filter=131)
+
+# if False:
+#     res_by_neuron = rib_model.forward(five_scaling)[:, 1, 8, :, :]
+#     np.save("res_by_neuron_18.npy", res_by_neuron.numpy())
+# else:
+#     res_by_neuron = np.load("res_by_neuron_18.npy")
+# res = res_by_neuron.sum(axis=-1)
+#  Save to file
 # %%
 
-plt.scatter(five_scaling[5], res[:, 1, 8, 2], marker=".", s=1)
+plot(five_scaling[5], res, output=2, x=0, y=0)
+# plot(five_scaling[5], res_n0, output=2, x=0, y=0, filename="diffs_n0.png")
+# plot(five_scaling[5], res_n1, output=2, x=0, y=0, filename="diffs_n1.png")
+
+
+# %%
+
+
+rib_model = run_rib_model_scaling()
+rib_in_len = rib_acts_extended_embedding.shape[-1]
+batch_size = 2
+five_scaling = torch.ones([rib_in_len, batch_size])
+five_scaling[5] = torch.linspace(1, 2, batch_size)
+
+res = rib_model.forward(five_scaling)
+mlp_impacts = torch.stack(
+    [rib_model.forward(five_scaling, mlp_filter=129 + i)[:, :, :, :] for i in range(512)]
+)
+resid_impacts = torch.stack(
+    [rib_model.forward(five_scaling, mlp_filter=i)[:, :, :, :] for i in range(129)]
+)
+
+# %%
+
 plt.figure()
-plt.scatter(five_scaling[5, 1:], np.diff(res[:, 1, 8, 2]), marker=".", s=1)
+plt.scatter(
+    mlp_impacts[:, 0, 1, 8, 2] - mlp_impacts[:, 1, 1, 8, 2],
+    mlp_impacts[:, 0, 45, 76, 2] - mlp_impacts[:, 1, 45, 76, 2],
+    s=1,
+    marker=".",
+)
+plt.xlabel("MLP neuron impact on output 2 at data point (1, 8)")
+plt.ylabel("MLP neuron impact on output 2 at data point (45, 76)")
+plt.show()
+
 
 # %%
+plt.figure()
+for x, y in [[0, 0], [1, 8], [34, 54], [112, 45]]:
+    plt.hist(mlp_impacts[:, 0, x, y, 2], bins=100, histtype="step", label=f"MLP neuron {x},{y}")
+plt.xlabel("MLP neuron impact on output 2")
+plt.legend()
+
+
+plt.hist(mlp_impacts[:, 0, 0, 0, 2], bins=100)
+plt.xlabel("MLP neuron impact on output 2")
+plt.savefig("mlp_impacts.png", dpi=600)
+
+plt.figure()
+plt.hist(resid_impacts[:, 0, 1, 8, 0], bins=100)
+plt.xlabel("Residual neuron impact on output 2")
+plt.savefig("resid_impacts.png", dpi=600)
+# plt.hist(torch.stack(mlp_impacts)[:, 1], bins=100)
+
+# if False:
+#     res_by_neuron = rib_model.forward(five_scaling)[:, 1, 8, :, :]
+#     np.save("res_by_neuron_18.npy", res_by_neuron.numpy())
+# else:
+#     res_by_neuron = np.load("res_by_neuron_18.npy")
+# res = res_by_neuron.sum(axis=-1)
+#  Save to file
+# %%
+
+# plot(five_scaling[5], res, output=2, x=0, y=0)
+# plot(five_scaling[5], res_n0, output=2, x=0, y=0, filename="diffs_n0.png")
+# plot(five_scaling[5], res_n1, output=2, x=0, y=0, filename="diffs_n1.png")

@@ -25,23 +25,6 @@ from dataclasses import dataclass, asdict
 from rib.plotting import plot_interaction_graph
 from rib.interaction_algos import InteractionRotation
 #%%
-# class SmallDNN(nn.Module):
-#     def __init__(self, layers = 4, n=4, k=2, dtype = torch.float32):
-#         super(SmallDNN, self).__init__()
-#         self.dtype = dtype
-#         # Define layers
-#         self.fc = nn.ModuleList([nn.Linear(n, n,dtype=self.dtype) for _ in range(layers)])
-
-#         # Hardcode weights and biases
-#         for i in range(layers):
-#             self.fc[i].weight = nn.Parameter(random_block_diagonal_matrix(n, k, dtype=self.dtype))
-#             self.fc[i].bias = nn.Parameter(torch.randn(n,dtype=self.dtype))
-
-#     def forward(self, x):
-#         for i in range(len(self.fc)-1):
-#             x = F.relu(self.fc[i](x))
-#         return F.softmax(self.fc[-1](x),-1)
-
 def random_block_diagonal_matrix(n, k, dtype = torch.float32):
     """Generate a random block diagonal matrix of size n x n with two blocks of size k x k and n - k x n - k."""
     # Generate random matrix
@@ -52,23 +35,23 @@ def random_block_diagonal_matrix(n, k, dtype = torch.float32):
     A[k:n, 0:k] = 0
 
     return A
+
 class BlockDiagonalDNN(MLP):
-    def __init__(self, layers = 4, n=4, k=2, dtype = torch.float32, bias = True):
+    def __init__(self, layers = 4, n=4, k=2, dtype = torch.float32, bias = None, activation_fn = 'relu'):
         super(BlockDiagonalDNN, self).__init__(hidden_sizes = [n] * layers, 
                                        input_size = n, output_size = n,
-                                       dtype = dtype, fold_bias = False)
+                                       dtype = dtype, fold_bias = False,
+                                       activation_fn=activation_fn)
         # self.dtype = dtype
         # # Define layers
         # self.fc = nn.ModuleList([nn.Linear(n, n,dtype=self.dtype) for _ in range(layers)])
 
         # Hardcode weights and biases
-        for i in range(layers):
+        for i in range(layers+1):
             self.layers[i].W = nn.Parameter(random_block_diagonal_matrix(n, k, dtype=dtype))
-            if not bias:
-                self.layers[i].b = nn.Parameter(torch.zeros(n,dtype=dtype))
+            if bias is not None:
+                self.layers[i].b = nn.Parameter(bias * torch.ones(n,dtype=dtype))
         self.fold_bias()
-
-test = BlockDiagonalDNN()
 
 # print(test.layers[0].W)
 #%%
@@ -124,15 +107,30 @@ def get_node_layers(n_layers: int) -> list[str]:
     """Return the names of the layers that are nodes in the graph."""
     out = [f'layers.{i}' for i in range(n_layers+1)]
 
-    out[-1] = "output"
+    out.append("output")
     return out
 
-def Cs_to_identity(Cs: list[InteractionRotation]):
+def cs_to_identity(Cs: list[InteractionRotation]):
     """Set all the Cs to identity matrices."""
     for C_info in Cs:
         print(C_info.C.shape, C_info.node_layer_name)
-        C_info.C = torch.eye(len(C_info.C), dtype=C_info.C.dtype, device=C_info.C.device)
-        C_info.C_pinv = torch.eye(len(C_info.C_pinv), dtype=C_info.C_pinv.dtype, device=C_info.C_pinv.device) if C_info.C_pinv is not None else None
+        if C_info.C.shape[0] != C_info.C.shape[1]:
+            print("Warning: C is not square.")
+            new_C = torch.eye(len(C_info.C), dtype=C_info.C.dtype, device=C_info.C.device)
+            C_info.C = new_C[:C_info.C.shape[0],:C_info.C.shape[1]]
+            C_info.C_pinv = new_C[:C_info.C_pinv.shape[0],:C_info.C_pinv.shape[1]] if C_info.C_pinv is not None else None
+        else:
+            C_info.C =  torch.eye(len(C_info.C), dtype=C_info.C.dtype, device=C_info.C.device)
+            C_info.C_pinv = torch.eye(len(C_info.C_pinv), dtype=C_info.C_pinv.dtype, device=C_info.C_pinv.device) if C_info.C_pinv is not None else None
+            
+    return Cs
+
+def cs_to_us(Cs: list[InteractionRotation], Us: list):
+    """Replace Cs with Us, the matrices which diagonalise the gram matrix of functions in each layer."""
+    for C_info, U_info in zip(Cs, Us):
+        print(C_info.C.shape, C_info.node_layer_name)
+        C_info.C = U_info.U
+        C_info.C_pinv = U_info.U.T
     return Cs
 #%%
 
@@ -145,15 +143,16 @@ class Config:
                  dataset_size: int = 128,
                  batch_size: int = 32,
                  seed: int = None,
-                 truncation_threshold: float = 1e-15,
+                 truncation_threshold: float = 1e-20,
                  n_intervals: int = 50,
                  dtype: type = torch.float32,
                  node_layers: list = None,
-                 datatype: str = 'strongcorrelated',
+                 datatype: str = 'random',
                  rotate_final_node_layer: bool = True,
                  force: bool = True,
-                 bias: bool = True,
-                 orthog_basis: bool = False,
+                 hardcode_bias = None,
+                 activation_fn = 'relu',
+                #  basis: str = 'rib',
                  ):
         """
         Initializes the configuration for the experiment.
@@ -188,8 +187,9 @@ class Config:
         self.datatype = datatype
         self.rotate_final_node_layer = rotate_final_node_layer
         self.force = force
-        self.bias = bias
-        self.orthog_basis = orthog_basis
+        self.hardcode_bias = hardcode_bias
+        self.activation_fn = activation_fn
+        # self.basis = basis
     def to_dict(self):
         return vars(self)
 
@@ -200,12 +200,11 @@ def main(config: Config) -> None:
         print(f"Seed not specified, using {config.seed}")
     set_seed(config.seed)
     exp_name = config.exp_name
-    exp_name += f'_seed{config.seed}_n{config.n}_k{config.k}_layers{config.layers}_{config.datatype}'
-    if not config.bias:
-        exp_name += '_nobias'
-    if config.orthog_basis:
-        exp_name += '_orthogbasis'
+    exp_name += f'_seed{config.seed}_n{config.n}_k{config.k}_layers{config.layers}_{config.datatype}_act_{config.activation_fn}_dsize_{config.dataset_size}'#_basis{config.basis}'
+    if config.hardcode_bias is not None:
+        exp_name += f'_bias{config.hardcode_bias}'
     assert config.datatype in ['strongcorrelated', 'random']
+    # assert config.basis in ['rib', 'pca', 'neuron']
 
     out_dir = Path(__file__).parent / "results"
     out_file = out_dir / exp_name / "rib_graph.pt"
@@ -216,7 +215,7 @@ def main(config: Config) -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = config.dtype
-    mlp = BlockDiagonalDNN(config.layers, config.n,config.k, dtype = dtype, bias = config.bias)
+    mlp = BlockDiagonalDNN(config.layers, config.n,config.k, dtype = dtype, bias = config.hardcode_bias, activation_fn = config.activation_fn)
     mlp.eval()
     mlp.to(device=torch.device(device), dtype=config.dtype)
     hooked_mlp = HookedModel(mlp)
@@ -233,7 +232,7 @@ def main(config: Config) -> None:
     non_output_node_layers = [layer for layer in node_layers if layer != "output"]
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = node_layers[-1] == "output" and config.rotate_final_node_layer
-
+    print(mlp.device)
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
         module_names=non_output_node_layers,
@@ -255,10 +254,8 @@ def main(config: Config) -> None:
         truncation_threshold=config.truncation_threshold,
         rotate_final_node_layer=config.rotate_final_node_layer,
     )
-    if config.orthog_basis:
-        Cs = Cs_to_identity(Cs)
-
-    E_hats = collect_interaction_edges(
+    
+    E_hats_rib = collect_interaction_edges(
         Cs=Cs,
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
@@ -267,7 +264,29 @@ def main(config: Config) -> None:
         dtype=dtype,
         device=device,
     )
-
+    
+    neuron_cs = cs_to_identity(Cs)
+    E_hats_neuron = collect_interaction_edges(
+        Cs=neuron_cs,
+        hooked_model=hooked_mlp,
+        n_intervals=config.n_intervals,
+        section_names=node_layers,
+        data_loader=dataloader,
+        dtype=dtype,
+        device=device,
+    )
+    pca_cs = cs_to_us(Cs, Us)
+    E_hats_pca = collect_interaction_edges(
+        Cs=pca_cs,
+        hooked_model=hooked_mlp,
+        n_intervals=config.n_intervals,
+        section_names=node_layers,
+        data_loader=dataloader,
+        dtype=dtype,
+        device=device,
+    )
+    
+    
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []
     for C_info in Cs:
@@ -283,9 +302,11 @@ def main(config: Config) -> None:
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "edges": [(module, E_hats[module].cpu()) for module in E_hats],
+        "rib_edges": [(module, E_hats_rib[module].cpu()) for module in E_hats_rib],
+        "neuron_edges": [(module, E_hats_neuron[module].cpu()) for module in E_hats_neuron],
+        "pca_edges": [(module, E_hats_pca[module].cpu()) for module in E_hats_pca],
         "model_config_dict": config.to_dict(),
-        "mlp": mlp.cpu()
+        "mlp": mlp.cpu().state_dict()
     }
     # Save the results (which include torch tensors) to file
     torch.save(results, out_file)
@@ -295,8 +316,10 @@ def main(config: Config) -> None:
     parent_dir = out_file.parent
     out_file_graph = parent_dir / "rib_graph.png"
     out_file_mlp = parent_dir / "mlp_graph.png"
+    out_file_neuron_basis = parent_dir / "neuron_basis_graph.png"
+    out_file_pca = parent_dir / "pca_graph.png"
 
-    mlp = results["mlp"]
+    mlp = mlp.cpu()
     mlp_edges = []
     for name in results["model_config_dict"]["node_layers"][:-1]:
         num = int(name.split(".")[1])
@@ -308,20 +331,40 @@ def main(config: Config) -> None:
     nodes_per_layer = config.n + 1
     layer_names = results["model_config_dict"]["node_layers"] + ["output"]
 
+    #make rib graph
     plot_interaction_graph(
-        raw_edges=results["edges"],
+        raw_edges=results["rib_edges"],
         layer_names=layer_names,
         exp_name=results["exp_name"],
         nodes_per_layer=nodes_per_layer,
         out_file=out_file_graph,
     )
 
+    #make graph of model weights
     plot_interaction_graph(
         raw_edges=mlp_edges,
         layer_names=layer_names,
         exp_name=results["exp_name"],
         nodes_per_layer=nodes_per_layer,
         out_file=out_file_mlp,
+    )
+    
+    #make pca graph
+    plot_interaction_graph(
+        raw_edges=results["pca_edges"],
+        layer_names=layer_names,
+        exp_name=results["exp_name"],
+        nodes_per_layer=nodes_per_layer,
+        out_file=out_file_pca,
+    )
+    
+    #make neuron basis graph
+    plot_interaction_graph(
+        raw_edges=results["neuron_edges"],
+        layer_names=layer_names,
+        exp_name=results["exp_name"],
+        nodes_per_layer=nodes_per_layer,
+        out_file=out_file_neuron_basis,
     )
     
 

@@ -1,29 +1,29 @@
-exp_name: edges_pythia-14m
+exp_name: pythia-14m-edges-ln1.5
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
-interaction_matrices_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/pythia-14m_rib_Cs.pt
+interaction_matrices_path: experiments/lm_rib_build/out/pythia-14m_rib_Cs.pt
 dataset:
   source: huggingface
   name: NeelNanda/pile-10k
   tokenizer_name: EleutherAI/pythia-14m
-  return_set: train  # pile-10k only has train, so we take the first 90% for building and last 10% for ablations
-  return_set_frac: 0.01
+  return_set: train  # pile-10k only has train
+  return_set_frac: 0.07 # ~1M tokens
   return_set_n_samples: null
   return_set_portion: first
-node_layers:
-  - mlp_out.0
-  - ln2.3
-  - mlp_out.3
+  n_ctx: 512
+node_layers: # note no output (this takes ~2hrs to get first rotations)
   - ln1.5
+  - attn_in.5
+  - ln2.5
+  - mlp_in.5
   - mlp_out.5
-  - output
-batch_size: 12  #  A100 can handle 24
-gram_batch_size: 40  #  A100 can handle 80
-edge_batch_size: 6
+batch_size: 36  #  A100 can handle 24
+gram_batch_size: 100  #  A100 can handle 80
+edge_batch_size: 50
 truncation_threshold: 1e-6
 rotate_final_node_layer: false
-n_intervals: 20
-dtype: float32
+n_intervals: 50
+dtype: float64
 calculate_edges: true
 eval_type: null

@@ -15,7 +15,7 @@ import torch
 
 
 results_file = (
-    "/mnt/ssd-apollo/nix/rib/experiments/lm_rib_build/pythia_edges/out/edges_0_rib_graph.pt"
+    "/mnt/ssd-apollo/nix/rib/experiments/lm_rib_build/pythia_edges/out/edges_4_rib_graph.pt"
 )
 
 results = torch.load(results_file)
@@ -45,10 +45,21 @@ plt.colorbar()
 plt.gcf().set_size_inches(10, 10)
 
 # %%
-extent = None
+extent = 50
 data = edges[:extent, :extent].T
-vmax = 0.1  # data.abs().max()
-plt.matshow(data, cmap="PiYG", vmin=-vmax, vmax=vmax)
+vmax = 1  # data.abs().max()
+plt.matshow(data, cmap="PiYG", vmin=-1, vmax=1)
+
+plt.ylabel(f"input ({input_mname})")
+plt.xlabel(f"output ({output_mname})")
+plt.colorbar()
+
+# %%
+
+extent = 80
+data = edges[:extent, :extent].T
+vmax = 1  # data.abs().max()
+plt.matshow(data.abs().log(), cmap="Blues", vmin=-8, vmax=0)
 
 plt.ylabel(f"input ({input_mname})")
 plt.xlabel(f"output ({output_mname})")

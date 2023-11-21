@@ -424,6 +424,7 @@ def relu_interaction_forward_hook_fn(
     module_name_next_layer: str,
     C_next_next_layer: Float[Tensor, "d_hidden1 d_hidden2"],
     n_intervals: int,
+    use_residual_stream: bool,
 ) -> None:
     """Hook function to store for ReLU metric numerators. The denominator is handled separately.
 
@@ -443,20 +444,23 @@ def relu_interaction_forward_hook_fn(
         module_name_next_layer: Also for getting next layer for in_grads.
         C_next_next_layer: Also for in_grads.
         n_intervals: Also for in_grads.
+        use_residual_stream: Whether to use residual stream for ReLU clustering.
     """
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
 
-    output_is_tuple: bool = True if isinstance(output, tuple) else False
     is_lm: bool = True if inputs[0].dim() == 3 else False
     outputs = output if isinstance(output, tuple) else (output,)
     raw_output = [x.clone() for x in outputs] # For passing into g_j finding function for metric 3
     out_hidden_dims = [x.shape[-1] for x in outputs]
 
     """Now fold the token into the batch to make it look like batch x height x width."""
-    if is_lm: # Don't want residual stream for operator syncing, so taken inputs[1] (last element of [MLP, resid_stream] tuple)
+    if is_lm and not use_residual_stream: # Don't want residual stream for operator syncing, so taken inputs[1] (last element of [MLP, resid_stream] tuple)
         inputs = rearrange(inputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
         outputs = rearrange(outputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
-    else:  # Inputs always tuple
+    elif is_lm and use_residual_stream:
+        inputs = rearrange(torch.cat([x.detach().clone() for x in inputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
+        outputs = rearrange(torch.cat([x.detach().clone() for x in outputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
+    else:  # Inputs always tuple, and in this case we want to treat the residual stream and MLP in the same way OR we don't have LM
         inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
         outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
@@ -487,7 +491,8 @@ def relu_interaction_forward_hook_fn(
             with torch.no_grad():
                 # Expand twice for m, n dimensions of final matrix, keeping last dim d1 as vector dimension
                 operator_expanded = repeat(operator, 'b d1 -> b d2 d3 d1', d2=d_hidden, d3=d_hidden).clone()
-                for m in range(d_hidden): operator_expanded[:, m, :, m] = operator
+                for m in range(d_hidden):
+                    operator_expanded[:, m, :, m] = operator
                 assert operator_expanded[0, 3, 7, 3] == operator[0, 7]
                 C_next_layer_repeated = repeat(C_next_layer, 'd1 d2 -> b d3 d4 d1 d2' , b=batch_size, d3=d_hidden, d4=d_hidden)
                 p_repeated = repeat(inputs, 'b d1 -> b d2 d3 d1', d2=d_hidden, d3=d_hidden)
@@ -517,9 +522,10 @@ def relu_interaction_forward_hook_fn(
                 n_intervals=n_intervals,
             )
 
-            if output_is_tuple: g_j_next_layer = torch.split(g_j_next_layer, out_hidden_dims, dim=-1)[1]
-
-            if is_lm: # Fold position into batch dimension
+            if is_lm:
+                if not use_residual_stream:
+                    g_j_next_layer = torch.split(g_j_next_layer, out_hidden_dims, dim=-1)[1]
+                # Fold position into batch dimension
                 g_j_next_layer = rearrange(g_j_next_layer, "b p d_hidden_combined -> (b p) d_hidden_combined")
 
             with torch.no_grad():
@@ -640,7 +646,6 @@ def test_edges_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
-    output_is_tuple: bool = True if isinstance(output, tuple) else False
     is_lm: bool = True if inputs[0].dim() == 3 else False
 
     if is_lm:

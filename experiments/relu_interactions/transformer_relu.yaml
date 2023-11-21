@@ -23,4 +23,5 @@ dtype: float32
 eval_type: accuracy
 relu_metric_type: 3
 edit_weights: False
-threshold: 1e-6
+threshold: 1e-4
+use_residual_stream: false

@@ -3,6 +3,7 @@ not store data."""
 from typing import Any, Union
 
 import torch
+from copy import deepcopy
 from einops import rearrange, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
@@ -26,7 +27,7 @@ def relu_swap_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     replacement_idxs: Int[Tensor, "d_hidden"],
-    use_residual_stream: bool = False,
+    use_residual_stream: bool,
 ) -> Union[
         tuple[Float[Tensor, "batch d_hidden"]],
         tuple[Float[Tensor, "batch pos d_hidden"]],
@@ -58,26 +59,30 @@ def relu_swap_forward_hook_fn(
 
     output_is_tuple = True if isinstance(output, tuple) else False
     is_lm = True if inputs[0].dim() == 3 else False
-    outputs = output if output_is_tuple else (output,)
-    out_hidden_dims = [x.shape[-1] for x in outputs]
+    outputs = output if isinstance(output, tuple) else (output,)
+    raw_outputs = deepcopy(outputs)
 
     # Once again, fold in token dimension into batch
     if is_lm and not use_residual_stream:
+        inputs = rearrange(inputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
+        outputs = rearrange(outputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
+        resid_stream_outputs = rearrange(raw_outputs[0], "b p d_hidden_combined -> (b p) d_hidden_combined")
+    elif is_lm and use_residual_stream:
         inputs = rearrange(torch.cat([x for x in inputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
         outputs = rearrange(torch.cat([x for x in outputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
+    else:  # Inputs always tuple, and in this case we don't have LM
+        inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+        outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
     operator: Float[Tensor, "batch d_hidden_out"] = torch.div(outputs, inputs)
     _, d_hidden = operator.shape
 
-    # `replacement_idxs` is shorter than `operator` by however large residual stream dim is
-    # Extend this code for residual stream by avoiding replacing these indices
     extended_replacement_idxs = torch.arange(d_hidden)
-    extended_replacement_idxs[:len(replacement_idxs)] = replacement_idxs
+    extended_replacement_idxs = replacement_idxs
     operator[..., torch.arange(d_hidden)] = operator[..., extended_replacement_idxs]
     edited_output = operator * inputs
 
-    if output_is_tuple:     # Split back into tuple form if the ouput should have been tuple
-        edited_output = tuple(torch.split(edited_output, out_hidden_dims, dim=-1))
+    if output_is_tuple:     # Put back in tuple form if ouput should have been tuple
+        return resid_stream_outputs, edited_output
 
     return edited_output
-

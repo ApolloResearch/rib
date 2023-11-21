@@ -1,31 +1,3 @@
-"""This script builds a RIB graph for a language model.
-We build the graph using a SequentialTransformer model, with weights ported over from a
-transformer-lens model.
-
-Steps to build the graph:
-1. Load a model from transformerlens (either from_pretrained or via ModelConfig).
-2. Fold in the biases into the weights.
-3. Convert the model to a SequentialTransformer model, which has nn.Modules corresponding to each
-    node layer.
-5. Collect the gram matrices at each node layer.
-6. Calculate the interaction basis matrices (labelled C in the paper) for each node layer, starting
-    from the final node layer and working backwards.
-7. Calculate the edges of the interaction graph between each node layer.
-
-Usage:
-    python run_lm_rib_build.py <path/to/config.yaml>
-
-The config.yaml should contain the `node_layers` field. This describes the sections of the
-graph that will be built: A graph layer will be built on the inputs to each specified node layer,
-as well as the output of the final node layer. For example, if `node_layers` is ["attn.0",
-"mlp_act.0"], this script will build the following graph layers:
-- One on the inputs to the "attn.0" node layer. This will include the residual stream concatenated
-    with the output of ln1.0.
-- One on the input to "mlp_act.0". This will include the residual stream concatenated with the
-    output of "mlp_in.0".
-- One on the output of "mlp_act.0". This will include the residual stream concatenated with the
-    output of "mlp_act.0".
-"""
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
@@ -45,7 +17,7 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score
 from sklearn.cluster import AffinityPropagation
 
 from rib.data_accumulator import (
-    calculate_all_swapped_iterative_relu_loss,
+    calculate_all_swapped_relu_loss,
     calculate_swapped_relu_loss,
 )
 from rib.hook_manager import HookedModel
@@ -54,7 +26,7 @@ from rib.log import logger
 from rib.types import TORCH_DTYPES
 
 if TYPE_CHECKING:   # Prevent circular import to import type annotations
-    from experiments.relu_interactions.mlp_relu import Config
+    from experiments.relu_interactions.transformer_relu import Config
 
 
 def relu_plot_and_cluster(
@@ -256,11 +228,8 @@ def swap_all_layers(
     fundamental computation in future layers should not break, because only activations (0s or 1s)
     are swapped, not pre-activations or post-activations.
     """
-    loss_change_list: list[float] = []
-    acc_change_list: list[float] = []
-    random_loss_change_list: list[float] = []
-    random_acc_change_list: list[float] = []
-
+    # list[float]
+    loss_change_list, acc_change_list, random_loss_change_list, random_acc_change_list = [], [], [], []
     num_valid_swaps_list_list: list[list[int]] = []     # Outer loop: tolerance value; inner loop: layer
     matrix_list = list(relu_matrices.values())
     module_list = list(config.activation_layers)
@@ -275,10 +244,10 @@ def swap_all_layers(
             replacement_idx_list.append(row_min_idxs)
             num_valid_swaps_list.apeend(num_valid_swaps)
 
-        print(f"num_valid_swaps: {num_valid_swaps_list}")
+        print(f"Num valid swaps: {num_valid_swaps_list}")
         num_valid_swaps_list_list.append(num_valid_swaps_list)
 
-        unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_iterative_relu_loss(
+        unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_relu_loss(
             hooked_model=hooked_model,
             module_names=module_list, # Used for hooks
             data_loader=data_loader,
@@ -286,6 +255,7 @@ def swap_all_layers(
             device=device,
             replacement_idx_list=replacement_idx_list,
             num_replaced_list=num_valid_swaps_list,
+            use_residual_stream=config.use_residual_stream,
         )
 
         print(
@@ -326,7 +296,7 @@ def swap_all_layers_using_clusters(
     random_acc_change_list: list[float] = []
     module_list = list(config.activation_layers)
 
-    unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_iterative_relu_loss(
+    unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_relu_loss(
         hooked_model=hooked_model,
         module_names=module_list, # Used for hooks
         data_loader=data_loader,
@@ -334,6 +304,7 @@ def swap_all_layers_using_clusters(
         device=device,
         replacement_idx_list=replacement_idxs_from_cluster,
         num_replaced_list=num_valid_swaps_from_cluster,
+        use_residual_stream=config.use_residual_stream,
     )
 
     print(

@@ -53,7 +53,7 @@ from experiments.relu_interactions.relu_interaction_utils import (
 )
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import (
-    calculate_all_swapped_iterative_relu_loss,
+    calculate_all_swapped_relu_loss,
     calculate_swapped_relu_loss,
     collect_clustered_relu_P_mats,
     collect_gram_matrices,
@@ -161,6 +161,11 @@ class Config(BaseModel):
         False,
         description="Whether to edit weights to push biases up so all ReLUs are synced - for debugging. Typically turned off."
     )
+    use_residual_stream: bool = Field(
+        False,
+        description="Whether to count residual stream in ReLU clustering alongside the MLP neurons."
+    )
+
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -239,7 +244,11 @@ def print_all_modules(mlp):
         print(name, ":", module)
 
 
-def plot_and_save_Ps(tensor_dict: dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]], out_dir: Path):
+def plot_and_save_Ps(
+    tensor_dict: dict[str, dict[Int[Tensor, "cluster_size"],
+    Float[Tensor, "d_hidden_next_layer d_hidden"]]],
+    out_dir: Path
+) -> None:
     for outer_key, inner_dict in tensor_dict.items():
         for i, (inner_key, tensor) in enumerate(inner_dict.items()):
             tensor = tensor.detach().cpu()
@@ -370,6 +379,7 @@ def get_relu_similarities(
         layer_module_names=graph_module_names,
         n_intervals=config.n_intervals,
         unhooked_model=model,
+        use_residual_stream=config.use_residual_stream,
     )
 
     with open(file_path, "wb") as f:
@@ -595,7 +605,7 @@ def transformer_relu_main(config_path_str: str):
         dataset=dataset,
         device=device,
         hooked_model=hooked_model,
-        Cs=Cs_and_Lambdas["C"],
+        Cs=C_list,
     )
 
     replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)
@@ -606,7 +616,8 @@ def transformer_relu_main(config_path_str: str):
         hooked_model=hooked_model,
         config=config,
         data_loader=graph_train_loader,
-        device=device)
+        device=device,
+    )
 
     # Separate part of main code ===================================================
     # Due to legacy code, ReLU metric calculation and ReLU swapping code only uses activation layers
@@ -627,17 +638,17 @@ def transformer_relu_main(config_path_str: str):
     seq_model.to(device=torch.device(device), dtype=dtype)
     hooked_model = HookedModel(seq_model)
 
-    # Has to be after editing node_layers so this contains the linear layers to extract weights from
-    W_hat_dict: dict[str, float[Tensor, "d_trunc_C_pinv, d_out_W"]] = check_and_open_file(
-        get_var_fn=get_rotated_Ws,
-        model=seq_model,
-        config=config,
-        file_path=Ws_save_file,
-        dataset=dataset,
-        device=device,
-        hooked_model=hooked_model,
-        C_pinv_list=C_pinv_list,
-    )
+    # # Has to be after editing node_layers so this contains the linear layers to extract weights from
+    # W_hat_dict: dict[str, float[Tensor, "d_trunc_C_pinv, d_out_W"]] = check_and_open_file(
+    #     get_var_fn=get_rotated_Ws,
+    #     model=seq_model,
+    #     config=config,
+    #     file_path=Ws_save_file,
+    #     dataset=dataset,
+    #     device=device,
+    #     hooked_model=hooked_model,
+    #     C_pinv_list=C_pinv_list,
+    # )
 
     # edges_dict = check_and_open_file(
     #     get_var_fn=get_edges,
@@ -649,27 +660,26 @@ def transformer_relu_main(config_path_str: str):
     #     hooked_model=hooked_model,
     #     C_list=C_list,
     #     C_unscaled_list=U_D_sqrt_pinv_Vs_list,
-    #     W_hat_list=W_hat_list,
+    #     W_hat_list=list(W_hat_dict.values()),
     # )
     # edges = list(edges_dict.values())
     # plot_matrix_list(edges, "edges", out_dir)
 
-    # config.node_layers can now be used in hooks in this function
-    # But first need to be converted into graph node layers
-    P_matrices: dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]] = check_and_open_file(
-        file_path=Ps_save_file,
-        get_var_fn=get_P_matrices,
-        model=seq_model,
-        config=config,
-        dataset=dataset,
-        device=device,
-        hooked_model=hooked_model,
-        C_list=Cs_and_Lambdas["C"],
-        W_hat_list=list(W_hat_dict.values()),
-        all_cluster_idxs=all_cluster_idxs,
-    )
-
-    plot_and_save_Ps(P_matrices, out_dir)
+    # # config.node_layers can now be used in hooks in this function
+    # # But first need to be converted into graph node layers
+    # P_matrices: dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]] = check_and_open_file(
+    #     file_path=Ps_save_file,
+    #     get_var_fn=get_P_matrices,
+    #     model=seq_model,
+    #     config=config,
+    #     dataset=dataset,
+    #     device=device,
+    #     hooked_model=hooked_model,
+    #     C_list=Cs_and_Lambdas["C"],
+    #     W_hat_list=list(W_hat_dict.values()),
+    #     all_cluster_idxs=all_cluster_idxs,
+    # )
+    # plot_and_save_Ps(P_matrices, out_dir)
 
 
 if __name__ == "__main__":

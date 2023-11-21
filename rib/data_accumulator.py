@@ -314,6 +314,7 @@ def collect_relu_interactions(
     Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
     layer_module_names: list[str],
     n_intervals: int,
+    use_residual_stream: bool,
     unhooked_model: nn.Module,
     hook_names: Optional[str] = None,
 ) -> tuple[dict[str, Float[Tensor, "d_hidden d_hidden"]], ...]:
@@ -357,12 +358,20 @@ def collect_relu_interactions(
                 data_key="relu_num",
                 fn=relu_interaction_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"relu_metric_type": relu_metric_type, "C_next_layer": Cs[i+1].to(device), "unhooked_model": unhooked_model, "module_name_next_layer": layer_module_names[i+1], "C_next_next_layer": Cs[i+2], "n_intervals": n_intervals}
+                fn_kwargs={
+                    "relu_metric_type": relu_metric_type,
+                    "C_next_layer": Cs[i+1].to(device),
+                    "unhooked_model": unhooked_model,
+                    "module_name_next_layer": layer_module_names[i+1],
+                    "C_next_next_layer": Cs[i+2],
+                    "n_intervals": n_intervals,
+                    "use_residual_stream": use_residual_stream,
+                }
+
             )
         )
 
-    run_dataset_through_model(
-        hooked_model, data_loader, hooks=relu_interaction_hooks, dtype=dtype, device=device)
+    run_dataset_through_model(hooked_model, data_loader, hooks=relu_interaction_hooks, dtype=dtype, device=device)
 
     relu_similarity_numerators: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["relu_num"].cpu()
@@ -577,7 +586,7 @@ def calculate_swapped_relu_loss(
     return unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy
 
 
-def calculate_all_swapped_iterative_relu_loss(
+def calculate_all_swapped_relu_loss(
     hooked_model: HookedModel,
     module_names: list[str],
     data_loader: DataLoader,
@@ -585,13 +594,11 @@ def calculate_all_swapped_iterative_relu_loss(
     device: str,
     replacement_idx_list: list[Int[Tensor, "d_hidden"]],
     num_replaced_list: list[list[int]],
+    use_residual_stream: bool,
     hook_names: Optional[list[str]] = None,
 ) -> tuple[list[float], ...]:
     """Calculate loss for unedited forward pass, and then on forward pass with specific ReLUs
     swapped.
-
-    - Iteratively replaces until loss and accuracy reach given thresholds (whichever first).
-    - Acts on all layers, though keeps the indices from the initial calculation.
     """
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
@@ -608,7 +615,10 @@ def calculate_all_swapped_iterative_relu_loss(
                 data_key="relu_swap",
                 fn=relu_swap_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"replacement_idxs": replacement_idx_list[i]}
+                fn_kwargs={
+                    "replacement_idxs": replacement_idx_list[i],
+                    "use_residual_stream": use_residual_stream
+                }
             )
         )
 
@@ -644,7 +654,10 @@ def calculate_all_swapped_iterative_relu_loss(
                 data_key="relu_swap",
                 fn=relu_swap_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"replacement_idxs": random_idx_tensor}
+                fn_kwargs={
+                    "replacement_idxs": random_idx_tensor,
+                    "use_residual_stream": use_residual_stream,
+                }
             )
         )
 

@@ -426,10 +426,9 @@ def main(
         "calc_edges_time": calc_edges_time,
     }
 
-    if dist_info.is_main_process:
-        # Save the results (which include torch tensors) to file
-        torch.save(results, out_file)
-        logger.info("Saved results to %s", out_file)
+    # Save the results (which include torch tensors) to file
+    torch.save(results, out_file)
+    logger.info("Saved results to %s", out_file)
 
 
 if __name__ == "__main__":

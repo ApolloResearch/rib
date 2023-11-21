@@ -26,35 +26,28 @@ as well as the output of the final node layer. For example, if `node_layers` is 
 - One on the output of "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_act.0".
 """
+import re
+from pathlib import Path
+from typing import Any, Iterable, Literal, Optional, Union, cast
+
 import fire
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import torch.nn as nn
-import re
 from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
-from pathlib import Path
-from typing import Any, List, Literal, Optional, Union, Iterable, cast
+from torch.utils.data import Dataset
 
 from experiments.relu_interactions.relu_interaction_utils import (
-    edit_weights_fn,
-    extract_weights_mlp,
-    get_nested_attribute,
-    plot_changes,
-    plot_matrix_list,
     print_all_modules,
     relu_plot_and_cluster,
-    swap_all_layers,
     swap_all_layers_using_clusters,
-    swap_single_layer,
 )
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import (
-    collect_clustered_relu_P_mats_no_W,
     collect_clustered_relu_P_mats,
+    collect_clustered_relu_P_mats_no_W,
     collect_gram_matrices,
     collect_relu_interactions,
     collect_test_edges,
@@ -67,21 +60,16 @@ from rib.interaction_algos import (
 )
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
-from rib.models.sequential_transformer.components import MODULE_CLASS_MAP
 from rib.models.utils import get_model_attr, get_model_weight
 from rib.types import TORCH_DTYPES
-from rib.utils import (
-    eval_cross_entropy_loss,
-    eval_model_accuracy,
-    load_config,
-    set_seed,
-)
+from rib.utils import load_config, set_seed
 
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exp_name: str = Field(..., description="The name of the experiment")
-    seed: int = Field(..., description="The random seed value for reproducibility")
+    seed: int = Field(...,
+                      description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."
     )
@@ -106,7 +94,8 @@ class Config(BaseModel):
         discriminator="source",
         description="The dataset to use to build the graph.",
     )
-    batch_size: int = Field(..., description="The batch size to use when building the graph.")
+    batch_size: int = Field(...,
+                            description="The batch size to use when building the graph.")
     gram_batch_size: Optional[int] = Field(
         None,
         description="The batch size to use when calculating the gram matrices. If None, use the same"
@@ -134,7 +123,8 @@ class Config(BaseModel):
         description="The size of the chunks to use for calculating the jacobian. If none, calculate"
         "the jacobian on all output dimensions at once.",
     )
-    dtype: str = Field(..., description="The dtype to use when building the graph.")
+    dtype: str = Field(...,
+                       description="The dtype to use when building the graph.")
     eps: float = Field(
         1e-5,
         description="The epsilon value to use for numerical stability in layernorm layers.",
@@ -165,7 +155,6 @@ class Config(BaseModel):
         description="Whether to count residual stream in ReLU clustering alongside the MLP neurons."
     )
 
-
     @field_validator("dtype")
     def dtype_validator(cls, v):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
@@ -183,7 +172,7 @@ class Config(BaseModel):
 def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
     """Ensure that the config for calculating edges is compatible with that used to calculate Cs."""
 
-    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers) :], (
+    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers):], (
         "node_layers in the config must be a subsequence of the node layers in the config used to"
         "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
         "match those needed to correctly calculate the edges."
@@ -220,9 +209,11 @@ def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
 def load_interaction_rotations(
     config: Config,
 ) -> tuple[
-    dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]
+    dict[str, Float[Tensor, "d_hidden d_hidden"]
+         ], list[InteractionRotation], list[Eigenvectors]
 ]:
-    logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
+    logger.info("Loading pre-saved C matrices from %s",
+                config.interaction_matrices_path)
     assert config.interaction_matrices_path is not None
     matrices_info = torch.load(config.interaction_matrices_path)
 
@@ -230,22 +221,18 @@ def load_interaction_rotations(
     _verify_compatible_configs(config, loaded_config)
 
     gram_matrices = matrices_info["gram_matrices"]
-    Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
+    Cs = [InteractionRotation(**data)
+          for data in matrices_info["interaction_rotations"]]
     Us = [Eigenvectors(**data) for data in matrices_info["eigenvectors"]]
     return gram_matrices, Cs, Us
 
 
 # Helper functions for main ========================================================
 
-def print_all_modules(mlp):
-    """Use for choosing which modules go in config file."""
-    for name, module in mlp.named_modules():
-        print(name, ":", module)
-
 
 def plot_and_save_Ps(
     tensor_dict: dict[str, dict[Int[Tensor, "cluster_size"],
-    Float[Tensor, "d_hidden_next_layer d_hidden"]]],
+                                Float[Tensor, "d_hidden_next_layer d_hidden"]]],
     out_dir: Path
 ) -> None:
     for outer_key, inner_dict in tensor_dict.items():
@@ -257,7 +244,8 @@ def plot_and_save_Ps(
 
             # Adjust subplot parameters to create space for annotation
             plt.subplots_adjust(top=0.85)
-            ax.text(0.5, 1.05, f'Inner Key: {inner_key}', transform=ax.transAxes, ha='center', va='bottom', fontsize=8, bbox=dict(boxstyle='round,pad=0.3'))
+            ax.text(0.5, 1.05, f'Inner Key: {inner_key}', transform=ax.transAxes,
+                    ha='center', va='bottom', fontsize=8, bbox=dict(boxstyle='round,pad=0.3'))
 
             plt.colorbar()
             file_name = out_dir / f"{outer_key}_cluster_{i}.png"
@@ -273,17 +261,18 @@ def get_Cs(
     device: str,
     hooked_model: HookedModel = None,
 ) -> dict[str,
-    Union[list[InteractionRotation],
-    list[Eigenvectors],
-    list[Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"]],
-    list[Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"]]],
-]:
+          Union[list[InteractionRotation],
+                list[Eigenvectors],
+                list[Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"]],
+                list[Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"]]],
+          ]:
     """Depending on which is easier, one of model or hooked_model are used.
 
     Hooked model should already be on device.
     """
     dtype = TORCH_DTYPES[config.dtype]
-    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
+    return_set = cast(Literal["train", "test", "all"],
+                      config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
         return_set=return_set,
@@ -312,7 +301,8 @@ def get_Cs(
             dtype=dtype,
             device=device,
             collect_output_gram=collect_output_gram,
-            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
+            hook_names=[
+                layer_name for layer_name in config.node_layers if layer_name != "output"],
         )
 
         graph_train_loader = create_data_loader(
@@ -337,11 +327,13 @@ def get_Cs(
     else:
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
 
-    C_list = [C_info.C for C_info in Cs if C_info is not None] # C_info may be None for final (output) layer if rotate_output_logits=False
+    # C_info may be None for final (output) layer if rotate_output_logits=False
+    C_list = [C_info.C for C_info in Cs if C_info is not None]
     C_pinv_list = [C_info.C_pinv for C_info in Cs if C_info is not None]
 
     with open(file_path, "wb") as f:
-        torch.save({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices,}, f)
+        torch.save({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs,
+                   "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices, }, f)
 
     return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}
 
@@ -355,17 +347,19 @@ def get_relu_similarities(
     hooked_model: HookedModel,
     Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
-    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
+    return_set = cast(Literal["train", "test", "all"],
+                      config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = create_data_loader(
+        dataset, shuffle=True, batch_size=config.batch_size)
 
     # Don't build the graph for the section of the model before the first node layer
     # The names below are *defined from* the node_layers dictionary in the config file
-    graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+    graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
     relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
         hooked_model=hooked_model,
@@ -375,7 +369,7 @@ def get_relu_similarities(
         device=device,
         relu_metric_type=config.relu_metric_type,
         Cs=Cs,
-        layer_module_names=graph_module_names,
+        layer_module_names=graph_section_names,
         n_intervals=config.n_intervals,
         unhooked_model=model,
         use_residual_stream=config.use_residual_stream,
@@ -389,11 +383,6 @@ def get_relu_similarities(
 
 def get_rotated_Ws(
     model: nn.Module,
-    config: Config,
-    file_path: str,
-    dataset: Dataset,
-    device: str,
-    hooked_model: HookedModel,
     C_pinv_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> dict[str, Float[Tensor, "layer_count d_hidden d_hidden"]]:
     """Extract W^l, perform paper-equivalent right multiplication of psuedoinverse of C^l.
@@ -402,7 +391,7 @@ def get_rotated_Ws(
     This must start at the same place as the node layers to calculate the C_pinvs did.
 
     Quick explanation on how this works:
-    - graph_module_names passes in automatically named sections based on node_layers in config.
+    - graph_section_names passes in automatically named sections based on node_layers in config.
     - These are MultiSequential objects with modules inside, and they are iterable.
     - Iterate through and extract weights, put in dictionary with key being the submodules in that
     section
@@ -416,17 +405,15 @@ def get_rotated_Ws(
             never have two submodules in section with valid weights, making this function only valid for
             MLPs and not attention layers. Values are weight tensors, with dimensions [in_dim, out_dim]
     """
-    graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+    graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
     weights_dict: dict[list[str], float[Tensor, "d_hidden1, d_hidden2"]] = {}
-    for module_name in graph_module_names:
-        module: Iterable = get_model_attr(model, module_name) # From rib.models.utils
-        str_module_names: str = ", ".join([submodule.__class__.__name__ for submodule in module])
-        weight = get_model_weight(model, attr_path=module_name)
-    # Returns None if module_classes instance doesn't match the module
-    # Also only consider mlp_out for now
-    # Note the regex is needed because you need two node layers if you want the section to end
-    # before the unembed (so you're not accidentally appending the unembed layer)
+    for section_name in graph_section_names:
+        section: Iterable = get_model_attr(model, section_name)  # From rib.models.utils
+        str_module_names: str = ", ".join([submodule.__class__.__name__ for submodule in section])
+        weight = get_model_weight(model, attr_path=section_name)
+    # Return None if module_classes instance doesn't match module, only consider mlp_out for now
+    # Regex is needed to specify exactly which module (e.g. not unembed matrix)
         if weight is not None and re.search(r'\bMLPOut\b', str_module_names):
             weights_dict[str_module_names] = weight
 
@@ -441,70 +428,72 @@ def get_rotated_Ws(
     return rotated_weights_dict
 
 
-def get_P_matrices(
-    model: nn.Module,
-    config: Config,
-    file_path: str,
-    dataset: Dataset,
-    device: str,
-    hooked_model: HookedModel,
-    C_list: list[Float[Tensor, "d_hidden d_hidden"]],
-    W_hat_list: list[Float[Tensor,  "d_hidden d_hidden"]],
-    all_cluster_idxs: list[list[np.ndarray]],
-) -> dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]]:
-    """Helper function for P matrix collection method.
+# def get_P_matrices(
+#     model: nn.Module,
+#     config: Config,
+#     file_path: str,
+#     dataset: Dataset,
+#     device: str,
+#     hooked_model: HookedModel,
+#     C_list: list[Float[Tensor, "d_hidden d_hidden"]],
+#     W_hat_list: list[Float[Tensor,  "d_hidden d_hidden"]],
+#     all_cluster_idxs: list[list[np.ndarray]],
+# ) -> dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]]:
+#     """Helper function for P matrix collection method.
 
-    In some cases this might include usage of W_hat_list, and in others it won't
-    """
-    graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+#     In some cases this might include usage of W_hat_list, and in others it won't
+#     """
+#     graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
-    P_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_clustered_relu_P_mats_no_W(
-        module_names=graph_module_names,
-        C_list=C_list,
-        all_cluster_idxs=all_cluster_idxs,
-    )
+#     P_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_clustered_relu_P_mats_no_W(
+#         module_names=graph_section_names,
+#         C_list=C_list,
+#         all_cluster_idxs=all_cluster_idxs,
+#     )
 
-    with open(file_path, "wb") as f:
-        torch.save(P_matrices, f)
+#     with open(file_path, "wb") as f:
+#         torch.save(P_matrices, f)
 
-    return P_matrices
+#     return P_matrices
 
 
-def get_edges(
-    model: nn.Module,
-    config: Config,
-    file_path: str,
-    dataset: Dataset,
-    device: str,
-    hooked_model: HookedModel,
-    C_list: list[Float[Tensor, "d_hidden_out d_hidden_in"]],
-    C_unscaled_list: list[Float[Tensor, "d_hidden_out d_hidden_in"]],
-    W_hat_list: list[Float[Tensor, "d_hidden_in d_hidden_out"]],
-) -> dict[str, Float[Tensor, "d_hidden_trunc_curr d_hidden_trunc_next"]]:
-    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
-    dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set=return_set,
-        tlens_model_path=config.tlens_model_path,
-    )
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+# def get_edges(
+#     model: nn.Module,
+#     config: Config,
+#     file_path: str,
+#     dataset: Dataset,
+#     device: str,
+#     hooked_model: HookedModel,
+#     C_list: list[Float[Tensor, "d_hidden_out d_hidden_in"]],
+#     C_unscaled_list: list[Float[Tensor, "d_hidden_out d_hidden_in"]],
+#     W_hat_list: list[Float[Tensor, "d_hidden_in d_hidden_out"]],
+# ) -> dict[str, Float[Tensor, "d_hidden_trunc_curr d_hidden_trunc_next"]]:
+#     return_set = cast(Literal["train", "test", "all"],
+#                       config.dataset.return_set)
+#     dataset = load_dataset(
+#         dataset_config=config.dataset,
+#         return_set=return_set,
+#         tlens_model_path=config.tlens_model_path,
+#     )
+#     graph_train_loader = create_data_loader(
+#         dataset, shuffle=True, batch_size=config.batch_size)
 
-    """NOTE CODE BELOW HAS C_UNSCALED_LIST = C_LIST. THIS SHOULD NOT ALWAYS BE TRUE."""
-    edges_dict: dict[str, Float[Tensor, "d_hidden_trunc_1 d_hiddn_trunc_2"]] = collect_test_edges(
-        C_unscaled_list=C_list,
-        C_list=C_list,
-        W_hat_list=W_hat_list,
-        hooked_model=hooked_model,
-        module_names=config.activation_layers,
-        data_loader=graph_train_loader,
-        dtype=TORCH_DTYPES[config.dtype],
-        device=device,
-    )
+#     """NOTE CODE BELOW HAS C_UNSCALED_LIST = C_LIST. THIS SHOULD NOT ALWAYS BE TRUE."""
+#     edges_dict: dict[str, Float[Tensor, "d_hidden_trunc_1 d_hiddn_trunc_2"]] = collect_test_edges(
+#         C_unscaled_list=C_list,
+#         C_list=C_list,
+#         W_hat_list=W_hat_list,
+#         hooked_model=hooked_model,
+#         module_names=config.activation_layers,
+#         data_loader=graph_train_loader,
+#         dtype=TORCH_DTYPES[config.dtype],
+#         device=device,
+#     )
 
-    with open(file_path, "wb") as f:
-        torch.save(edges_dict, f)
+#     with open(file_path, "wb") as f:
+#         torch.save(edges_dict, f)
 
-    return edges_dict
+#     return edges_dict
 
 
 def check_and_open_file(
@@ -525,7 +514,8 @@ def check_and_open_file(
         with file_path.open("rb") as f:
             var = torch.load(f, map_location=device)
     else:
-        var = get_var_fn(model, config, file_path, dataset, device, hooked_model, **kwargs)
+        var = get_var_fn(model, config, file_path, dataset,
+                         device, hooked_model, **kwargs)
 
     return var
 
@@ -544,7 +534,8 @@ def transformer_relu_main(config_path_str: str):
     Ps_save_file = Path(__file__).parent / "Ps_transformer"
     edges_save_file = Path(__file__).parent / "edges_transformer"
 
-    out_dir = Path(__file__).parent / f"out_transformer_relu / type_{config.relu_metric_type}"
+    out_dir = Path(__file__).parent / \
+        f"out_transformer_relu / type_{config.relu_metric_type}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     dtype = TORCH_DTYPES[config.dtype]
@@ -562,7 +553,7 @@ def transformer_relu_main(config_path_str: str):
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    print_all_modules(seq_model) # Check module names were correctly defined
+    print_all_modules(seq_model)  # Check module names were correctly defined
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need both train and test sets
@@ -572,7 +563,8 @@ def transformer_relu_main(config_path_str: str):
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = create_data_loader(
+        dataset, shuffle=True, batch_size=config.batch_size)
 
     # dict of InteractionRotation objects or Tensors
     Cs_and_Lambdas: dict[str, list[Union[InteractionRotation, Float[Tensor, ...]]]] = check_and_open_file(
@@ -585,7 +577,8 @@ def transformer_relu_main(config_path_str: str):
         hooked_model=hooked_model,
     )
 
-    C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list, U_D_sqrt_pinv_Vs_list, U_D_sqrt_Vs_list, Cs, Us, gram_matrices = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"], Cs_and_Lambdas["Lambda_abs_sqrts"], Cs_and_Lambdas["Lambda_abs_sqrt_pinvs"], Cs_and_Lambdas["U_D_sqrt_pinv_Vs"], Cs_and_Lambdas["U_D_sqrt_Vs"], Cs_and_Lambdas["Cs raw"], Cs_and_Lambdas["Us raw"], Cs_and_Lambdas["gram matrices"]
+    C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list, U_D_sqrt_pinv_Vs_list, U_D_sqrt_Vs_list, Cs, Us, gram_matrices = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"], Cs_and_Lambdas[
+        "Lambda_abs_sqrts"], Cs_and_Lambdas["Lambda_abs_sqrt_pinvs"], Cs_and_Lambdas["U_D_sqrt_pinv_Vs"], Cs_and_Lambdas["U_D_sqrt_Vs"], Cs_and_Lambdas["Cs raw"], Cs_and_Lambdas["Us raw"], Cs_and_Lambdas["gram matrices"]
 
     relu_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = check_and_open_file(
         get_var_fn=get_relu_similarities,
@@ -598,7 +591,8 @@ def transformer_relu_main(config_path_str: str):
         Cs=C_list,
     )
 
-    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)
+    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(
+        relu_matrices, out_dir, config)
 
     swap_all_layers_using_clusters(
         replacement_idxs_from_cluster=replacement_idxs_from_cluster,
@@ -610,35 +604,27 @@ def transformer_relu_main(config_path_str: str):
     )
 
     # Separate part of main code ===================================================
-    # Due to legacy code, ReLU metric calculation and ReLU swapping code only uses activation layers
-    # `node_layers` is fixed and wraps activation layer by itself
-    # However, for next task, need whole MLP input + activation segment
-    # So redefine node_layers to create a new model
+    # Redefine layers required for weight matrices
 
-    seq_model, tlens_cfg_dict = load_sequential_transformer(
-        node_layers=["mlp_out.0", "unembed"], # CHANGE LAYERS FOR MLP - NOTE THIS AT LEAST NEEDS TO START WHERE THE PREVIOUS MODEL LIST DID, SO THAT MULTIPLYING BY THE PREVIOUSLY CALCULATED C WITH ZIP WORKS
-        last_pos_module_type=config.last_pos_module_type,
-        tlens_pretrained=config.tlens_pretrained,
-        tlens_model_path=config.tlens_model_path,
-        eps=config.eps,
-        dtype=dtype,
-        device=device,
-    )
-    seq_model.eval()
-    seq_model.to(device=torch.device(device), dtype=dtype)
-    hooked_model = HookedModel(seq_model)
+    # seq_model, tlens_cfg_dict = load_sequential_transformer(
+    #     # CHANGE LAYERS FOR MLP - NOTE THIS AT LEAST NEEDS TO START WHERE THE PREVIOUS MODEL LIST DID, SO THAT MULTIPLYING BY THE PREVIOUSLY CALCULATED C WITH ZIP WORKS
+    #     node_layers=["mlp_out.0", "unembed"],
+    #     last_pos_module_type=config.last_pos_module_type,
+    #     tlens_pretrained=config.tlens_pretrained,
+    #     tlens_model_path=config.tlens_model_path,
+    #     eps=config.eps,
+    #     dtype=dtype,
+    #     device=device,
+    # )
+    # seq_model.eval()
+    # seq_model.to(device=torch.device(device), dtype=dtype)
+    # hooked_model = HookedModel(seq_model)
 
-    # Has to be after editing node_layers so this contains the linear layers to extract weights from
-    W_hat_dict: dict[str, float[Tensor, "d_trunc_C_pinv, d_out_W"]] = check_and_open_file(
-        get_var_fn=get_rotated_Ws,
-        model=seq_model,
-        config=config,
-        file_path=Ws_save_file,
-        dataset=dataset,
-        device=device,
-        hooked_model=hooked_model,
-        C_pinv_list=C_pinv_list,
-    )
+    # # Has to be after editing node_layers so this contains the linear layers to extract weights from
+    # W_hat_dict: dict[str, float[Tensor, "d_trunc_C_pinv, d_out_W"]] = get_rotated_Ws(
+    #     model=seq_model,
+    #     C_pinv_list=C_pinv_list,
+    # )
 
     # edges_dict = check_and_open_file(
     #     get_var_fn=get_edges,
@@ -655,21 +641,21 @@ def transformer_relu_main(config_path_str: str):
     # edges = list(edges_dict.values())
     # plot_matrix_list(edges, "edges", out_dir)
 
-    # config.node_layers can now be used in hooks in this function
-    # But first need to be converted into graph node layers
-    P_matrices: dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]] = check_and_open_file(
-        file_path=Ps_save_file,
-        get_var_fn=get_P_matrices,
-        model=seq_model,
-        config=config,
-        dataset=dataset,
-        device=device,
-        hooked_model=hooked_model,
-        C_list=Cs_and_Lambdas["C"],
-        W_hat_list=list(W_hat_dict.values()),
-        all_cluster_idxs=all_cluster_idxs,
-    )
-    plot_and_save_Ps(P_matrices, out_dir)
+    # # config.node_layers can now be used in hooks in this function
+    # # But first need to be converted into graph node layers
+    # P_matrices: dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]] = check_and_open_file(
+    #     file_path=Ps_save_file,
+    #     get_var_fn=get_P_matrices,
+    #     model=seq_model,
+    #     config=config,
+    #     dataset=dataset,
+    #     device=device,
+    #     hooked_model=hooked_model,
+    #     C_list=Cs_and_Lambdas["C"],
+    #     W_hat_list=list(W_hat_dict.values()),
+    #     all_cluster_idxs=all_cluster_idxs,
+    # )
+    # plot_and_save_Ps(P_matrices, out_dir)
 
 
 if __name__ == "__main__":

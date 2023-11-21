@@ -1,28 +1,23 @@
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy
 import seaborn as sns
-from jaxtyping import Float, Int
-from einops import rearrange, repeat
 import torch
-from torch import Tensor
-from torch.utils.data import DataLoader
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-
+from einops import rearrange
+from jaxtyping import Float, Int
 from scipy.cluster.hierarchy import dendrogram, fcluster, leaves_list, linkage
 from scipy.spatial.distance import squareform
-from sklearn.metrics import silhouette_score, davies_bouldin_score
-from sklearn.cluster import AffinityPropagation
+from torch import Tensor
+from torch.utils.data import DataLoader
 
 from rib.data_accumulator import (
     calculate_all_swapped_relu_loss,
     calculate_swapped_relu_loss,
 )
 from rib.hook_manager import HookedModel
-
-from rib.log import logger
 from rib.types import TORCH_DTYPES
 
 if TYPE_CHECKING:   # Prevent circular import to import type annotations
@@ -57,7 +52,7 @@ def relu_plot_and_cluster(
             out_dir / f"mat_{i}_type_{config.relu_metric_type}.png")
 
         # Plot raw histogram
-        plt.figure(figsize=(10,8))
+        plt.figure(figsize=(10, 8))
         flat_similarity = np.array(similarity_matrix).flatten()
         sns.histplot(flat_similarity, bins=100, kde=False)
         plt.savefig(
@@ -69,13 +64,16 @@ def relu_plot_and_cluster(
                 similarity_matrix[similarity_matrix < threshold] = 0
                 distance_matrix = 1 - similarity_matrix
             case 1 | 2:
-                distance_matrix = torch.max(similarity_matrix, similarity_matrix.T) # Make symmetric
+                distance_matrix = torch.max(
+                    similarity_matrix, similarity_matrix.T)  # Make symmetric
                 threshold = 1
                 distance_matrix[distance_matrix > threshold] = threshold
             case 3:
-                distance_matrix = torch.max(torch.abs(similarity_matrix), torch.abs(similarity_matrix).T)
+                distance_matrix = torch.max(
+                    torch.abs(similarity_matrix), torch.abs(similarity_matrix).T)
 
-        distance_matrix = distance_matrix.fill_diagonal_(0) # Deal with zeros on diagonal
+        distance_matrix = distance_matrix.fill_diagonal_(
+            0)  # Deal with zeros on diagonal
         mean_distance = torch.mean(distance_matrix)
         std_distance = torch.sqrt(torch.var(distance_matrix))
         print(f"mean distance {mean_distance} std distance {std_distance}")
@@ -101,9 +99,11 @@ def relu_plot_and_cluster(
         # To replace elements of operator vector within clusters with `centroid member` of each cluster
         indices_of_original_O = np.arange(distance_matrix.shape[0])
         for cluster in unique_clusters:
-            cluster_idx = np.where(clusters == cluster)[0] # 1D array of indices of original matrix
+            # 1D array of indices of original matrix
+            cluster_idx = np.where(clusters == cluster)[0]
             layer_num_valid_swaps.append(cluster_idx.shape[0] - 1)
-            cluster_distances = distance_matrix[np.ix_(cluster_idx, cluster_idx)]
+            cluster_distances = distance_matrix[np.ix_(
+                cluster_idx, cluster_idx)]
             # Use symmetry of matrix, sum only over one dimension to compute total distance to all
             # other members
             # And find minimum index in this cluster subarray
@@ -121,20 +121,24 @@ def relu_plot_and_cluster(
         print(f"swaps {layer_num_valid_swaps}")
         # Cast indices to tensor and add to list of returns - one item per layer
         return_index_list.append(torch.tensor(indices_of_original_O))
-        layer_num_swaps_dict = {i: swap_num for i, swap_num in enumerate(layer_num_valid_swaps)}
+        layer_num_swaps_dict = {i: swap_num for i,
+                                swap_num in enumerate(layer_num_valid_swaps)}
         degeneracy_total = sum([(n+1)**2-n-1 for n in layer_num_valid_swaps])
         print(f"swaps dict {layer_num_swaps_dict}")
         print(f"degeneracy total {degeneracy_total}")
         with open('relu_clusters.txt', 'w') as file:
-            for item in all_cluster_idxs: file.write("%s\n" % item)
+            for item in all_cluster_idxs:
+                file.write("%s\n" % item)
 
         rearranged_similarity_matrix = distance_matrix[order, :][:, order]
 
         # Plot sorted similarity matrix via indices obtained from distance matrix
         plt.figure(figsize=(10, 8))
-        sns.heatmap(rearranged_similarity_matrix, annot=False, cmap="YlGnBu", cbar=True, square=True)
+        sns.heatmap(rearranged_similarity_matrix, annot=False,
+                    cmap="YlGnBu", cbar=True, square=True)
         plt.title("Reordered Similarity Matrix")
-        plt.savefig(out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}.png")
+        plt.savefig(
+            out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}.png")
 
     return return_index_list, all_num_valid_swaps, all_cluster_idxs
 
@@ -144,7 +148,8 @@ def detect_edges(matrix, sigma=1):
     laplacian = scipy.ndimage.laplace(smoothed)
 
     # Find zero-crossings
-    zero_crossings = np.logical_xor(laplacian > 0, scipy.ndimage.binary_erosion(laplacian < 0))
+    zero_crossings = np.logical_xor(
+        laplacian > 0, scipy.ndimage.binary_erosion(laplacian < 0))
     edges = zero_crossings.astype(int)
 
     np.save('log_edges', edges)
@@ -175,7 +180,8 @@ def swap_single_layer(
     acc_change_list: list[float] = []
     random_loss_change_list: list[float] = []
     random_acc_change_list: list[float] = []
-    tols = [[1e-3, 7e-4, 4e-4, 1e-4, 7e-5, 4e-5], [1e-4, 7e-5, 4e-5, 1e-5, 7e-6, 4e-6]]
+    tols = [[1e-3, 7e-4, 4e-4, 1e-4, 7e-5, 4e-5],
+            [1e-4, 7e-5, 4e-5, 1e-5, 7e-6, 4e-6]]
     matrix = list(relu_matrices.values())[layer_num]
     module_name = list(config.activation_layers)[layer_num]
 
@@ -188,7 +194,7 @@ def swap_single_layer(
 
         unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_swapped_relu_loss(
             hooked_model=hooked_model,
-            module_name=module_name, # Used for hooks
+            module_name=module_name,  # Used for hooks
             data_loader=data_loader,
             dtype=TORCH_DTYPES[config.dtype],
             device=device,
@@ -206,11 +212,15 @@ def swap_single_layer(
         )
 
         loss_change_list.append((hooked_loss - unhooked_loss) / unhooked_loss)
-        acc_change_list.append(( hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
-        random_loss_change_list.append((random_hooked_loss - unhooked_loss) / unhooked_loss)
-        random_acc_change_list.append((random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+        acc_change_list.append(
+            (hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+        random_loss_change_list.append(
+            (random_hooked_loss - unhooked_loss) / unhooked_loss)
+        random_acc_change_list.append(
+            (random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
 
-    plot_changes(num_valid_swaps_list, loss_change_list, random_loss_change_list, acc_change_list, random_acc_change_list, out_dir, layer_num)
+    plot_changes(num_valid_swaps_list, loss_change_list, random_loss_change_list,
+                 acc_change_list, random_acc_change_list, out_dir, layer_num)
 
 
 def swap_all_layers(
@@ -234,17 +244,21 @@ def swap_all_layers(
     """
     # list[float]
     loss_change_list, acc_change_list, random_loss_change_list, random_acc_change_list = [], [], [], []
-    num_valid_swaps_list_list: list[list[int]] = []     # Outer loop: tolerance value; inner loop: layer
+    # Outer loop: tolerance value; inner loop: layer
+    num_valid_swaps_list_list: list[list[int]] = []
     matrix_list = list(relu_matrices.values())
     module_list = list(config.activation_layers)
 
     for i in range(len(tols[0])):
-        num_valid_swaps_list: list[int] = [] # Count number of swaps in each layer - for plotting
+        # Count number of swaps in each layer - for plotting
+        num_valid_swaps_list: list[int] = []
         # Outer loop: modules; inner loop: indices of hidden layer
-        replacement_idx_list: list[Int[Tensor, "d_hidden"]] = [] # Passed into hook function
+        # Passed into hook function
+        replacement_idx_list: list[Int[Tensor, "d_hidden"]] = []
         for layer_num, (module, matrix) in enumerate(zip(module_list, matrix_list)):
             tol = tols[layer_num][i]
-            row_min_idxs, num_valid_swaps = find_indices_to_replace(matrix, tol)
+            row_min_idxs, num_valid_swaps = find_indices_to_replace(
+                matrix, tol)
             replacement_idx_list.append(row_min_idxs)
             num_valid_swaps_list.apeend(num_valid_swaps)
 
@@ -253,7 +267,7 @@ def swap_all_layers(
 
         unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_relu_loss(
             hooked_model=hooked_model,
-            module_names=module_list, # Used for hooks
+            module_names=module_list,  # Used for hooks
             data_loader=data_loader,
             dtype=TORCH_DTYPES[config.dtype],
             device=device,
@@ -272,12 +286,17 @@ def swap_all_layers(
         )
 
         loss_change_list.append((hooked_loss - unhooked_loss) / unhooked_loss)
-        acc_change_list.append(( hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
-        random_loss_change_list.append((random_hooked_loss - unhooked_loss) / unhooked_loss)
-        random_acc_change_list.append((random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+        acc_change_list.append(
+            (hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+        random_loss_change_list.append(
+            (random_hooked_loss - unhooked_loss) / unhooked_loss)
+        random_acc_change_list.append(
+            (random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
 
-    mean_swaps_list = [sum(swaps) / len(swaps) for swaps in num_valid_swaps_list_list]
-    plot_changes(mean_swaps_list, loss_change_list, random_loss_change_list, acc_change_list, random_acc_change_list, out_dir)
+    mean_swaps_list = [sum(swaps) / len(swaps)
+                       for swaps in num_valid_swaps_list_list]
+    plot_changes(mean_swaps_list, loss_change_list, random_loss_change_list,
+                 acc_change_list, random_acc_change_list, out_dir)
 
 
 def swap_all_layers_using_clusters(
@@ -302,7 +321,7 @@ def swap_all_layers_using_clusters(
 
     unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_relu_loss(
         hooked_model=hooked_model,
-        module_names=module_list, # Used for hooks
+        module_names=module_list,  # Used for hooks
         data_loader=data_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
@@ -321,9 +340,12 @@ def swap_all_layers_using_clusters(
     )
 
     loss_change_list.append((hooked_loss - unhooked_loss) / unhooked_loss)
-    acc_change_list.append(( hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
-    random_loss_change_list.append((random_hooked_loss - unhooked_loss) / unhooked_loss)
-    random_acc_change_list.append((random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+    acc_change_list.append(
+        (hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+    random_loss_change_list.append(
+        (random_hooked_loss - unhooked_loss) / unhooked_loss)
+    random_acc_change_list.append(
+        (random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
 
 
 def find_indices_to_replace(matrix: Float[Tensor, "d1 d1"], tol: float) -> tuple[Float[Tensor, "d1"], int]:
@@ -332,7 +354,8 @@ def find_indices_to_replace(matrix: Float[Tensor, "d1 d1"], tol: float) -> tuple
     - Whether this minimum distance is below a given threshold -> if true, then swap mth row with nth column
     """
     matrix = torch.abs(matrix)
-    diag_mask = torch.eye(matrix.size(0), matrix.size(1)).bool().to(matrix.device)
+    diag_mask = torch.eye(matrix.size(0), matrix.size(1)
+                          ).bool().to(matrix.device)
     matrix = matrix.masked_fill_(diag_mask, float('inf'))
 
     row_min_vals, row_min_idxs = torch.min(matrix, dim=-1)
@@ -376,13 +399,16 @@ def extract_weights_mlp(model: torch.nn.Module) -> list[torch.Tensor]:
 
     for name, layer in model.named_children():
         if hasattr(layer, 'weight'):
-            weights = get_nested_attribute(model, name + '.weight').data.clone().cpu()
+            weights = get_nested_attribute(
+                model, name + '.weight').data.clone().cpu()
 
             batch_size, d_hidden = weights.shape
             to_append_weights = torch.zeros(d_hidden)
-            to_append_weights[-1] = 1  # Create vector with last element 1, append as row of W (dims output, input)
+            # Create vector with last element 1, append as row of W (dims output, input)
+            to_append_weights[-1] = 1
             # Tranpose weights later for multiplication since canonical code form (input, output)
-            weights = torch.cat([weights, rearrange(to_append_weights, 'd -> 1 d')], dim=0)
+            weights = torch.cat(
+                [weights, rearrange(to_append_weights, 'd -> 1 d')], dim=0)
             assert weights[-1, -1] == 1
 
             weights_list.append(weights)
@@ -433,13 +459,8 @@ def plot_changes(
 
 
 def plot_temp(matrix: Float[Tensor, "d1 d2"], title: str) -> None:
-    from pathlib import Path
-
-    import matplotlib.pyplot as plt
-    import seaborn as sns
     out_dir = Path(__file__).parent / "relu_temp_debug"
     out_dir.mkdir(parents=True, exist_ok=True)
-
 
     if matrix.dim() == 1:
         aspect_ratio = 20 / matrix.shape[0]
@@ -450,7 +471,8 @@ def plot_temp(matrix: Float[Tensor, "d1 d2"], title: str) -> None:
     vertical_size = 7
     horizontal_size = vertical_size * aspect_ratio
     plt.figure(figsize=(horizontal_size, vertical_size))
-    sns.heatmap(matrix.detach().cpu(), annot=False, cmap="YlGnBu", cbar=True, square=True)
+    sns.heatmap(matrix.detach().cpu(), annot=False,
+                cmap="YlGnBu", cbar=True, square=True)
     plt.tight_layout()
     plt.savefig(out_dir / f"{title}.png")
     plt.close()

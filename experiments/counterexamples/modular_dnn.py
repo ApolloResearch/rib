@@ -144,7 +144,7 @@ class Config:
                  batch_size: int = 32,
                  seed: int = None,
                  truncation_threshold: float = 1e-20,
-                 n_intervals: int = 50,
+                 n_intervals: int = 0,
                  dtype: type = torch.float32,
                  node_layers: list = None,
                  datatype: str = 'random',
@@ -232,7 +232,6 @@ def main(config: Config) -> None:
     non_output_node_layers = [layer for layer in node_layers if layer != "output"]
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = node_layers[-1] == "output" and config.rotate_final_node_layer
-    print(mlp.device)
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
         module_names=non_output_node_layers,

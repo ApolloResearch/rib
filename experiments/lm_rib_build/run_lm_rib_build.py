@@ -301,6 +301,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
         tlens_model_path=config.tlens_model_path,
     )
 
+    logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
     logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
     if config.eval_type is not None:
         eval_loader = create_data_loader(

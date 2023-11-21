@@ -489,10 +489,11 @@ class AttentionOut(nn.Module):
         # The key context length is the number of positions in the past - this includes all positions in the cache
         # If not caching, query_ctx_length == key_ctx_length
         key_ctx_length = attn_scores.size(-1)
+        query_ctx_length = attn_scores.size(-2)
 
         mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
         return torch.where(
-            mask[:key_ctx_length],
+            mask[:query_ctx_length, :key_ctx_length],
             attn_scores,
             cast(Tensor, self.IGNORE),
         )

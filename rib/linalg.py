@@ -5,10 +5,10 @@ import numpy as np
 import torch
 from einops import rearrange
 from jaxtyping import Float
-from torch import Tensor
-from torch.func import jacrev, vmap
+from torch import Tensor, nn
 from tqdm import tqdm
 
+from rib.models.sequential_transformer.components import MLPIn, MLPOut, MultiSequential
 from rib.types import TORCH_DTYPES
 
 
@@ -142,7 +142,7 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
 def edge_norm(
     alpha_f_in_hat: Float[Tensor, "... in_hidden_combined"],
     outputs_const: tuple[Float[Tensor, "... out_hidden_combined"]],
-    module: torch.nn.Module,
+    module: nn.Module,
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     in_hidden_dims: list[int],
@@ -299,7 +299,7 @@ def integrated_gradient_trapezoidal_jacobian(
 
 
 def integrated_gradient_trapezoidal_norm(
-    module: torch.nn.Module,
+    module: nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch in_hidden"]],
         tuple[Float[Tensor, "batch pos _"], ...],
@@ -415,3 +415,32 @@ def calc_gram_matrix(
         raise ValueError("Unexpected tensor rank")
 
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
+
+
+def linear_integrated_gradient(W: Float[Tensor, "in_dim out_dim"]):
+    raise NotImplementedError("Analytic integrated gradient for linear layers not yet implemented.")
+
+
+def get_analytic_integrated_gradient_fn(
+    section: Union[nn.Module, MultiSequential]
+) -> Optional[Callable]:
+    """Get the analytic integrated gradient function for a given section.
+
+    Args:
+        section: The section to get the analytic integrated gradient function for.
+
+    Returns:
+        The analytic integrated gradient function for the section, or None if we need to use a
+        numerical approximation.
+    """
+    if isinstance(section, MultiSequential) and len(section) == 1 or isinstance(section, nn.Module):
+        module = section[0] if isinstance(section, MultiSequential) else section
+        if isinstance(module, MLPIn):
+            fn = partial(linear_integrated_gradient, W=module.W_in)
+        elif isinstance(module, MLPOut):
+            fn = partial(linear_integrated_gradient, W=module.W_out)
+        else:
+            fn = None
+    else:
+        fn = None
+    return fn

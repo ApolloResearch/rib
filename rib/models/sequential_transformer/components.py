@@ -687,6 +687,16 @@ class IdentitySplit(torch.nn.Module):
         return residual, residual.clone()
 
 
+class MultiSequential(nn.Sequential):
+    """Sequential module where containing modules that may have multiple inputs and outputs."""
+
+    def forward(self, *inputs):
+        for module in self._modules.values():
+            inputs = inputs if isinstance(inputs, tuple) else (inputs,)
+            inputs = module(*inputs)
+        return inputs
+
+
 # Map from module names in SequentialTransformer to the corresponding component modules
 SEQUENTIAL_COMPONENT_REGISTRY = {
     "embed": Embed,

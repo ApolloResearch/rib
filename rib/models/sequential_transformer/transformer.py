@@ -15,6 +15,7 @@ from rib.models.sequential_transformer.components import (
     IdentitySplit,
     LayerNormPre,
     LayerNormPreFolded,
+    MultiSequential,
 )
 from rib.models.sequential_transformer.config import SequentialTransformerConfig
 from rib.models.utils import (
@@ -29,16 +30,6 @@ from rib.models.utils import (
     fold_unembed,
     get_model_attr,
 )
-
-
-class MultiSequential(nn.Sequential):
-    """Sequential module where containing modules that may have multiple inputs and outputs."""
-
-    def forward(self, *inputs):
-        for module in self._modules.values():
-            inputs = inputs if isinstance(inputs, tuple) else (inputs,)
-            inputs = module(*inputs)
-        return inputs
 
 
 class SequentialTransformer(nn.Module):

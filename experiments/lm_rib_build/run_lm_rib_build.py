@@ -265,12 +265,12 @@ def main(
 
     out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    # If we are using multiprocessing, append a pod_rank to all output files
-    pod_rank_suffix = f"_pod{dist_info.pod_rank}" if dist_info.n_pods > 1 else ""
+    # If we are using multiprocessing, append a global rank to the output file name
+    global_rank_suffix = f"_global_rank{dist_info.global_rank}" if dist_info.global_size > 1 else ""
     if config.calculate_edges:
-        out_file = out_dir / f"{config.exp_name}_rib_graph{pod_rank_suffix}.pt"
+        out_file = out_dir / f"{config.exp_name}_rib_graph{global_rank_suffix}.pt"
     else:
-        out_file = out_dir / f"{config.exp_name}_rib_Cs{pod_rank_suffix}.pt"
+        out_file = out_dir / f"{config.exp_name}_rib_Cs{global_rank_suffix}.pt"
     if dist_info.is_main_process and not check_outfile_overwrite(
         out_file, config.force_overwrite_output or force, logger=logger
     ):
@@ -399,20 +399,6 @@ def main(
             device=device,
             data_set_size=full_dataset_len,  # includes data for other processes
         )
-
-        if dist_info.is_parallelised:
-            # Reduce the edge values across local processes
-            for m_name, edge_vals in E_hats.items():
-                check_sizes_mpi(dist_info, edge_vals)
-                receiver_tensor = None
-                if dist_info.is_main_process:
-                    receiver_tensor = torch.empty_like(edge_vals).cpu()
-                # we sum across the edge_val tensors in each process, putting the result in
-                # the root process's reciever_tensor.
-                dist_info.local_comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
-                if dist_info.is_main_process:
-                    assert receiver_tensor is not None
-                    E_hats[m_name] = receiver_tensor
 
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)

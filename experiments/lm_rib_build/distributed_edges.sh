@@ -41,4 +41,4 @@ fi
 # Get the current directory
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-mpirun -n $N_GPUS python $DIR/run_lm_rib_build.py $DIR/$CONFIG_FILE --n_pods=$N_PODS --pod_rank=$POD_RANK
+mpirun -n $N_GPUS python $DIR/run_lm_rib_build.py $CONFIG_FILE --n_pods=$N_PODS --pod_rank=$POD_RANK

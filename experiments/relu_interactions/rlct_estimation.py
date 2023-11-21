@@ -1,40 +1,16 @@
-import re
 from pathlib import Path
-from typing import Any, Iterable, List, Literal, Optional, Union, cast
+from typing import List, Literal, Optional, Union, cast
 
 import fire
-import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import torch.nn as nn
-from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
-from rib.data_accumulator import (
-    collect_clustered_relu_P_mats,
-    collect_clustered_relu_P_mats_no_W,
-    collect_gram_matrices,
-    collect_relu_interactions,
-    collect_test_edges,
-)
-from rib.hook_manager import HookedModel
-from rib.interaction_algos import (
-    Eigenvectors,
-    InteractionRotation,
-    calculate_interaction_rotations,
-)
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
-from rib.log import logger
-from rib.models.sequential_transformer.components import MODULE_CLASS_MAP
-from rib.models.utils import get_model_attr, get_model_weight
 from rib.rlct_helpers import estimate_rlcts_training
 from rib.types import TORCH_DTYPES
 from rib.utils import (
-    eval_cross_entropy_loss,
-    eval_model_accuracy,
     load_config,
     set_seed,
 )
@@ -218,7 +194,7 @@ def rlct_main(config_path_str: str):
     )
 
     with open(out_dir / f"rlct_{config.rlct_config.sample_layer}.txt", "w") as f:
-        f.write(f"SGD: {slgd_mean} +/- {sgld_std}\n")
+        f.write(f"SGLD: {slgd_mean} +/- {sgld_std}\n")
         f.write(f"SGNHT: {sgnht_mean} +/- {sgnht_std}\n")
 
 

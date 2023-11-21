@@ -1,6 +1,6 @@
 import itertools
 from copy import deepcopy
-from typing import Callable, Dict, List, Literal, Optional, Type, Union
+from typing import Callable, Dict, Literal, Optional, Type, Union, TYPE_CHECKING
 
 import pandas as pd
 import torch
@@ -8,11 +8,38 @@ from torch import nn
 from torch.multiprocessing import cpu_count, get_context
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from einops import rearrange
 
 from devinterp.optim.sgld import SGLD
 from devinterp.optim.sgld_ma import SGLD_MA
 from devinterp.optim.sgnht import SGNHT
 from rib.models.utils import get_model_attr
+
+if TYPE_CHECKING:   # Prevent circular import to import type annotations
+    from experiments.relu_interactions.rlct_estimation import Config
+
+
+def predictive_kl_loss(x: torch.Tensor, y: torch.Tensor, teacher_model: nn.Module, student_model: nn.Module, temperature: float = 1., **kwargs) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Standard knowledge distillation loss (equivalent to KL divergence between the tempered teacher and student softmax outputs).
+    """
+    with torch.no_grad():
+        teacher_logits = teacher_model(x)
+    student_logits = student_model(x)
+    return (
+        nn.functional.kl_div(
+            nn.functional.log_softmax(fix_transformer_logit(student_logits) / temperature, dim=-1),
+            nn.functional.log_softmax(fix_transformer_logit(teacher_logits) / temperature, dim=-1),
+            log_target=True,
+            reduction="batchmean",
+        ),
+        student_logits,
+    )
+
+
+def fix_transformer_logit(logits: tuple) -> torch.Tensor:
+    """Get rid of tuple and token dimension."""
+    return rearrange(logits[0], 'b () d -> b d')
 
 
 def sample_single_chain(
@@ -27,21 +54,24 @@ def sample_single_chain(
     chain: int = 0,
     seed: Optional[int] = None,
     pbar: bool = False,
-    verbose=True,
+    verbose: bool = True,
     device: torch.device = torch.device("cpu"),
-    return_weights=False,
+    return_weights: bool = False,
+    use_distill_loss: bool = False,
     sample_layer: Optional[str] = None,
 ) -> pd.DataFrame:
     """Instantiate a new model and optimizer for this chain and run sampling to get RLCT estimate.
 
     Args:
         sample_layer: Indicates which layer to calculate RLCT for. Everything else is frozen.
-            If this parameter is None, all layers are sampled. Should be e.g. "layers.0.activation"
+            If this parameter is None, all layers are sampled.
+            MLP: should be e.g. "layers.0.activation"
+            SequentialTransformer: should be e.g. "sections.section_0.0"
     Returns:
         local_draws: A DataFrame containing loss values with loss over steps.
             Save weights if returning weights is true. Also save acceptance ratio if using Metropolis step.
     """
-    model = deepcopy(ref_model).to(device)
+    model, baseline_model = deepcopy(ref_model).to(device), deepcopy(ref_model).to(device)
 
     # Only pass parameters of layers that should not be frozen to the optimizer
     if sample_layer is None:
@@ -52,7 +82,7 @@ def sample_single_chain(
         assert not isinstance(module, torch.nn.ModuleList), "Layer to calculate RLCT must be a single module, not a ModuleList"
         optimizer_params = module.parameters()
 
-    optimizer = sampling_method(optimizer_params, **(optimizer_kwargs or {}))
+    optimizer = sampling_method(optimizer_params, **(optimizer_kwargs.dict() or {}))
 
     if seed is not None:
         torch.manual_seed(seed)
@@ -84,8 +114,18 @@ def sample_single_chain(
             Args:
                 backward: Whether to perform backward pass. Only used for updating weight grad at proposed location. See SGLD_MA.step() for more details.
             """
-            outputs = model(xs)
-            loss = criterion(outputs, ys)
+            y_preds = model(xs)
+            if use_distill_loss:
+                loss, student_logits = predictive_kl_loss(
+                    x=xs,
+                    y=ys,
+                    teacher_model=baseline_model,
+                    student_model=model,
+                    is_lm=is_lm,
+                )
+            else:
+                y_preds = fix_transformer_logit(y_preds) if is_lm else y_preds
+                loss = criterion(y_preds, ys)
             if backward:
                 optimizer.zero_grad()
                 loss.backward()
@@ -94,7 +134,22 @@ def sample_single_chain(
         optimizer.zero_grad()
         xs, ys = xs.to(device), ys.to(device)
         y_preds = model(xs)
-        loss = criterion(y_preds, ys)
+        is_lm: bool = True if y_preds[0].dim() == 3 else False
+
+        if isinstance(y_preds, tuple): # For LM output can be tuple with empty second element
+            y_preds = rearrange(y_preds[0], "b p logit_dim -> (b p) logit_dim")
+
+        if use_distill_loss:
+            loss, student_logits = predictive_kl_loss(
+                x=xs,
+                y=ys,
+                teacher_model=baseline_model,
+                student_model=model,
+                is_lm=is_lm,
+            )
+        else:
+            y_preds = fix_transformer_logit(y_preds) if is_lm else y_preds
+            loss = criterion(y_preds, ys)
 
         loss.backward()
 
@@ -128,20 +183,10 @@ def sample(
     model: torch.nn.Module,
     loader: DataLoader,
     criterion: Callable,
+    config: "Config",
     sampling_method: Type[torch.optim.Optimizer] = SGLD,
-    optimizer_kwargs: Optional[Dict[str,
-                                    Union[float, Literal["adaptive"]]]] = None,
-    num_draws: int = 100,
-    num_chains: int = 10,
-    num_burnin_steps: int = 0,
-    num_steps_bw_draws: int = 1,
-    cores: int = 1,
-    seed: Optional[Union[int, List[int]]] = None,
-    pbar: bool = True,
+    optimizer_kwargs: Optional[Dict[str, Union[float, Literal["adaptive"]]]] = None,
     device: torch.device = torch.device("cpu"),
-    verbose: bool = True,
-    return_weights: bool = False,
-    sample_layer: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Sample model weights using a given optimizer, supporting multiple chains.
@@ -160,6 +205,8 @@ def sample(
         progressbar (bool): Whether to display a progress bar.
         optimizer_kwargs (Optional[Dict[str, Union[float, Literal['adaptive']]]]): Keyword arguments for the optimizer.
     """
+    seed, num_chains, cores = config.rlct_config.seed, config.rlct_config.num_chains, config.rlct_config.cores
+
     if cores is None:
         cores = min(4, cpu_count())
 
@@ -180,16 +227,16 @@ def sample(
             ref_model=model,
             loader=loader,
             criterion=criterion,
-            num_draws=num_draws,
-            num_burnin_steps=num_burnin_steps,
-            num_steps_bw_draws=num_steps_bw_draws,
             sampling_method=sampling_method,
             optimizer_kwargs=optimizer_kwargs,
-            pbar=pbar,
+            num_draws=config.rlct_config.num_draws,
+            num_burnin_steps=config.rlct_config.num_burnin_steps,
+            num_steps_bw_draws=config.rlct_config.num_steps_bw_draws,
+            pbar=config.rlct_config.pbar,
             device=device,
-            verbose=verbose,
-            return_weights=return_weights,
-            freeze_layers=sample_layer,
+            verbose=config.rlct_config.verbose,
+            use_distill_loss=config.rlct_config.use_distill_loss,
+            sample_layer=config.rlct_config.sample_layer,
         )
 
     results = []

@@ -1,0 +1,54 @@
+exp_name: modular_arithmetic
+seed: 0
+tlens_pretrained: null
+tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
+interaction_matrices_path: null
+dataset:
+  source: custom
+  name: modular_arithmetic
+  return_set: train
+node_layers: # For whole layer hooking
+  - mlp_in.0
+  - mlp_out.0
+  - unembed
+rotate_final_node_layer: true # Whether unembed is rotated. If you want output node layer C, need to
+# manually add to node_layers
+batch_size: 256
+truncation_threshold: 1e-6
+last_pos_module_type: add_resid1  # module type in which to only output the last position index
+n_intervals: 50
+dtype: float32
+eval_type: accuracy
+
+rlct_config:
+  sampling_method: SGLD
+  sigma: 0.25
+  sgld_kwargs:
+    lr: 1e-4
+    noise_level: 1.0
+    weight_decay: 3e-5
+    elasticity: 1.0
+    temperature: "adaptive"
+    # Samples seen total during training. For non-iterable datasets, is length of dataloader.
+    num_samples: 10000
+    bounding_box_size: 0.5
+  sgnht_kwargs:
+    lr: 1e-4
+    diffusion_factor: 0.01
+    bounding_box_size: 0.5
+    num_samples: 10000
+  num_chains: 10
+  num_draws: 100
+  num_burnin_steps: 0
+  num_steps_bw_draws: 2
+  batch_size: 1024
+  cores: 1
+  seed:
+    # Default: None. Can be an int or a list of ints.
+    # Example: 1234 or [1234, 5678]
+  pbar: true  # Progress bar
+  verbose: true
+  return_weights: true
+  use_distill_loss: true
+  save_results: true
+  # sample_layer: "sections.section_0.0"

@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Literal, Optional, Type, Union
+from typing import Callable, Dict, List, Literal, Optional, Type, Union, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -9,42 +9,28 @@ from devinterp.optim.sgld import SGLD
 from devinterp.optim.sgld_ma import SGLD_MA
 from devinterp.slt.sampler import sample
 
+if TYPE_CHECKING:   # Prevent circular import to import type annotations
+    from experiments.relu_interactions.rlct_estimation import Config
+
 
 def estimate_learning_coeff(
     model: torch.nn.Module,
     loader: DataLoader,
     criterion: Callable,
+    config: "Config",
     sampling_method: Type[torch.optim.Optimizer] = SGLD,
-    optimizer_kwargs: Optional[Dict[str,
-                                    Union[float, Literal["adaptive"]]]] = None,
-    num_draws: int = 100,
-    num_chains: int = 10,
-    num_burnin_steps: int = 0,
-    num_steps_bw_draws: int = 1,
-    cores: int = 1,
-    seed: Optional[Union[int, List[int]]] = None,
-    pbar: bool = True,
+    optimizer_kwargs: Optional[Dict[str, Union[float, Literal["adaptive"]]]] = None,
     device: torch.device = torch.device("cpu"),
-    verbose: bool = True,
-    sample_layer: Optional[str] = None,
 ) -> float:
     """Use lambda hat equation and average and baseline loss."""
     trace: pd.DataFrame = sample(
         model=model,
         loader=loader,
         criterion=criterion,
+        config=config,
         sampling_method=sampling_method,
         optimizer_kwargs=optimizer_kwargs,
-        num_draws=num_draws,
-        num_chains=num_chains,
-        num_burnin_steps=num_burnin_steps,
-        num_steps_bw_draws=num_steps_bw_draws,
-        cores=cores,
-        seed=seed,
-        pbar=pbar,
         device=device,
-        verbose=verbose,
-        sample_layer=sample_layer,
     )
     baseline_loss = trace.loc[trace["chain"] == 0, "loss"].iloc[0]
     avg_loss = trace.groupby("chain")["loss"].mean().mean()
@@ -61,21 +47,15 @@ def estimate_learning_coeff_with_summary(
     model: torch.nn.Module,
     loader: DataLoader,
     criterion: Callable,
-    sampling_method: Type[torch.optim.Optimizer] = SGLD,
-    optimizer_kwargs: Optional[Dict[str,
-                                    Union[float, Literal["adaptive"]]]] = None,
-    num_draws: int = 100,
-    num_chains: int = 10,
-    num_burnin_steps: int = 0,
-    num_steps_bw_draws: int = 1,
-    cores: int = 1,
-    seed: Optional[Union[int, List[int]]] = None,
-    pbar: bool = True,
+    config: "Config",
+    sampling_method: Type[torch.optim.Optimizer],
+    optimizer_kwargs: Optional[Dict[str, Union[float, Literal["adaptive"]]]] = None,
     device: torch.device = torch.device("cpu"),
-    verbose: bool = True,
-    sample_layer: Optional[str] = None,
 ) -> dict:
     """Calls on sample function and returns summary mean, standard deviation, trace, and acceptance ratio for MH.
+
+    Currently uses deepcopy() in sampler, but it might be better practise to instantiate new model
+    and put state dict in.
 
     Args:
         sample_layer: If a list of ints, freezes the layers not indicated by these layers..
@@ -85,31 +65,23 @@ def estimate_learning_coeff_with_summary(
         model=model,
         loader=loader,
         criterion=criterion,
+        config=config,
         sampling_method=sampling_method,
         optimizer_kwargs=optimizer_kwargs,
-        num_draws=num_draws,
-        num_chains=num_chains,
-        num_burnin_steps=num_burnin_steps,
-        num_steps_bw_draws=num_steps_bw_draws,
-        cores=cores,
-        seed=seed,
-        pbar=pbar,
         device=device,
-        verbose=verbose,
-        sample_layer=sample_layer,
     )
 
     baseline_loss = trace.loc[trace["chain"] == 0, "loss"].iloc[0]
-    num_samples = len(loader.dataset)
+    num_samples = optimizer_kwargs.num_samples
     avg_losses = trace.groupby("chain")["loss"].mean()
-    results = torch.zeros(num_chains, device=device)
+    results = torch.zeros(config.rlct_config.num_chains, device=device)
     if sampling_method == SGLD_MA:
         accept_ratio = trace.groupby("chain")["accept_ratio"].mean().mean()
         print(f"Acceptance ratio: {accept_ratio}")
     else:
         accept_ratio = None
 
-    for i in range(num_chains):
+    for i in range(config.rlct_config.num_chains):
         chain_avg_loss = avg_losses.iloc[i]
         results[i] = (chain_avg_loss - baseline_loss) * \
             num_samples / np.log(num_samples)
@@ -120,7 +92,7 @@ def estimate_learning_coeff_with_summary(
     return {
         "mean": avg_loss.item(),
         "std": std_loss.item(),
-        **{f"chain_{i}": results[i].item() for i in range(num_chains)},
+        **{f"chain_{i}": results[i].item() for i in range(config.rlct_config.num_chains)},
         "trace": trace,
         "accept_ratio": accept_ratio,
     }

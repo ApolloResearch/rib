@@ -148,5 +148,14 @@
             "console": "integratedTerminal",
             "justMyCode": true
         },
+        {
+            "name": "lm_rlct",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/relu_interactions/rlct_estimation.py",
+            "args": "${workspaceFolder}/experiments/relu_interactions/transformer_rlct.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
     ]
 }

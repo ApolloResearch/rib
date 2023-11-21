@@ -431,10 +431,8 @@ def get_analytic_integrated_gradient_fn(section: nn.Module) -> Optional[Callable
         The analytic integrated gradient function for the section, or None if we need to use a
         numerical approximation.
     """
-    if (
-        isinstance(section, nn.Sequential)
-        and len(section) == 1
-        or not isinstance(section, nn.Sequential)
+    if (isinstance(section, nn.Sequential) and len(section) == 1) or not isinstance(
+        section, nn.Sequential
     ):
         module = section[0] if isinstance(section, nn.Sequential) else section
         if isinstance(module, MLPIn):

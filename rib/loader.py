@@ -264,7 +264,7 @@ def load_dataset(
             dataset_config.return_set_frac and dataset_config.return_set_n_samples
         ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
 
-        n_ctx = 1024 if "gpt2" in dataset_config.tokenizer_name else 2048
+        # TODO: maybe assert n_ctx is supported
 
         if dataset_config.return_set_frac:
             percent = int(dataset_config.return_set_frac * 100)
@@ -282,7 +282,9 @@ def load_dataset(
 
         tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
         tokenizer.pad_token = tokenizer.eos_token
-        dataset = tokenize_dataset(dataset=raw_dataset, tokenizer=tokenizer, n_ctx=n_ctx)
+        dataset = tokenize_dataset(
+            dataset=raw_dataset, tokenizer=tokenizer, n_ctx=dataset_config.n_ctx
+        )
         return dataset
 
 

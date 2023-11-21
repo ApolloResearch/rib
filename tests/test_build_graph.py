@@ -130,7 +130,6 @@ def test_modular_arithmetic_build_graph():
     n_intervals: 0
     dtype: float32
     eval_type: accuracy
-
     """
     load_config_path = "experiments.lm_rib_build.run_lm_rib_build.load_config"
 

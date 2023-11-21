@@ -8,7 +8,7 @@ from jaxtyping import Float
 from torch import Tensor, nn
 from tqdm import tqdm
 
-from rib.models.sequential_transformer.components import MLPIn, MLPOut, MultiSequential
+from rib.models.sequential_transformer.components import MLPIn, MLPOut
 from rib.types import TORCH_DTYPES
 
 
@@ -421,9 +421,7 @@ def linear_integrated_gradient(W: Float[Tensor, "in_dim out_dim"]):
     raise NotImplementedError("Analytic integrated gradient for linear layers not yet implemented.")
 
 
-def get_analytic_integrated_gradient_fn(
-    section: Union[nn.Module, MultiSequential]
-) -> Optional[Callable]:
+def get_analytic_integrated_gradient_fn(section: nn.Module) -> Optional[Callable]:
     """Get the analytic integrated gradient function for a given section.
 
     Args:
@@ -433,8 +431,12 @@ def get_analytic_integrated_gradient_fn(
         The analytic integrated gradient function for the section, or None if we need to use a
         numerical approximation.
     """
-    if isinstance(section, MultiSequential) and len(section) == 1 or isinstance(section, nn.Module):
-        module = section[0] if isinstance(section, MultiSequential) else section
+    if (
+        isinstance(section, nn.Sequential)
+        and len(section) == 1
+        or not isinstance(section, nn.Sequential)
+    ):
+        module = section[0] if isinstance(section, nn.Sequential) else section
         if isinstance(module, MLPIn):
             fn = partial(linear_integrated_gradient, W=module.W_in)
         elif isinstance(module, MLPOut):

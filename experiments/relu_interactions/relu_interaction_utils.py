@@ -122,7 +122,11 @@ def relu_plot_and_cluster(
         # Cast indices to tensor and add to list of returns - one item per layer
         return_index_list.append(torch.tensor(indices_of_original_O))
         layer_num_swaps_dict = {i: swap_num for i, swap_num in enumerate(layer_num_valid_swaps)}
+        degeneracy_total = sum([(n+1)**2-n-1 for n in layer_num_valid_swaps])
         print(f"swaps dict {layer_num_swaps_dict}")
+        print(f"degeneracy total {degeneracy_total}")
+        with open('relu_clusters.txt', 'w') as file:
+            for item in all_cluster_idxs: file.write("%s\n" % item)
 
         rearranged_similarity_matrix = distance_matrix[order, :][:, order]
 

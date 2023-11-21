@@ -673,21 +673,20 @@ def calculate_all_swapped_relu_loss(
 
 
 def collect_clustered_relu_P_mats(
-    hooked_model: HookedModel,
     module_names: list[str],
-    data_loader: DataLoader,
-    dtype: torch.dtype,
-    device: str,
     C_list: list[Float[Tensor, "d_hidden_out d_hidden_truncated"]],
     W_hat_list: list[Float[Tensor, "d_hidden_out d_hiddden_in"]],
     all_cluster_idxs: list[list[Int[Tensor, "cluster_size"]]],
     hook_names: Optional[list[str]] = None,
 ) -> dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]]:
-    """In expression for functions in next layer, obtain per-cluster P matrix for each cluster."""
+    """In expression for functions in next layer, obtain per-cluster P matrix for each cluster.
+
+    This case only works for a transformation where a weight matrix is included with ReLU.
+    Turns out this is not quite true for modadd.
+    """
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
-        assert len(hook_names) == len(
-            module_names), "Must specify a hook name for each module."
+        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
     else:
         hook_names = module_names
 
@@ -700,6 +699,29 @@ def collect_clustered_relu_P_mats(
             W_hat_cluster = W_hat_t[:, cluster_idxs] # Rows W overleaf = cols C in code
             P: Float[Tensor, "d_hidden_next_layer d_hidden"] = W_hat_cluster @ C_next_layer_cluster
             layer_P_dict[f"{cluster_idxs}"] = P
+        P_dict[module_name] = layer_P_dict
+
+    return P_dict
+
+
+def collect_clustered_relu_P_mats_no_W(
+    module_names: list[str],
+    C_list: list[Float[Tensor, "d_hidden_out d_hidden_truncated"]],
+    all_cluster_idxs: list[list[Int[Tensor, "cluster_size"]]],
+) -> dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]]:
+    """In expression for functions in next layer, obtain per-cluster P matrix for each cluster.
+
+    This case only works for a transformation where a weight matrix is included with ReLU.
+    Turns out this is not quite true for modadd.
+    """
+    assert len(module_names) > 0, "No modules specified."
+
+    P_dict = {}
+    for i, (module_name, layer_cluster_idxs) in enumerate(zip(module_names, all_cluster_idxs)):
+        layer_P_dict = {}
+        for cluster_idxs in layer_cluster_idxs:
+            C_next_layer_cluster = C_list[i][cluster_idxs, :] # Cols C in overleaf = rows C in code
+            layer_P_dict[f"{cluster_idxs}"] = C_next_layer_cluster
         P_dict[module_name] = layer_P_dict
 
     return P_dict

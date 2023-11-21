@@ -53,8 +53,7 @@ from experiments.relu_interactions.relu_interaction_utils import (
 )
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import (
-    calculate_all_swapped_relu_loss,
-    calculate_swapped_relu_loss,
+    collect_clustered_relu_P_mats_no_W,
     collect_clustered_relu_P_mats,
     collect_gram_matrices,
     collect_relu_interactions,
@@ -450,27 +449,18 @@ def get_P_matrices(
     device: str,
     hooked_model: HookedModel,
     C_list: list[Float[Tensor, "d_hidden d_hidden"]],
-    W_hat_list: list[Float[Tensor, "d_hidden d_hidden"]],
+    W_hat_list: list[Float[Tensor,  "d_hidden d_hidden"]],
     all_cluster_idxs: list[list[np.ndarray]],
 ) -> dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]]:
-    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
-    dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set=return_set,
-        tlens_model_path=config.tlens_model_path,
-    )
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    """Helper function for P matrix collection method.
 
+    In some cases this might include usage of W_hat_list, and in others it won't
+    """
     graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
-    P_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_clustered_relu_P_mats(
-        hooked_model=hooked_model,
+    P_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_clustered_relu_P_mats_no_W(
         module_names=graph_module_names,
-        data_loader=graph_train_loader,
-        dtype=TORCH_DTYPES[config.dtype],
-        device=device,
         C_list=C_list,
-        W_hat_list=W_hat_list,
         all_cluster_idxs=all_cluster_idxs,
     )
 
@@ -638,17 +628,17 @@ def transformer_relu_main(config_path_str: str):
     seq_model.to(device=torch.device(device), dtype=dtype)
     hooked_model = HookedModel(seq_model)
 
-    # # Has to be after editing node_layers so this contains the linear layers to extract weights from
-    # W_hat_dict: dict[str, float[Tensor, "d_trunc_C_pinv, d_out_W"]] = check_and_open_file(
-    #     get_var_fn=get_rotated_Ws,
-    #     model=seq_model,
-    #     config=config,
-    #     file_path=Ws_save_file,
-    #     dataset=dataset,
-    #     device=device,
-    #     hooked_model=hooked_model,
-    #     C_pinv_list=C_pinv_list,
-    # )
+    # Has to be after editing node_layers so this contains the linear layers to extract weights from
+    W_hat_dict: dict[str, float[Tensor, "d_trunc_C_pinv, d_out_W"]] = check_and_open_file(
+        get_var_fn=get_rotated_Ws,
+        model=seq_model,
+        config=config,
+        file_path=Ws_save_file,
+        dataset=dataset,
+        device=device,
+        hooked_model=hooked_model,
+        C_pinv_list=C_pinv_list,
+    )
 
     # edges_dict = check_and_open_file(
     #     get_var_fn=get_edges,
@@ -665,21 +655,21 @@ def transformer_relu_main(config_path_str: str):
     # edges = list(edges_dict.values())
     # plot_matrix_list(edges, "edges", out_dir)
 
-    # # config.node_layers can now be used in hooks in this function
-    # # But first need to be converted into graph node layers
-    # P_matrices: dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]] = check_and_open_file(
-    #     file_path=Ps_save_file,
-    #     get_var_fn=get_P_matrices,
-    #     model=seq_model,
-    #     config=config,
-    #     dataset=dataset,
-    #     device=device,
-    #     hooked_model=hooked_model,
-    #     C_list=Cs_and_Lambdas["C"],
-    #     W_hat_list=list(W_hat_dict.values()),
-    #     all_cluster_idxs=all_cluster_idxs,
-    # )
-    # plot_and_save_Ps(P_matrices, out_dir)
+    # config.node_layers can now be used in hooks in this function
+    # But first need to be converted into graph node layers
+    P_matrices: dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]] = check_and_open_file(
+        file_path=Ps_save_file,
+        get_var_fn=get_P_matrices,
+        model=seq_model,
+        config=config,
+        dataset=dataset,
+        device=device,
+        hooked_model=hooked_model,
+        C_list=Cs_and_Lambdas["C"],
+        W_hat_list=list(W_hat_dict.values()),
+        all_cluster_idxs=all_cluster_idxs,
+    )
+    plot_and_save_Ps(P_matrices, out_dir)
 
 
 if __name__ == "__main__":

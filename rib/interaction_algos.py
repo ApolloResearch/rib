@@ -103,6 +103,7 @@ def calculate_interaction_rotations(
     device: str,
     n_intervals: int,
     M_dtype: torch.dtype = torch.float64,
+    Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
@@ -130,6 +131,10 @@ def calculate_interaction_rotations(
         M_dtype: The data type to use for the M_dash and M matrices, including where the M is
             collected over the dataset in `M_dash_and_Lambda_dash_pre_forward_hook_fn`. Needs to be
             float64 for Pythia-14m (empirically). Defaults to float64.
+        Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
+            Lambda_dash matrix. Does not affect the output, only used for the einsum within
+            M_dash_and_Lambda_dash_pre_forward_hook_fn. Needs to be float64 on CPU but float32 was
+            fine on GPU. Defaults to float64.
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
@@ -246,9 +251,8 @@ def calculate_interaction_rotations(
             device=device,
             hook_name=node_layer,
             M_dtype=M_dtype,
+            Lambda_einsum_dtype=Lambda_einsum_dtype,
         )
-
-        Lambda_dash = Lambda_dash.to(dtype=dtype)
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
 

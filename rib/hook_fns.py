@@ -174,6 +174,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     n_intervals: int,
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
+    Lambda_einsum_dtype: torch.dtype = torch.float64,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -190,6 +191,9 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         dataset_size: Size of the dataset. Used to normalize the gram matrix.
         M_dtype: The data type to use for the M_dash matrix. Needs to be
             float64 for Pythia-14m (empirically). Defaults to float64.
+        Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
+            Lambda_dash matrix. Does not affect the output, only used for the einsum itself.
+            Needs to be float64 on CPU but float32 was fine on GPU. Defaults to float64.
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -219,10 +223,11 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
         Lambda_dash = torch.einsum(
-            einsum_pattern, in_grads.to(M_dtype) / normalization_factor, in_acts.to(M_dtype)
+            einsum_pattern,
+            in_grads.to(Lambda_einsum_dtype) / normalization_factor,
+            in_acts.to(Lambda_einsum_dtype),
         )
         Lambda_dash = Lambda_dash.to(in_dtype)
-        Lambda_dash = Lambda_dash.to(torch.float64)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)

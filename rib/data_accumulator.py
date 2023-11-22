@@ -134,6 +134,7 @@ def collect_M_dash_and_Lambda_dash(
     device: str,
     hook_name: Optional[str] = None,
     M_dtype: torch.dtype = torch.float64,
+    Lambda_einsum_dtype: torch.dtype = torch.float64,
 ) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -152,6 +153,10 @@ def collect_M_dash_and_Lambda_dash(
         hook_name: The name of the hook to use to store the matrices in the hooked model.
         M_dtype: The data type to use for the M_dash matrix. Needs to be
             float64 for Pythia-14m (empirically). Defaults to float64.
+        Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
+            Lambda_dash matrix. Does not affect the output, only used for the einsum within
+            M_dash_and_Lambda_dash_pre_forward_hook_fn. Needs to be float64 on CPU but float32 was
+            fine on GPU. Defaults to float64.
 
     Returns:
         A tuple containing M' and Lambda'.
@@ -169,6 +174,7 @@ def collect_M_dash_and_Lambda_dash(
             "n_intervals": n_intervals,
             "dataset_size": len(data_loader.dataset),  # type: ignore
             "M_dtype": M_dtype,
+            "Lambda_einsum_dtype": Lambda_einsum_dtype,
         },
     )
 

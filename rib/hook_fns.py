@@ -203,6 +203,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         C_out=C_out,
         n_intervals=n_intervals,
     )
+    in_dtype = in_grads.dtype
 
     has_pos = inputs[0].dim() == 3
 
@@ -217,7 +218,11 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         )
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
-        Lambda_dash = torch.einsum(einsum_pattern, in_grads / normalization_factor, in_acts)
+        Lambda_dash = torch.einsum(
+            einsum_pattern, in_grads.to(M_dtype) / normalization_factor, in_acts.to(M_dtype)
+        )
+        Lambda_dash = Lambda_dash.to(in_dtype)
+        Lambda_dash = Lambda_dash.to(torch.float64)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)

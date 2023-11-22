@@ -49,14 +49,19 @@ for i, layer in enumerate(new_model.layers):
 new_model.cuda()
 
 
-# check the model gets good accuracy
-@torch.inference_mode()
-def evaluate_model(model: MLP, device: str) -> float:
+def get_dataloader():
     # Load the MNIST train dataset
     transform = transforms.ToTensor()
     data = datasets.MNIST(root=REPO_ROOT / ".data", train=True, download=True, transform=transform)
-    data_loader = DataLoader(data, batch_size=256, shuffle=True)
+    return DataLoader(data, batch_size=256, shuffle=True)
 
+
+data_loader = get_dataloader()
+
+
+# check the model gets good accuracy
+@torch.inference_mode()
+def evaluate_model(model: MLP, device: str) -> float:
     # Test the model
     model.eval()
     correct = 0
@@ -74,7 +79,6 @@ def evaluate_model(model: MLP, device: str) -> float:
 
 assert evaluate_model(new_model, "cuda") > 95
 
-
 save_dir = "experiments/train_mnist/sample_checkpoints/old_reproduction/"
 # save_model(train_config, Path(save_dir), new_model, 2)
 # %%
@@ -86,7 +90,7 @@ rib_build(RibConfig(**rib_config))
 
 # %%
 # ran rib_build on old model while on main
-old_graph_path = "experiments/mnist_rib_build/out/old-for-repo_rib_graph.pt"
+old_graph_path = "experiments/mnist_rib_build/out/4-node-layers-for-repo_rib_graph.pt"
 new_graph_path = "experiments/mnist_rib_build/out/new-for-repo_rib_graph.pt"
 
 old = torch.load(old_graph_path)
@@ -95,12 +99,16 @@ new = torch.load(new_graph_path)
 for layer in range(3):
     o, n = old["edges"][layer][1], new["edges"][layer][1]
     print(o.shape, n.shape)
-    # print((o - n).abs().mean().item())
+    print((o[:10, :10] - n[:10, :10]).abs().mean().item())
 
 
 rib_plot(old_graph_path)
 rib_plot(new_graph_path)
+# # %%
+# from experiments.mnist_ablations.run_mnist_ablations import load_mlp
 
+# load_mlp(old["model_config_dict"], old["config"]["mlp_path"], "cuda")
+# load_mlp(new["model_config_dict"], new["config"]["mlp_path"], "cuda")
 
 # %%
 with open("experiments/mnist_ablations/rib_4-node-layers.yaml") as f:
@@ -117,6 +125,9 @@ new_ablate_config["interaction_graph_path"] = new_graph_path
 ablate(AblateConfig(**new_ablate_config))
 
 # %%
+
+
+#
 
 ablate_plot(
     "experiments/mnist_ablations/out/old-for-repo_ablation_results.json",

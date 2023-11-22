@@ -221,6 +221,32 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     ), "Lambda_dash cannot be all zeros otherwise everything will be truncated"
 
 
+def linear_integrated_gradient_pre_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos in_hidden"], ...],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    C_in: Float[Tensor, "in_hidden in_hidden_trunc"],
+    dataset_size: int,
+) -> None:
+    """Hook function for calculating the integrated gradient for a linear module."""
+    assert isinstance(data_key, str), "data_key must be a string."
+    in_acts = torch.cat(inputs, dim=-1)
+    f_hat = in_acts @ C_in
+
+    has_pos = inputs[0].dim() == 3
+    normalization_factor = in_acts.shape[1] * dataset_size if has_pos else dataset_size
+    einsum_pattern = "bpj,bpj->j" if has_pos else "bj,bj->j"
+
+    f_hat_norm = torch.einsum(einsum_pattern, f_hat, f_hat) / normalization_factor
+
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, f_hat_norm)
+
+
 def interaction_edge_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[

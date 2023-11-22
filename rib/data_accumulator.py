@@ -1,10 +1,12 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
-from typing import TYPE_CHECKING, Optional, Union
+from functools import partial
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import torch
+from fancy_einsum import einsum
 from jaxtyping import Float
-from torch import Tensor
+from torch import Tensor, nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -13,9 +15,12 @@ from rib.hook_fns import (
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
+    linear_integrated_gradient_pre_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
 from rib.log import logger
+from rib.models.sequential_transformer.components import MLPIn, MLPOut
+from rib.models.utils import get_model_attr
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -218,6 +223,8 @@ def collect_interaction_edges(
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
+
+    integrated_gradient_types: dict[str, Literal["linear", "numerical"]] = {}
     edge_hooks: list[Hook] = []
     for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
         # C from the next node layer
@@ -226,35 +233,100 @@ def collect_interaction_edges(
         C_out = Cs[idx + 1].C
         if C_out is not None:
             C_out = C_out.to(device=device)
-        edge_hooks.append(
-            Hook(
-                name=C_info.node_layer_name,
-                data_key="edge",
-                fn=interaction_edge_pre_forward_hook_fn,
-                module_name=module_name,
-                fn_kwargs={
-                    "C_in": C_info.C.to(device=device),  # C from the current node layer
-                    "C_in_pinv": C_info.C_pinv.to(device=device),  # C_pinv from current node layer
-                    "C_out": C_out,
-                    "n_intervals": n_intervals,
-                    "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
-                },
+
+        # Get the list of modules in the section
+        section = get_model_attr(hooked_model.model, module_name)
+        # Check if only a single module in the section
+        if (isinstance(section, nn.Sequential) and len(section) == 1) or not isinstance(
+            section, nn.Sequential
+        ):
+            module = section[0] if isinstance(section, nn.Sequential) else section
+            if isinstance(module, (MLPIn, MLPOut)):
+                edge_hooks.append(
+                    Hook(
+                        name=C_info.node_layer_name,
+                        data_key="f_hat_norm",
+                        fn=linear_integrated_gradient_pre_forward_hook_fn,
+                        module_name=module_name,
+                        fn_kwargs={
+                            "C_in": C_info.C.to(device=device),  # C from the current node layer
+                            "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
+                        },
+                    )
+                )
+                # Initialise f_hat_norm to (out_dim). This gets accumulated in the forward hook.
+                hooked_model.hooked_data[C_info.node_layer_name] = {
+                    "f_hat_norm": torch.zeros(C_info.out_dim, dtype=dtype, device=device)
+                }
+                integrated_gradient_types[C_info.node_layer_name] = "linear"
+        else:
+            edge_hooks.append(
+                Hook(
+                    name=C_info.node_layer_name,
+                    data_key="edge",
+                    fn=interaction_edge_pre_forward_hook_fn,
+                    module_name=module_name,
+                    fn_kwargs={
+                        "C_in": C_info.C.to(device=device),  # C from the current node layer
+                        "C_in_pinv": C_info.C_pinv.to(
+                            device=device
+                        ),  # C_pinv from current node layer
+                        "C_out": C_out,
+                        "n_intervals": n_intervals,
+                        "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
+                    },
+                )
             )
-        )
-        # Initialise the edge matrices to zeros to (out_dim, in_dim). These get added to in the
-        # forward hook.
-        hooked_model.hooked_data[C_info.node_layer_name] = {
-            "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.out_dim, dtype=dtype, device=device)
-        }
+            # Initialise the edge matrices to zeros to (out_dim, in_dim). These get accumulated in
+            # the forward hook.
+            hooked_model.hooked_data[C_info.node_layer_name] = {
+                "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.out_dim, dtype=dtype, device=device)
+            }
+            integrated_gradient_types[C_info.node_layer_name] = "numerical"
 
     run_dataset_through_model(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {
-        node_layer_name: hooked_model.hooked_data[node_layer_name]["edge"]
-        for node_layer_name in hooked_model.hooked_data
-    }
+    # Ensure that we have the same number of edge_modules as we do data stored in the hooked model
+    assert len(edge_modules) == len(hooked_model.hooked_data), (
+        f"Number of edge modules ({len(edge_modules)}) not the same as the number of "
+        f"hooked data ({len(hooked_model.hooked_data)})."
+    )
+    edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {}
+    for i, node_layer_name in enumerate(hooked_model.hooked_data):
+        if integrated_gradient_types[node_layer_name] == "linear":
+            section = get_model_attr(hooked_model.model, edge_modules[i])
+            module = section[0] if isinstance(section, nn.Sequential) else section
+            if isinstance(module, MLPIn):
+                W_raw = module.W_in
+            elif isinstance(module, MLPOut):
+                W_raw = module.W_out
+            else:
+                raise ValueError(f"Module type {type(module)} not supported for linear type.")
+            f_hat_norm: Float[Tensor, "in_hidden_extra_trunc"] = hooked_model.hooked_data[
+                node_layer_name
+            ]["f_hat_norm"]
+            n_extra_dims = len(f_hat_norm) - W_raw.shape[0]
+
+            # Create matrix ((I, 0), (0, W_raw)) where I is an identity matrix of size n_extra_dims
+            # This handles the concatenated residual stream and other input stream
+            W = torch.block_diag(torch.eye(n_extra_dims, dtype=dtype, device=device), W_raw)
+            W_hat = einsum(
+                "out out_trunc, in out, in_trunc in -> out_trunc in_trunc", C_out, W, C_info.C_pinv
+            )
+            edge = einsum(
+                "out_trunc in_trunc, in_trunc -> out_trunc in_trunc", W_hat**2, f_hat_norm**2
+            )
+            edges[node_layer_name] = edge
+        elif integrated_gradient_types[node_layer_name] == "numerical":
+            edges[node_layer_name] = hooked_model.hooked_data[node_layer_name]["edge"]
+        else:
+            raise ValueError(
+                f"Integrated gradient type {integrated_gradient_types[node_layer_name]} not "
+                f"supported."
+            )
+
     hooked_model.clear_hooked_data()
 
     # Ensure that the keys of the edges dict are the same as the node layer names without `output`

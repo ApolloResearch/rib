@@ -27,6 +27,7 @@ import torch
 from pydantic import BaseModel, Field, field_validator
 
 from rib.ablations import (
+    AblationAccuracies,
     ExponentialScheduleConfig,
     LinearScheduleConfig,
     load_basis_matrices,
@@ -80,13 +81,13 @@ class Config(BaseModel):
         return v
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> AblationAccuracies:
     start_time = time.time()
     config = load_config(config_path_or_obj, config_model=Config)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
     if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
-        return
+        raise FileExistsError
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -169,15 +170,17 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     time_taken = f"{(time.time() - start_time) / 60:.1f} minutes"
     logger.info("Finished in %s.", time_taken)
 
+    results = {
+        "config": json.loads(config.model_dump_json()),
+        "results": ablation_results,
+        "time_taken": time_taken,
+    }
     if config.exp_name is not None:
-        results = {
-            "config": json.loads(config.model_dump_json()),
-            "results": ablation_results,
-            "time_taken": time_taken,
-        }
         with open(out_file, "w") as f:
             json.dump(results, f)
         logger.info("Wrote results to %s", out_file)
+
+    return ablation_results
 
 
 if __name__ == "__main__":

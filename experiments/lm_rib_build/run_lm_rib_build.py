@@ -33,7 +33,7 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, Optional, Union, cast
+from typing import Any, Dict, Literal, Optional, Union, cast
 
 import fire
 import torch
@@ -239,7 +239,7 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False):
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[str, Any]:
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating

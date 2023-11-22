@@ -17,7 +17,7 @@ Usage:
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import fire
 import torch
@@ -65,7 +65,7 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return data_loader
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[str, Any]:
     """Implement the main algorithm and store the graph to disk."""
     config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
@@ -76,8 +76,8 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
-    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
-        return
+    if check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
+        raise FileExistsError("Not overwriting output file")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]

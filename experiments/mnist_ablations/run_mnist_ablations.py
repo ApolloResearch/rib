@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 from rib.ablations import (
+    AblationAccuracies,
     ExponentialScheduleConfig,
     LinearScheduleConfig,
     load_basis_matrices,
@@ -80,12 +81,12 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return data_loader
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> AblationAccuracies:
     config = load_config(config_path_or_obj, config_model=Config)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
     if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
-        return
+        raise FileExistsError
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -137,15 +138,18 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
         dtype=dtype,
     )
 
+    results = {
+        "config": json.loads(config.model_dump_json()),
+        "accuracies": accuracies,
+    }
+
     if config.exp_name is not None:
-        results = {
-            "config": json.loads(config.model_dump_json()),
-            "accuracies": accuracies,
-        }
         with open(out_file, "w") as f:
             json.dump(results, f)
         logger.info("Wrote results to %s", out_file)
 
+    return accuracies
+
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(main, serialize=lambda _: "")

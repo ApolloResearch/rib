@@ -101,31 +101,35 @@ def relu_plot_and_cluster(
         for cluster in unique_clusters:
             # 1D array of indices of original matrix
             cluster_idx = np.where(clusters == cluster)[0]
+            layer_cluster_idxs.append(torch.tensor(cluster_idx))
+
             layer_num_valid_swaps.append(cluster_idx.shape[0] - 1)
-            cluster_distances = distance_matrix[np.ix_(
-                cluster_idx, cluster_idx)]
+            cluster_distances = distance_matrix[np.ix_(cluster_idx, cluster_idx)]
+
             # Use symmetry of matrix, sum only over one dimension to compute total distance to all
             # other members
             # And find minimum index in this cluster subarray
             centroid_idx_in_cluster = np.argmin(cluster_distances.sum(axis=1))
+
             # Map this back to indices of original array
             centroid_idx_original = cluster_idx[centroid_idx_in_cluster]
+
             # Set all index elements to cluster centroid index (note we do not return or manipulate
             # *distance matrix values*)
             # Want instead indices with which to permute the O(x) vector in forward hook
             indices_of_original_O[cluster_idx] = centroid_idx_original
-            layer_cluster_idxs.append(torch.tensor(cluster_idx))
 
         all_cluster_idxs.append(layer_cluster_idxs)
         all_num_valid_swaps.append(layer_num_valid_swaps)
         print(f"swaps {layer_num_valid_swaps}")
+
         # Cast indices to tensor and add to list of returns - one item per layer
         return_index_list.append(torch.tensor(indices_of_original_O))
-        layer_num_swaps_dict = {i: swap_num for i,
-                                swap_num in enumerate(layer_num_valid_swaps)}
+        layer_num_swaps_dict = {i: swap_num for i, swap_num in enumerate(layer_num_valid_swaps)}
         degeneracy_total = sum([(n+1)**2-n-1 for n in layer_num_valid_swaps])
         print(f"swaps dict {layer_num_swaps_dict}")
         print(f"degeneracy total {degeneracy_total}")
+
         with open('relu_clusters.txt', 'w') as file:
             for item in all_cluster_idxs:
                 file.write("%s\n" % item)
@@ -488,3 +492,38 @@ def plot_matrix_list(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_
                     cmap="YlGnBu", cbar=True, square=True)
         plt.savefig(
             out_dir / f"{var_name}_{i}.png")
+
+
+def plot_eigenvalues(eigenvalues: Float[Tensor, "d_hidden"], out_dir: Path, title: str) -> None:
+    plt.figure(figsize=(8, 6))
+    plt.scatter(range(len(eigenvalues)), eigenvalues, color='blue')
+    plt.title('Eigenvalues in Descending Order')
+    plt.xlabel('Index')
+    plt.ylabel('Eigenvalue')
+    plt.grid(True)
+    plt.savefig(out_dir / f"eigenvalues_{title}.png")
+    plt.close()
+
+
+def plot_eigenvectors(eigenvectors: np.ndarray, out_dir: Path, title: str) -> None:
+    num_vectors = eigenvectors.shape[1]
+    num_components = eigenvectors.shape[0]
+    x = np.arange(num_components)  # the label locations
+
+    plt.figure(figsize=(10, 6))
+
+    # Width of a bar
+    width = 0.8 / num_vectors
+
+    for i in range(num_vectors):
+        plt.bar(x - width/2 + i * width, eigenvectors[:, i], width, label=f'Eigenvector {i+1}', alpha=0.7)
+
+    plt.title(f'All Eigenvectors - {title}')
+    plt.xlabel('Component')
+    plt.ylabel('Value')
+    plt.xticks(x)
+    plt.legend()
+    plt.grid(True)
+
+    plt.savefig(out_dir / f"eigenvectors_{title}.png")
+    plt.close()

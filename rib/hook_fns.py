@@ -220,8 +220,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         dataset_size: Size of the dataset. Used to normalize the gram matrix.
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
-    assert len(
-        data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
+    assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
     # Remove the pre foward hook to avoid recursion when calculating the jacobian
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
@@ -593,6 +592,7 @@ def function_size_forward_hook_fn(
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
     outputs = output if isinstance(output, tuple) else (output,)
     outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
+
     if rotate == True: outputs = outputs @ C_next_layer
     einsum_pattern = 'bpi ->' if outputs.dim() == 3 else 'bi->'
     # l2 norm of functions f^{l+1} - i.e. output of this layer
@@ -686,3 +686,58 @@ def test_edges_forward_hook_fn(
     edge_matrix = torch.einsum('bij -> ij', rows_f_next_layer_hats * C_O_W_hat * cols_f_hats)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, edge_matrix.detach())
+
+
+def cluster_gram_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    output: Union[
+        Float[Tensor, "batch d_hidden"],
+        Float[Tensor, "batch pos d_hidden"],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    dataset_size: int,
+    cluster_idxs: list[Int[Tensor, "d_hidden"]],
+    use_residual_stream: bool,
+) -> None:
+    """Calculate gram matrix of each cluster, where cluster replacement has already been tested for
+    100% accuracy retention.
+
+    Hook only valid for activation layer.
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+    is_lm = True if inputs[0].dim() == 3 else False
+    outputs = output if isinstance(output, tuple) else (output,)
+
+    # Once again, fold in token dimension into batch
+    if is_lm and not use_residual_stream:
+        inputs = rearrange(inputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
+        outputs = rearrange(outputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
+    elif is_lm and use_residual_stream:
+        inputs = rearrange(torch.cat([x for x in inputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
+        outputs = rearrange(torch.cat([x for x in outputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
+    else:  # Inputs always tuple, and in this case we don't have LM
+        inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+        outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+
+    # Every cluster has its own gram matrix, which can be differentiated with `data_key` which tells
+    # you the cluster number (the element of cluster_idxs it was taken from)
+    for cluster_num, idxs in enumerate(cluster_idxs):
+        cluster_inputs = inputs[..., idxs]
+        cluster_outputs = outputs[..., idxs]
+        cluster_operator = torch.div(cluster_outputs, cluster_inputs)
+        gram_matrix = calc_gram_matrix(cluster_operator * cluster_inputs, dataset_size=dataset_size)
+        _add_to_hooked_matrix(hooked_data, hook_name, cluster_num, gram_matrix.detach())
+
+
+
+

@@ -43,6 +43,8 @@ from experiments.relu_interactions.relu_interaction_utils import (
     print_all_modules,
     relu_plot_and_cluster,
     swap_all_layers_using_clusters,
+    plot_eigenvalues,
+    plot_eigenvectors,
 )
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import (
@@ -51,6 +53,7 @@ from rib.data_accumulator import (
     collect_gram_matrices,
     collect_relu_interactions,
     collect_test_edges,
+    collect_cluster_grams,
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
@@ -58,6 +61,7 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
+from rib.linalg import eigendecompose
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.models.utils import get_model_attr, get_model_weight
@@ -271,15 +275,6 @@ def get_Cs(
     Hooked model should already be on device.
     """
     dtype = TORCH_DTYPES[config.dtype]
-    return_set = cast(Literal["train", "test", "all"],
-                      config.dataset.return_set)
-    dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set=return_set,
-        tlens_model_path=config.tlens_model_path,
-    )
-
-    # Don't build the graph for the section of the model before the first node layer
     section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
     if config.interaction_matrices_path is None:
@@ -301,13 +296,10 @@ def get_Cs(
             dtype=dtype,
             device=device,
             collect_output_gram=collect_output_gram,
-            hook_names=[
-                layer_name for layer_name in config.node_layers if layer_name != "output"],
+            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
         )
 
-        graph_train_loader = create_data_loader(
-            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
-        )
+        graph_train_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed)
 
         logger.info("Calculating interaction rotations (Cs).")
         # Calls on collect_M_dash_and_Lambda_dash
@@ -347,21 +339,10 @@ def get_relu_similarities(
     hooked_model: HookedModel,
     Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
-    return_set = cast(Literal["train", "test", "all"],
-                      config.dataset.return_set)
-    dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set=return_set,
-        tlens_model_path=config.tlens_model_path,
-    )
-    graph_train_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.batch_size)
-
-    # Don't build the graph for the section of the model before the first node layer
-    # The names below are *defined from* the node_layers dictionary in the config file
+    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
     graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
-    relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
+    relu_similarities: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
         hooked_model=hooked_model,
         module_names=config.activation_layers,
         data_loader=graph_train_loader,
@@ -376,9 +357,9 @@ def get_relu_similarities(
     )
 
     with open(file_path, "wb") as f:
-        torch.save(relu_similarity_matrices, f)
+        torch.save(relu_similarities, f)
 
-    return relu_similarity_matrices
+    return relu_similarities
 
 
 def get_rotated_Ws(
@@ -417,21 +398,49 @@ def get_rotated_Ws(
         if weight is not None and re.search(r'\bMLPOut\b', str_module_names):
             weights_dict[str_module_names] = weight
 
-    rotated_weights_dict = {}
+    rotated_weights = {}
     for (str_module_name, weight), C_pinv in zip(list(weights_dict.items()), C_pinv_list[1:]):
         # Cut off first C matrix because need to use C in next layer
         resid_stream_size = C_pinv.shape[1] - weight.shape[0]
         assert resid_stream_size > 0, "Weight and C mats don't match"
         weight = torch.cat((weight, torch.eye(resid_stream_size)))
-        rotated_weights_dict[str_module_name] = C_pinv @ weight
+        rotated_weights[str_module_name] = C_pinv @ weight
 
-    return rotated_weights_dict
+    return rotated_weights
 
+
+def get_cluster_gram(
+    model: nn.Module,
+    config: Config,
+    file_path: Path,
+    dataset: Dataset,
+    device: str,
+    hooked_model: HookedModel,
+    all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
+) -> dict[str, list[Float[Tensor, "d_cluster d_cluster"]]]:
+    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+
+    cluster_grams: dict[str, list[Float[Tensor, "d_cluster d_cluster"]]] = collect_cluster_grams(
+        hooked_model=hooked_model,
+        module_names=config.activation_layers,
+        data_loader=graph_train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+        all_cluster_idxs=all_cluster_idxs,
+        use_residual_stream=config.use_residual_stream,
+        dataset_size=len(dataset)
+    )
+
+    with open(file_path, "wb") as f:
+        torch.save(cluster_grams, f)
+
+
+    return cluster_grams
 
 # def get_P_matrices(
 #     model: nn.Module,
 #     config: Config,
-#     file_path: str,
+#     file_path: Path,
 #     dataset: Dataset,
 #     device: str,
 #     hooked_model: HookedModel,
@@ -445,16 +454,16 @@ def get_rotated_Ws(
 #     """
 #     graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
-#     P_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_clustered_relu_P_mats_no_W(
+#     Ps: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_clustered_relu_P_mats_no_W(
 #         module_names=graph_section_names,
 #         C_list=C_list,
 #         all_cluster_idxs=all_cluster_idxs,
 #     )
 
 #     with open(file_path, "wb") as f:
-#         torch.save(P_matrices, f)
+#         torch.save(Ps, f)
 
-#     return P_matrices
+#     return Ps
 
 
 # def get_edges(
@@ -468,18 +477,10 @@ def get_rotated_Ws(
 #     C_unscaled_list: list[Float[Tensor, "d_hidden_out d_hidden_in"]],
 #     W_hat_list: list[Float[Tensor, "d_hidden_in d_hidden_out"]],
 # ) -> dict[str, Float[Tensor, "d_hidden_trunc_curr d_hidden_trunc_next"]]:
-#     return_set = cast(Literal["train", "test", "all"],
-#                       config.dataset.return_set)
-#     dataset = load_dataset(
-#         dataset_config=config.dataset,
-#         return_set=return_set,
-#         tlens_model_path=config.tlens_model_path,
-#     )
-#     graph_train_loader = create_data_loader(
-#         dataset, shuffle=True, batch_size=config.batch_size)
+#     graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
 #     """NOTE CODE BELOW HAS C_UNSCALED_LIST = C_LIST. THIS SHOULD NOT ALWAYS BE TRUE."""
-#     edges_dict: dict[str, Float[Tensor, "d_hidden_trunc_1 d_hiddn_trunc_2"]] = collect_test_edges(
+#     edges: dict[str, Float[Tensor, "d_hidden_trunc_1 d_hiddn_trunc_2"]] = collect_test_edges(
 #         C_unscaled_list=C_list,
 #         C_list=C_list,
 #         W_hat_list=W_hat_list,
@@ -491,9 +492,9 @@ def get_rotated_Ws(
 #     )
 
 #     with open(file_path, "wb") as f:
-#         torch.save(edges_dict, f)
+#         torch.save(edges, f)
 
-#     return edges_dict
+#     return edges
 
 
 def check_and_open_file(
@@ -533,9 +534,9 @@ def transformer_relu_main(config_path_str: str):
     Ws_save_file = Path(__file__).parent / "Ws_transformer"
     Ps_save_file = Path(__file__).parent / "Ps_transformer"
     edges_save_file = Path(__file__).parent / "edges_transformer"
+    cluster_gram_save_file = Path(__file__).parent / "cluster_gram_transformer"
 
-    out_dir = Path(__file__).parent / \
-        f"out_transformer_relu / type_{config.relu_metric_type}"
+    out_dir = Path(__file__).parent / f"out_transformer_relu / type_{config.relu_metric_type}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     dtype = TORCH_DTYPES[config.dtype]
@@ -602,6 +603,25 @@ def transformer_relu_main(config_path_str: str):
         data_loader=graph_train_loader,
         device=device,
     )
+
+    # Keys: module name for layer; values: list of gram matrices
+    cluster_grams: dict[str, list[Float[Tensor, "d_cluster d_cluster"]]] = check_and_open_file(
+        get_var_fn=get_cluster_gram,
+        model=seq_model,
+        config=config,
+        file_path=cluster_gram_save_file,
+        dataset=dataset,
+        device=device,
+        hooked_model=hooked_model,
+        all_cluster_idxs=all_cluster_idxs,
+    )
+
+    for (module_name, layer_gram_list) in list(cluster_grams.items()):
+        for (cluster_idx, matrix) in enumerate(layer_gram_list):
+            sorted_eigenvalues, sorted_eigenvectors = eigendecompose(matrix)
+            plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"{module_name}_{cluster_idx}")
+            plot_eigenvectors(sorted_eigenvectors, out_dir, title=f"{module_name}_{cluster_idx}")
+
 
     # Separate part of main code ===================================================
     # Redefine layers required for weight matrices

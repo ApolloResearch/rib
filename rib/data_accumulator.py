@@ -23,6 +23,7 @@ from rib.hook_fns import (
     interaction_edge_pre_forward_hook_fn,
     relu_interaction_forward_hook_fn,
     test_edges_forward_hook_fn,
+    cluster_gram_forward_hook_fn
 )
 from rib.hook_fns_non_static import relu_swap_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
@@ -328,7 +329,8 @@ def collect_relu_interactions(
 
     Args:
         hooked_model: The hooked model.
-        module_names: The names of the modules to collect gram matrices for.
+        module_names: The names of the modules to collect relu interactions for. These should be
+            activation layer types only.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
         dtype: The data type to use for model computations.
@@ -388,7 +390,7 @@ def collect_relu_interactions(
 
     hooked_model.clear_hooked_data()
 
-    match relu_metric_type:
+    match relu_metric_type: # This is just used for the denominator, since some metrics divide by the rotated function L2 norm
         case 0 | 1 | 3: rotate = False
         case 2: rotate = True
 
@@ -726,3 +728,54 @@ def collect_clustered_relu_P_mats_no_W(
 
     return P_dict
 
+
+def collect_cluster_grams(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
+    use_residual_stream: bool,
+    dataset_size: int,
+    hook_names: Optional[str] = None,
+) -> dict[str, list[Float[Tensor, "d_cluster d_cluster"]]]:
+    """
+    Args:
+        module_names: The names of the modules to collect relu interactions for. These should be
+            activation layer types only.
+        hook_names: Used for saving in hook data and retrieving hook data. If not specified,
+            automatically set to be module_names.
+    """
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    cluster_gram_hooks = []
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        cluster_gram_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="relu_swap",
+                fn=cluster_gram_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"cluster_idxs": all_cluster_idxs[i], "use_residual_stream": use_residual_stream, "dataset_size": dataset_size}
+            )
+        )
+
+    run_dataset_through_model(
+        hooked_model,
+        data_loader,
+        hooks=cluster_gram_hooks,
+        dtype=dtype,
+        device=device,
+    )
+
+    cluster_grams: dict[str, list[Float[Tensor, "d_hidden, d_hidden"]]] = {}
+    for layer_idx, hook_name in enumerate(hook_names):
+        cluster_grams[hook_name] = [hooked_model.hooked_data[hook_name][i] for i in range(len(all_cluster_idxs[layer_idx]))]
+    hooked_model.clear_hooked_data()
+
+    return cluster_grams

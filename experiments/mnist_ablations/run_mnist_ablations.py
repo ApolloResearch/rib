@@ -68,7 +68,6 @@ class Config(BaseModel):
 
 
 def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
-    print(config_dict["model"])
     mlp = MLP(
         hidden_sizes=config_dict["model"]["hidden_sizes"],
         input_size=784,

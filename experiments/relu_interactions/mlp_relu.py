@@ -1,14 +1,11 @@
-import json
-from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import fire
-import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import yaml
-from jaxtyping import Float, Int
+from jaxtyping import Float
 from pydantic import BaseModel, field_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -16,18 +13,10 @@ from torchvision import datasets, transforms
 
 from experiments.relu_interactions.relu_interaction_utils import (
     edit_weights_fn,
-    extract_weights_mlp,
-    get_nested_attribute,
-    print_all_modules,
     relu_plot_and_cluster,
-    swap_all_layers,
-    swap_single_layer,
     swap_all_layers_using_clusters,
-    plot_changes,
 )
 from rib.data_accumulator import (
-    calculate_all_swapped_iterative_relu_loss,
-    calculate_swapped_relu_loss,
     collect_gram_matrices,
     collect_relu_interactions,
 )
@@ -121,7 +110,8 @@ def get_Cs(
     # Builds sqrt sorted Lambda matrix and its inverse
     Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs, Lambda_dashes = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
-        module_names=config.node_layers,
+        section_names=config.node_layers,
+        node_layers=config.node_layers,
         hooked_model=hooked_model,
         data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],

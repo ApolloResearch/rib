@@ -420,7 +420,7 @@ def get_cluster_gram(
 ) -> dict[str, list[Float[Tensor, "d_cluster d_cluster"]]]:
     graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
-    cluster_grams: dict[str, list[Float[Tensor, "d_cluster d_cluster"]]] = collect_cluster_grams(
+    cluster_grams, output_cluster_grams = collect_cluster_grams(
         hooked_model=hooked_model,
         module_names=config.activation_layers,
         data_loader=graph_train_loader,
@@ -431,11 +431,11 @@ def get_cluster_gram(
         dataset_size=len(dataset)
     )
 
-    with open(file_path, "wb") as f:
-        torch.save(cluster_grams, f)
+    # with open(file_path, "wb") as f:
+    #     torch.save(cluster_grams, f)
 
 
-    return cluster_grams
+    return cluster_grams, output_cluster_grams
 
 # def get_P_matrices(
 #     model: nn.Module,
@@ -605,7 +605,7 @@ def transformer_relu_main(config_path_str: str):
     )
 
     # Keys: module name for layer; values: list of gram matrices
-    cluster_grams: dict[str, list[Float[Tensor, "d_cluster d_cluster"]]] = check_and_open_file(
+    cluster_grams, output_cluster_grams = check_and_open_file(
         get_var_fn=get_cluster_gram,
         model=seq_model,
         config=config,
@@ -620,7 +620,13 @@ def transformer_relu_main(config_path_str: str):
         for (cluster_idx, matrix) in enumerate(layer_gram_list):
             sorted_eigenvalues, sorted_eigenvectors = eigendecompose(matrix)
             plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"{module_name}_{cluster_idx}")
-            plot_eigenvectors(sorted_eigenvectors, out_dir, title=f"{module_name}_{cluster_idx}")
+            # plot_eigenvectors(sorted_eigenvectors, f"{out_dir}/cluster_gram", title=f"{module_name}_{cluster_idx}")
+
+    for (module_name, layer_gram_list) in list(output_cluster_grams.items()):
+        for (cluster_idx, matrix) in enumerate(layer_gram_list):
+            sorted_eigenvalues, sorted_eigenvectors = eigendecompose(matrix)
+            plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"output_{module_name}_{cluster_idx}")
+
 
 
     # Separate part of main code ===================================================

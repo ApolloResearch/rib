@@ -736,7 +736,9 @@ def cluster_gram_forward_hook_fn(
         cluster_outputs = outputs[..., idxs]
         cluster_operator = torch.div(cluster_outputs, cluster_inputs)
         gram_matrix = calc_gram_matrix(cluster_operator * cluster_inputs, dataset_size=dataset_size)
+        output_gram_matrix = calc_gram_matrix(cluster_outputs, dataset_size=dataset_size)
         _add_to_hooked_matrix(hooked_data, hook_name, cluster_num, gram_matrix.detach())
+        _add_to_hooked_matrix(hooked_data, hook_name, f"output_{cluster_num}", output_gram_matrix.detach())
 
 
 

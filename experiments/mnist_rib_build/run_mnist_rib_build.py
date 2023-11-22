@@ -29,6 +29,7 @@ from torchvision import datasets, transforms
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
+from rib.loader import load_mlp
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
@@ -53,19 +54,6 @@ class Config(BaseModel):
     def dtype_validator(cls, v):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
         return v
-
-
-def load_mlp(config_dict: dict, mlp_path: Path, device: str) -> MLP:
-    mlp = MLP(
-        hidden_sizes=config_dict["model"]["hidden_sizes"],
-        input_size=784,
-        output_size=10,
-        activation_fn=config_dict["model"]["activation_fn"],
-        bias=config_dict["model"]["bias"],
-        fold_bias=config_dict["model"]["fold_bias"],
-    )
-    mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
-    return mlp
 
 
 def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
@@ -94,6 +82,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+    assert mlp.has_folded_bias
     mlp.eval()
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)

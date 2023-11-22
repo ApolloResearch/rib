@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 
 import numpy as np
 import torch
@@ -255,7 +255,7 @@ def fold_attn_O(
 
 
 def fold_mlp_in(
-    act_fn: str,
+    act_fn: Optional[str],
     weight: Float[Tensor, "d_model d_mlp"],
     bias: Float[Tensor, "d_mlp"],
 ) -> None:
@@ -265,11 +265,11 @@ def fold_mlp_in(
     a single value at the end equal to the value that would be transformed to 1 by the activation
     function (denoted root_1). I.e. W_in_folded will be of shape (d_model + 1, d_mlp + 1).
 
-    If the activation function has a root_1 of 0 (such as ReLU), the value added to the end will be
-    1. This will result in act_fn(x @ W_in_folded) giving the same result as act_fn(x @ W_in + b_in).
+    If the activation function has a root_1 of 1 (such as ReLU, or the idenity/no activation fn), the value added to the end will be
+    1. This will result in act_fn(x @ W_in_folded) giving the same result as act_fn(x @ W_in + b_in), except with an extra 1 concatenated at the end.
     """
 
-    if act_fn == "relu":
+    if act_fn == "relu" or act_fn is None:
         # relu(1) = 1
         root_one = 1.0
     elif act_fn in ["gelu", "gelu_new"]:

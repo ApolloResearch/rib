@@ -440,6 +440,8 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
         torch.save(results, out_file)
         logger.info("Saved results to %s", out_file)
 
+    return results
+
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(main, serialize=lambda _: "")

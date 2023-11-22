@@ -20,7 +20,6 @@ from torch import Tensor
 from rib.linalg import (
     calc_gram_matrix,
     edge_norm,
-    get_analytic_integrated_gradient_fn,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
 )
@@ -293,55 +292,44 @@ def interaction_edge_pre_forward_hook_fn(
 
     jac_out = hooked_data[hook_name][data_key]
 
-    integrated_grad_fn = get_analytic_integrated_gradient_fn(module)
-    if integrated_grad_fn is not None:
-        # Calculate the integrated gradient analytically
-        integrated_grad_fn(
-            inputs=inputs,
-            jac_out=jac_out,
-            dataset_size=dataset_size,
-        )
-    else:
-        # Calculate the integrated gradient numerically
-        has_pos = inputs[0].dim() == 3
+    # Calculate the integrated gradient numerically
+    has_pos = inputs[0].dim() == 3
 
-        # We first concatenate the inputs over the hidden dimension
-        in_acts = torch.cat(inputs, dim=-1)
-        # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
-        f_hat = in_acts @ C_in
+    # We first concatenate the inputs over the hidden dimension
+    in_acts = torch.cat(inputs, dim=-1)
+    # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
+    f_hat = in_acts @ C_in
 
-        in_hidden_dims = [x.shape[-1] for x in inputs]
+    in_hidden_dims = [x.shape[-1] for x in inputs]
 
-        # Compute f^{l+1}(x) to which the derivative is not applied.
-        with torch.inference_mode():
-            # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
-            f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_hat @ C_in_pinv
-            input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
+    # Compute f^{l+1}(x) to which the derivative is not applied.
+    with torch.inference_mode():
+        # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
+        f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_hat @ C_in_pinv
+        input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
 
-            output_const = module(*tuple(x.detach().clone() for x in input_tuples))
-            outputs_const = (
-                (output_const,) if isinstance(output_const, torch.Tensor) else output_const
-            )
+        output_const = module(*tuple(x.detach().clone() for x in input_tuples))
+        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
 
-        has_pos = f_hat.dim() == 3
+    has_pos = f_hat.dim() == 3
 
-        edge_norm_partial = partial(
-            edge_norm,
-            outputs_const=outputs_const,
-            module=module,
-            C_in_pinv=C_in_pinv,
-            C_out=C_out,
-            in_hidden_dims=in_hidden_dims,
-            has_pos=has_pos,
-        )
+    edge_norm_partial = partial(
+        edge_norm,
+        outputs_const=outputs_const,
+        module=module,
+        C_in_pinv=C_in_pinv,
+        C_out=C_out,
+        in_hidden_dims=in_hidden_dims,
+        has_pos=has_pos,
+    )
 
-        integrated_gradient_trapezoidal_jacobian(
-            fn=edge_norm_partial,
-            x=f_hat,
-            n_intervals=n_intervals,
-            jac_out=jac_out,
-            dataset_size=dataset_size,
-        )
+    integrated_gradient_trapezoidal_jacobian(
+        fn=edge_norm_partial,
+        x=f_hat,
+        n_intervals=n_intervals,
+        jac_out=jac_out,
+        dataset_size=dataset_size,
+    )
 
 
 def acts_forward_hook_fn(

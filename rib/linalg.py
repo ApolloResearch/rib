@@ -415,32 +415,3 @@ def calc_gram_matrix(
         raise ValueError("Unexpected tensor rank")
 
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
-
-
-def linear_integrated_gradient(W: Float[Tensor, "in_dim out_dim"]):
-    raise NotImplementedError("Analytic integrated gradient for linear layers not yet implemented.")
-
-
-def get_analytic_integrated_gradient_fn(section: nn.Module) -> Optional[Callable]:
-    """Get the analytic integrated gradient function for a given section.
-
-    Args:
-        section: The section to get the analytic integrated gradient function for.
-
-    Returns:
-        The analytic integrated gradient function for the section, or None if we need to use a
-        numerical approximation.
-    """
-    if (isinstance(section, nn.Sequential) and len(section) == 1) or not isinstance(
-        section, nn.Sequential
-    ):
-        module = section[0] if isinstance(section, nn.Sequential) else section
-        if isinstance(module, MLPIn):
-            fn = partial(linear_integrated_gradient, W=module.W_in)
-        elif isinstance(module, MLPOut):
-            fn = partial(linear_integrated_gradient, W=module.W_out)
-        else:
-            fn = None
-    else:
-        fn = None
-    return fn

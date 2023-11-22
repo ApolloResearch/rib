@@ -28,7 +28,6 @@ class ModelConfig(BaseModel):
     hidden_sizes: Optional[list[int]]
     activation_fn: str = "relu"
     bias: bool = True
-    fold_bias: bool = True
 
 
 class TrainConfig(BaseModel):
@@ -171,7 +170,7 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
         output_size=10,
         activation_fn=config.model.activation_fn,
         bias=config.model.bias,
-        fold_bias=config.model.fold_bias,
+        fold_bias=False,  # false even if config.model.fold_bias is true; we fold after training
     )
     model = model.to(device)
 

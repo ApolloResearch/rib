@@ -1,22 +1,42 @@
 """This script reads in results from different lm_rib_build runs and adds together the edges.
 
-It takes in as a command line argument a list of .pt files, each of which contains a list of edges.
-After checking that the configs are the same, it adds together the edges and saves the result to a
-new file (named the same as the first file without a `global_rankN` suffix and with `_combined`
-appended).
+It can take in as command line arguments either a list of .pt files or a directory. Each .pt file contains a list of edges.
+If a directory is provided, it searches for all .pt files in the directory. After checking that the configs are the same,
+it adds together the edges and saves the result to a new file (named the same as the first file without a `global_rankN` suffix
+and with `_combined` appended).
 
-Example usage:
+Example usage with files:
     python combined_edges.py out/pythia-14m_rib_graph_global_rank0.pt out/pythia-14m_rib_global_rank1.pt
+
+Example usage with a directory:
+    python combined_edges.py out/pythia-14m
 """
 from pathlib import Path
 
 import fire
 import torch
 
+from rib.log import logger
 
-def main(*results_files: str) -> None:
-    """Combine the edges from the given results files and save the result to a new file."""
-    result_file_paths = [Path(results_file) for results_file in results_files]
+
+def main(*inputs: str) -> None:
+    """Combine the edges from the given results files or all .pt files in a directory and save the result to a new file."""
+    result_file_paths: list[Path] = []
+
+    for input in inputs:
+        path = Path(input)
+        if path.is_dir():
+            # Add all .pt files in the directory to result_file_paths
+            result_file_paths.extend(path.glob("*.pt"))
+        elif path.is_file() and path.suffix == ".pt":
+            # Add the file to result_file_paths
+            result_file_paths.append(path)
+        else:
+            raise ValueError(f"Invalid input: {input} is neither a .pt file nor a directory")
+
+    # Check if result_file_paths is empty
+    if not result_file_paths:
+        raise ValueError("No .pt files found in the provided inputs")
 
     # Save the combined edges to a new file
     out_file = (
@@ -74,6 +94,8 @@ def main(*results_files: str) -> None:
     del out_results["dist_info"]
 
     torch.save(out_results, out_file)
+    result_file_strs = "\n".join(map(str, result_file_paths))
+    logger.info(f"Combined edges in files\n{result_file_strs}\nand saved to {out_file}")
 
 
 if __name__ == "__main__":

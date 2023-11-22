@@ -7,6 +7,9 @@ from torch import nn
 
 from rib.models import MLP, MLPLayer
 from rib.models.utils import ACTIVATION_MAP
+from rib.utils import set_seed
+
+set_seed(0)
 
 
 @pytest.mark.parametrize("hidden_sizes", [[], [4, 3]])
@@ -72,7 +75,7 @@ def test_mlp_layers(
             # No activation function for the last layer
             assert not hasattr(layer, "activation")
 
-    batch_size = 5
+    batch_size = 10
     rand_input = torch.rand((batch_size, input_size), requires_grad=True)
     output = model(rand_input)
     in_grad = torch.autograd.grad(output.sum(), rand_input)[0]

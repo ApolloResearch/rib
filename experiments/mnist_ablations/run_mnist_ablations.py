@@ -34,6 +34,7 @@ from rib.ablations import (
     run_ablations,
 )
 from rib.hook_manager import HookedModel
+from rib.loader import load_mlp
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
@@ -65,21 +66,6 @@ class Config(BaseModel):
     def dtype_validator(cls, v: str):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
         return v
-
-
-def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
-    mlp = MLP(
-        hidden_sizes=config_dict["model"]["hidden_sizes"],
-        input_size=784,
-        output_size=10,
-        activation_fn=config_dict["model"]["activation_fn"],
-        bias=config_dict["model"]["bias"],
-        fold_bias=False,
-    )
-    mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
-    if fold_bias:
-        mlp.fold_bias()
-    return mlp
 
 
 def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:

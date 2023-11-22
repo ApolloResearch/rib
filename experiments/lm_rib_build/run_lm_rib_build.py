@@ -260,8 +260,8 @@ def main(
 
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
 
-    adjust_logger_dist(dist_info, logger)
-    device = get_device_mpi(dist_info, logger)
+    adjust_logger_dist(dist_info)
+    device = get_device_mpi(dist_info)
 
     out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -272,7 +272,7 @@ def main(
     else:
         out_file = out_dir / f"{config.exp_name}_rib_Cs{global_rank_suffix}.pt"
     if dist_info.is_main_process and not check_outfile_overwrite(
-        out_file, config.force_overwrite_output or force, logger=logger
+        out_file, config.force_overwrite_output or force
     ):
         dist_info.local_comm.Abort()  # stop this and other processes
 

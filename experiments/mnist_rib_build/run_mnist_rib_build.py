@@ -88,7 +88,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
-    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
+    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force):
         return
 
     device = "cuda" if torch.cuda.is_available() else "cpu"

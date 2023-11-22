@@ -1,13 +1,14 @@
 """
 Utilities for dealing with parallel processes across pods and also across GPUs within a pod.
 """
-import logging
 import warnings
 from dataclasses import dataclass, fields
 from logging import WARNING
 
 import torch
 from mpi4py import MPI
+
+from rib.log import logger
 
 
 @dataclass(frozen=True)
@@ -62,13 +63,13 @@ def get_dist_info(n_pods: int, pod_rank: int) -> DistributedInfo:
     )
 
 
-def adjust_logger_dist(dist_info: DistributedInfo, logger: logging.Logger):
+def adjust_logger_dist(dist_info: DistributedInfo):
     """Avoids stdout clutter by not having auxuilary processes log INFO."""
     if not dist_info.is_main_process:
         logger.setLevel(WARNING)
 
 
-def get_device_mpi(dist_info: DistributedInfo, logger: logging.Logger):
+def get_device_mpi(dist_info: DistributedInfo):
     if not torch.cuda.is_available():
         return "cpu"
     if not dist_info.is_parallelised:

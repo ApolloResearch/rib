@@ -85,7 +85,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     config = load_config(config_path_or_obj, config_model=Config)
 
     out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
+    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force):
         return
 
     out_file.parent.mkdir(parents=True, exist_ok=True)

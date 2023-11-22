@@ -49,6 +49,10 @@ class Config(BaseModel):
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
     node_layers: list[str]
+    out_dir: Optional[Path] = Field(
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
+    )
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -73,11 +77,11 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[st
     with open(config.mlp_path.parent / "config.yaml", "r") as f:
         model_config_dict = yaml.safe_load(f)
 
-    out_dir = Path(__file__).parent / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
-    if check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
-        raise FileExistsError("Not overwriting output file")
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
+        if check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
+            raise FileExistsError("Not overwriting output file")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
@@ -146,8 +150,9 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[st
     }
 
     # Save the results (which include torch tensors) to file
-    torch.save(results, out_file)
-    logger.info("Saved results to %s", out_file)
+    if config.out_dir is not None:
+        torch.save(results, out_file)
+        logger.info("Saved results to %s", out_file)
     return results
 
 

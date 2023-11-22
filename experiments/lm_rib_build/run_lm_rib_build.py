@@ -147,8 +147,8 @@ class Config(BaseModel):
     )
 
     out_dir: Optional[Path] = Field(
-        None,
-        description="Directory for the output files. If not provided it is `./out/` relative to this file.",
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
     )
 
     @field_validator("dtype")
@@ -261,17 +261,19 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[st
     adjust_logger_mpi(logger)
     device = get_device_mpi(logger)
 
-    out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-    if config.calculate_edges:
-        out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        if config.calculate_edges:
+            out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
+        else:
+            out_file = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+        if mpi_info.is_main_process and not check_outfile_overwrite(
+            out_file, config.force_overwrite_output or force, logger=logger
+        ):
+            mpi_info.comm.Abort()  # stop this and other processes
+            return None  # this is unreachable as Abort will terminate
     else:
-        out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if mpi_info.is_main_process and not check_outfile_overwrite(
-        out_file, config.force_overwrite_output or force, logger=logger
-    ):
-        mpi_info.comm.Abort()  # stop this and other processes
-        return None  # this is unreachable as Abort will terminate
+        out_file = None
 
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
@@ -435,7 +437,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[st
         "calc_edges_time": calc_edges_time,
     }
 
-    if mpi_info.is_main_process:
+    if out_file is not None and mpi_info.is_main_process:
         # Save the results (which include torch tensors) to file
         torch.save(results, out_file)
         logger.info("Saved results to %s", out_file)

@@ -71,7 +71,7 @@ def mock_torch_load(*args, **kwargs):
         if "mlp_path" in interaction_graph_info["config"]:
             interaction_graph_info["config"]["mlp_path"] = (
                 Path(__file__).parent.parent
-                / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-08-13_16-23-59/model_epoch_3.pt"
+                / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
             )
         # Modular addition
         if "tlens_model_path" in interaction_graph_info["config"]:

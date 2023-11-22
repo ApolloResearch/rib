@@ -26,7 +26,6 @@ class TestPythiaFloatingPointErrors:
         """Run RIB build with float32 and float64 and return the results."""
         rib_config_str = """
             force_overwrite_output: true
-            seed: 0
             tlens_pretrained: pythia-14m
             tlens_model_path: null
             dataset:
@@ -52,6 +51,7 @@ class TestPythiaFloatingPointErrors:
             n_intervals: 10
             calculate_edges: false
             eval_type: null
+            seed: 42
             """
         rib_config = yaml.safe_load(rib_config_str)
         temp_dir = temp_object.name
@@ -153,7 +153,7 @@ class TestPythiaFloatingPointErrors:
             - mlp_out.5
         batch_size: 30  # A100 can handle 60
         eval_type: ce_loss
-        seed: 0
+        seed: 42
         """
         ablation_config = yaml.safe_load(ablation_config_str)
         temp_dir = temp_object.name
@@ -196,7 +196,7 @@ class TestPythiaFloatingPointErrors:
                     torch.tensor(float32_ablation_result),
                     torch.tensor(float64_ablation_result),
                     atol=1e-3,
-                ), f"Float difference {node_layer} {n_vecs_ablated}: {float32_ablation_result} (float32) != {float64_ablation_result} (float64)"
+                ), f"Float difference {node_layer} {n_vecs_ablated}: {float32_ablation_result} (float32) != {float64_ablation_result} (float64), full results: {ablation_results['float32'][node_layer]} (float32) != {ablation_results['float64'][node_layer]} (float64)"
 
     @pytest.mark.parametrize("dtype", ["float32", "float64"])
     def test_ablation_result_flatness(self, ablation_results: dict, dtype: str) -> None:
@@ -209,4 +209,4 @@ class TestPythiaFloatingPointErrors:
                     torch.tensor(ablation_result_128),
                     torch.tensor(ablation_result_642),
                     atol=1e-3,
-                ), f"MLP non-flat ablation curve {dtype} {node_layer}: {ablation_result_128} (128) != {ablation_result_642} (642)"
+                ), f"MLP non-flat ablation curve {dtype} {node_layer}: {ablation_result_128} (128) != {ablation_result_642} (642), full results: {ablation_results[dtype][node_layer]}"

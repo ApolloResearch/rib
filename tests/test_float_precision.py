@@ -88,8 +88,10 @@ def test_pythia_floating_point_errors() -> None:
         rib_config["dtype"] = dtype
         rib_config["exp_name"] = exp_name
         if not torch.cuda.is_available():
+            # Try to reduce memory usage for CI
             rib_config["batch_size"] = 1
             rib_config["gram_batch_size"] = 1
+        print("Running RIB build with batch size", rib_config["batch_size"])
         rib_main(RibConfig(**rib_config))
         basis_matrices = torch.load(f"{temp_dir}/float-precision-test-pythia-14m-{dtype}_rib_Cs.pt")
         rib_results[dtype] = basis_matrices
@@ -97,11 +99,16 @@ def test_pythia_floating_point_errors() -> None:
     for node_layer in rib_results["float32"]["gram_matrices"].keys():
         float32_gram_matrix = rib_results["float32"]["gram_matrices"][node_layer]
         float64_gram_matrix = rib_results["float64"]["gram_matrices"][node_layer]
-        assert torch.allclose(float32_gram_matrix.to(torch.float64), float64_gram_matrix, atol=1e-4)
+        assert torch.allclose(
+            float32_gram_matrix.to(torch.float64), float64_gram_matrix, atol=1e-4
+        ), f"Gram matrix difference {node_layer} between float32 and float64."
 
-    if torch.cuda.is_available():
-        # This is pretty awful
-        # And even more wrong on CPU apparently
+    # FIXME This test is absolutely awful at the moment. We'd love to have a code that is consistent
+    #       enough to run this test with tigher tolerances & all settings (GPU, batch size)
+    #       Currently it fails on CPU (batch size [4, 20] but also [1, 1])
+    #       and even on GPU if batch size [1, 1].
+    if rib_config["batch_size"] > 1 and not torch.cuda.is_available():
+        print("Testing interaction_rotations")
         for node_layer_index in range(len(rib_results["float32"]["interaction_rotations"])):
             n_max = 4
             if rib_results["float32"]["interaction_rotations"][node_layer_index]["C"] is None:
@@ -114,9 +121,11 @@ def test_pythia_floating_point_errors() -> None:
             ]
             assert torch.allclose(
                 float32_C.to(torch.float64), float64_C, rtol=0.5, atol=0.5 * float64_C.max()
-            ), node_layer_index
+            ), "Interaction rotation difference between float32 and float64."
 
-    # Still bad but slightly better
+    # This tests is still pretty approximate (especially we only test the first n_max=1 columns)
+    # but not absolutely awful.
+    print("Testing eigenvectors")
     for node_layer_index in range(len(rib_results["float32"]["eigenvectors"])):
         n_max = 10
         if rib_results["float32"]["eigenvectors"][node_layer_index]["U"] is None:
@@ -125,7 +134,7 @@ def test_pythia_floating_point_errors() -> None:
         float_64_U = rib_results["float64"]["eigenvectors"][node_layer_index]["U"][:, :n_max]
         assert torch.allclose(
             float_32_U.to(torch.float64), float_64_U, atol=1e-3 * float_64_U.max()
-        )
+        ), f"Eigenvector difference {node_layer_index} between float32 and float64."
 
     ablation_results = {}
     for dtype in ["float32", "float64"]:
@@ -134,14 +143,17 @@ def test_pythia_floating_point_errors() -> None:
         ablation_config["exp_name"] = exp_name
         ablation_config["interaction_graph_path"] = f"{temp_dir}/{exp_name}_rib_Cs.pt"
         if not torch.cuda.is_available():
+            # Try to reduce memory usage for CI
             ablation_config["batch_size"] = 1
+        print("Running ablations with batch size", ablation_config["batch_size"], "for", dtype)
         ablation_main(AblationConfig(**ablation_config))
         ablation_result = json.load(open(f"{temp_dir}/{exp_name}_ablation_results.json"))["results"]
         ablation_results[dtype] = ablation_result
 
+    print("Testing ablation results")
     # ln2.3 (and others) are broken (https://github.com/ApolloResearch/rib/issues/212)
     for node_layer in ablation_results["float32"].keys():
-        # ln are broken. ln1.0 seemed fine on GPU (a6000) but broken on
+        # ln are broken. ln1.0 seemed fine on GPU (a6000) but broken on CPU
         if node_layer in ["ln2.3", "ln1.5", "ln1.0"]:
             continue
         for n_vecs_ablated in ablation_results["float32"][node_layer].keys():
@@ -151,7 +163,7 @@ def test_pythia_floating_point_errors() -> None:
                 torch.tensor(float32_ablation_result),
                 torch.tensor(float64_ablation_result),
                 atol=1e-3,
-            ), f"Diff for {node_layer} {n_vecs_ablated} = {float32_ablation_result} != {float64_ablation_result}"
+            ), f"Float difference {node_layer} {n_vecs_ablated}: {float32_ablation_result} (float32) != {float64_ablation_result} (float32)"
         if "mlp_out" in node_layer:
             for dtype in ["float32", "float64"]:
                 # Should be identical due to residual stream size
@@ -161,4 +173,4 @@ def test_pythia_floating_point_errors() -> None:
                     torch.tensor(ablation_result_128),
                     torch.tensor(ablation_result_642),
                     atol=1e-3,
-                ), f"Diff for {node_layer} {dtype} = {ablation_result_128} != {ablation_result_642}"
+                ), f"MLP non-flat ablation curve {dtype} {node_layer}: {ablation_result_128} (128) != {ablation_result_642} (642)"

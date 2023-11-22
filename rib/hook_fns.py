@@ -336,3 +336,29 @@ def acts_forward_hook_fn(
     detached_outputs = [x.detach().cpu() for x in outputs]
     # Store the output activations
     hooked_data[hook_name] = {data_key: detached_outputs}
+
+
+def acts_pre_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+) -> None:
+    """Hook function for storing the output activations.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module (not used).
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+    detached_outputs = [x.detach().cpu() for x in inputs]
+    # Store the output activations
+    hooked_data[hook_name] = {data_key: detached_outputs}

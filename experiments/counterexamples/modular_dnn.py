@@ -35,7 +35,8 @@ def random_block_diagonal_matrix(n, k, variances = None, dtype = torch.float32):
 
     # Zero out the blocks
     A[:k, :k] =  variances[0] * torch.randn(k,k,dtype=dtype)
-    A[k:n, k:n] = variances[1] * torch.randn(k,k,dtype=dtype)
+    if k < n:
+        A[k:n, k:n] = variances[1] * torch.randn(k,k,dtype=dtype)
 
     return A
 
@@ -151,64 +152,65 @@ def binarise(E_hats, tol=1e-1):
 
 class Config:
     def __init__(self,
-                 exp_name: str = "small_modular_dnn",
-                 n: int = 4,
-                 k: int = 2,
-                 layers: int = 3,
-                 dataset_size: int = 128,
-                 batch_size: int = 32,
-                 seed: int = None,
-                 truncation_threshold: float = 1e-30,
-                 n_intervals: int = 0,
-                 dtype: type = torch.float32,
-                 node_layers: list = None,
-                 datatype: str = 'random',
-                 rotate_final_node_layer: bool = True,
-                 force: bool = True,
-                 hardcode_bias = None,
-                 activation_fn = 'relu',
-                 variances = None,
-                 data_variances = None,
-                #  basis: str = 'rib',
-                 ):
-        """
-        Initializes the configuration for the experiment.
+                     exp_name: str = "small_modular_dnn",
+                     n: int = 4,
+                     k: int = 2,
+                     layers: int = 3,
+                     dataset_size: int = 128,
+                     batch_size: int = 32,
+                     seed: int = None,
+                     truncation_threshold: float = 1e-30,
+                     n_intervals: int = 0,
+                     dtype: type = torch.float32,
+                     node_layers: list = None,
+                     datatype: str = 'random',
+                     rotate_final_node_layer: bool = True,
+                     force: bool = True,
+                     hardcode_bias = None,
+                     activation_fn = 'relu',
+                     variances = None,
+                     data_variances = None,
+                    #  basis: str = 'rib',
+                     ):
+            """
+            Initializes the configuration for the experiment.
 
-        :param exp_name: Name of the experiment.
-        :param n: [Description of n]
-        :param k: [Description of k]
-        :param layers: Number of layers.
-        :param dataset_size: Size of the dataset.
-        :param batch_size: Batch size for training.
-        :param seed: Seed for random number generators. 
-                     A random seed is generated if None is provided.
-        :param truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
-        :param n_intervals: The number of intervals to use for integrated gradients.
-        :param dtype: Data type of all tensors (except those overridden in certain functions).
-        :param node_layers: The names of the layers that are nodes in the graph. 
-                            Defaults are set based on 'layers' if None is provided.
-        :param datatype: The type of data to use for the dataset.
-        :param rotate_final_node_layer: Whether to rotate the final node layer.
-        """
-        self.exp_name = exp_name
-        self.n = n
-        self.k = k
-        self.layers = layers
-        self.dataset_size = dataset_size
-        self.batch_size = batch_size
-        self.seed = seed if seed is not None else np.random.randint(0, 1000)
-        self.truncation_threshold = truncation_threshold
-        self.n_intervals = n_intervals
-        self.dtype = dtype
-        self.node_layers = node_layers if node_layers is not None else get_node_layers(layers)
-        self.datatype = datatype
-        self.rotate_final_node_layer = rotate_final_node_layer
-        self.force = force
-        self.hardcode_bias = hardcode_bias
-        self.activation_fn = activation_fn
-        self.variances = variances
-        self.data_variances = data_variances
-        # self.basis = basis
+            :param exp_name: Name of the experiment.
+            :param layers: Number of layers in the neural network.
+            :param dataset_size: Size of the dataset.
+            :param batch_size: Batch size for training.
+            :param seed: Seed for random number generators. A random seed is generated if None is provided.
+            :param truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
+            :param n_intervals: The number of intervals to use for integrated gradients.
+            :param dtype: Data type of all tensors (except those overridden in certain functions).
+            :param node_layers: The names of the layers that are nodes in the graph. Defaults are set based on 'layers' if None is provided.
+            :param datatype: The type of data to use for the dataset.
+            :param rotate_final_node_layer: Whether to rotate the final node layer.
+            :param force: Whether to force the experiment to run even if the experiment directory already exists.
+            :param hardcode_bias: The bias values to use for the neural network layers.
+            :param activation_fn: The activation function to use for the neural network layers.
+            :param variances: The variances to use for the neural network layers.
+            :param data_variances: The variances to use for the dataset.
+            """
+            self.exp_name = exp_name
+            self.n = n
+            self.k = k
+            self.layers = layers
+            self.dataset_size = dataset_size
+            self.batch_size = batch_size
+            self.seed = seed if seed is not None else np.random.randint(0, 1000)
+            self.truncation_threshold = truncation_threshold
+            self.n_intervals = n_intervals
+            self.dtype = dtype
+            self.node_layers = node_layers if node_layers is not None else get_node_layers(layers)
+            self.datatype = datatype
+            self.rotate_final_node_layer = rotate_final_node_layer
+            self.force = force
+            self.hardcode_bias = hardcode_bias
+            self.activation_fn = activation_fn
+            self.variances = variances
+            self.data_variances = data_variances
+            # self.basis = basis
     def to_dict(self):
         return vars(self)
 

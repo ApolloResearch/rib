@@ -87,6 +87,9 @@ def test_pythia_floating_point_errors() -> None:
         exp_name = f"float-precision-test-pythia-14m-{dtype}"
         rib_config["dtype"] = dtype
         rib_config["exp_name"] = exp_name
+        if not torch.cuda.is_available():
+            rib_config["batch_size"] = 1
+            rib_config["gram_batch_size"] = 1
         rib_main(RibConfig(**rib_config))
         basis_matrices = torch.load(f"{temp_dir}/float-precision-test-pythia-14m-{dtype}_rib_Cs.pt")
         rib_results[dtype] = basis_matrices
@@ -130,6 +133,8 @@ def test_pythia_floating_point_errors() -> None:
         ablation_config["dtype"] = dtype
         ablation_config["exp_name"] = exp_name
         ablation_config["interaction_graph_path"] = f"{temp_dir}/{exp_name}_rib_Cs.pt"
+        if not torch.cuda.is_available():
+            ablation_config["batch_size"] = 1
         ablation_main(AblationConfig(**ablation_config))
         ablation_result = json.load(open(f"{temp_dir}/{exp_name}_ablation_results.json"))["results"]
         ablation_results[dtype] = ablation_result

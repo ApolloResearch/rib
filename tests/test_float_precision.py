@@ -18,10 +18,12 @@ from experiments.lm_rib_build.run_lm_rib_build import main as rib_main
 class TestPythiaFloatingPointErrors:
     @pytest.fixture(scope="class")
     def temp_object(self) -> tempfile.TemporaryDirectory:
+        """Create a temporary directory for the RIB build and ablation results."""
         return tempfile.TemporaryDirectory()
 
     @pytest.fixture(scope="class")
     def rib_results(self, temp_object) -> dict:
+        """Run RIB build with float32 and float64 and return the results."""
         rib_config_str = """
             force_overwrite_output: true
             seed: 0
@@ -64,8 +66,7 @@ class TestPythiaFloatingPointErrors:
                 # Try to reduce memory usage for CI
                 rib_config["batch_size"] = 1
                 rib_config["gram_batch_size"] = 1
-            print("Running RIB build with batch size", rib_config["batch_size"])
-            print(rib_config)
+            print("Running RIB build with batch size", rib_config["batch_size"], "for", dtype)
             rib_main(RibConfig(**rib_config))
             basis_matrices = torch.load(
                 f"{temp_dir}/float-precision-test-pythia-14m-{dtype}_rib_Cs.pt"
@@ -75,6 +76,7 @@ class TestPythiaFloatingPointErrors:
         return rib_results
 
     def test_gram_matrices(self, rib_results: dict) -> None:
+        """Test that all the gram matrices are similar between float32 and float64."""
         for node_layer in rib_results["float32"]["gram_matrices"].keys():
             float32_gram_matrix = rib_results["float32"]["gram_matrices"][node_layer]
             float64_gram_matrix = rib_results["float64"]["gram_matrices"][node_layer]
@@ -83,6 +85,7 @@ class TestPythiaFloatingPointErrors:
             ), f"Gram matrix difference {node_layer} between float32 and float64."
 
     def test_interaction_rotations(self, rib_results: dict) -> None:
+        """Test that some (n_max) of the interaction rotations are identical between float32 and float64."""
         # FIXME This test is absolutely awful at the moment. We'd love to have a code that is consistent
         #       enough to run this test with tigher tolerances & all settings (GPU, batch size)
         #       Currently it fails on CPU (batch size [4, 20] but also [1, 1])
@@ -93,7 +96,6 @@ class TestPythiaFloatingPointErrors:
         if not rib_results["float32"]["config"]["batch_size"] > 1:
             pytest.skip("This test does not work with batch size 1.")
 
-        print("Testing interaction_rotations")
         for node_layer_index in range(len(rib_results["float32"]["interaction_rotations"])):
             n_max = 4
             if rib_results["float32"]["interaction_rotations"][node_layer_index]["C"] is None:
@@ -109,9 +111,9 @@ class TestPythiaFloatingPointErrors:
             ), "Interaction rotation difference between float32 and float64."
 
     def test_eigenvectors(self, rib_results: dict) -> None:
+        """Test that some (n_max) of the eigenvectors are identical between float32 and float64."""
         # This tests is pretty approximate (especially we only test the first n_max=10 columns)
         # but not absolutely awful.
-        print("Testing eigenvectors")
         for node_layer_index in range(len(rib_results["float32"]["eigenvectors"])):
             n_max = 10
             if rib_results["float32"]["eigenvectors"][node_layer_index]["U"] is None:
@@ -160,6 +162,8 @@ class TestPythiaFloatingPointErrors:
         ablation_results = {}
         for dtype in ["float32", "float64"]:
             exp_name = f"float-precision-test-pythia-14m-{dtype}"
+            # Note that ablation_config["dtype"] does not matter much, but whether the file in
+            # ablation_config["interaction_graph_path"] is float32 or float64 does matter a lot.
             ablation_config["dtype"] = dtype
             ablation_config["exp_name"] = exp_name
             ablation_config["interaction_graph_path"] = f"{temp_dir}/{exp_name}_rib_Cs.pt"

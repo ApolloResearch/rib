@@ -33,13 +33,20 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Union, cast
+from typing import Annotated, Any, Dict, Literal, Optional, Union, cast
 
 import fire
 import torch
 from jaxtyping import Float
 from mpi4py import MPI
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 from torch import Tensor
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
@@ -63,7 +70,7 @@ from rib.mpi_utils import (
     get_device_mpi,
     get_mpi_info,
 )
-from rib.types import TORCH_DTYPES
+from rib.types import DTYPE_STR, TORCH_DTYPES, RootPath
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
@@ -83,10 +90,10 @@ class Config(BaseModel):
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."
     )
-    tlens_model_path: Optional[Path] = Field(
+    tlens_model_path: Optional[RootPath] = Field(
         None, description="Path to saved transformer lens model."
     )
-    interaction_matrices_path: Optional[Path] = Field(
+    interaction_matrices_path: Optional[RootPath] = Field(
         None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
     node_layers: list[str] = Field(
@@ -130,7 +137,7 @@ class Config(BaseModel):
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
 
-    dtype: str = Field(..., description="The dtype to use when building the graph.")
+    dtype: DTYPE_STR = Field(..., description="The dtype to use when building the graph.")
 
     eps: float = Field(
         1e-5,
@@ -146,15 +153,10 @@ class Config(BaseModel):
         "If None, skip evaluation.",
     )
 
-    out_dir: Optional[Path] = Field(
+    out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
     )
-
-    @field_validator("dtype")
-    def dtype_validator(cls, v):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "Config":

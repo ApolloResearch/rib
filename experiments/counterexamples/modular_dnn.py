@@ -25,19 +25,22 @@ from dataclasses import dataclass, asdict
 from rib.plotting import plot_interaction_graph
 from rib.interaction_algos import InteractionRotation
 #%%
-def random_block_diagonal_matrix(n, k, dtype = torch.float32):
+def random_block_diagonal_matrix(n, k, variances = None, dtype = torch.float32):
     """Generate a random block diagonal matrix of size n x n with two blocks of size k x k and n - k x n - k."""
     # Generate random matrix
-    A = torch.randn(n, n, dtype=dtype)
+    A = torch.zeros((n, n), dtype=dtype)
+    
+    if variances is None:
+        variances = [1,1]
 
     # Zero out the blocks
-    A[0:k, k:n] = 0
-    A[k:n, 0:k] = 0
+    A[:k, :k] =  variances[0] * torch.randn(k,k,dtype=dtype)
+    A[k:n, k:n] = variances[1] * torch.randn(k,k,dtype=dtype)
 
     return A
 
 class BlockDiagonalDNN(MLP):
-    def __init__(self, layers = 4, n=4, k=2, dtype = torch.float32, bias = None, activation_fn = 'relu'):
+    def __init__(self, layers = 4, n=4, k=2, dtype = torch.float32, bias = None, activation_fn = 'relu', variances = None):
         super(BlockDiagonalDNN, self).__init__(hidden_sizes = [n] * layers, 
                                        input_size = n, output_size = n,
                                        dtype = dtype, fold_bias = False,
@@ -48,7 +51,7 @@ class BlockDiagonalDNN(MLP):
 
         # Hardcode weights and biases
         for i in range(layers+1):
-            self.layers[i].W = nn.Parameter(random_block_diagonal_matrix(n, k, dtype=dtype))
+            self.layers[i].W = nn.Parameter(random_block_diagonal_matrix(n, k, variances = variances, dtype=dtype))
             if bias is not None:
                 self.layers[i].b = nn.Parameter(bias * torch.ones(n,dtype=dtype))
         self.fold_bias()
@@ -58,7 +61,7 @@ class BlockDiagonalDNN(MLP):
     
 
 class RandomVectorDataset(Dataset):
-    def __init__(self, n, size, dtype = torch.float32):
+    def __init__(self, n, k, size, variances = None, dtype = torch.float32):
         """
         Args:
             n (int): Length of each vector.
@@ -67,6 +70,9 @@ class RandomVectorDataset(Dataset):
         self.n = n
         self.size = size
         self.data = torch.randn(size, n, dtype=dtype)
+        if variances is not None:
+            self.data[:,0:k] *= variances[0]
+            self.data[:,k:n] *= variances[1]
         self.labels = torch.randint(0, n, (size,))
 
     def __len__(self):
@@ -132,6 +138,15 @@ def cs_to_us(Cs: list[InteractionRotation], Us: list):
         C_info.C = U_info.U
         C_info.C_pinv = U_info.U.T
     return Cs
+
+def binarise(E_hats, tol=1e-1):
+    """Binarise the interaction edges."""
+    E_hats_binary = {}
+    for k, matrix in E_hats.items():
+        binary_matrix = torch.zeros_like(matrix)
+        binary_matrix[matrix >= tol] = 1
+        E_hats_binary[k] = binary_matrix
+    return E_hats_binary
 #%%
 
 class Config:
@@ -143,7 +158,7 @@ class Config:
                  dataset_size: int = 128,
                  batch_size: int = 32,
                  seed: int = None,
-                 truncation_threshold: float = 1e-20,
+                 truncation_threshold: float = 1e-30,
                  n_intervals: int = 0,
                  dtype: type = torch.float32,
                  node_layers: list = None,
@@ -152,6 +167,8 @@ class Config:
                  force: bool = True,
                  hardcode_bias = None,
                  activation_fn = 'relu',
+                 variances = None,
+                 data_variances = None,
                 #  basis: str = 'rib',
                  ):
         """
@@ -189,6 +206,8 @@ class Config:
         self.force = force
         self.hardcode_bias = hardcode_bias
         self.activation_fn = activation_fn
+        self.variances = variances
+        self.data_variances = data_variances
         # self.basis = basis
     def to_dict(self):
         return vars(self)
@@ -203,6 +222,11 @@ def main(config: Config) -> None:
     exp_name += f'_seed{config.seed}_n{config.n}_k{config.k}_layers{config.layers}_{config.datatype}_act_{config.activation_fn}_dsize_{config.dataset_size}'#_basis{config.basis}'
     if config.hardcode_bias is not None:
         exp_name += f'_bias{config.hardcode_bias}'
+    if config.variances is not None:
+        print(config.variances, type)
+        exp_name += f'_variances{config.variances[0]}_{config.variances[1]}'
+    if config.data_variances is not None:
+        exp_name += f'_data_variances{config.data_variances[0]}_{config.data_variances[1]}'
     assert config.datatype in ['strongcorrelated', 'random']
     # assert config.basis in ['rib', 'pca', 'neuron']
 
@@ -215,7 +239,7 @@ def main(config: Config) -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = config.dtype
-    mlp = BlockDiagonalDNN(config.layers, config.n,config.k, dtype = dtype, bias = config.hardcode_bias, activation_fn = config.activation_fn)
+    mlp = BlockDiagonalDNN(config.layers, config.n,config.k, dtype = dtype, bias = config.hardcode_bias, variances = config.variances, activation_fn = config.activation_fn)
     mlp.eval()
     mlp.to(device=torch.device(device), dtype=config.dtype)
     hooked_mlp = HookedModel(mlp)
@@ -225,7 +249,11 @@ def main(config: Config) -> None:
                                                 config.dataset_size,
                                                 dtype=config.dtype)
     else:
-        dataset = RandomVectorDataset(config.n, config.dataset_size, dtype=config.dtype)
+        dataset = RandomVectorDataset(config.n,
+                                      config.k,
+                                      config.dataset_size,
+                                      config.data_variances,
+                                      dtype=config.dtype)
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
 
     node_layers = config.node_layers
@@ -285,6 +313,9 @@ def main(config: Config) -> None:
         device=device,
     )
     
+    E_hats_binary_rib = binarise(E_hats_rib)
+    E_hats_binary_pca = binarise(E_hats_pca)
+    
     
     # Move interaction matrices to the cpu and store in dict
     interaction_rotations = []
@@ -317,6 +348,8 @@ def main(config: Config) -> None:
     out_file_mlp = parent_dir / "mlp_graph.png"
     out_file_neuron_basis = parent_dir / "neuron_basis_graph.png"
     out_file_pca = parent_dir / "pca_graph.png"
+    out_file_rib_binary = parent_dir / "rib_binary_graph.png"
+    out_file_pca_binary = parent_dir / "pca_binary_graph.png"
 
     mlp = mlp.cpu()
     mlp_edges = []
@@ -338,6 +371,14 @@ def main(config: Config) -> None:
         nodes_per_layer=nodes_per_layer,
         out_file=out_file_graph,
     )
+    #make binary rib graph
+    plot_interaction_graph(
+        raw_edges=[(module, E_hats_binary_rib[module].cpu()) for module in E_hats_binary_rib],
+        layer_names=layer_names,
+        exp_name=results["exp_name"],
+        nodes_per_layer=nodes_per_layer,
+        out_file=out_file_rib_binary,
+    )
 
     #make graph of model weights
     plot_interaction_graph(
@@ -355,6 +396,15 @@ def main(config: Config) -> None:
         exp_name=results["exp_name"],
         nodes_per_layer=nodes_per_layer,
         out_file=out_file_pca,
+    )
+    
+    #make binary pca graph
+    plot_interaction_graph(
+        raw_edges=[(module, E_hats_binary_pca[module].cpu()) for module in E_hats_binary_pca],
+        layer_names=layer_names,
+        exp_name=results["exp_name"],
+        nodes_per_layer=nodes_per_layer,
+        out_file=out_file_pca_binary,
     )
     
     #make neuron basis graph

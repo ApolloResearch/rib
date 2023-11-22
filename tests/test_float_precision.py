@@ -14,6 +14,8 @@ from experiments.lm_rib_build.run_lm_rib_build import Config as RibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as rib_main
 
 
+# Skipped because slow (5 and 10 mins for RIB build and ablations, respectively)
+@pytest.mark.skip_ci
 @pytest.mark.slow
 class TestPythiaFloatingPointErrors:
     @pytest.fixture(scope="class")
@@ -183,6 +185,7 @@ class TestPythiaFloatingPointErrors:
 
         return ablation_results
 
+    # Skip because broken on CI (but works on devboxes)
     @pytest.mark.skip_ci
     def test_ablation_result_float_precision(self, ablation_results: dict) -> None:
         # ln2.3 (and others) are broken (https://github.com/ApolloResearch/rib/issues/212)
@@ -199,6 +202,7 @@ class TestPythiaFloatingPointErrors:
                     atol=1e-3,
                 ), f"Float difference {node_layer} {n_vecs_ablated}: {float32_ablation_result} (float32) != {float64_ablation_result} (float64), full results: {ablation_results['float32'][node_layer]} (float32) != {ablation_results['float64'][node_layer]} (float64)"
 
+    # Skip because broken on CI (but works on devboxes)
     @pytest.mark.skip_ci
     @pytest.mark.parametrize("dtype", ["float32", "float64"])
     def test_ablation_result_flatness(self, ablation_results: dict, dtype: str) -> None:

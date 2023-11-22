@@ -196,7 +196,7 @@ class TestPythiaFloatingPointErrors:
                     torch.tensor(float32_ablation_result),
                     torch.tensor(float64_ablation_result),
                     atol=1e-3,
-                ), f"Float difference {node_layer} {n_vecs_ablated}: {float32_ablation_result} (float32) != {float64_ablation_result} (float32)"
+                ), f"Float difference {node_layer} {n_vecs_ablated}: {float32_ablation_result} (float32) != {float64_ablation_result} (float64)"
 
     @pytest.mark.parametrize("dtype", ["float32", "float64"])
     def test_ablation_result_flatness(self, ablation_results: dict, dtype: str) -> None:

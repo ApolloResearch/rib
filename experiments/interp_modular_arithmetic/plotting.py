@@ -12,7 +12,7 @@ def fft_plot_cos_phase_1d(acts, rtol=1e-4):
     r"""
     Plot the cos phase of a 1D FFT data. The input to the FFT is assumed to be real-valued.
 
-    Derivation for why we can express the FFT terms \tilde A_f e^(i2π/113 f x) as
+    Derivation for why we can express the FFT terms B_f e^(i2π/113 f x) as
     A_f cos(2π/113 f x + φ), for real-valued input:
 
         1. Convert from f=0...112 to f=-56...56 since f=57...112 correspond to f=-56...-1),
@@ -33,6 +33,9 @@ def fft_plot_cos_phase_1d(acts, rtol=1e-4):
 
            Each f term is sqrt(Re(2A_f)^2 + Im(2A_f)^2) cos(2π/113 f x -atan2(Im(-A_f), Re(A_f)))
            or simply 2*|A_f| cos(2π/113 f x + atan2(Im(A_f), Re(A_f))).
+
+        Note now a 1D FFT translates 113 real numbers into 113 complex numbers (with 1
+        discrete symmetry) which we turn into 56*2+1 real numbers (ampltidue & phase + const term).
 
     Args:
         acts: nD tensor of activations, complex. 0th dimension assumed to be frequency.
@@ -108,6 +111,21 @@ def fft_plot_cos_phase_1d(acts, rtol=1e-4):
     cbar = fig.colorbar(im, ax=ax, label="Phase φ")
     ax.grid(color="grey", linestyle="--", alpha=0.3)
     return fig, ax
+
+
+# def fft_plot_cos_phase_2d(acts, rtol=1e-4):
+#     r"""
+#     Plot the cos-phase-plot of a 2D FFT data. The input to the FFT is assumed to be real-valued.
+
+#     Note that the input to the FFT is N^2 numbers, so the output needs to be 4 values for every
+#     pair of two frequencies (4*63^2)
+
+#     The derivation follows from the 1D FFT. We know that B_f e^(i2π/113 f x) + B_f* e^(i2π/113 f x)
+#     is equal to a cos(2π/113 f x + c), so e^(i2π/113 (f_x x + f_y y))
+#     is equal to cos(2π/113 (f_x x + f_y y) + c). Note that this goes from 113**2 complex terms
+#     (with 1 discrete symmetry, so 226 DOF) to 113 terms with amplitude and phase (226 DOF).
+
+#     Note how the 2D FFT takes in 113**2 numbers, and outputs 62*63"""
 
 
 def annotated_fft_line_plot(
@@ -274,6 +292,103 @@ def plot_fft_activations(
                 cbar = fig.colorbar(im, ax=ax)
                 cbar.set_ticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
                 cbar.set_ticklabels([r"$-\pi$", r"$-\pi/2$", r"$0$", r"$\pi/2$", r"$\pi$"])
+            ax.set_title(f"Dim {row}, {title_info}")
+
+    datetimestr = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = datetimestr + (
+        title.replace(" ", "_")
+        .replace("\n", "_")
+        .replace(".", "_")
+        .replace("(", "")
+        .replace(")", "")
+        .replace(",", "")
+        .replace("'", "")
+    )
+    dpi = 600 if annotate else 300
+    save_path = Path(__file__).parent.joinpath(f"out/{filename}.png")
+    plt.savefig(save_path, dpi=dpi)
+
+
+def plot_fft_activations_cosphase(
+    acts,
+    title="Default title",
+    nrows=4,
+    figsize=(8, 16),
+    annotate=False,
+    fftshift=True,
+    phaseplot_magnitude_threshold=0.5,
+):
+    """Plot the first nrows activation dimensions as a function of x and y, in a grid of subplots.
+
+    The first column is the magnitude, the second column is the phase.
+
+    Args:
+        acts (torch.Tensor): The activations to plot
+        title (str, optional): The title of the plot.
+        nrows (int, optional): The number of rows to plot. Defaults to 4.
+        figsize (tuple, optional): The size of the figure. Defaults to (8, 16).
+        annotate (bool, optional): Whether to annotate the phase plot with the magnitude and phase
+        fftshift (bool, optional): Whether to fftshift the activations before plotting. Defaults
+            to True.
+        phaseplot_magnitude_threshold (float, optional): The magnitude threshold deciding
+            whether to plot the phase. Defaults to 0.5.
+    """
+    ncols = 2
+    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
+    freqs = torch.fft.fftfreq(acts.shape[0])
+    if fftshift:
+        freqs = torch.fft.fftshift(freqs).numpy()
+        acts = torch.fft.fftshift(acts, dim=[0, 1])
+        title += "(fftshift'ed)"
+        extent = [freqs[0], freqs[-1], freqs[0], freqs[-1]]
+    else:
+        extent = None
+
+    fig.suptitle(title)
+    for col, title_info in enumerate(["magnitude", "phase"]):
+        for row, ax in enumerate(axes[:, col]):
+            vminmax = acts.abs()[:, :, row].max().item()
+            # abs_norm = SymLogNorm(linthresh=vminmax / 10, linscale=1, vmin=-vminmax, vmax=vminmax)
+            abs_norm = LogNorm(vmin=vminmax / 1e2, vmax=vminmax, clip=True)
+            n_quadrant = len(freqs) // 2
+            top_right_quadrant = acts[:n_quadrant, :n_quadrant, row]
+            bottom_left_quadrant = acts.flip(dims=(0, 1))[:n_quadrant, :n_quadrant, row]
+            top_left_quadrant = acts.flip(dims=(1,))[:n_quadrant, :n_quadrant, row]
+            bottom_right_quadrant = acts.flip(dims=(0,))[:n_quadrant, :n_quadrant, row]
+            if col == 0:
+                im = ax.imshow(
+                    (
+                        top_right_quadrant.abs()
+                        + bottom_left_quadrant.abs()
+                        + top_left_quadrant.abs()
+                        + bottom_right_quadrant.abs()
+                    )
+                    .abs()
+                    .numpy(),
+                    cmap="Greys",
+                    norm=abs_norm,
+                    aspect="equal",
+                    extent=extent,
+                    origin="lower",
+                )
+                fig.colorbar(im, ax=ax)
+            else:
+                im = ax.imshow(
+                    (
+                        top_right_quadrant.abs()
+                        + bottom_left_quadrant.abs()
+                        - top_left_quadrant.abs()
+                        - bottom_right_quadrant.abs()
+                    )
+                    .abs()
+                    .numpy(),
+                    cmap="Greys",
+                    norm=abs_norm,
+                    aspect="equal",
+                    extent=extent,
+                    origin="lower",
+                )
+                fig.colorbar(im, ax=ax)
             ax.set_title(f"Dim {row}, {title_info}")
 
     datetimestr = datetime.now().strftime("%Y%m%d_%H%M%S")

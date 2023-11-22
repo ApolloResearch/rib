@@ -405,7 +405,7 @@ class SequentialTransformer(nn.Module):
 
         Returns:
             A tuple of tensors, the number of which depends on how many outputs the final module in
-            the graph.
+            the graph gives.
         """
         xs = input_ids
         for module_section in self.sections.values():

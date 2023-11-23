@@ -151,7 +151,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
 
     graph_module_names = [f"sections.{sec}" for sec in seq_model.sections if sec != "pre"]
 
-    ablation_results: dict[str, dict[int, float]] = run_ablations(
+    ablation_results: AblationAccuracies = run_ablations(
         basis_matrices=basis_matrices,
         ablation_node_layers=config.ablation_node_layers,
         hooked_model=hooked_model,

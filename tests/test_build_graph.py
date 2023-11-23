@@ -197,7 +197,7 @@ def test_mnist_build_graph_invalid_node_layers():
     """Test that non-sequential node_layers raises an error."""
     mock_config = """
     exp_name: test
-    mlp_path: OVERWRITE/IN/MOCK
+    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
     batch_size: 256
     seed: 0
     truncation_threshold: 1e-6
@@ -207,22 +207,14 @@ def test_mnist_build_graph_invalid_node_layers():
     node_layers:
         - layers.0
         - layers.2
+    out_dir: null
     """
-    load_config_path = "experiments.mnist_rib_build.run_mnist_rib_build.load_config"
 
-    def mock_load_config_mnist(*args, **kwargs):
-        # Load the config as normal but set the mlp_path using a relative path
-        config = load_config(*args, **kwargs)
-        config.mlp_path = (
-            Path(__file__).parent.parent
-            / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
-        )
-        return config
+    config_dict = yaml.safe_load(mock_config)
+    config = MnistRibConfig(**config_dict)
 
     with pytest.raises(AssertionError):
         graph_build_test(
-            mock_config=mock_config,
-            load_config_mock_fn=mock_load_config_mnist,
-            load_config_path=load_config_path,
+            config=config,
             build_graph_main_fn=mnist_build_graph_main,
         )

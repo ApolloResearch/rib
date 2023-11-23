@@ -145,6 +145,12 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
+    use_analytic_integrad: bool = Field(
+        True,
+        description="Whether to use the analytic method for calculating the integrated gradient"
+        " if available for that section. If False, use the numerical method. Currently only"
+        " implemented for the edge calculation.",
+    )
 
     out_dir: Optional[Path] = Field(
         None,
@@ -394,7 +400,8 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
             data_loader=edge_train_loader,
             dtype=dtype,
             device=device,
-            data_set_size=full_dataset_len,  # includes data for other processes
+            dataset_size=full_dataset_len,  # includes data for other processes
+            use_analytic_integrad=config.use_analytic_integrad,
         )
 
         if mpi_info.is_parallelised:

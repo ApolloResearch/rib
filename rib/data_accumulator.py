@@ -197,7 +197,8 @@ def collect_interaction_edges(
     data_loader: DataLoader,
     dtype: torch.dtype,
     device: str,
-    data_set_size: Optional[int] = None,
+    dataset_size: Optional[int] = None,
+    use_analytic_integrad: bool = True,
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -213,14 +214,19 @@ def collect_interaction_edges(
         data_loader: The pytorch data loader.
         dtype: The data type to use for model computations.
         device: The device to run the model on.
-        data_set_size: the total size of the dataset, used to normalize. Defaults to
-        `len(data_loader)`. Important to set when parallelizing over the dataset.
+        dataset_size: the total size of the dataset, used to normalize. Defaults to
+            `len(data_loader)`. Important to set when parallelizing over the dataset.
+        use_analytic_integrad: Whether to use the analytic edge calculation if the section supports
+            it. Defaults to True.
 
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes
         through.
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
+
+    dataset_size = dataset_size if dataset_size is not None else len(data_loader.dataset)  # type: ignore
+
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
 
@@ -236,29 +242,30 @@ def collect_interaction_edges(
 
         # Get the list of modules in the section
         section = get_model_attr(hooked_model.model, module_name)
-        # Check if only a single module in the section
-        if (isinstance(section, nn.Sequential) and len(section) == 1) or not isinstance(
-            section, nn.Sequential
-        ):
-            module = section[0] if isinstance(section, nn.Sequential) else section
-            if isinstance(module, (MLPIn, MLPOut)):
-                edge_hooks.append(
-                    Hook(
-                        name=C_info.node_layer_name,
-                        data_key="f_hat_norm",
-                        fn=linear_integrated_gradient_pre_forward_hook_fn,
-                        module_name=module_name,
-                        fn_kwargs={
-                            "C_in": C_info.C.to(device=device),  # C from the current node layer
-                            "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
-                        },
+        if use_analytic_integrad:
+            # Check if only a single module in the section
+            if (isinstance(section, nn.Sequential) and len(section) == 1) or not isinstance(
+                section, nn.Sequential
+            ):
+                module = section[0] if isinstance(section, nn.Sequential) else section
+                if isinstance(module, (MLPIn, MLPOut)):
+                    edge_hooks.append(
+                        Hook(
+                            name=C_info.node_layer_name,
+                            data_key="f_hat_norm",
+                            fn=linear_integrated_gradient_pre_forward_hook_fn,
+                            module_name=module_name,
+                            fn_kwargs={
+                                "C_in": C_info.C.to(device=device),  # C from the current node layer
+                                "dataset_size": dataset_size,
+                            },
+                        )
                     )
-                )
-                # Initialise f_hat_norm to (out_dim). This gets accumulated in the forward hook.
-                hooked_model.hooked_data[C_info.node_layer_name] = {
-                    "f_hat_norm": torch.zeros(C_info.out_dim, dtype=dtype, device=device)
-                }
-                integrated_gradient_types[C_info.node_layer_name] = "linear"
+                    # Initialise f_hat_norm to (out_dim). This gets accumulated in the forward hook.
+                    hooked_model.hooked_data[C_info.node_layer_name] = {
+                        "f_hat_norm": torch.zeros(C_info.out_dim, dtype=dtype, device=device)
+                    }
+                    integrated_gradient_types[C_info.node_layer_name] = "linear"
         else:
             edge_hooks.append(
                 Hook(
@@ -273,7 +280,7 @@ def collect_interaction_edges(
                         ),  # C_pinv from current node layer
                         "C_out": C_out,
                         "n_intervals": n_intervals,
-                        "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
+                        "dataset_size": dataset_size,
                     },
                 )
             )

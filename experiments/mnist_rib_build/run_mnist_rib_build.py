@@ -49,6 +49,9 @@ class Config(BaseModel):
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
     node_layers: list[str]
+    use_analytic_integrad: bool = Field(
+        False, description="Whether to use the analytic version of integrated gradients."
+    )
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
@@ -119,10 +122,11 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
         Cs=Cs,
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
-        section_names=config.node_layers,
+        section_names=non_output_node_layers,
         data_loader=train_loader,
         dtype=dtype,
         device=device,
+        use_analytic_integrad=config.use_analytic_integrad,
     )
 
     # Move interaction matrices to the cpu and store in dict

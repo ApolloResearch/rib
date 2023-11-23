@@ -59,6 +59,15 @@
             "justMyCode": true
         },
         {
+            "name": "lm build play-pythia-14m",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/lm_rib_build/run_lm_rib_build.py",
+            "args": "${workspaceFolder}/experiments/lm_rib_build/edges_pythia-14m.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "lm build gpt2",
             "type": "python",
             "request": "launch",

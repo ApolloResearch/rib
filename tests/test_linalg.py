@@ -171,7 +171,7 @@ def test_intergrated_gradient_trapezoidal_norm_linear():
 
 
 def test_integrated_gradient_trapezoidal_norm_polynomial():
-    """Show that our integrated gradient converges to the analytical solution for a polynomial.
+    """Show that our integrated gradient converges to the analytic solution for a polynomial.
 
     Assume we have a polynomial function f = x^3. Our normed function for the integrated gradient
     is then:
@@ -182,7 +182,7 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
            = [ 2 * x^5 alpha^3 - x^5 alpha^6 ]_{0}^{1}
            = x^5 C_out^2
 
-    We show that this analytical solution is approached as n_intervals increases.
+    We show that this analytic solution is approached as n_intervals increases.
     """
 
     torch.manual_seed(0)
@@ -208,15 +208,15 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=200
     )
 
-    analytical_result = inputs[0] ** 5 @ C_out**2
+    analytic_result = inputs[0] ** 5 @ C_out**2
 
     assert torch.allclose(
-        result_200, analytical_result, atol=1e-2
+        result_200, analytic_result, atol=1e-2
     ), "Integrated grad norms are not close enough"
 
     # Check that the results approach inputs[0]**5 as n_intervals increases
     differences = [
-        (result - analytical_result).sum().abs() for result in [result_2, result_20, result_200]
+        (result - analytic_result).sum().abs() for result in [result_2, result_20, result_200]
     ]  # Check that differences is decreasing
     assert (
         differences[0] > differences[1] > differences[2]
@@ -224,7 +224,7 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
 
 
 def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
-    """Show that our integrated gradient of our norm function converges to the analytical
+    """Show that our integrated gradient of our norm function converges to the analytic
     solution for a polynomial, with the special feature that act(0) != 0. Earlier code made this
     assumption, and this test checks that our new code also holds without the assumption
 
@@ -233,7 +233,7 @@ def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
     f_norm = integral_{0}^{1} day((((alpha * x)^3 + 1) @ C_out)^2) / day(alpha * x) d_alpha.
            = (x^5 + 2 * x^2) C_out^2
 
-    We show that this analytical solution is approached as n_intervals increases.
+    We show that this analytic solution is approached as n_intervals increases.
     """
 
     torch.manual_seed(0)
@@ -259,16 +259,16 @@ def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=200
     )
 
-    analytical_result = inputs[0] ** 5 @ C_out**2
+    analytic_result = inputs[0] ** 5 @ C_out**2
     # Old formula gave (inputs[0] ** 5 + 2 * inputs[0] ** 2) @ C_out**2
 
     assert torch.allclose(
-        result_200, analytical_result, atol=1e-2
+        result_200, analytic_result, atol=1e-2
     ), "Integrated grad norms are not close enough"
 
     # Check that the results approach inputs[0]**5 as n_intervals increases
     differences = [
-        (result - analytical_result).sum().abs() for result in [result_2, result_20, result_200]
+        (result - analytic_result).sum().abs() for result in [result_2, result_20, result_200]
     ]  # Check that differences is decreasing
     assert (
         differences[0] > differences[1] > differences[2]

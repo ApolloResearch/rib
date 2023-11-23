@@ -130,6 +130,7 @@ def test_modular_arithmetic_build_graph():
     n_intervals: 0
     dtype: float32
     eval_type: accuracy
+    use_analytic_integrad: false
     """
     load_config_path = "experiments.lm_rib_build.run_lm_rib_build.load_config"
 
@@ -198,8 +199,10 @@ def test_mnist_build_graph():
     dtype: float32
     node_layers:
         - layers.0
+        - layers.1
         - layers.2
         - output
+    use_analytic_integrad: false
     """
     load_config_path = "experiments.mnist_rib_build.run_mnist_rib_build.load_config"
 

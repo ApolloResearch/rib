@@ -158,7 +158,7 @@ def check_outfile_overwrite(out_file: Path, force: bool = False) -> bool:
 
     if out_file.exists():
         if force:
-            logger.info(f"Overwriting {out_file} (reason: config or cmdline)")
+            logger.info(f"Overwriting {out_file} (reason: config or cmdline or multiprocessing)")
             return True
         elif _response():
             logger.info(f"Overwriting {out_file} (based on user prompt)")

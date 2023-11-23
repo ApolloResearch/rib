@@ -24,7 +24,7 @@ from typing import Callable, Literal, Optional, Union, cast
 
 import fire
 import torch
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from rib.ablations import (
     AblationAccuracies,
@@ -51,7 +51,8 @@ class Config(BaseModel):
     exp_name: str
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
-        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: RootPath
@@ -84,7 +85,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         config.out_dir.mkdir(parents=True, exist_ok=True)
         out_file = config.out_dir / f"{config.exp_name}_ablation_results.json"
         if not check_outfile_overwrite(out_file, force):
-            raise FileExistsError
+            raise FileExistsError("Not overwriting output file")
 
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)

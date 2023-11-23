@@ -11,10 +11,8 @@ absolute path to the MLP, and a github action will not have access to the same a
 """
 
 import sys
-import tempfile
 from pathlib import Path
 from typing import Union
-from unittest.mock import patch
 
 import pytest
 import torch
@@ -32,7 +30,6 @@ from experiments.mnist_ablations.run_mnist_ablations import (
     Config as MNISTAblationConfig,
 )
 from experiments.mnist_ablations.run_mnist_ablations import main as mnist_ablations_main
-from rib.log import logger
 
 
 def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool = False) -> bool:

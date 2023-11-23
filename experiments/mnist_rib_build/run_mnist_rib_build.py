@@ -48,7 +48,8 @@ class Config(BaseModel):
     node_layers: list[str]
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
-        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
     )
 
 

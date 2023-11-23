@@ -33,7 +33,7 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any, Dict, Literal, Optional, TypedDict, Union, cast
+from typing import Literal, Optional, Union, cast
 
 import fire
 import torch
@@ -78,7 +78,8 @@ class Config(BaseModel):
     exp_name: str = Field(..., description="The name of the experiment")
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
-        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     seed: int = Field(..., description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
@@ -256,7 +257,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         config.out_dir.mkdir(parents=True, exist_ok=True)
         f_name = f"{config.exp_name}_rib_{'graph' if config.calculate_edges else 'Cs'}.pt"
         out_file = config.out_dir / f_name
-        if not check_outfile_overwrite(out_file, force):
+        if not check_outfile_overwrite(out_file, force or mpi_info.size > 1):
             mpi_info.comm.Abort()  # stop this and other processes
 
     dtype = TORCH_DTYPES[config.dtype]

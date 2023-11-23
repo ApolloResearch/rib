@@ -48,7 +48,8 @@ class TrainConfig(BaseModel):
     eval_every_n_epochs: int
     save_dir: Optional[RootPath] = Field(
         Path(__file__).parent / ".checkpoints" / "modular_arithmetic",
-        description="Directory for the output files. Defaults to `./.checkpoints/modular_arthitmatic`. If None, no output is written.",
+        description="Directory for the output files. Defaults to `./.checkpoints/modular_arithmetic`."
+        "If None, no output is written. If a relative path, it is relative to the root of the rib repo.",
     )
     save_every_n_epochs: Optional[int] = None
 

@@ -178,6 +178,7 @@ def test_mnist_build_graph():
     dtype: float32
     node_layers:
         - layers.0
+        - layers.1
         - layers.2
         - output
     out_dir: null
@@ -190,3 +191,30 @@ def test_mnist_build_graph():
         config=config,
         build_graph_main_fn=mnist_build_graph_main,
     )
+
+
+def test_mnist_build_graph_invalid_node_layers():
+    """Test that non-sequential node_layers raises an error."""
+    mock_config = """
+    exp_name: test
+    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
+    batch_size: 256
+    seed: 0
+    truncation_threshold: 1e-6
+    rotate_final_node_layer: false
+    n_intervals: 0
+    dtype: float32
+    node_layers:
+        - layers.0
+        - layers.2
+    out_dir: null
+    """
+
+    config_dict = yaml.safe_load(mock_config)
+    config = MnistRibConfig(**config_dict)
+
+    with pytest.raises(AssertionError):
+        graph_build_test(
+            config=config,
+            build_graph_main_fn=mnist_build_graph_main,
+        )

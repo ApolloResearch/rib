@@ -48,7 +48,8 @@ class Config(BaseModel):
     node_layers: list[str]
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
-        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
     )
 
 
@@ -78,7 +79,15 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
     mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
-    assert mlp.has_folded_bias
+    assert mlp.has_folded_bias, "MLP must have folded bias to run RIB"
+
+    all_possible_node_layers = [f"layers.{i}" for i in range(len(mlp.layers))] + ["output"]
+    assert "|".join(config.node_layers) in "|".join(all_possible_node_layers), (
+        f"config.node_layers must be a subsequence of {all_possible_node_layers} for a plain MLP, "
+        f"otherwise our algorithm will be invalid because we require that the output of a "
+        f"node layer is the input to the next node layer."
+    )
+
     mlp.eval()
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
@@ -115,7 +124,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         Cs=Cs,
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
-        section_names=config.node_layers,
+        section_names=non_output_node_layers,
         data_loader=train_loader,
         dtype=dtype,
         device=device,

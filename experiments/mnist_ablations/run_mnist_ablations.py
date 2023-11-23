@@ -62,7 +62,8 @@ class Config(BaseModel):
     seed: int
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
-        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
     )
 
 
@@ -82,7 +83,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         config.out_dir.mkdir(parents=True, exist_ok=True)
         out_file = config.out_dir / f"{config.exp_name}_ablation_results.json"
         if not check_outfile_overwrite(out_file, force):
-            raise FileExistsError
+            raise FileExistsError("Not overwriting output file")
 
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
@@ -120,7 +121,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
     accuracy = eval_model_accuracy(hooked_mlp, test_loader, dtype=dtype, device=device)
     logger.info("Accuracy before ablation: %.2f%%", accuracy * 100)
 
-    accuracies: dict[str, dict[int, float]] = run_ablations(
+    accuracies: AblationAccuracies = run_ablations(
         basis_matrices=basis_matrices,
         ablation_node_layers=config.ablation_node_layers,
         hooked_model=hooked_mlp,

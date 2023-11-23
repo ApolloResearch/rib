@@ -337,7 +337,7 @@ def get_relu_similarities(
     dataset: Dataset,
     device: str,
     hooked_model: HookedModel,
-    Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    Cs_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
     graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
     graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
@@ -349,7 +349,7 @@ def get_relu_similarities(
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
         relu_metric_type=config.relu_metric_type,
-        Cs=Cs,
+        Cs_list=Cs_list,
         layer_module_names=graph_section_names,
         n_intervals=config.n_intervals,
         unhooked_model=model,
@@ -422,7 +422,7 @@ def get_cluster_gram(
 
     cluster_grams, output_cluster_grams = collect_cluster_grams(
         hooked_model=hooked_model,
-        module_names=config.activation_layers,
+        module_names=["sections.section_0.0"], # If you start defining node layers from mlp_in
         data_loader=graph_train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
@@ -589,7 +589,7 @@ def transformer_relu_main(config_path_str: str):
         dataset=dataset,
         device=device,
         hooked_model=hooked_model,
-        Cs=C_list,
+        Cs_list=C_list,
     )
 
     replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(
@@ -604,8 +604,29 @@ def transformer_relu_main(config_path_str: str):
         device=device,
     )
 
+    # Separate part of main code ===================================================
+    # Redefine layers and instantiate new transformer
+
+    mode = "cluster_grams"
+    new_node_layer_dict = {'weights': ["mlp_out.0, unembed"], "cluster_grams": ["mlp_in.0", "mlp_act.0"]}
+    seq_model, tlens_cfg_dict = load_sequential_transformer(
+        # CHANGE LAYERS FOR MLP - NOTE for w_hat this needs to start where previous model node
+        # layers did, so using zip with previously saved C matrices list works
+        node_layers=new_node_layer_dict[mode],
+        last_pos_module_type=config.last_pos_module_type,
+        tlens_pretrained=config.tlens_pretrained,
+        tlens_model_path=config.tlens_model_path,
+        eps=config.eps,
+        dtype=dtype,
+        device=device,
+    )
+
+    seq_model.eval()
+    seq_model.to(device=torch.device(device), dtype=dtype)
+    hooked_model = HookedModel(seq_model)
+
     # Keys: module name for layer; values: list of gram matrices
-    cluster_grams, output_cluster_grams = check_and_open_file(
+    cluster_grams, whole_layer_gram = check_and_open_file(
         get_var_fn=get_cluster_gram,
         model=seq_model,
         config=config,
@@ -622,30 +643,15 @@ def transformer_relu_main(config_path_str: str):
             plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"{module_name}_{cluster_idx}")
             # plot_eigenvectors(sorted_eigenvectors, f"{out_dir}/cluster_gram", title=f"{module_name}_{cluster_idx}")
 
-    for (module_name, layer_gram_list) in list(output_cluster_grams.items()):
-        for (cluster_idx, matrix) in enumerate(layer_gram_list):
-            sorted_eigenvalues, sorted_eigenvectors = eigendecompose(matrix)
-            plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"output_{module_name}_{cluster_idx}")
+    # for (module_name, layer_gram_list) in list(output_cluster_grams.items()):
+    #     for (cluster_idx, matrix) in enumerate(layer_gram_list):
+    #         sorted_eigenvalues, sorted_eigenvectors = eigendecompose(matrix)
+    #         plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"output_{module_name}_{cluster_idx}")
 
+    sorted_eigenvalues, sorted_eigenvectors = eigendecompose(whole_layer_gram)
+    plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"whole_layer_{module_name}")
 
-
-    # Separate part of main code ===================================================
-    # Redefine layers required for weight matrices
-
-    # seq_model, tlens_cfg_dict = load_sequential_transformer(
-    #     # CHANGE LAYERS FOR MLP - NOTE THIS AT LEAST NEEDS TO START WHERE THE PREVIOUS MODEL LIST DID, SO THAT MULTIPLYING BY THE PREVIOUSLY CALCULATED C WITH ZIP WORKS
-    #     node_layers=["mlp_out.0", "unembed"],
-    #     last_pos_module_type=config.last_pos_module_type,
-    #     tlens_pretrained=config.tlens_pretrained,
-    #     tlens_model_path=config.tlens_model_path,
-    #     eps=config.eps,
-    #     dtype=dtype,
-    #     device=device,
-    # )
-    # seq_model.eval()
-    # seq_model.to(device=torch.device(device), dtype=dtype)
-    # hooked_model = HookedModel(seq_model)
-
+    ## BELOW IS IRRELEVANT CODE FOR NOW
     # # Has to be after editing node_layers so this contains the linear layers to extract weights from
     # W_hat_dict: dict[str, float[Tensor, "d_trunc_C_pinv, d_out_W"]] = get_rotated_Ws(
     #     model=seq_model,

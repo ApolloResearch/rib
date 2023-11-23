@@ -426,7 +426,7 @@ def collect_function_sizes(
     fn_size_hooks = []
     if not is_lm:
         module_names = module_names[:-1]
-    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+    for i, (module_name, hook_name) in enumerate(zip(module_names[:-1], hook_names)):
         fn_size_hooks.append(
             Hook(
                 name=hook_name,
@@ -759,7 +759,9 @@ def collect_cluster_grams(
     cluster_output_grams: dict[str, list[Float[Tensor, "d_cluster d_cluster"]]] = {}
     for layer_idx, hook_name in enumerate(hook_names):
         cluster_grams[hook_name] = [hooked_model.hooked_data[hook_name][i] for i in range(len(all_cluster_idxs[layer_idx]))]
-        cluster_output_grams[hook_name] = [hooked_model.hooked_data[hook_name][f"output_{i}"] for i in range(len(all_cluster_idxs[layer_idx]))]
+        # cluster_output_grams[hook_name] = [hooked_model.hooked_data[hook_name][f"output_{i}"] for
+        # i in range(len(all_cluster_idxs[layer_idx]))]
+        whole_layer_gram = hooked_model.hooked_data[hook_name]["whole layer"]
     hooked_model.clear_hooked_data()
 
-    return cluster_grams, cluster_output_grams
+    return cluster_grams, whole_layer_gram

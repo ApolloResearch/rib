@@ -536,6 +536,9 @@ def relu_interaction_forward_hook_fn(
             careful to only pass in raw output into the function."""
             ## For first term of numerator (... indicates either "b" or "b p")
             next_layer_module = get_model_attr(unhooked_model, module_name_next_layer)
+            # Deep copy module so we can pass it in to calculate g_j without worrying about existing
+            # hooks on activation function which cause recursive hook calling when
+            # forward method called inside integrated_gradient_trapezoidal_norm
             copy_next_layer_module = deepcopy(next_layer_module)
             if hasattr(copy_next_layer_module, 'activation') and copy_next_layer_module._forward_hooks:
                 copy_next_layer_module.activation._forward_hooks.popitem()
@@ -683,7 +686,6 @@ def test_edges_forward_hook_fn(
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
     is_lm: bool = True if inputs[0].dim() == 3 else False
-
     if is_lm:
         next_layer_preactivations = module.forward(inputs[0], inputs[1])
         next_layer_preactivations = torch.cat([x for x in next_layer_preactivations], dim=-1)
@@ -818,16 +820,18 @@ def cluster_gram_forward_hook_fn(
         inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
         outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
+    batch_size, d_hidden = inputs.shape
+
     # Every cluster has its own gram matrix, which can be differentiated with `data_key` which tells
     # you the cluster number (the element of cluster_idxs it was taken from)
     for cluster_num, idxs in enumerate(cluster_idxs):
-        cluster_inputs = inputs[..., idxs]
-        cluster_outputs = outputs[..., idxs]
-        cluster_operator = torch.div(cluster_outputs, cluster_inputs)
-        gram_matrix = calc_gram_matrix(cluster_operator * cluster_inputs, dataset_size=dataset_size)
-        output_gram_matrix = calc_gram_matrix(cluster_outputs, dataset_size=dataset_size)
+        idx = idxs[0].item() # Arbitrarily pick first member of cluster
+        o_k = repeat(outputs[..., idx] > 0, 'b -> b d_hidden', d_hidden=d_hidden) # 1 If greater than zero else 0
+        gram_matrix = calc_gram_matrix(o_k * inputs, dataset_size=dataset_size)
         _add_to_hooked_matrix(hooked_data, hook_name, cluster_num, gram_matrix.detach())
-        _add_to_hooked_matrix(hooked_data, hook_name, f"output_{cluster_num}", output_gram_matrix.detach())
+
+    whole_layer_gram = calc_gram_matrix(inputs, dataset_size=dataset_size)
+    _add_to_hooked_matrix(hooked_data, hook_name, "whole layer", whole_layer_gram.detach())
 
 
 

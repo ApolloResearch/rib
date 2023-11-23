@@ -11,7 +11,7 @@ node_layers: # For whole layer hooking
   - mlp_act.0
   - mlp_out.0
   - unembed
-activation_layers: # For activation layer hooking
+activation_layers: # For activation layer hooking - ssection num depends on structure of node layers
   - sections.section_0.0
 rotate_final_node_layer: true # Whether unembed is rotated. If you want output node layer C, need to
 # manually add to node_layers

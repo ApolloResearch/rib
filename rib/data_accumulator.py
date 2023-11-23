@@ -3,7 +3,6 @@
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import torch
-from fancy_einsum import einsum
 from jaxtyping import Float
 from torch import Tensor, nn
 from torch.utils.data import DataLoader
@@ -17,6 +16,7 @@ from rib.hook_fns import (
     linear_integrated_gradient_pre_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
+from rib.linalg import calc_linear_edge_analytic
 from rib.log import logger
 from rib.models.mlp import MLPLayer
 from rib.models.sequential_transformer.components import MLPIn, MLPOut
@@ -227,12 +227,12 @@ def collect_interaction_edges(
 
     dataset_size = dataset_size if dataset_size is not None else len(data_loader.dataset)  # type: ignore
 
-    edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
+    section_ids = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
 
     integrated_gradient_types: dict[str, Literal["linear", "numerical"]] = {}
     edge_hooks: list[Hook] = []
-    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
+    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], section_ids)):
         C_in = C_info.C
         C_in_pinv = C_info.C_pinv
         C_out = Cs[idx + 1].C
@@ -297,22 +297,23 @@ def collect_interaction_edges(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    # Ensure that we have the same number of edge_modules as we do data stored in the hooked model
-    assert len(edge_modules) == len(hooked_model.hooked_data), (
-        f"Number of edge modules ({len(edge_modules)}) not the same as the number of "
+    # Ensure that we have the same number of section_ids as we do data stored in the hooked model
+    assert len(section_ids) == len(hooked_model.hooked_data), (
+        f"Number of edge modules ({len(section_ids)}) not the same as the number of "
         f"hooked data ({len(hooked_model.hooked_data)})."
     )
     edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {}
-    for i, node_layer_name in enumerate(hooked_model.hooked_data):
-        if integrated_gradient_types[node_layer_name] == "linear":
-            C_in = Cs[i].C
-            C_in_pinv = Cs[i].C_pinv
-            C_out = Cs[i + 1].C
+    for i, module_id in enumerate(hooked_model.hooked_data):
+        C_in = C_info.C
+        C_in_pinv = C_info.C_pinv
+        C_out = Cs[idx + 1].C
 
-            assert C_in is not None, "C matrix is None."
-            assert C_in_pinv is not None, "C_pinv matrix is None."
+        assert C_in is not None, "C matrix is None."
+        assert C_in_pinv is not None, "C_pinv matrix is None."
 
-            section = get_model_attr(hooked_model.model, edge_modules[i])
+        if integrated_gradient_types[module_id] == "linear":
+            f_hat_norm = hooked_model.hooked_data[module_id]["f_hat_norm"]
+            section = get_model_attr(hooked_model.model, section_ids[i])
             module = section[0] if isinstance(section, nn.Sequential) else section
             if isinstance(module, MLPIn):
                 W_raw = module.W_in
@@ -322,32 +323,20 @@ def collect_interaction_edges(
                 W_raw = module.W
             else:
                 raise ValueError(f"Module type {type(module)} not supported for linear type.")
-            f_hat_norm: Float[Tensor, "in_hidden_extra_trunc"] = hooked_model.hooked_data[
-                node_layer_name
-            ]["f_hat_norm"]
-            # Account for cases where our function layer is the concatenation of multiple streams
-            n_extra_dims = C_in.shape[0] - W_raw.shape[0]
-
-            # Create matrix ((I, 0), (0, W_raw)) where I is an identity matrix of size n_extra_dims
-            # This handles the concatenated residual stream and other input stream
-            W = torch.block_diag(torch.eye(n_extra_dims, dtype=dtype, device=device), W_raw)
-
-            W_C_pinv = einsum("in out, in_trunc in -> out in_trunc", W, C_in_pinv.to(device))
-            if C_out is None:
-                W_hat = W_C_pinv
-            else:
-                W_hat = einsum(
-                    "out out_trunc, out in_trunc -> out_trunc in_trunc", C_out.to(device), W_C_pinv
-                )
-            edge = einsum(
-                "out_trunc in_trunc, in_trunc -> out_trunc in_trunc", W_hat**2, f_hat_norm**2
+            edges[module_id] = calc_linear_edge_analytic(
+                W_raw=W_raw,
+                f_hat_norm=f_hat_norm,
+                in_dim=C_in.shape[0],
+                C_in_pinv=C_in_pinv.to(device),
+                C_out=C_out.to(device) if C_out is not None else None,
+                dtype=dtype,
+                device=device,
             )
-            edges[node_layer_name] = edge
-        elif integrated_gradient_types[node_layer_name] == "numerical":
-            edges[node_layer_name] = hooked_model.hooked_data[node_layer_name]["edge"]
+        elif integrated_gradient_types[module_id] == "numerical":
+            edges[module_id] = hooked_model.hooked_data[module_id]["edge"]
         else:
             raise ValueError(
-                f"Integrated gradient type {integrated_gradient_types[node_layer_name]} not "
+                f"Integrated gradient type {integrated_gradient_types[module_id]} not "
                 f"supported."
             )
 

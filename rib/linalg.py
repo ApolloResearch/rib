@@ -1,14 +1,13 @@
-from functools import partial
 from typing import Callable, Optional, Union
 
 import numpy as np
 import torch
 from einops import rearrange
+from fancy_einsum import einsum
 from jaxtyping import Float
 from torch import Tensor, nn
 from tqdm import tqdm
 
-from rib.models.sequential_transformer.components import MLPIn, MLPOut
 from rib.types import TORCH_DTYPES
 
 
@@ -415,3 +414,43 @@ def calc_gram_matrix(
         raise ValueError("Unexpected tensor rank")
 
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
+
+
+def calc_linear_edge_analytic(
+    W_raw: Float[Tensor, "in out"],
+    f_hat_norm: Float[Tensor, "in_hidden_combined_trunc"],
+    in_dim: int,
+    C_in_pinv: Float[Tensor, "in_trunc in"],
+    C_out: Optional[Float[Tensor, "out out_trunc"]],
+    dtype: torch.dtype,
+    device: str,
+) -> Float[Tensor, "out_trunc in_trunc"]:
+    """Calculate the edges for a purely linear module analytically.
+
+    Args:
+        W_raw: The raw weight matrix.
+        f_hat_norm: The norm of the output of the module containing the weight matrix.
+        in_dim: The dimension of the input to the module containing the weight matrix.
+        C_in_pinv: The pseudoinverse of C_in.
+        C_out: The interaction basis for the output node layer.
+        dtype: The dtype to use for the calculation.
+        device: The device to use for the calculation.
+
+    Returns:
+        The edge weights across the linear module containing W_raw.
+    """
+
+    # Account for cases where our function layer is the concatenation of multiple streams
+    n_extra_dims = in_dim - W_raw.shape[0]
+
+    # Create matrix ((I, 0), (0, W_raw)) where I is an identity matrix of size n_extra_dims
+    # This handles the concatenated residual stream and other input stream
+    W = torch.block_diag(torch.eye(n_extra_dims, dtype=dtype, device=device), W_raw)
+
+    W_C_pinv = einsum("in out, in_trunc in -> out in_trunc", W, C_in_pinv)
+    if C_out is None:
+        W_hat = W_C_pinv
+    else:
+        W_hat = einsum("out out_trunc, out in_trunc -> out_trunc in_trunc", C_out, W_C_pinv)
+    edge = einsum("out_trunc in_trunc, in_trunc -> out_trunc in_trunc", W_hat**2, f_hat_norm**2)
+    return edge

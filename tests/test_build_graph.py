@@ -187,7 +187,7 @@ def test_pythia_14m_build_graph():
 
 
 @pytest.mark.slow
-def test_mnist_build_graph():
+def test_mnist_build_graph_numeric():
     mock_config = """
     exp_name: test
     mlp_path: OVERWRITE/IN/MOCK
@@ -221,3 +221,40 @@ def test_mnist_build_graph():
         load_config_path=load_config_path,
         build_graph_main_fn=mnist_build_graph_main,
     )
+
+
+# @pytest.mark.slow
+# def test_mnist_build_graph_anlaytic():
+#     mock_config = """
+#     exp_name: test
+#     mlp_path: OVERWRITE/IN/MOCK
+#     batch_size: 256
+#     seed: 0
+#     truncation_threshold: 1e-6
+#     rotate_final_node_layer: false
+#     n_intervals: 0
+#     dtype: float32
+#     node_layers:
+#         - layers.0
+#         - layers.1
+#         - layers.2
+#         - output
+#     use_analytic_integrad: true
+#     """
+#     load_config_path = "experiments.mnist_rib_build.run_mnist_rib_build.load_config"
+
+#     def mock_load_config_mnist(*args, **kwargs):
+#         # Load the config as normal but set the mlp_path using a relative path
+#         config = load_config(*args, **kwargs)
+#         config.mlp_path = (
+#             Path(__file__).parent.parent
+#             / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
+#         )
+#         return config
+
+#     graph_build_test(
+#         mock_config=mock_config,
+#         load_config_mock_fn=mock_load_config_mnist,
+#         load_config_path=load_config_path,
+#         build_graph_main_fn=mnist_build_graph_main,
+#     )

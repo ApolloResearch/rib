@@ -1,3 +1,4 @@
+import os
 import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional, Type, TypeVar, Union
@@ -17,7 +18,9 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound=BaseModel)
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = (
+    Path(os.environ["GITHUB_WORKSPACE"]) if os.environ.get("CI") else Path(__file__).parent.parent
+)
 
 
 @torch.inference_mode()

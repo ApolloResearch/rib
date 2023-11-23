@@ -242,6 +242,7 @@ def collect_interaction_edges(
 
         # Get the list of modules in the section
         section = get_model_attr(hooked_model.model, module_name)
+
         if use_analytic_integrad:
             # Check if only a single module in the section
             if (isinstance(section, nn.Sequential) and len(section) == 1) or not isinstance(
@@ -266,7 +267,8 @@ def collect_interaction_edges(
                         "f_hat_norm": torch.zeros(C_info.out_dim, dtype=dtype, device=device)
                     }
                     integrated_gradient_types[C_info.node_layer_name] = "linear"
-        else:
+        if C_info.node_layer_name not in integrated_gradient_types:
+            # Haven't added an analytic integrated gradient hook, so add a numerical one
             edge_hooks.append(
                 Hook(
                     name=C_info.node_layer_name,

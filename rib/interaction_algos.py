@@ -102,7 +102,8 @@ def calculate_interaction_rotations(
     dtype: torch.dtype,
     device: str,
     n_intervals: int,
-    matmul_dtype: torch.dtype = torch.float64,
+    M_dtype: torch.dtype = torch.float64,
+    Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
@@ -127,8 +128,13 @@ def calculate_interaction_rotations(
         dtype: The data type to use for model computations.
         device: The device to run the model on.
         n_intervals: The number of intervals to use for integrated gradients.
-        matmul_dtype: The data type to use for the M_dash -> M transformation. Needs to be float64
-            for Pythia-14m (empirically). Defaults to float64.
+        M_dtype: The data type to use for the M_dash and M matrices, including where the M is
+            collected over the dataset in `M_dash_and_Lambda_dash_pre_forward_hook_fn`. Needs to be
+            float64 for Pythia-14m (empirically). Defaults to float64.
+        Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
+            Lambda_dash matrix. Does not affect the output, only used for the einsum within
+            M_dash_and_Lambda_dash_pre_forward_hook_fn. Needs to be float64 on CPU but float32 was
+            fine on GPU. Defaults to float64.
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
@@ -244,14 +250,19 @@ def calculate_interaction_rotations(
             dtype=dtype,
             device=device,
             hook_name=node_layer,
+            M_dtype=M_dtype,
+            Lambda_einsum_dtype=Lambda_einsum_dtype,
         )
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
-        in_dtype = M_dash.dtype
+
+        # Converts M to fp64
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            U_D_sqrt.T.to(matmul_dtype) @ M_dash.to(matmul_dtype) @ U_D_sqrt.to(matmul_dtype)
-        ).to(in_dtype)
+            U_D_sqrt.T.to(M_dtype) @ M_dash @ U_D_sqrt.to(M_dtype)
+        )
         V = eigendecompose(M)[1]  # V has size (d_hidden_trunc, d_hidden_trunc)
+        V = V.to(dtype)
+
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
         D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())

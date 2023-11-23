@@ -7,6 +7,7 @@ plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional, Union
 
@@ -228,6 +229,19 @@ def plot_ablation_results(
 
             axs[i].grid(True)
             axs[i].legend()
+
+    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    plt.text(
+        1,
+        0,
+        date,
+        fontsize=12,
+        color="gray",
+        ha="right",
+        va="bottom",
+        alpha=0.5,
+        transform=axs[0].transAxes,
+    )
 
     # Make a title for the entire figure
     plt.suptitle("_".join(exp_names))

@@ -53,6 +53,12 @@ class Config(BaseModel):
     )
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: Path
+
+    out_dir: Optional[Path] = Field(
+        None,
+        description="Directory for the output files. If not provided it is `./out/` relative to this file.",
+    )
+
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
         ...,
         discriminator="schedule_type",
@@ -84,7 +90,9 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
     start_time = time.time()
     config = load_config(config_path_or_obj, config_model=Config)
 
-    out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
+    out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"{config.exp_name}_ablation_results.json"
     if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
         return
 

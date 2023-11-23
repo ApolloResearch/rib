@@ -70,4 +70,4 @@ jobs:
     - name: Run tests
       run: |
         source venv/bin/activate
-        pytest --runslow -m "not skip_ci"
+        pytest --runslow -m "not skip_ci" --durations=10

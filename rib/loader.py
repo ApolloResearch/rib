@@ -16,6 +16,7 @@ from rib.data import (
     ModularArithmeticDatasetConfig,
 )
 from rib.models import SequentialTransformer, SequentialTransformerConfig
+from rib.models.mlp import MLP
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.utils import set_seed, train_test_split
 
@@ -98,6 +99,21 @@ def load_sequential_transformer(
         seq_model.fold_bias()
 
     return seq_model, tlens_cfg_dict
+
+
+def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
+    mlp = MLP(
+        hidden_sizes=config_dict["model"]["hidden_sizes"],
+        input_size=784,
+        output_size=10,
+        activation_fn=config_dict["model"]["activation_fn"],
+        bias=config_dict["model"]["bias"],
+        fold_bias=False,
+    )
+    mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
+    if fold_bias:
+        mlp.fold_bias()
+    return mlp
 
 
 def create_modular_arithmetic_dataset(

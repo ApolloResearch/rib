@@ -13,6 +13,7 @@ absolute path to the MLP, and a github action will not have access to the same a
 import sys
 from pathlib import Path
 from typing import Union
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -29,7 +30,8 @@ from experiments.mnist_ablations.run_mnist_ablations import (
     Config as MNISTAblationConfig,
 )
 from experiments.mnist_ablations.run_mnist_ablations import main as mnist_ablations_main
-from rib.loader import load_mlp
+from rib.loader import load_mlp, load_sequential_transformer
+from rib.log import logger
 
 
 def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool = False) -> bool:
@@ -63,17 +65,14 @@ def check_accuracies(
     max_accuracy_threshold: float,
     sort_tolerance: int = 10,
 ) -> None:
-    """Run the ablation script with a mock config and check the results.
+    """Check the results of an ablation experiment
 
     Args:
-        script_path: The path to the run ablation script
-        mock_load_config_fn: The function to mock load_config with.
-        mock_main_fn: The function to mock main with.
-        layer_keys: The keys to check for in the accuracies dictionary.
+        accuracies: The result of the ablation experiment
+        config: The config the ablation was run with
         max_accuracy_threshold: Lower bound on accuracy to expect with 0 ablated vectors.
         sort_tolerance: The number of out-of-order pairs to tolerate when checking if the
             accuracies are roughly sorted.
-        specific_points: The specific ablation points to check for.
     """
     # Check that there are accuracies returned
     assert list(accuracies.keys()) == config.ablation_node_layers, (
@@ -110,10 +109,24 @@ def check_accuracies(
         assert _is_roughly_sorted(accuracy_vals, k=sort_tolerance, reverse=True)
 
 
+def mock_load_mlp(*args, **kwargs):
+    assert "mlp_path" in kwargs
+    logger.info("mock patching to load mlp from sample_checkpoints with relative path")
+    kwargs[
+        "mlp_path"
+    ] = "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
+    return load_mlp(*args, **kwargs)
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
 def test_run_mnist_ablations(ablation_type):
-    """Test various ablation result properties for orthogonal ablations on MNIST."""
+    """Test various ablation result properties for ablations on MNIST.
+
+    The ablation experiments load the mlp from the config of the interaction graph. This can be an
+    absolute path to the ssd folder which ci doesn't have access to. So we mock patch a relative
+    path in.
+    """
     config_str = f"""
     exp_name: null  # Prevent saving output
     ablation_type: {ablation_type}
@@ -133,14 +146,32 @@ def test_run_mnist_ablations(ablation_type):
     """
     config_dict = yaml.safe_load(config_str)
     config = MNISTAblationConfig(**config_dict)
-    accuracies = mnist_ablations_main(config)
+    with patch("rib.loader.load_mlp", side_effect=mock_load_mlp):
+        accuracies = mnist_ablations_main(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
+
+
+def mock_load_sequential_transformer(*args, **kwargs):
+    assert "tlens_model_path" in kwargs
+    logger.info(
+        "mock patching to load mod-add transformer from sample_checkpoints with relative path"
+    )
+    if "tlens_model_path" in kwargs:
+        kwargs[
+            "tlens_model_path"
+        ] = "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
+    return load_sequential_transformer(*args, **kwargs)
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
 def test_run_modular_arithmetic_rib_ablations(ablation_type):
-    """Test various ablation result properties for RIB on modular arithmetic."""
+    """Test various ablation result properties on modular arithmetic.
+
+    The ablation experiments load the mlp from the config of the interaction graph. This can be an
+    absolute path to the ssd folder which ci doesn't have access to. So we mock patch a relative
+    path in.
+    """
 
     config_str = f"""
     exp_name: null  # Prevent saving output
@@ -166,5 +197,8 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     """
     config_dict = yaml.safe_load(config_str)
     config = LMAblationConfig(**config_dict)
-    accuracies = lm_ablations_main(config)
+    with patch(
+        "rib.loader.load_sequential_transformer", side_effect=mock_load_sequential_transformer
+    ):
+        accuracies = lm_ablations_main(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)

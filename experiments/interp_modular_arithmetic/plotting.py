@@ -1,3 +1,4 @@
+from colorsys import hls_to_rgb
 from datetime import datetime
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def fft_plot_cos_phase_1d(acts, rtol=1e-4):
             assert (n_freqs * f + 0.5) % 1 - 0.5 < rtol, f"{n_freqs}*f={n_freqs*f} must be integer"
             freq_labels.append(f"cos{n_freqs*f:.0f}")
             freq_amplitudes.append(2 * torch.sqrt(a_pos.real**2 + a_pos.imag**2))
-            freq_phases.append(-torch.atan2(a_pos.imag, a_pos.real))
+            freq_phases.append(torch.atan2(a_pos.imag, a_pos.real))
 
     # Plot the amplitudes and phases
     freq_labels = np.array(freq_labels)
@@ -246,7 +247,8 @@ def plot_fft_activations(
         for row, ax in enumerate(axes[:, col]):
             vminmax = acts.abs()[:, :, row].max().item()
             # abs_norm = SymLogNorm(linthresh=vminmax / 10, linscale=1, vmin=-vminmax, vmax=vminmax)
-            abs_norm = LogNorm(vmin=vminmax / 1e2, vmax=vminmax, clip=True)
+            # abs_norm = LogNorm(vmin=vminmax / 1e2, vmax=vminmax, clip=True)
+            abs_norm = Normalize(vmin=0, vmax=vminmax)
             if col == 0:
                 im = ax.imshow(
                     acts.abs()[:, :, row].numpy(),
@@ -310,7 +312,7 @@ def plot_fft_activations(
 
 
 def plot_fft_activations_cosphase(
-    acts,
+    acts_in,
     title="Default title",
     nrows=4,
     figsize=(8, 16),
@@ -320,87 +322,233 @@ def plot_fft_activations_cosphase(
 ):
     """Plot the first nrows activation dimensions as a function of x and y, in a grid of subplots.
 
-    The first column is the magnitude, the second column is the phase.
+    For every combination of non-zero frequencies k_x, k_y, there are four terms:
+    = A_++ e^(i2π/113 (k_x x + k_y y)) + A_+- e^(i2π/113 (k_x x - k_y y))
+    + A_-+ e^(i2π/113 (-k_x x + k_y y)) + A_-- e^(i2π/113 (-k_x x - k_y y))
+
+    These can be combined into two real terms using A_++ = conj(A_--), A_+- = conj(A_-+):
+    = 2*A_++.real cos(2π/113 (k_x x + k_y y)) - 2*A_++.imag sin(2π/113 (k_x x + k_y y))
+    + 2*A_+-.real cos(2π/113 (k_x x - k_y y)) - 2*A_+-.imag sin(2π/113 (k_x x - k_y y))
+
+    And these terms can again be combined into two terms using harmonic addition:
+    = 2*|A_++| cos(2π/113 (k_x x + k_y y) + atan2(2*A_++.imag, 2*A_++.real))
+    + 2*|A_+-| cos(2π/113 (k_x x - k_y y) + atan2(2*A_+-.imag, 2*A_+-.real))
+
+    # Alternatively, we can combine the exp terms the other way, adding up vertically:
+
+
+    We could also convert this to cos cos, cos sin, sin cos, sin sin terms without phases.
+
+    For the zero-frequency terms, say k_y = 0 WLOG, we have A_+0 = conj(A_-0) and
+    = A_+0 e^(i2π/113 (k_x x)) + A_-0 e^(i2π/113 (-k_x x))
+    = 2*A_+0.real cos(2π/113 (k_x x)) - 2*A_+0.imag sin(2π/113 (k_x x))
+    = 2*|A_+0| cos(2π/113 (k_x x) + atan2(2*A_+0.imag, 2*A_+0.real))
+    and for k_x = 0 we have
+    = 2*|A_0+| cos(2π/113 (k_y y) + atan2(2*A_0+.imag, 2*A_0+.real))
+    and for A_00 we have A_00 = real and
+    = A_00 e^0
+
+    So we can plot a 2D FFT as a 2D plot of x+y and x-y waves with magnitude and phase each, either
+    as two panels (x+y and x-y separately), or as a single panel with x+y and x-y inbterleaved.
 
     Args:
-        acts (torch.Tensor): The activations to plot
-        title (str, optional): The title of the plot.
-        nrows (int, optional): The number of rows to plot. Defaults to 4.
-        figsize (tuple, optional): The size of the figure. Defaults to (8, 16).
-        annotate (bool, optional): Whether to annotate the phase plot with the magnitude and phase
-        fftshift (bool, optional): Whether to fftshift the activations before plotting. Defaults
-            to True.
-        phaseplot_magnitude_threshold (float, optional): The magnitude threshold deciding
-            whether to plot the phase. Defaults to 0.5.
     """
-    ncols = 2
-    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
-    freqs = torch.fft.fftfreq(acts.shape[0])
-    if fftshift:
-        freqs = torch.fft.fftshift(freqs).numpy()
-        acts = torch.fft.fftshift(acts, dim=[0, 1])
-        title += "(fftshift'ed)"
-        extent = [freqs[0], freqs[-1], freqs[0], freqs[-1]]
-    else:
-        extent = None
+    n_freqs = acts_in.shape[0]
+    assert acts_in.shape[1] == n_freqs, "acts must be square"
+    assert n_freqs % 2 == 1, f"n_freqs={n_freqs} must be odd"
+    freqs = torch.fft.fftshift(torch.fft.fftfreq(n_freqs))
+    freqs_plus = freqs[n_freqs // 2 + 1 :]
+    i_center = n_freqs // 2
 
-    fig.suptitle(title)
-    for col, title_info in enumerate(["magnitude", "phase"]):
-        for row, ax in enumerate(axes[:, col]):
-            vminmax = acts.abs()[:, :, row].max().item()
-            # abs_norm = SymLogNorm(linthresh=vminmax / 10, linscale=1, vmin=-vminmax, vmax=vminmax)
-            abs_norm = LogNorm(vmin=vminmax / 1e2, vmax=vminmax, clip=True)
-            n_quadrant = len(freqs) // 2
-            top_right_quadrant = acts[:n_quadrant, :n_quadrant, row]
-            bottom_left_quadrant = acts.flip(dims=(0, 1))[:n_quadrant, :n_quadrant, row]
-            top_left_quadrant = acts.flip(dims=(1,))[:n_quadrant, :n_quadrant, row]
-            bottom_right_quadrant = acts.flip(dims=(0,))[:n_quadrant, :n_quadrant, row]
-            if col == 0:
-                im = ax.imshow(
-                    (
-                        top_right_quadrant.abs()
-                        + bottom_left_quadrant.abs()
-                        + top_left_quadrant.abs()
-                        + bottom_right_quadrant.abs()
-                    )
-                    .abs()
-                    .numpy(),
-                    cmap="Greys",
-                    norm=abs_norm,
-                    aspect="equal",
-                    extent=extent,
-                    origin="lower",
-                )
-                fig.colorbar(im, ax=ax)
-            else:
-                im = ax.imshow(
-                    (
-                        top_right_quadrant.abs()
-                        + bottom_left_quadrant.abs()
-                        - top_left_quadrant.abs()
-                        - bottom_right_quadrant.abs()
-                    )
-                    .abs()
-                    .numpy(),
-                    cmap="Greys",
-                    norm=abs_norm,
-                    aspect="equal",
-                    extent=extent,
-                    origin="lower",
-                )
-                fig.colorbar(im, ax=ax)
-            ax.set_title(f"Dim {row}, {title_info}")
+    def colorize(r, angle, vmin=0, vmax=None):
+        vmax = r.max() if vmax is None else vmax
+        pi = np.pi
+        h = (angle + pi) / (2 * pi) + 0.5
+        # l=1 for r=vmin, l=0 for r=vmax
+        l = 1 - (r - vmin) / (vmax - vmin)
+        s = 0.8
+        c = np.vectorize(hls_to_rgb)(h, l, s)  # --> tuple
+        c = np.array(c)  # -->  array of (3,n,m) shape, but need (n,m,3)
+        c = c.swapaxes(0, 2)
+        return c
 
-    datetimestr = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = datetimestr + (
-        title.replace(" ", "_")
-        .replace("\n", "_")
-        .replace(".", "_")
-        .replace("(", "")
-        .replace(")", "")
-        .replace(",", "")
-        .replace("'", "")
-    )
-    dpi = 600 if annotate else 300
-    save_path = Path(__file__).parent.joinpath(f"out/{filename}.png")
-    plt.savefig(save_path, dpi=dpi)
+    fig, axes = plt.subplots(nrows, ncols=2, constrained_layout=True, figsize=figsize)
+    for row in range(nrows):
+        acts = torch.fft.fftshift(acts_in[:, :, row], dim=[0, 1])
+        A_pp = acts[i_center + 1 :, i_center + 1 :]
+        # A_mm = acts.flip(dims=(0, 1))[i_center + 1 :, i_center + 1 :]
+        A_pm = acts.flip(dims=(1,))[i_center + 1 :, i_center + 1 :]
+        # A_mp = acts.flip(dims=(0,))[i_center + 1 :, i_center + 1 :]
+        A_0p = acts[i_center, i_center + 1 :]
+        A_p0 = acts[i_center + 1 :, i_center]
+        # A_0m = acts.flip(dims=(1,))[i_center, i_center + 1 :]
+        # A_m0 = acts.flip(dims=(0,))[i_center + 1 :, i_center]
+        A_00 = acts[i_center, i_center]
+
+        # Make an array like this:
+        # A00 A0p
+        # Ap0 App
+        mag_array = torch.zeros((i_center + 1, i_center + 1))
+        mag_array[0, 0] = A_00.abs()
+        mag_array[0, 1:] = A_0p.abs()
+        mag_array[1:, 0] = A_p0.abs()
+        mag_array[1:, 1:] = A_pp.abs()
+        mag_array2 = A_pm.abs()
+
+        phase_array = torch.zeros((i_center + 1, i_center + 1))
+        phase_array[0, 0] = 0
+        phase_array[0, 1:] = A_0p.angle()  # angle = atan2(im, re)
+        phase_array[1:, 0] = A_p0.angle()
+        phase_array[1:, 1:] = A_pp.angle()
+        phase_array2 = A_pm.angle()
+        vmax = max(mag_array.max(), mag_array2.max())
+        axes[row, 0].imshow(
+            colorize(mag_array, phase_array, vmax=vmax),
+            extent=[0, i_center, 0, i_center],
+            origin="lower",
+        )
+
+        axes[row, 1].imshow(
+            colorize(mag_array2, phase_array2, vmax=vmax),
+            extent=[1, i_center, 1, i_center],
+            origin="lower",
+        )
+        axes[row, 0].set_ylabel(f"k_y")
+        print("mag_array shape", mag_array.shape)
+        axes[row, 0].text(0.5, 0.5, f"Max val: {mag_array.max():.2e}")
+        axes[row, 0].grid(color="grey", linestyle="--", alpha=0.3)
+        axes[row, 0].set_xticks(np.arange(i_center + 2))
+        axes[row, 0].set_xticklabels(
+            [f"cos{k:.0f}" for k in [0, *113 * freqs_plus]] + [" "], rotation=-90, fontsize=6
+        )
+        axes[row, 0].set_yticks(np.arange(i_center + 2))
+        axes[row, 1].set_xticks(np.arange(1, i_center + 2))
+        axes[row, 1].set_yticks(np.arange(1, i_center + 2))
+
+        axes[row, 1].grid(color="grey", linestyle="--", alpha=0.3)
+    axes[-1, 0].set_xlabel(f"k_x")
+    axes[-1, 1].set_xlabel(f"k_x")
+    axes[0, 0].set_title("A+ cos(2π/113 (kx x + ky y) + φ)")
+    axes[0, 1].set_title("A- cos(2π/113 (kx x - ky y) + φ)")
+
+
+def plot_fft_activations_coscos(
+    acts_in,
+    title="Default title",
+    nrows=4,
+    figsize=(8, 16),
+    annotate=False,
+    fftshift=True,
+    phaseplot_magnitude_threshold=0.5,
+):
+    """Plot the first nrows activation dimensions as a function of x and y, in a grid of subplots.
+
+    For every combination of non-zero frequencies k_x, k_y, there are four terms:
+    = A_++ e^(i2π/113 (k_x x + k_y y)) + A_+- e^(i2π/113 (k_x x - k_y y))
+    + A_-+ e^(i2π/113 (-k_x x + k_y y)) + A_-- e^(i2π/113 (-k_x x - k_y y))
+
+    These can be combined into two real terms using A_++ = conj(A_--), A_+- = conj(A_-+):
+    = 2*A_++.real cos(2π/113 (k_x x + k_y y)) - 2*A_++.imag sin(2π/113 (k_x x + k_y y))
+    + 2*A_+-.real cos(2π/113 (k_x x - k_y y)) - 2*A_+-.imag sin(2π/113 (k_x x - k_y y))
+
+    And these terms can again be combined into two terms using harmonic addition:
+    = 2*|A_++| cos(2π/113 (k_x x + k_y y) + atan2(2*A_++.imag, 2*A_++.real))
+    + 2*|A_+-| cos(2π/113 (k_x x - k_y y) + atan2(2*A_+-.imag, 2*A_+-.real))
+
+    # Alternatively, we can combine the exp terms the other way, adding up vertically:
+
+
+    We could also convert this to cos cos, cos sin, sin cos, sin sin terms without phases.
+
+    For the zero-frequency terms, say k_y = 0 WLOG, we have A_+0 = conj(A_-0) and
+    = A_+0 e^(i2π/113 (k_x x)) + A_-0 e^(i2π/113 (-k_x x))
+    = 2*A_+0.real cos(2π/113 (k_x x)) - 2*A_+0.imag sin(2π/113 (k_x x))
+    = 2*|A_+0| cos(2π/113 (k_x x) + atan2(2*A_+0.imag, 2*A_+0.real))
+    and for k_x = 0 we have
+    = 2*|A_0+| cos(2π/113 (k_y y) + atan2(2*A_0+.imag, 2*A_0+.real))
+    and for A_00 we have A_00 = real and
+    = A_00 e^0
+
+    So we can plot a 2D FFT as a 2D plot of x+y and x-y waves with magnitude and phase each, either
+    as two panels (x+y and x-y separately), or as a single panel with x+y and x-y inbterleaved.
+
+    Args:
+    """
+    n_freqs = acts_in.shape[0]
+    assert acts_in.shape[1] == n_freqs, "acts must be square"
+    assert n_freqs % 2 == 1, f"n_freqs={n_freqs} must be odd"
+    freqs = torch.fft.fftshift(torch.fft.fftfreq(n_freqs))
+    freqs_plus = freqs[n_freqs // 2 + 1 :]
+    i_center = n_freqs // 2
+
+    def colorize(r, angle, vmin=0, vmax=None):
+        vmax = r.max() if vmax is None else vmax
+        pi = np.pi
+        h = (angle + pi) / (2 * pi) + 0.5
+        # l=1 for r=vmin, l=0 for r=vmax
+        l = 1 - (r - vmin) / (vmax - vmin)
+        s = 0.8
+        c = np.vectorize(hls_to_rgb)(h, l, s)  # --> tuple
+        c = np.array(c)  # -->  array of (3,n,m) shape, but need (n,m,3)
+        c = c.swapaxes(0, 2)
+        return c
+
+    fig, axes = plt.subplots(nrows, ncols=2, constrained_layout=True, figsize=figsize)
+    for row in range(nrows):
+        acts = torch.fft.fftshift(acts_in[:, :, row], dim=[0, 1])
+        A_pp = acts[i_center + 1 :, i_center + 1 :]
+        # A_mm = acts.flip(dims=(0, 1))[i_center + 1 :, i_center + 1 :]
+        A_pm = acts.flip(dims=(1,))[i_center + 1 :, i_center + 1 :]
+        # A_mp = acts.flip(dims=(0,))[i_center + 1 :, i_center + 1 :]
+        A_0p = acts[i_center, i_center + 1 :]
+        A_p0 = acts[i_center + 1 :, i_center]
+        # A_0m = acts.flip(dims=(1,))[i_center, i_center + 1 :]
+        # A_m0 = acts.flip(dims=(0,))[i_center + 1 :, i_center]
+        A_00 = acts[i_center, i_center]
+
+        # Make an array like this:
+        # A00 A0p
+        # Ap0 App
+        mag_array = torch.zeros((i_center + 1, i_center + 1))
+        mag_array[0, 0] = A_00.abs()
+        mag_array[0, 1:] = A_0p.abs()
+        mag_array[1:, 0] = A_p0.abs()
+        mag_array[1:, 1:] = A_pp.abs() + A_pm.abs()
+        mag_array2 = A_pp.abs() - A_pm.abs()
+
+        phase_array = torch.zeros((i_center + 1, i_center + 1))
+        phase_array[0, 0] = 0
+        phase_array[0, 1:] = A_0p.angle()  # angle = atan2(im, re)
+        phase_array[1:, 0] = A_p0.angle()
+        phase_array[1:, 1:] = (A_pp.angle() + A_pm.angle()) / 2
+        phase_array2 = (A_pp.angle() - A_pm.angle()) / 2
+        vmax = max(mag_array.max(), mag_array2.max())
+        axes[row, 0].imshow(
+            colorize(mag_array, phase_array, vmax=vmax),
+            extent=[0, i_center, 0, i_center],
+            origin="lower",
+        )
+
+        axes[row, 1].imshow(
+            colorize(mag_array2, phase_array2, vmax=vmax),
+            extent=[1, i_center, 1, i_center],
+            origin="lower",
+        )
+        axes[row, 0].set_ylabel(f"k_y")
+        print("mag_array shape", mag_array.shape)
+        axes[row, 0].text(0.5, 0.5, f"Max val: {mag_array.max():.2e}")
+        axes[row, 1].text(0.5, 0.5, f"Max val: {mag_array2.max():.2e}")
+        axes[row, 0].grid(color="grey", linestyle="--", alpha=0.3)
+        axes[row, 0].set_xticks(np.arange(i_center + 2))
+        axes[row, 0].set_xticklabels(
+            [f"cos{k:.0f}" for k in [0, *113 * freqs_plus]] + [" "], rotation=-90, fontsize=6
+        )
+        axes[row, 0].set_yticks(np.arange(i_center + 2))
+        axes[row, 1].set_xticks(np.arange(1, i_center + 2))
+        axes[row, 1].set_yticks(np.arange(1, i_center + 2))
+
+        axes[row, 1].grid(color="grey", linestyle="--", alpha=0.3)
+    axes[-1, 0].set_xlabel(f"k_x")
+    axes[-1, 1].set_xlabel(f"k_x")
+    axes[0, 0].set_title("cos cos")
+    axes[0, 1].set_title("sin sin")

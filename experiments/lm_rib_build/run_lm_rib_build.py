@@ -33,23 +33,17 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any, Dict, Literal, Optional, TypedDict, Union, cast
+from typing import Literal, Optional, Union, cast
 
 import fire
 import torch
 from jaxtyping import Float
-from mpi4py import MPI
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
-from rib.distributed_utils import (
-    adjust_logger_dist,
-    check_sizes_mpi,
-    get_device_mpi,
-    get_dist_info,
-)
+from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,

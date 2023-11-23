@@ -27,7 +27,6 @@ class TestPythiaFloatingPointErrors:
     def rib_results(self, temp_object) -> dict:
         """Run RIB build with float32 and float64 and return the results."""
         rib_config_str = """
-            force_overwrite_output: true
             tlens_pretrained: pythia-14m
             tlens_model_path: null
             dataset:
@@ -135,7 +134,6 @@ class TestPythiaFloatingPointErrors:
         # rib_results is an argument to make sure this runs after the rib_results fixture but
         # it actually just uses the temp dir which has been written to by the rib_results fixture.
         ablation_config_str = """
-        force_overwrite_output: true
         ablation_type: rib
         schedule:
             schedule_type: linear

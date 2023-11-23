@@ -3,7 +3,7 @@ from typing import Literal, Optional, Union
 import torch
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, StrDtype
 
 
 class SequentialTransformerConfig(BaseModel):
@@ -55,7 +55,7 @@ class SequentialTransformerConfig(BaseModel):
 
     @field_validator("dtype")
     @classmethod
-    def set_dtype(cls, v: Union[str, torch.dtype]) -> torch.dtype:
+    def set_dtype(cls, v: Union[StrDtype, torch.dtype]) -> torch.dtype:
         """Verify torch dtype or convert str to torch.dtype."""
         if isinstance(v, torch.dtype):
             if v not in TORCH_DTYPES.values():

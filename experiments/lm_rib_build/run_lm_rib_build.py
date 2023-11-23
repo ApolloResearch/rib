@@ -39,7 +39,7 @@ import fire
 import torch
 from jaxtyping import Float
 from mpi4py import MPI
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
@@ -63,7 +63,7 @@ from rib.mpi_utils import (
     get_device_mpi,
     get_mpi_info,
 )
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
@@ -76,17 +76,19 @@ from rib.utils import (
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exp_name: str = Field(..., description="The name of the experiment")
-    force_overwrite_output: Optional[bool] = Field(
-        False, description="Don't ask before overwriting the output file."
+    out_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     seed: int = Field(..., description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."
     )
-    tlens_model_path: Optional[Path] = Field(
+    tlens_model_path: Optional[RootPath] = Field(
         None, description="Path to saved transformer lens model."
     )
-    interaction_matrices_path: Optional[Path] = Field(
+    interaction_matrices_path: Optional[RootPath] = Field(
         None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
     node_layers: list[str] = Field(
@@ -130,7 +132,7 @@ class Config(BaseModel):
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
 
-    dtype: str = Field(..., description="The dtype to use when building the graph.")
+    dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
 
     eps: float = Field(
         1e-5,
@@ -145,16 +147,6 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-
-    out_dir: Optional[Path] = Field(
-        None,
-        description="Directory for the output files. If not provided it is `./out/` relative to this file.",
-    )
-
-    @field_validator("dtype")
-    def dtype_validator(cls, v):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "Config":
@@ -239,7 +231,7 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False):
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
@@ -261,17 +253,12 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
     adjust_logger_mpi(logger)
     device = get_device_mpi(logger)
 
-    out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-    if config.calculate_edges:
-        out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
-    else:
-        out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if mpi_info.is_main_process and not check_outfile_overwrite(
-        out_file, config.force_overwrite_output or force, logger=logger
-    ):
-        mpi_info.comm.Abort()  # stop this and other processes
-        return None  # this is unreachable as Abort will terminate
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        f_name = f"{config.exp_name}_rib_{'graph' if config.calculate_edges else 'Cs'}.pt"
+        out_file = config.out_dir / f_name
+        if not check_outfile_overwrite(out_file, force):
+            mpi_info.comm.Abort()  # stop this and other processes
 
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
@@ -423,7 +410,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
 
     eigenvectors = [asdict(U_info) for U_info in Us]
 
-    results = {
+    results: RibBuildResults = {
         "exp_name": config.exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
@@ -435,11 +422,13 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
         "calc_edges_time": calc_edges_time,
     }
 
-    if mpi_info.is_main_process:
+    if config.out_dir is not None and mpi_info.is_main_process:
         # Save the results (which include torch tensors) to file
         torch.save(results, out_file)
         logger.info("Saved results to %s", out_file)
 
+    return results
+
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(main, serialize=lambda _: "")

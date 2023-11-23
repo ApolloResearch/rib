@@ -15,6 +15,7 @@ from rib.utils import calc_exponential_ablation_schedule
 
 BasisVecs = Union[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden d_hidden"]]
 BasisVecsPinv = Union[Float[Tensor, "d_hidden_trunc d_hidden"], Float[Tensor, "d_hidden d_hidden"]]
+AblationAccuracies = dict[str, dict[int, float]]
 
 
 class ScheduleConfig(BaseModel):
@@ -162,7 +163,7 @@ def run_ablations(
     schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
     device: str,
     dtype: Optional[torch.dtype] = None,
-) -> dict[str, dict[int, float]]:
+) -> AblationAccuracies:
     """Rotate to and from a truncated basis and compare ablation accuracies/losses.
 
     Note that we want our ablation schedules for different bases to match up, even though different
@@ -185,7 +186,7 @@ def run_ablations(
     Returns:
         A dictionary mapping node layers to ablation accuracies/losses.
     """
-    results: dict[str, dict[int, float]] = {}
+    results: AblationAccuracies = {}
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
         ablation_node_layers, graph_module_names, basis_matrices
     ):

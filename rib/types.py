@@ -4,13 +4,13 @@ from typing import Annotated, Literal, Union
 import torch
 from pydantic import BeforeValidator
 
-TORCH_DTYPES = {
+StrDtype = Literal["float32", "float64", "bfloat16"]
+
+TORCH_DTYPES: dict[StrDtype, torch.dtype] = {
     "float32": torch.float32,
     "float64": torch.float64,
     "bfloat16": torch.bfloat16,
 }
-
-DTYPE_STR = Literal["float32", "float64", "bfloat16"]
 
 
 def to_root_path(path: Union[str, Path]):
@@ -21,6 +21,6 @@ def to_root_path(path: Union[str, Path]):
         return Path(ROOT_DIR / path)
 
 
+# This is a type for pydantic configs that will convert all relative paths
+# to be relative to the ROOT_DIR of rib.
 RootPath = Annotated[Path, BeforeValidator(to_root_path)]
-
-# %%

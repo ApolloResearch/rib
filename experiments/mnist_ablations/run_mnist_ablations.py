@@ -23,7 +23,7 @@ from typing import Literal, Optional, Union
 
 import fire
 import torch
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -37,8 +37,7 @@ from rib.ablations import (
 from rib.hook_manager import HookedModel
 from rib.loader import load_mlp
 from rib.log import logger
-from rib.models import MLP
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     REPO_ROOT,
     check_outfile_overwrite,
@@ -49,27 +48,22 @@ from rib.utils import (
 
 
 class Config(BaseModel):
-    exp_name: Optional[str]
-    force_overwrite_output: Optional[bool] = Field(
-        False, description="Don't ask before overwriting the output file."
-    )
+    exp_name: str
     ablation_type: Literal["rib", "orthogonal"]
-    interaction_graph_path: Path
+    interaction_graph_path: RootPath
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
         ...,
         discriminator="schedule_type",
         description="The schedule to use for ablations.",
     )
-    dtype: str
+    dtype: StrDtype
     ablation_node_layers: list[str]
     batch_size: int
     seed: int
-
-    @field_validator("dtype")
-    @classmethod
-    def dtype_validator(cls, v: str):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
+    out_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
+    )
 
 
 def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
@@ -84,11 +78,11 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> AblationAccuracies:
     config = load_config(config_path_or_obj, config_model=Config)
 
-    out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
-        raise FileExistsError
-
-    out_file.parent.mkdir(parents=True, exist_ok=True)
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = config.out_dir / f"{config.exp_name}_ablation_results.json"
+        if not check_outfile_overwrite(out_file, force):
+            raise FileExistsError
 
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
@@ -143,7 +137,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         "accuracies": accuracies,
     }
 
-    if config.exp_name is not None:
+    if config.out_dir is not None:
         with open(out_file, "w") as f:
             json.dump(results, f)
         logger.info("Wrote results to %s", out_file)

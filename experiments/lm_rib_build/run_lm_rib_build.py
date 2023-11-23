@@ -39,14 +39,7 @@ import fire
 import torch
 from jaxtyping import Float
 from mpi4py import MPI
-from pydantic import (
-    BaseModel,
-    BeforeValidator,
-    ConfigDict,
-    Field,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
@@ -70,7 +63,7 @@ from rib.mpi_utils import (
     get_device_mpi,
     get_mpi_info,
 )
-from rib.types import DTYPE_STR, TORCH_DTYPES, RootPath
+from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
@@ -83,8 +76,9 @@ from rib.utils import (
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exp_name: str = Field(..., description="The name of the experiment")
-    force_overwrite_output: Optional[bool] = Field(
-        False, description="Don't ask before overwriting the output file."
+    out_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
     )
     seed: int = Field(..., description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
@@ -137,7 +131,7 @@ class Config(BaseModel):
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
 
-    dtype: DTYPE_STR = Field(..., description="The dtype to use when building the graph.")
+    dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
 
     eps: float = Field(
         1e-5,
@@ -151,11 +145,6 @@ class Config(BaseModel):
         None,
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
-    )
-
-    out_dir: Optional[RootPath] = Field(
-        Path(__file__).parent / "out",
-        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
     )
 
     @model_validator(mode="after")
@@ -265,17 +254,10 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[st
 
     if config.out_dir is not None:
         config.out_dir.mkdir(parents=True, exist_ok=True)
-        if config.calculate_edges:
-            out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
-        else:
-            out_file = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
-        if mpi_info.is_main_process and not check_outfile_overwrite(
-            out_file, config.force_overwrite_output or force, logger=logger
-        ):
+        f_name = f"{config.exp_name}_rib_{'graph' if config.calculate_edges else 'Cs'}.pt"
+        out_file = config.out_dir / f_name
+        if not check_outfile_overwrite(out_file, force):
             mpi_info.comm.Abort()  # stop this and other processes
-            return None  # this is unreachable as Abort will terminate
-    else:
-        out_file = None
 
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
@@ -439,7 +421,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[st
         "calc_edges_time": calc_edges_time,
     }
 
-    if out_file is not None and mpi_info.is_main_process:
+    if config.out_dir is not None and mpi_info.is_main_process:
         # Save the results (which include torch tensors) to file
         torch.save(results, out_file)
         logger.info("Saved results to %s", out_file)

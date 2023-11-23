@@ -128,7 +128,7 @@ def test_run_mnist_ablations(ablation_type):
     path in.
     """
     config_str = f"""
-    exp_name: null  # Prevent saving output
+    exp_name: "test_ablation_mnist"
     ablation_type: {ablation_type}
     interaction_graph_path: experiments/mnist_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
     schedule:
@@ -143,6 +143,7 @@ def test_run_mnist_ablations(ablation_type):
     batch_size: 64
     seed: 0
     eval_type: accuracy
+    out_dir: null
     """
     config_dict = yaml.safe_load(config_str)
     config = MNISTAblationConfig(**config_dict)
@@ -174,7 +175,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     """
 
     config_str = f"""
-    exp_name: null  # Prevent saving output
+    exp_name: "test_ablation_mod_add"
     ablation_type: {ablation_type}
     interaction_graph_path: experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
     schedule:
@@ -194,6 +195,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     dtype: float32
     seed: 0
     eval_type: accuracy
+    out_dir: null
     """
     config_dict = yaml.safe_load(config_str)
     config = LMAblationConfig(**config_dict)

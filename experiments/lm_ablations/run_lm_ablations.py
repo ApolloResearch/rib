@@ -37,7 +37,7 @@ from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.hook_manager import HookedModel
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
@@ -48,12 +48,13 @@ from rib.utils import (
 
 
 class Config(BaseModel):
-    exp_name: Optional[str]
-    force_overwrite_output: Optional[bool] = Field(
-        False, description="Don't ask before overwriting the output file."
+    exp_name: str
+    out_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
     )
     ablation_type: Literal["rib", "orthogonal"]
-    interaction_graph_path: Path
+    interaction_graph_path: RootPath
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
         ...,
         discriminator="schedule_type",
@@ -66,7 +67,7 @@ class Config(BaseModel):
     )
     ablation_node_layers: list[str]
     batch_size: int
-    dtype: str
+    dtype: StrDtype
     eps: Optional[float] = 1e-5
     seed: int
     eval_type: Literal["accuracy", "ce_loss"] = Field(
@@ -74,22 +75,16 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph.",
     )
 
-    @field_validator("dtype")
-    @classmethod
-    def dtype_validator(cls, v: str):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
-
 
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> AblationAccuracies:
     start_time = time.time()
     config = load_config(config_path_or_obj, config_model=Config)
 
-    out_file = Path(__file__).parent / "out" / f"{config.exp_name}_ablation_results.json"
-    if not check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
-        raise FileExistsError
-
-    out_file.parent.mkdir(parents=True, exist_ok=True)
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = config.out_dir / f"{config.exp_name}_ablation_results.json"
+        if not check_outfile_overwrite(out_file, force):
+            raise FileExistsError
 
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)
@@ -175,7 +170,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         "results": ablation_results,
         "time_taken": time_taken,
     }
-    if config.exp_name is not None:
+    if config.out_dir is not None:
         with open(out_file, "w") as f:
             json.dump(results, f)
         logger.info("Wrote results to %s", out_file)

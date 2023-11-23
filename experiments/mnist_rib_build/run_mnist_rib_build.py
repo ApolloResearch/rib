@@ -32,32 +32,24 @@ from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import load_mlp
 from rib.log import logger
 from rib.models import MLP
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 
 
 class Config(BaseModel):
     exp_name: str
-    force_overwrite_output: Optional[bool] = Field(
-        False, description="Don't ask before overwriting the output file."
-    )
-    mlp_path: Path
+    mlp_path: RootPath
     batch_size: int
     seed: int
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
     rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.
-    dtype: str  # Data type of all tensors (except those overriden in certain functions).
+    dtype: StrDtype  # Data type of all tensors (except those overriden in certain functions).
     node_layers: list[str]
-    out_dir: Optional[Path] = Field(
+    out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output is written.",
     )
-
-    @field_validator("dtype")
-    def dtype_validator(cls, v):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
 
 
 def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
@@ -80,7 +72,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[st
     if config.out_dir is not None:
         config.out_dir.mkdir(parents=True, exist_ok=True)
         out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
-        if check_outfile_overwrite(out_file, config.force_overwrite_output or force, logger=logger):
+        if not check_outfile_overwrite(out_file, force):
             raise FileExistsError("Not overwriting output file")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"

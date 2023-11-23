@@ -1,41 +1,30 @@
+from contextlib import nullcontext
 from typing import Optional, Tuple
 
 import pytest
+import torch
 from torch import nn
 
-from rib.models import MLP
-from rib.models.mlp import Layer, LinearFoldedBias
+from rib.models import MLP, MLPLayer
 from rib.models.utils import ACTIVATION_MAP
+from rib.utils import set_seed
+
+set_seed(0)
 
 
-@pytest.mark.parametrize(
-    "hidden_sizes, activation_fn, fold_bias, bias, expected_layer_sizes",
-    [
-        # 2 hidden layers with ReLU, fold_bias True, bias False
-        ([4, 3], "relu", True, False, [(3, 4), (4, 3), (3, 4)]),
-        # no hidden layers with ReLU, fold_bias False, bias True
-        ([], "relu", False, True, [(3, 4)]),
-        # 1 hidden layer with Tanh, fold_bias True, bias True
-        ([4], "tanh", True, True, [(4, 4), (5, 4)]),
-        # 2 hidden layers with Sigmoid, fold_bias False, bias False
-        ([4, 3], "sigmoid", False, False, [(3, 4), (4, 3), (3, 4)]),
-        # 1 hidden layer with default ReLU, fold_bias True, bias True
-        ([4], None, True, True, [(4, 4), (5, 4)]),
-        # 1 hidden layer with Tanh, fold_bias False, bias False
-        ([4], "tanh", False, False, [(3, 4), (4, 4)]),
-    ],
-)
+@pytest.mark.parametrize("hidden_sizes", [[], [4, 3]])
+@pytest.mark.parametrize("activation_fn", ["relu", "gelu", "sigmoid"])
+@pytest.mark.parametrize("bias, fold_bias", [(False, False), (True, False), (True, True)])
 def test_mlp_layers(
     hidden_sizes: list[int],
-    activation_fn: Optional[str],
+    activation_fn: str,
     fold_bias: bool,
     bias: bool,
-    expected_layer_sizes: list[Tuple[int, int]],
 ) -> None:
     """Test the MLP constructor for fixed input and output sizes.
 
-    Verifies the created layers' types, sizes and bias. Also checks whether the
-    layers are instances of LinearFoldedBias when fold_bias is True, and nn.Linear when it's False.
+    Verifies the created layers' shapes and bias.
+    Also tests that when folding the bias in the forward and backward passes remain the same.
 
     Args:
         hidden_sizes: A list of hidden layer sizes. If None, no hidden layers are added.
@@ -47,45 +36,37 @@ def test_mlp_layers(
     """
     input_size = 3
     output_size = 4
-    if activation_fn is None:
+    expected_layer_sizes = list(zip([input_size] + hidden_sizes, hidden_sizes + [output_size]))
+
+    # some activation functions can't be folded
+    exception_expected = (
+        (activation_fn in ["tanh", "sigmoid"]) and fold_bias and (len(hidden_sizes) > 0)
+    )
+    with pytest.raises(ValueError) if exception_expected else nullcontext():
         model = MLP(
             hidden_sizes,
             input_size,
             output_size,
+            activation_fn=activation_fn,
             bias=bias,
             fold_bias=fold_bias,
         )
-    else:
-        model = MLP(
-            hidden_sizes,
-            input_size,
-            output_size,
-            activation_fn,
-            bias,
-            fold_bias,
-        )
+    if exception_expected:
+        return None
 
     assert isinstance(model, MLP)
-
+    assert model.has_folded_bias == fold_bias
     activation_fn = activation_fn or "relu"
 
     for i, layer in enumerate(model.layers):
-        assert isinstance(layer, Layer)
+        assert isinstance(layer, MLPLayer)
 
-        if fold_bias and bias:
-            assert isinstance(layer.linear, LinearFoldedBias)
-        else:
-            assert isinstance(layer.linear, nn.Linear)
+        assert layer.has_folded_bias == fold_bias
+        assert (layer.b is None) == (not bias or fold_bias)
 
         # Check the in/out feature sizes of Linear layers
-        assert layer.linear.in_features == expected_layer_sizes[i][0]
-        assert layer.linear.out_features == expected_layer_sizes[i][1]
-        # Check bias is None when fold_bias is True, and not None otherwise
-        assert (
-            layer.linear.bias is None
-            if fold_bias or bias is False
-            else layer.linear.bias is not None
-        )
+        assert layer.in_features == expected_layer_sizes[i][0]
+        assert layer.out_features == expected_layer_sizes[i][1]
 
         if i < len(model.layers) - 1:
             # Activation layers at indices before the last layer
@@ -93,3 +74,21 @@ def test_mlp_layers(
         else:
             # No activation function for the last layer
             assert not hasattr(layer, "activation")
+
+    batch_size = 10
+    rand_input = torch.rand((batch_size, input_size), requires_grad=True)
+    output = model(rand_input)
+    in_grad = torch.autograd.grad(output.sum(), rand_input)[0]
+    assert output.shape == (batch_size, output_size)
+
+    if bias and not fold_bias and (activation_fn not in ["sigmoid", "tanh"]):
+        model.fold_bias()
+        assert model.has_folded_bias
+        folded_output = model(rand_input)
+        folded_in_grad = torch.autograd.grad(folded_output.sum(), rand_input)[0]
+        assert torch.allclose(output, folded_output)
+        assert torch.allclose(in_grad, folded_in_grad)
+
+    if not bias and not fold_bias:
+        with pytest.raises(AssertionError):
+            model.fold_bias()

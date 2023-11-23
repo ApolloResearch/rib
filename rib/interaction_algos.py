@@ -274,8 +274,6 @@ def calculate_interaction_rotations(
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
             Lambda_abs, truncation_threshold
         )
-        Lambda_abs_sqrt_trunc = Lambda_abs_sqrt_trunc
-        Lambda_abs_sqrt_trunc_pinv = Lambda_abs_sqrt_trunc_pinv
 
         C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
             (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()

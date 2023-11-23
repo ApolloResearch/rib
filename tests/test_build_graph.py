@@ -24,7 +24,6 @@ import yaml
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
-
 from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
 from experiments.mnist_rib_build.run_mnist_rib_build import Config as MnistRibConfig
@@ -34,13 +33,8 @@ from experiments.mnist_rib_build.run_mnist_rib_build import (
 from rib.interaction_algos import build_sorted_lambda_matrices
 
 
-def graph_build_test(
-    config: Union[LMRibConfig, MnistRibConfig],
-    build_graph_main_fn: Callable,
-):
-    atol = 1e-5
-
-    results: dict = {}
+def build_get_lambdas(config: Union[LMRibConfig, MnistRibConfig], build_graph_main_fn: Callable):
+    """Build the graph but extracting the lambdas"""
     Lambda_abs: list[torch.Tensor] = []
 
     def mock_build_sorted_lambda_matrices(Lambda_abs_arg, *args, **kwargs):
@@ -53,45 +47,54 @@ def graph_build_test(
         side_effect=mock_build_sorted_lambda_matrices,
     ):
         results = build_graph_main_fn(config)
-        grams = results["gram_matrices"]
-        Cs = results["interaction_rotations"]
-        E_hats = results["edges"]
 
-        # Sort each row, and reverse the order of the Lambda_abs
-        Lambdas = [
-            torch.sort(lambda_row, descending=True).values for lambda_row in Lambda_abs[::-1]
-        ]
+    # Sort each row, and reverse the order of the Lambda_abs
+    Lambdas = [torch.sort(lambda_row, descending=True).values for lambda_row in Lambda_abs[::-1]]
 
-        # The output interaction matrix should be None if rotate_final_node_layer is False
-        if not results["config"]["rotate_final_node_layer"]:
-            assert (
-                Cs[-1]["C"] is None
-            ), "The output interaction matrix should be None if rotate_final_node_layer is False"
+    return results, Lambdas
 
-        # We don't have edges or lambdas for the final layer in node_layers
-        comparison_layers = results["config"]["node_layers"][:-1]
-        for i, module_name in enumerate(comparison_layers):
-            # Get the module names from the grams
-            # Check that the size of the sum of activations in the interaction basis is equal
-            # to the outgoing edges of a node
-            act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
-            if E_hats:
-                edge_size = E_hats[i][1].sum(0).abs()
-                assert torch.allclose(
-                    act_size / act_size.abs().max(),
-                    edge_size / edge_size.abs().max(),
-                    atol=atol,
-                ), f"act_size not equal to edge_size for {module_name}"
 
-            # Check that the Lambdas are also the same as the act_size and edge_size
-            # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
-            # `rib.interaction_algos.build_sort_lambda_matrix)
-            Lambdas_trunc = Lambdas[i][: len(act_size)]
+def graph_build_test(
+    config: Union[LMRibConfig, MnistRibConfig],
+    build_graph_main_fn: Callable,
+    atol=1e-5,
+):
+    results, Lambdas = build_get_lambdas(config, build_graph_main_fn)
+
+    grams = results["gram_matrices"]
+    Cs = results["interaction_rotations"]
+    E_hats = results["edges"]
+
+    # The output interaction matrix should be None if rotate_final_node_layer is False
+    if not config.rotate_final_node_layer:
+        assert (
+            Cs[-1]["C"] is None
+        ), "The output interaction matrix should be None if rotate_final_node_layer is False"
+
+    # We don't have edges or lambdas for the final layer in node_layers
+    comparison_layers = config.node_layers[:-1]
+    for i, module_name in enumerate(comparison_layers):
+        # Get the module names from the grams
+        # Check that the size of the sum of activations in the interaction basis is equal
+        # to the outgoing edges of a node
+        act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
+        if E_hats:
+            edge_size = E_hats[i][1].sum(0).abs()
             assert torch.allclose(
                 act_size / act_size.abs().max(),
-                Lambdas_trunc / Lambdas_trunc.max(),
+                edge_size / edge_size.abs().max(),
                 atol=atol,
-            ), f"act_size not equal to Lambdas for {module_name}"
+            ), f"act_size not equal to edge_size for {module_name}"
+
+        # Check that the Lambdas are also the same as the act_size and edge_size
+        # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
+        # `rib.interaction_algos.build_sort_lambda_matrix)
+        Lambdas_trunc = Lambdas[i][: len(act_size)]
+        assert torch.allclose(
+            act_size / act_size.abs().max(),
+            Lambdas_trunc / Lambdas_trunc.max(),
+            atol=atol,
+        ), f"act_size not equal to Lambdas for {module_name}"
 
 
 @pytest.mark.slow

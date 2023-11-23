@@ -1,6 +1,5 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
-from functools import partial
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import torch
@@ -19,6 +18,7 @@ from rib.hook_fns import (
 )
 from rib.hook_manager import Hook, HookedModel
 from rib.log import logger
+from rib.models.mlp import MLPLayer
 from rib.models.sequential_transformer.components import MLPIn, MLPOut
 from rib.models.utils import get_model_attr
 
@@ -233,12 +233,12 @@ def collect_interaction_edges(
     integrated_gradient_types: dict[str, Literal["linear", "numerical"]] = {}
     edge_hooks: list[Hook] = []
     for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
-        # C from the next node layer
-        assert C_info.C is not None, "C matrix is None."
-        assert C_info.C_pinv is not None, "C_pinv matrix is None."
+        C_in = C_info.C
+        C_in_pinv = C_info.C_pinv
         C_out = Cs[idx + 1].C
-        if C_out is not None:
-            C_out = C_out.to(device=device)
+
+        assert C_in is not None, "C matrix is None."
+        assert C_in_pinv is not None, "C_pinv matrix is None."
 
         # Get the list of modules in the section
         section = get_model_attr(hooked_model.model, module_name)
@@ -249,7 +249,9 @@ def collect_interaction_edges(
                 section, nn.Sequential
             ):
                 module = section[0] if isinstance(section, nn.Sequential) else section
-                if isinstance(module, (MLPIn, MLPOut)):
+                if isinstance(module, (MLPIn, MLPOut)) or (
+                    isinstance(module, MLPLayer) and module.activation_fn is None
+                ):
                     edge_hooks.append(
                         Hook(
                             name=C_info.node_layer_name,
@@ -257,7 +259,7 @@ def collect_interaction_edges(
                             fn=linear_integrated_gradient_pre_forward_hook_fn,
                             module_name=module_name,
                             fn_kwargs={
-                                "C_in": C_info.C.to(device=device),  # C from the current node layer
+                                "C_in": C_in.to(device),  # C from the current node layer
                                 "dataset_size": dataset_size,
                             },
                         )
@@ -276,11 +278,9 @@ def collect_interaction_edges(
                     fn=interaction_edge_pre_forward_hook_fn,
                     module_name=module_name,
                     fn_kwargs={
-                        "C_in": C_info.C.to(device=device),  # C from the current node layer
-                        "C_in_pinv": C_info.C_pinv.to(
-                            device=device
-                        ),  # C_pinv from current node layer
-                        "C_out": C_out,
+                        "C_in": C_in.to(device),  # C from the current node layer
+                        "C_in_pinv": C_in_pinv.to(device),  # C_pinv from current node layer
+                        "C_out": C_out.to(device) if C_out is not None else None,
                         "n_intervals": n_intervals,
                         "dataset_size": dataset_size,
                     },
@@ -305,25 +305,40 @@ def collect_interaction_edges(
     edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {}
     for i, node_layer_name in enumerate(hooked_model.hooked_data):
         if integrated_gradient_types[node_layer_name] == "linear":
+            C_in = Cs[i].C
+            C_in_pinv = Cs[i].C_pinv
+            C_out = Cs[i + 1].C
+
+            assert C_in is not None, "C matrix is None."
+            assert C_in_pinv is not None, "C_pinv matrix is None."
+
             section = get_model_attr(hooked_model.model, edge_modules[i])
             module = section[0] if isinstance(section, nn.Sequential) else section
             if isinstance(module, MLPIn):
                 W_raw = module.W_in
             elif isinstance(module, MLPOut):
                 W_raw = module.W_out
+            elif isinstance(module, MLPLayer):
+                W_raw = module.W
             else:
                 raise ValueError(f"Module type {type(module)} not supported for linear type.")
             f_hat_norm: Float[Tensor, "in_hidden_extra_trunc"] = hooked_model.hooked_data[
                 node_layer_name
             ]["f_hat_norm"]
-            n_extra_dims = len(f_hat_norm) - W_raw.shape[0]
+            # Account for cases where our function layer is the concatenation of multiple streams
+            n_extra_dims = C_in.shape[0] - W_raw.shape[0]
 
             # Create matrix ((I, 0), (0, W_raw)) where I is an identity matrix of size n_extra_dims
             # This handles the concatenated residual stream and other input stream
             W = torch.block_diag(torch.eye(n_extra_dims, dtype=dtype, device=device), W_raw)
-            W_hat = einsum(
-                "out out_trunc, in out, in_trunc in -> out_trunc in_trunc", C_out, W, C_info.C_pinv
-            )
+
+            W_C_pinv = einsum("in out, in_trunc in -> out in_trunc", W, C_in_pinv.to(device))
+            if C_out is None:
+                W_hat = W_C_pinv
+            else:
+                W_hat = einsum(
+                    "out out_trunc, out in_trunc -> out_trunc in_trunc", C_out.to(device), W_C_pinv
+                )
             edge = einsum(
                 "out_trunc in_trunc, in_trunc -> out_trunc in_trunc", W_hat**2, f_hat_norm**2
             )

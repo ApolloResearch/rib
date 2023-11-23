@@ -208,7 +208,7 @@ def test_mnist_build_graph():
         config = load_config(*args, **kwargs)
         config.mlp_path = (
             Path(__file__).parent.parent
-            / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-08-13_16-23-59/model_epoch_3.pt"
+            / "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
         )
         return config
 

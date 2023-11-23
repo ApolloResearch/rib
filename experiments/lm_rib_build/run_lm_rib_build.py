@@ -257,7 +257,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         config.out_dir.mkdir(parents=True, exist_ok=True)
         f_name = f"{config.exp_name}_rib_{'graph' if config.calculate_edges else 'Cs'}.pt"
         out_file = config.out_dir / f_name
-        if not check_outfile_overwrite(out_file, force or mpi_info.size > 1):
+        if not check_outfile_overwrite(out_file, force):
             mpi_info.comm.Abort()  # stop this and other processes
 
     dtype = TORCH_DTYPES[config.dtype]

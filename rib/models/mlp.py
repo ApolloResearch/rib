@@ -1,8 +1,7 @@
 """
 Defines a generic MLP to be used for rib.
 """
-from typing import Iterable, Optional, Tuple
-from warnings import warn
+from typing import Optional, Tuple
 
 import torch
 from fancy_einsum import einsum
@@ -106,7 +105,7 @@ class MLP(nn.Module):
         # Size of each layer (including input and output)
         sizes = [input_size] + hidden_sizes + [output_size]
 
-        self.layers: Iterable[MLPLayer] = nn.ModuleList()
+        self.layers: nn.ModuleList = nn.ModuleList()
         for i in range(len(sizes) - 1):
             final_layer = i == len(sizes) - 2
             # No activation for final layer

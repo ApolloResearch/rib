@@ -17,7 +17,7 @@ Usage:
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Optional, Union
 
 import fire
 import torch
@@ -32,7 +32,7 @@ from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import load_mlp
 from rib.log import logger
 from rib.models import MLP
-from rib.types import TORCH_DTYPES, RootPath, StrDtype
+from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 
 
@@ -61,7 +61,7 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
     return data_loader
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[str, Any]:
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:
     """Implement the main algorithm and store the graph to disk."""
     config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
@@ -131,7 +131,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[st
 
     eigenvectors = [asdict(U_info) for U_info in Us]
 
-    results = {
+    results: RibBuildResults = {
         "exp_name": config.exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,

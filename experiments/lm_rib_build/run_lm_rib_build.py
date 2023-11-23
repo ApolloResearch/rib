@@ -33,7 +33,7 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated, Any, Dict, Literal, Optional, Union, cast
+from typing import Annotated, Any, Dict, Literal, Optional, TypedDict, Union, cast
 
 import fire
 import torch
@@ -63,7 +63,7 @@ from rib.mpi_utils import (
     get_device_mpi,
     get_mpi_info,
 )
-from rib.types import TORCH_DTYPES, RootPath, StrDtype
+from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
@@ -230,7 +230,7 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[str, Any]:
+def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
@@ -409,7 +409,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Dict[st
 
     eigenvectors = [asdict(U_info) for U_info in Us]
 
-    results = {
+    results: RibBuildResults = {
         "exp_name": config.exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,

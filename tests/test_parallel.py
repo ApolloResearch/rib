@@ -1,5 +1,3 @@
-import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +8,9 @@ from mpi4py import MPI
 from torch.utils.data import ConcatDataset, TensorDataset
 
 from experiments.lm_rib_build.combine_edges import main as combine_edges
+from experiments.lm_rib_build.distributed_edges import main as run_edges
 from experiments.lm_rib_build.run_lm_rib_build import Config
 from experiments.lm_rib_build.run_lm_rib_build import main as run_rib_build
-from rib.distributed_utils import get_dist_info
 from rib.loader import get_dataset_chunk
 from rib.log import logger
 
@@ -20,7 +18,6 @@ ROOT_DIR = Path(__file__).parent.parent
 
 
 @pytest.mark.slow
-@pytest.mark.skip_ci
 class TestDistributed:
     def make_config_dict(self, exp_name: str, **kwargs):
         config_str = f"""
@@ -60,28 +57,23 @@ class TestDistributed:
         return run_rib_build(Config(**single_config_dict))["edges"]
 
     def get_double_edges(self, tmpdir):
+        double_config_path = f"{tmpdir}/double_config.yaml"
+        double_outdir_path = f"{tmpdir}/double_out/"
+
         double_config = self.make_config_dict(
             "test_double",
             calculate_edges=True,
             interaction_matrices_path=f"{tmpdir}/compute_cs_rib_Cs.pt",
-            out_dir=f"{tmpdir}/double_out/",
+            out_dir=double_outdir_path,
         )
-        with open(f"{tmpdir}/double_config.yaml", "w") as f:
+        with open(double_config_path, "w") as f:
             yaml.dump(double_config, f)
-        run_file = ROOT_DIR / "experiments/lm_rib_build/run_lm_rib_build.py"
+
         # mpi might be initialized which causes problems for running an mpiexec subcommand.
         MPI.Finalize()
-        process_return_info = subprocess.run(
-            ["mpiexec", "-n", "2", "python", str(run_file), f"{tmpdir}/double_config.yaml"],
-            capture_output=True,
-        )
-        if process_return_info.returncode != 0:
-            for err_line in process_return_info.stderr.splitlines():
-                logger.error(err_line)  # log line by line so easier to read stack trace
-            assert False, "double subprocess errored"
-        logger.info("done with computing!")
-        combine_edges(double_config["out_dir"])
-        results = torch.load(f"{double_config['out_dir']}/test_double_rib_graph_combined.pt")
+        run_edges(double_config_path, n_pods=1, pod_rank=0, n_processes=2)
+        combine_edges(double_outdir_path)
+        results = torch.load(f"{double_outdir_path}/test_double_rib_graph_combined.pt")
         return results["edges"]
 
     def test_edges_are_same(self, tmpdir):

@@ -34,30 +34,6 @@ if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
 
 
-def plot_temp(matrix: Float[Tensor, "d1 d2"], title: str) -> None:
-    from pathlib import Path
-
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    out_dir = Path(__file__).parent / "relu_temp_debug"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-
-    if matrix.dim() == 1:
-        aspect_ratio = 20 / matrix.shape[0]
-        matrix = matrix.unsqueeze(-1)
-    else:
-        aspect_ratio = matrix.shape[1] / matrix.shape[0]
-    # Set the vertical size, and let the horizontal size adjust based on the aspect ratio
-    vertical_size = 7
-    horizontal_size = vertical_size * aspect_ratio
-    plt.figure(figsize=(horizontal_size, vertical_size))
-    sns.heatmap(matrix.detach().cpu(), annot=False, cmap="YlGnBu", cbar=True, square=True)
-    plt.tight_layout()
-    plt.savefig(out_dir / f"{title}.png")
-    plt.close()
-
-
 def run_dataset_through_model(
     hooked_model: HookedModel,
     dataloader: DataLoader,
@@ -312,12 +288,13 @@ def collect_relu_interactions(
     dtype: torch.dtype,
     device: str,
     relu_metric_type: int,
-    Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
+    Cs_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
     layer_module_names: list[str],
     n_intervals: int,
     use_residual_stream: bool,
     unhooked_model: nn.Module,
     hook_names: Optional[str] = None,
+    is_lm: Optional[bool] = True,
 ) -> tuple[dict[str, Float[Tensor, "d_hidden d_hidden"]], ...]:
     """Identify whether ReLUs are synchronising.
 
@@ -339,7 +316,7 @@ def collect_relu_interactions(
         Cs: list of basis rotation matrices used only for metric type 2.
         Lambda_dash: Now pass in Lambda dashes as the first term in numerator for metric type 3.
         g_js: list of g_js as derivative of f_hat^{l+1} with respect to alpha*f_l.
-        layer_module_names: non-activation layer list including last layer, to calculate functions
+        layer_module_names: Non-activation layer list including last layer, to calculate functions
         sizes over.
 
     Returns:
@@ -362,10 +339,10 @@ def collect_relu_interactions(
                 module_name=module_name,
                 fn_kwargs={
                     "relu_metric_type": relu_metric_type,
-                    "C_next_layer": Cs[i+1].to(device),
+                    "C_next_layer": Cs_list[i+1].to(device),
                     "unhooked_model": unhooked_model,
                     "module_name_next_layer": layer_module_names[i+1],
-                    "C_next_next_layer": Cs[i+2],
+                    "C_next_next_layer": Cs_list[i+2].to(device),
                     "n_intervals": n_intervals,
                     "use_residual_stream": use_residual_stream,
                 }
@@ -379,15 +356,6 @@ def collect_relu_interactions(
         hook_name: hooked_model.hooked_data[hook_name]["relu_num"].cpu()
         for hook_name in hooked_model.hooked_data
     }
-
-    # Plot preactivations for debugging
-    preactivations = {
-        hook_name: torch.div(hooked_model.hooked_data[hook_name]["preactivations"], len(data_loader.dataset))
-        for hook_name in hooked_model.hooked_data
-    }
-    for hook_name, mat in preactivations.items():
-        plot_temp(mat, f"preact_{hook_name}")
-
     hooked_model.clear_hooked_data()
 
     match relu_metric_type: # This is just used for the denominator, since some metrics divide by the rotated function L2 norm
@@ -402,7 +370,8 @@ def collect_relu_interactions(
         device=device,
         hook_names=layer_module_names, # Changed hook layers to activation layers only
         rotate=rotate,
-        Cs=Cs,
+        Cs_list=Cs_list,
+        is_lm=is_lm
     )
 
     match relu_metric_type:
@@ -433,8 +402,9 @@ def collect_function_sizes(
     dtype: torch.dtype,
     device: str,
     rotate: bool,
-    Cs: list[Float[Tensor, "d_hidden d_hidden"]],
+    Cs_list: list[Float[Tensor, "d_hidden d_hidden"]],
     hook_names: Optional[str] = None,
+    is_lm: Optional[bool] = True,
 ) -> list[float]:
     """Calculate denominator for ReLU similarity metrics as l2 norm of function sizes in layer l+1.
 
@@ -444,14 +414,16 @@ def collect_function_sizes(
     assert len(module_names) > 0, "No modules specified."
 
     fn_size_hooks = []
-    for i, (module_name, hook_name) in enumerate(zip(module_names[:-1], hook_names)):
+    if not is_lm:
+        module_names = module_names[:-1]
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
         fn_size_hooks.append(
             Hook(
                 name=hook_name,
                 data_key="fn_size",
                 fn=function_size_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"rotate": rotate, "C_next_layer": Cs[i+1]}
+                fn_kwargs={"rotate": rotate, "C_next_layer": Cs_list[i+1]}
             )
         )
 

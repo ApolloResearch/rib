@@ -102,7 +102,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> None:
         collect_output_gram=collect_output_gram,
     )
 
-    Cs, Us, _, _, _, _, = calculate_interaction_rotations(
+    Cs, Us, _, _, _, _, _, = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
         section_names=non_output_node_layers,
         node_layers=config.node_layers,

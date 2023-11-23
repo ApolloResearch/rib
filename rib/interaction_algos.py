@@ -157,8 +157,7 @@ def calculate_interaction_rotations(
     assert len(section_names) > 0, "No sections specified."
 
     non_output_node_layers = [node_layer for node_layer in node_layers if node_layer != "output"]
-    assert len(non_output_node_layers) == len(
-        section_names
+    assert len(non_output_node_layers) == len(section_names
     ), "Must specify a hook name for each section (except the output section)."
 
     # We start appending Us and Cs from the output layer and work our way backwards

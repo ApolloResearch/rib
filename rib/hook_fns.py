@@ -17,6 +17,7 @@ import torch.nn as nn
 from einops import rearrange, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
+from copy import deepcopy
 
 from rib.linalg import (
     calc_gram_matrix,
@@ -446,6 +447,9 @@ def relu_interaction_forward_hook_fn(
         use_residual_stream: Whether to use residual stream for ReLU clustering.
     """
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
+    if module._forward_hooks:
+        module._forward_hooks.popitem()
+    assert not module._forward_hooks, "Module has multiple forward hooks"
 
     is_lm: bool = True if inputs[0].dim() == 3 else False
     outputs = output if isinstance(output, tuple) else (output,)
@@ -514,8 +518,14 @@ def relu_interaction_forward_hook_fn(
             Note the gradient calculation is where position is treated differently to batch, so be
             careful to only pass in raw output into the function."""
             ## For first term of numerator (... indicates either "b" or "b p")
+            next_layer_module = get_model_attr(unhooked_model, module_name_next_layer)
+            copy_next_layer_module = deepcopy(next_layer_module)
+            if hasattr(copy_next_layer_module, 'activation') and copy_next_layer_module._forward_hooks:
+                copy_next_layer_module.activation._forward_hooks.popitem()
+                assert not copy_next_layer_module.activation._forward_hooks, "Module activation has multiple forward hooks"
+
             g_j_next_layer: Float[Tensor, "... d_hidden_combined"] = integrated_gradient_trapezoidal_norm(
-                module=get_model_attr(unhooked_model, module_name_next_layer),
+                module=copy_next_layer_module,
                 inputs=raw_output, # Inputs (ALWAYS TUPLE) to next layer are outputs of activation module -> may need to fix concat for transformers
                 C_out=C_next_next_layer,
                 n_intervals=n_intervals,
@@ -590,6 +600,10 @@ def function_size_forward_hook_fn(
         C_next_layer: Optional, provide for rotate=True case.
     """
     assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
+    if module._forward_hooks:
+        module._forward_hooks.popitem()
+    assert not module._forward_hooks, "Module has multiple forward hooks"
+
     outputs = output if isinstance(output, tuple) else (output,)
     outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
 
@@ -645,6 +659,11 @@ def test_edges_forward_hook_fn(
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
     """
     assert isinstance(data_key, str), "data_key must be a string."
+    if module._forward_hooks:
+        module._forward_hooks.popitem()
+    elif module._forward_pre_hooks:
+        module._forward_pre_hooks.popitem()
+    assert not module._forward_hooks, "Module has multiple forward hooks"
 
     is_lm: bool = True if inputs[0].dim() == 3 else False
 
@@ -688,6 +707,59 @@ def test_edges_forward_hook_fn(
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, edge_matrix.detach())
 
 
+# def cluster_gram_forward_hook_fn(
+#     module: torch.nn.Module,
+#     inputs: Union[
+#         tuple[Float[Tensor, "batch d_hidden"]],
+#         tuple[Float[Tensor, "batch pos d_hidden"]],
+#         tuple[Float[Tensor, "batch pos d_hidden1"],
+#               Float[Tensor, "batch pos d_hidden2"]],
+#     ],
+#     output: Union[
+#         Float[Tensor, "batch d_hidden"],
+#         Float[Tensor, "batch pos d_hidden"],
+#         tuple[Float[Tensor, "batch pos d_hidden1"],
+#               Float[Tensor, "batch pos d_hidden2"]],
+#     ],
+#     hooked_data: dict[str, Any],
+#     hook_name: str,
+#     data_key: Union[str, list[str]],
+#     dataset_size: int,
+#     cluster_idxs: list[Int[Tensor, "d_hidden"]],
+#     use_residual_stream: bool,
+# ) -> None:
+#     """Calculate gram matrix of each cluster, where cluster replacement has already been tested for
+#     100% accuracy retention.
+
+#     Hook only valid for activation layer.
+#     """
+#     assert isinstance(data_key, str), "data_key must be a string."
+#     is_lm = True if inputs[0].dim() == 3 else False
+#     outputs = output if isinstance(output, tuple) else (output,)
+
+#     # Once again, fold in token dimension into batch
+#     if is_lm and not use_residual_stream:
+#         inputs = rearrange(inputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
+#         outputs = rearrange(outputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
+#     elif is_lm and use_residual_stream:
+#         inputs = rearrange(torch.cat([x for x in inputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
+#         outputs = rearrange(torch.cat([x for x in outputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
+#     else:  # Inputs always tuple, and in this case we don't have LM
+#         inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+#         outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+
+#     # Every cluster has its own gram matrix, which can be differentiated with `data_key` which tells
+#     # you the cluster number (the element of cluster_idxs it was taken from)
+#     for cluster_num, idxs in enumerate(cluster_idxs):
+#         cluster_inputs = inputs[..., idxs]
+#         cluster_outputs = outputs[..., idxs]
+#         cluster_operator = torch.div(cluster_outputs, cluster_inputs)
+#         gram_matrix = calc_gram_matrix(cluster_operator * cluster_inputs, dataset_size=dataset_size)
+#         output_gram_matrix = calc_gram_matrix(cluster_outputs, dataset_size=dataset_size)
+#         _add_to_hooked_matrix(hooked_data, hook_name, cluster_num, gram_matrix.detach())
+#         _add_to_hooked_matrix(hooked_data, hook_name, f"output_{cluster_num}", output_gram_matrix.detach())
+
+
 def cluster_gram_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
@@ -712,7 +784,7 @@ def cluster_gram_forward_hook_fn(
     """Calculate gram matrix of each cluster, where cluster replacement has already been tested for
     100% accuracy retention.
 
-    Hook only valid for activation layer.
+    Hook should be on section containing mlp_in layer and mlp_act layer in modadd transformer.
     """
     assert isinstance(data_key, str), "data_key must be a string."
     is_lm = True if inputs[0].dim() == 3 else False

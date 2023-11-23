@@ -331,6 +331,10 @@ def integrated_gradient_trapezoidal_norm(
     """
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
+        """Double check you aren't passing a forward pass which then triggers existing hooks."""
+        assert not module._forward_hooks
+        if hasattr(module, 'activation'):
+            assert not module.activation.forward_hooks
         output_const = module(*tuple(x.detach().clone() for x in inputs))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
 
@@ -344,42 +348,42 @@ def integrated_gradient_trapezoidal_norm(
         n_intervals, integral_boundary_relative_epsilon
     )
 
-    for alpha_index, alpha in enumerate(alphas):
-        # Compute f^{l+1}(f^l(alpha x))
-        alpha_inputs = tuple(alpha * x for x in inputs)
-        output_alpha = module(*alpha_inputs)
-        outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
+    with torch.set_grad_enabled(True):
+        for alpha_index, alpha in enumerate(alphas):
+            # Compute f^{l+1}(f^l(alpha x))
+            alpha_inputs = tuple(torch.mul(alpha, x) for x in inputs)
+            output_alpha = module(*alpha_inputs)
+            outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
 
-        # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
-        outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
+            # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
+            outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
+            # Concatenate the outputs over the hidden dimension
+            out_acts = torch.cat(outputs, dim=-1)
 
-        # Concatenate the outputs over the hidden dimension
-        out_acts = torch.cat(outputs, dim=-1)
+            f_hat = out_acts @ C_out if C_out is not None else out_acts
 
-        f_hat = out_acts @ C_out if C_out is not None else out_acts
+            # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
+            # to taking the gradient of each output element separately, but it lets us simply use
+            # backward() instead of more complex (and probably less efficient) vmap operations.
+            f_hat_norm = (f_hat**2).sum()
 
-        # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
-        # to taking the gradient of each output element separately, but it lets us simply use
-        # backward() instead of more complex (and probably less efficient) vmap operations.
-        f_hat_norm = (f_hat**2).sum()
+            # Accumulate the grad of f_hat_norm w.r.t the input tensors
+            f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
 
-        # Accumulate the grad of f_hat_norm w.r.t the input tensors
-        f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
+            alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
+            # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
+            # estimate at alpha=0.5)
+            if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+                alpha_in_grads = 0.5 * alpha_in_grads
 
-        alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
-        # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
-        # estimate at alpha=0.5)
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
-            alpha_in_grads = 0.5 * alpha_in_grads
+            in_grads += alpha_in_grads * interval_size
 
-        in_grads += alpha_in_grads * interval_size
+            for x in alpha_inputs:
+                assert x.grad is not None, "Input grad should not be None."
+                x.grad.zero_()
 
-        for x in alpha_inputs:
-            assert x.grad is not None, "Input grad should not be None."
-            x.grad.zero_()
-
-    # Add the minus sign in front of the IG integral, see e.g. the definition of g_j in equation (3.27)
-    in_grads *= -1
+        # Add the minus sign in front of the IG integral, see e.g. the definition of g_j in equation (3.27)
+        in_grads *= -1
 
     return in_grads
 

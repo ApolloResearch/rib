@@ -26,6 +26,7 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
+from rib.loader import load_mlp
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, load_config, set_seed
@@ -37,7 +38,6 @@ class Config(BaseModel):
     batch_size: int
     seed: int
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
-    logits_node_layer: bool  # Whether to build an extra output node layer for the logits.
     rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: str  # Data type of all tensors (except those overriden in certain functions).
@@ -46,25 +46,12 @@ class Config(BaseModel):
     relu_metric_type: int
     edit_weights: bool
     threshold: float # For dendrogram distance cutting with fcluster to make clusters
+    use_residual_stream: bool
 
     @field_validator("dtype")
     def dtype_validator(cls, v):
         assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
         return v
-
-
-def load_mlp(config_dict: dict, mlp_path: Path, device: str) -> MLP:
-    mlp = MLP(
-        hidden_sizes=config_dict["model"]["hidden_sizes"],
-        input_size=784,
-        output_size=10,
-        activation_fn=config_dict["model"]["activation_fn"],
-        bias=config_dict["model"]["bias"],
-        fold_bias=config_dict["model"]["fold_bias"],
-    )
-    mlp.load_state_dict(torch.load(
-        mlp_path, map_location=torch.device(device)))
-    return mlp
 
 
 def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
@@ -91,15 +78,17 @@ def get_Cs(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_model = HookedModel(model)
+    assert model.has_folded_bias
 
     train_loader = load_mnist_dataloader(train=True, batch_size=config.batch_size)
 
+    non_output_node_layers = [layer for layer in config.node_layers if layer != "output"]
     # Only need gram matrix for logits if we're rotating the final node layer
-    collect_output_gram = config.logits_node_layer and config.rotate_final_node_layer
+    collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_model,
-        module_names=config.node_layers,
+        module_names=non_output_node_layers,
         data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
@@ -110,7 +99,7 @@ def get_Cs(
     # Builds sqrt sorted Lambda matrix and its inverse
     Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs, Lambda_dashes = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
-        section_names=config.node_layers,
+        section_names=non_output_node_layers,
         node_layers=config.node_layers,
         hooked_model=hooked_model,
         data_loader=train_loader,
@@ -134,15 +123,11 @@ def get_relu_similarities(
     model: nn.Module,
     config: Config,
     file_path: Path,
-    Cs: list[Float[Tensor, "d_hidden1 d_hidden2"]],
-    Lambda_dashes: list[Float[Tensor, "d_hidden d_hidden"]],
+    Cs_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     layer_list = ["layers.0.linear", "layers.1.linear"]
-    if config.edit_weights:
-        for layer in layer_list:
-            edit_weights_fn(model, layer)
     model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(model)
 
@@ -156,11 +141,12 @@ def get_relu_similarities(
         dtype=TORCH_DTYPES[config.dtype],
         device=device,
         relu_metric_type=config.relu_metric_type,
-        Cs=Cs,
-        Lambda_dashes=Lambda_dashes,
+        Cs_list=Cs_list,
         layer_module_names=config.node_layers,
         n_intervals=config.n_intervals,
         unhooked_model=model,
+        use_residual_stream=config.use_residual_stream,
+        is_lm=False
     )
 
     with open(file_path, "wb") as f:
@@ -198,7 +184,7 @@ def mlp_relu_main(config_path_str: str) -> None:
     set_seed(config.seed)
 
     relu_matrices_save_file = Path(__file__).parent / f"similarity_metric_{config.relu_metric_type}_mlp"
-    Cs_save_file = Path(__file__).parent / "Cs"
+    Cs_save_file = Path(__file__).parent / "Cs_mlp"
 
     out_dir = Path(__file__).parent / f"out_mlp_relu/type_{config.relu_metric_type}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -227,8 +213,7 @@ def mlp_relu_main(config_path_str: str) -> None:
         config=config,
         model=model,
         device=device,
-        Cs=Cs_and_Lambdas["C"],
-        Lambda_dashes=Cs_and_Lambdas["Lambda_dashes"],
+        Cs_list=Cs_and_Lambdas["C"],
     )
 
     replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)

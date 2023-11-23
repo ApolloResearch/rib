@@ -179,4 +179,4 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(main, serialize=lambda _: "")

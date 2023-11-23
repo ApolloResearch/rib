@@ -99,6 +99,7 @@ class TestPythiaFloatingPointErrors:
             pytest.skip("This test does not work with batch size 1.")
 
         for node_layer_index in range(len(rib_results["float32"]["interaction_rotations"])):
+            # This only tests the first 4 columns, would like to improve in the future!
             n_max = 4
             if rib_results["float32"]["interaction_rotations"][node_layer_index]["C"] is None:
                 continue
@@ -108,9 +109,12 @@ class TestPythiaFloatingPointErrors:
             float64_C = rib_results["float64"]["interaction_rotations"][node_layer_index]["C"][
                 :, :n_max
             ]
+            # This is a super weak test, would like to improve in the future!
             assert torch.allclose(
-                float32_C.to(torch.float64), float64_C, rtol=0.5, atol=0.5 * float64_C.max()
-            ), "Interaction rotation difference between float32 and float64."
+                float32_C.to(torch.float64),
+                float64_C,
+                atol=0.5 * float64_C.max(),
+            ), f"Interaction rotation {node_layer_index} difference between float32 and float64."
 
     def test_eigenvectors(self, rib_results: dict) -> None:
         """Test that some (n_max) of the eigenvectors are identical between float32 and float64."""

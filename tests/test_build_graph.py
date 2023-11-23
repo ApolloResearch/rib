@@ -57,11 +57,10 @@ def graph_build_test(
         Cs = results["interaction_rotations"]
         E_hats = results["edges"]
 
-        # Sort, and reverse the order of the Lambda_abs
+        # Sort each row, and reverse the order of the Lambda_abs
         Lambdas = [
-            torch.sort(Lambda_abs, descending=True).values for Lambda_abs in Lambda_abs[::-1]
+            torch.sort(lambda_row, descending=True).values for lambda_row in Lambda_abs[::-1]
         ]
-        # TODO : ???? why Lambda_abs in both?
 
         # The output interaction matrix should be None if rotate_final_node_layer is False
         if not results["config"]["rotate_final_node_layer"]:

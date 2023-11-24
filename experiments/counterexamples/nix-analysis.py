@@ -1,6 +1,8 @@
 # %%
 import os
 
+import matplotlib.pyplot as plt
+
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
@@ -19,10 +21,11 @@ N_SAMPLES = 100_000
 DEVICE = "cpu"
 DTYPE = torch.float32
 IN_SIZE = 2
+ACT_FN = "relu"
 
 
 def get_model():
-    model = MLP([2, 2], input_size=IN_SIZE, output_size=2, bias=True, activation_fn="identity")
+    model = MLP([2, 2], input_size=IN_SIZE, output_size=2, bias=True, activation_fn=ACT_FN)
 
     for l in model.layers:
         l: MLPLayer
@@ -46,7 +49,8 @@ model = get_model()
 hooked_model = HookedModel(model)
 
 # %%
-rand_vectors = torch.randn((N_SAMPLES, IN_SIZE))
+DATA_CENTER = 1
+rand_vectors = torch.randn((N_SAMPLES, IN_SIZE)) + DATA_CENTER
 dataset = TensorDataset(rand_vectors, torch.zeros(N_SAMPLES))
 dataloader = DataLoader(dataset, batch_size=1_000)
 node_layers = [f"layers.{i}" for i in range(len(model.layers))] + ["output"]
@@ -106,7 +110,6 @@ E_hats = collect_interaction_edges(
 
 # %%
 
-import matplotlib.pyplot as plt
 
 fig, axs = plt.subplots(1, 3, figsize=(10, 3))
 
@@ -147,10 +150,9 @@ plt.tight_layout()
 plot_interaction_graph(
     E_hats.items(),
     node_layers,
-    "idenity",
+    ACT_FN,
     nodes_per_layer=2,
     out_file="experiments/counterexamples/out/identity.png",
-    colors=[["mediumblue", "deeppink"]] * 4,
+    colors=[["mediumblue", "deeppink"] for _ in range(4)],
 )
-
 # %%

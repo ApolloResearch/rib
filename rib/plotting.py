@@ -131,7 +131,7 @@ def plot_interaction_graph(
     # Create the undirected graph
     graph = nx.Graph()
 
-    fig, ax = plt.subplots(1, 1, figsize=(20, 10))
+    fig, ax = plt.subplots(1, 1, figsize=(8, 2.5))
 
     layers = _create_node_layers(edges)
     # Add nodes to the graph object

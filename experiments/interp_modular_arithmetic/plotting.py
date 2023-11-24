@@ -193,7 +193,7 @@ def _imshow_complex(
         cbar2.ax.set_yticklabels(cbar2.ax.get_yticklabels(), rotation=45)
 
 
-def fft_plot_cos_phase_1d(acts, rtol=1e-4):
+def fft_plot_cos_phase_1d(acts, rtol=1e-4, labels=True, title=""):
     r"""
     Plot the cos phase of a 1D FFT data. The input to the FFT is assumed to be real-valued.
 
@@ -288,12 +288,18 @@ def fft_plot_cos_phase_1d(acts, rtol=1e-4):
         vmax=np.pi,
         s=10,
     )
-    ax.plot(freq_labels_ticks, freq_amplitudes, lw=0.5)
+    if labels:
+        for i in range(freq_amplitudes.shape[1]):
+            ax.plot(freq_labels_ticks, freq_amplitudes[:, i], lw=0.5, label=f"Dim {i}")
+        ax.legend(loc="upper right")
+    else:
+        ax.plot(freq_labels_ticks, freq_amplitudes, lw=0.5, label=f"Dim {i}")
     ax.set_xticks(np.arange(len(freq_labels)))
     ax.set_xticklabels(freq_labels, rotation=-90)
     ax.set_ylabel("Amplitude A")
     ax.set_xlabel("Each term A cos f = A*cos(2π/113 f + φ)")
     fig.colorbar(im, ax=ax, label="Phase φ")
+    fig.suptitle(title)
     ax.grid(color="grey", linestyle="--", alpha=0.3)
     return fig, ax
 
@@ -339,13 +345,21 @@ def fft_plot_eikx_2d(
     nrows=2,
     ncols=2,
     figsize=None,
+    phase_colorbar=True,
+    mag_colorbar=True,
 ):
     figsize = (ncols * 4, nrows * 4) if figsize is None else figsize
     fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
     freqs_shifted, acts_shifted = _fftshift_2d(acts_orig)
     for i, ax in enumerate(axes.flatten()):
         ax.set_title(f"Dim {i}")
-        _imshow_complex(freqs_shifted, acts_shifted[:, :, i], ax)
+        _imshow_complex(
+            freqs_shifted,
+            acts_shifted[:, :, i],
+            ax,
+            phase_colorbar=phase_colorbar,
+            mag_colorbar=mag_colorbar,
+        )
     fig.suptitle(title)
 
 
@@ -383,9 +397,9 @@ def fft_plot_coscos_sinsin(
     mag_coscos[1:, 1:] += acts_minus.abs()
     mag_sinsin = acts_plus.abs()[1:, 1:] - acts_minus.abs()
     for row, [ax_plus, ax_minus] in enumerate(axes):
-        ax_plus.set_title(f"Dim {row}, A cos(f_x x + φ_x) * cos(f_y y + φ_y)")
+        ax_plus.set_title(f"Dim {row}, A cos(f_x x + φ_x) * cos(f_y y + φ_y)", fontsize=8)
         _imshow_complex(freqs=freqs_shifted, acts=mag_coscos[:, :, row], ax=ax_plus)
-        ax_minus.set_title(f"Dim {row}, B sin(f_x x + φ_x) * sin(f_y y + φ_y)")
+        ax_minus.set_title(f"Dim {row}, B sin(f_x x + φ_x) * sin(f_y y + φ_y)", fontsize=8)
         _imshow_complex(freqs=freqs_shifted, acts=mag_sinsin[:, :, row], ax=ax_minus)
     fig.suptitle(title)
 

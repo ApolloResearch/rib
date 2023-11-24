@@ -99,7 +99,7 @@ def plot_interaction_graph(
     exp_name: str,
     nodes_per_layer: Union[int, list[int]],
     out_file: Path,
-    colors: Optional[list[list[str]]] = None,
+    colors: Optional[list[Union[str, list[str]]]] = None,
 ) -> None:
     """Plot the interaction graph for the given edges.
 
@@ -149,7 +149,8 @@ def plot_interaction_graph(
             pos[node] = (i, j * spacing)
 
     # Draw nodes
-    # colors = ["black", "green", "orange", "purple"]  # Add more colors if you have more layers
+    if colors is None:
+        colors = ["black", "green", "orange", "purple"]
     options = {"edgecolors": "tab:gray", "node_size": 200, "alpha": 1}
     for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
         nx.draw_networkx_nodes(graph, pos, nodelist=layer, node_color=colors[i], **options)

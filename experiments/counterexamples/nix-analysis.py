@@ -1,5 +1,6 @@
 # %%
 import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 
@@ -120,7 +121,7 @@ for layer in range(3):
 
     c_info = Cs[layer]
     assert c_info.node_layer_name == f"layers.{layer}"
-    C = c_info.C
+    C: torch.Tensor = c_info.C  # type: ignore
     for i, color in zip([0, 1], ["mediumblue", "deeppink"]):
         dx, dy = C[[0, 1], i]
         ax.axline((0, 0), (dx, dy), color=color)
@@ -148,11 +149,11 @@ plt.tight_layout()
 # %%
 
 plot_interaction_graph(
-    E_hats.items(),
+    list(E_hats.items()),
     node_layers,
     ACT_FN,
     nodes_per_layer=2,
-    out_file="experiments/counterexamples/out/identity.png",
+    out_file=Path("experiments/counterexamples/out/{ACT_FN}.png"),
     colors=[["mediumblue", "deeppink"] for _ in range(4)],
 )
 # %%

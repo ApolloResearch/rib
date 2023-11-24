@@ -196,7 +196,9 @@ def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
     if isinstance(config.dataset, HFDatasetConfig):
         assert isinstance(loaded_config.dataset, HFDatasetConfig)
         if config.dataset.return_set_frac is not None:
-            assert loaded_config.dataset.return_set_frac is not None
+            assert (
+                loaded_config.dataset.return_set_frac is not None
+            ), "Can't set return_set_frac if the loaded config didn't use it"
             assert (
                 config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
             ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"

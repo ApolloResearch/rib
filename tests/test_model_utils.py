@@ -2,6 +2,7 @@ from typing import TypeVar
 
 import pytest
 import torch
+from transformers import AutoTokenizer
 
 from rib.hook_fns import attn_scores_pre_forward_hook
 from rib.hook_manager import Hook, HookedModel
@@ -236,8 +237,8 @@ def test_n_ctx_attn_pattern_pythia():
     """
     set_seed(0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float32
-    atol = 1e-6
+    dtype = torch.float64
+    atol = 1e-8
     module_id = "attn_out.0"
     batch_size = 2
     short_n_ctx = 20
@@ -305,4 +306,70 @@ def test_n_ctx_attn_pattern_pythia():
     assert torch.allclose(attn_scores, attn_scores_long, atol=atol), (
         f"Attention scores for short_n_ctx={short_n_ctx} and long_n_ctx={long_n_ctx} are not equal."
         f"Max difference: {torch.max(torch.abs(attn_scores - attn_scores_long))}"
+    )
+
+
+@pytest.mark.slow()
+def test_n_ctx_padding_pythia():
+    """Test that padding a short context does not change the model output for pythia-14m."""
+
+    set_seed(0)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float64
+    atol = 1e-8
+    module_id = "attn_out.0"
+    batch_size = 2
+    short_n_ctx = 20
+    long_n_ctx = 2048
+
+    seq_model, _ = load_sequential_transformer(
+        node_layers=[module_id],
+        last_pos_module_type=None,
+        tlens_pretrained="pythia-14m",
+        tlens_model_path=None,
+        eps=1e-5,
+        fold_bias=True,
+        dtype=dtype,
+        device=device,
+    )
+
+    seq_model.eval()
+    seq_model.to(device=torch.device(device), dtype=dtype)
+    hooked_model = HookedModel(seq_model)
+
+    # Create a fake data sample of length short_n_ctx
+    input_ids_short = torch.randint(
+        0,
+        seq_model.cfg.d_vocab,
+        (batch_size, short_n_ctx),
+        device=device,
+    )
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+    tokenizer.pad_token = tokenizer.eos_token
+    # Add padding tokens to the fake data sample so that it is length n_ctx=2048
+    input_ids_long = torch.cat(
+        [
+            input_ids_short,
+            torch.full(
+                (batch_size, long_n_ctx - short_n_ctx),
+                tokenizer.pad_token_id,
+                dtype=torch.long,
+                device=device,
+            ),
+        ],
+        dim=1,
+    )
+
+    # Ran short_ctx example through model
+    with torch.inference_mode():
+        out_short = hooked_model(input_ids_short)
+
+    # Ran long_ctx example through model
+    with torch.inference_mode():
+        out_long = hooked_model(input_ids_long)
+
+    # Check that the output for the first short_n_ctx positions is the same
+    assert torch.allclose(out_short[0], out_long[0][:, :short_n_ctx, :], atol=atol), (
+        f"Model output for short_n_ctx={short_n_ctx} and long_n_ctx={long_n_ctx} are not equal."
+        f"Max difference: {torch.max(torch.abs(out_short[0] - out_long[0][..., :short_n_ctx, :]))}"
     )

@@ -1,4 +1,9 @@
 #  %%
+# IPython magic
+%reload_ext autoreload
+%autoreload 2
+
+# Imports
 from pathlib import Path
 
 import einops
@@ -10,12 +15,13 @@ from jaxtyping import Float
 from plotting import *
 from transformations import fft2, pca_activations, svd_activations
 
+# Settings
 torch.set_grad_enabled(False)
-
 parent_dir = Path(__file__).parent
 
 # %%
 
+# Setup
 activations = Activations(
     config_path_str=parent_dir.joinpath("mod_arithmetic_config.yaml"),
     interaction_graph_path="/mnt/ssd-apollo/stefan/rib/modular_arithmetic_interaction_graph.pt",
@@ -64,6 +70,7 @@ sec_2_1_resid_post_mlp_acts = activations.get_section_activations(section="secti
 # %%
 
 sec_pre_2_resid_embed_acts_x_fft = fft2(sec_pre_2_resid_embed_acts_x)
+sec_pre_2_resid_embed_acts_y_fft = fft2(sec_pre_2_resid_embed_acts_y)
 plot_fft_activations(sec_pre_2_resid_embed_acts_x_fft)
 # %%
 
@@ -239,6 +246,29 @@ def print_acts_and_phases(ffted_acts, index, p=113, lower=600, upper=np.inf):
                     f"Phase {phase/np.pi*180:.1f} deg",
                     f"Phrase as real & imag: e^(i phi) = {np.cos(phase):.3f} + i {np.sin(phase):.3f}",
                 )
+
+
+sec_0_2_resid_post_attn_acts_z = sec_0_2_resid_post_attn_acts[:, :, 0, :]
+sec_0_2_resid_post_attn_acts_z_svd = svd_activations(sec_0_2_resid_post_attn_acts_z)
+sec_0_2_resid_post_attn_acts_z_pca = pca_activations(sec_0_2_resid_post_attn_acts_z)
+sec_0_2_resid_post_attn_acts_z_svd_fft = fft2(sec_0_2_resid_post_attn_acts_z_svd)
+sec_0_2_resid_post_attn_acts_z_pca_fft = fft2(sec_0_2_resid_post_attn_acts_z_pca)
+
+
+fft_plot_eikx_2d(sec_0_2_resid_post_attn_acts_z_svd_fft, nrows=2)
+fft_plot_cosplusminus(sec_0_2_resid_post_attn_acts_z_svd_fft, nrows=4)
+fft_plot_coscos_sinsin(sec_0_2_resid_post_attn_acts_z_svd_fft, nrows=4)
+
+
+sec_2_1_resid_post_mlp_acts_z = sec_2_1_resid_post_mlp_acts[:, :, 0, :]
+sec_2_1_resid_post_mlp_acts_z_svd = svd_activations(sec_2_1_resid_post_mlp_acts_z)
+sec_2_1_resid_post_mlp_acts_z_pca = pca_activations(sec_2_1_resid_post_mlp_acts_z)
+sec_2_1_resid_post_mlp_acts_z_svd_fft = fft2(sec_2_1_resid_post_mlp_acts_z_svd)
+sec_2_1_resid_post_mlp_acts_z_pca_fft = fft2(sec_2_1_resid_post_mlp_acts_z_pca)
+
+fft_plot_eikx_2d(sec_2_1_resid_post_mlp_acts_z_svd_fft, nrows=2)
+fft_plot_cosplusminus(sec_2_1_resid_post_mlp_acts_z_svd_fft, nrows=4)
+fft_plot_coscos_sinsin(sec_2_1_resid_post_mlp_acts_z_svd_fft, nrows=4)
 
 
 print_acts_and_phases(attention_pattern_p_to_x_svd_fft, 1, lower=3e3)

@@ -5,8 +5,192 @@ from pathlib import Path
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
+import plotly.express as px
 import torch
 from matplotlib.colors import LogNorm, Normalize, SymLogNorm
+
+
+# Neel's helper functions
+def imshow(tensor, renderer=None, xaxis="", yaxis="", **kwargs):
+    px.imshow(
+        tensor.numpy(),
+        color_continuous_midpoint=0.0,
+        color_continuous_scale="RdBu",
+        labels={"x": xaxis, "y": yaxis},
+        **kwargs,
+    ).show(renderer)
+
+
+def line(tensor, renderer=None, xaxis="", yaxis="", **kwargs):
+    px.line(tensor.numpy(), labels={"x": xaxis, "y": yaxis}, **kwargs).show(renderer)
+
+
+def scatter(x, y, xaxis="", yaxis="", caxis="", renderer=None, **kwargs):
+    x = x.numpy()
+    y = y.numpy()
+    px.scatter(y=y, x=x, labels={"x": xaxis, "y": yaxis, "color": caxis}, **kwargs).show(renderer)
+
+
+# Stefan's helper functions
+def _colorize(r, angle, vmin=0, vmax=None):
+    """
+    Convert magnitude and phase to color  for plotting, brightness (white=0) and hue (real=?).
+
+    Input shapes [x, y]. Used for 2D FFT imshows, transpose included.
+    """
+    vmax = r.max() if vmax is None else vmax
+    pi = np.pi
+    h = (angle + pi) / (2 * pi)  # (x, y)
+    # 1 = white, minimum to 1-1/1.5 = dark but not black
+    l = 1 - (r - vmin) / (vmax - vmin) / 1.5  # (x, y)
+    s = 0.8
+    c = np.vectorize(hls_to_rgb)(h, l, s)  # --> tuple
+    c = np.array(c)  # (3,x,y)
+    c = c.swapaxes(0, 2)  # (y,x,3) -- this combines transpose and move color to 3rd dim!
+    return c  # Imshow wants [y, x, rgb]
+
+
+def _fftshift_1d(acts, skip_warning=False):
+    n_freqs = acts.shape[0]
+    if acts.ndim == 2 and acts.shape[1] == n_freqs and not skip_warning:
+        raise Warning("acts is square, sure this is 1D?")
+    freqs = torch.fft.fftfreq(n_freqs)
+    freqs_shifted = torch.fft.fftshift(freqs)
+    acts_shifted = torch.fft.fftshift(acts, dim=0)
+    return freqs_shifted, acts_shifted
+
+
+def _fftshift_2d(acts):
+    n_freqs = acts.shape[0]
+    assert acts.shape[1] == n_freqs, "acts must be square"
+    freqs = torch.fft.fftfreq(n_freqs)
+    freqs_shifted = torch.fft.fftshift(freqs)
+    acts_shifted = torch.fft.fftshift(acts, dim=[0, 1])
+    return freqs_shifted, acts_shifted
+
+
+def __ftshift_to_cosplusminus(acts_shifted):
+    """Convert fftshifted acts to the cos(x+y+φ) and cos(x-y+φ) terms.
+
+    For every combination of non-zero frequencies k_x, k_y, there are four terms:
+    = A_++ e^(i2π/113 (k_x x + k_y y)) + A_+- e^(i2π/113 (k_x x - k_y y))
+    + A_-+ e^(i2π/113 (-k_x x + k_y y)) + A_-- e^(i2π/113 (-k_x x - k_y y))
+
+    These can be combined into two real terms using A_++ = conj(A_--), A_+- = conj(A_-+):
+    = 2*A_++.real cos(2π/113 (k_x x + k_y y)) - 2*A_++.imag sin(2π/113 (k_x x + k_y y))
+    + 2*A_+-.real cos(2π/113 (k_x x - k_y y)) - 2*A_+-.imag sin(2π/113 (k_x x - k_y y))
+
+    And these terms can again be combined into two terms using harmonic addition:
+    = 2*|A_++| cos(2π/113 (k_x x + k_y y) + atan2(2*A_++.imag, 2*A_++.real))
+    + 2*|A_+-| cos(2π/113 (k_x x - k_y y) + atan2(2*A_+-.imag, 2*A_+-.real))
+
+    For the zero-frequency terms, say k_y = 0 WLOG, we have A_+0 = conj(A_-0) and
+    = A_+0 e^(i2π/113 (k_x x)) + A_-0 e^(i2π/113 (-k_x x))
+    = 2*A_+0.real cos(2π/113 (k_x x)) - 2*A_+0.imag sin(2π/113 (k_x x))
+    = 2*|A_+0| cos(2π/113 (k_x x) + atan2(2*A_+0.imag, 2*A_+0.real))
+    and for k_x = 0 we have
+    = 2*|A_0+| cos(2π/113 (k_y y) + atan2(2*A_0+.imag, 2*A_0+.real))
+    and for A_00 we have A_00 = real and
+    = A_00 e^0
+
+    So we can plot a 2D FFT as a 2D plot of x+y and x-y waves with magnitude and phase each, either
+    as two panels (x+y and x-y separately), or as a single panel with x+y and x-y interleaved.
+
+    Args:
+    """
+    n_freqs = acts_shifted.shape[0]
+    assert acts_shifted.shape[1] == n_freqs, "acts must be square"
+    assert n_freqs % 2 == 1, f"n_freqs={n_freqs} must be odd"
+    i_center = n_freqs // 2
+
+    A_pp = acts_shifted[i_center + 1 :, i_center + 1 :]
+    A_pm = acts_shifted.flip(dims=(1,))[i_center + 1 :, i_center + 1 :]
+    A_0p = acts_shifted[i_center, i_center + 1 :]
+    A_p0 = acts_shifted[i_center + 1 :, i_center]
+    A_00 = acts_shifted[i_center, i_center]
+    # Redundant terms
+    # A_mm = acts_shifted.flip(dims=(0, 1))[i_center + 1 :, i_center + 1 :]
+    # A_mp = acts_shifted.flip(dims=(0,))[i_center + 1 :, i_center + 1 :]
+    # A_0m = acts_shifted.flip(dims=(1,))[i_center, i_center + 1 :]
+    # A_m0 = acts_shifted.flip(dims=(0,))[i_center + 1 :, i_center]
+
+    cos_plus = torch.zeros_like(acts_shifted[: i_center + 1, : i_center + 1])
+    cos_plus[0, 0] = A_00
+    cos_plus[0, 1:] = A_0p
+    cos_plus[1:, 0] = A_p0
+    cos_plus[1:, 1:] = A_pp
+    cos_minus = A_pm
+
+    return cos_plus, cos_minus
+
+    # mag_plus = torch.zeros_like(acts_shifted[: i_center + 1, : i_center + 1])
+    # mag_plus[0, 0] = A_00.abs()
+    # mag_plus[0, 1:] = A_0p.abs()
+    # mag_plus[1:, 0] = A_p0.abs()
+    # mag_plus[1:, 1:] = A_pp.abs()
+    # mag_minus = A_pm.abs()
+
+    # phase_plus = torch.zeros_like(acts_shifted[: i_center + 1, : i_center + 1])
+    # phase_plus[0, 0] = 0
+    # phase_plus[0, 1:] = A_0p.angle()  # angle == atan2(im, re)
+    # phase_plus[1:, 0] = A_p0.angle()
+    # phase_plus[1:, 1:] = A_pp.angle()
+    # phase_minus = A_pm.angle()
+
+    # return mag_plus, phase_plus, mag_minus, phase_minus
+
+
+def _extent_from_acts(acts, modes):
+    if acts.shape[0] == modes.shape[0]:
+        extent = [modes[0], modes[-1], modes[0], modes[-1]]
+    elif acts.shape[0] == modes.shape[0] // 2 + 1:
+        extent = [0, modes[-1], 0, modes[-1]]
+    elif acts.shape[0] == modes.shape[0] // 2:
+        n_freqs = modes.shape[0]
+        i_center = n_freqs // 2
+        extent = [modes[i_center + 1], modes[-1], modes[i_center + 1], modes[-1]]
+    else:
+        raise ValueError(f"Cannot infer extent from acts.shape={acts.shape}")
+    return extent
+
+
+def _imshow_complex(
+    freqs, acts, ax, mag_colorbar=True, phase_colorbar=False, extent=None, phase=None
+):
+    """Take in default FFT acts and plot the magnitude and phase in a single imshow plot."""
+    assert acts.ndim == 2, "acts must be 2D"
+    assert acts.shape[0] == acts.shape[1], "acts must be square"
+    assert freqs.ndim == 1, "freqs must be 1D"
+    modes = 113 * freqs
+    extent = _extent_from_acts(acts, modes) if extent is None else extent
+    if phase is None:
+        mag = acts.abs()
+        phase = acts.angle()
+    else:
+        assert acts.imag.abs().max() == 0
+        assert phase.imag.abs().max() == 0
+        assert acts.shape == phase.shape
+        mag = acts
+
+    vmax = mag.max()
+    im = ax.imshow(
+        _colorize(mag, phase, vmax=vmax),
+        extent=extent,
+        origin="lower",
+        aspect="equal",
+    )
+    ax.set_xlabel("f_x")
+    ax.set_ylabel("f_y")
+    if phase_colorbar:
+        sm = plt.cm.ScalarMappable(cmap="hsv", norm=Normalize(vmin=-np.pi, vmax=np.pi))
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax)
+    if mag_colorbar:
+        sm2 = plt.cm.ScalarMappable(cmap="Greys", norm=Normalize(vmin=0, vmax=vmax))
+        sm2.set_array([])
+        cbar2 = plt.colorbar(sm2, ax=ax)
+        # Rotate labels 45
+        cbar2.ax.set_yticklabels(cbar2.ax.get_yticklabels(), rotation=45)
 
 
 def fft_plot_cos_phase_1d(acts, rtol=1e-4):
@@ -109,59 +293,103 @@ def fft_plot_cos_phase_1d(acts, rtol=1e-4):
     ax.set_xticklabels(freq_labels, rotation=-90)
     ax.set_ylabel("Amplitude A")
     ax.set_xlabel("Each term A cos f = A*cos(2π/113 f + φ)")
-    cbar = fig.colorbar(im, ax=ax, label="Phase φ")
+    fig.colorbar(im, ax=ax, label="Phase φ")
     ax.grid(color="grey", linestyle="--", alpha=0.3)
     return fig, ax
 
 
-# def fft_plot_cos_phase_2d(acts, rtol=1e-4):
-#     r"""
-#     Plot the cos-phase-plot of a 2D FFT data. The input to the FFT is assumed to be real-valued.
+# def annotated_fft_line_plot(
+#     acts,
+#     ax=None,
+#     fftshift=True,
+#     title="Default title",
+#     figsize=(8, 8),
+#     xlabel="Fourier frequency",
+#     ylabel="Magnitude",
+#     label=None,
+#     annotation_magnitude_threshold=0.05,
+# ):
+#     if ax is None:
+#         _, ax = plt.subplots(figsize=figsize)
+#     freqs = torch.fft.fftfreq(acts.shape[0])
+#     if fftshift:
+#         freqs = torch.fft.fftshift(freqs)
+#         acts = torch.fft.fftshift(acts)
+#     phase = acts.angle()
+#     acts = acts.abs()
+#     ax.set_title(title)
+#     ax.set_xlabel(xlabel)
+#     ax.set_ylabel(ylabel)
+#     ax.plot(freqs, acts, label=label)
+#     for j, v in enumerate(acts):
+#         if v > annotation_magnitude_threshold * acts.max():
+#             sign = "+" if phase[j] >= 0 else "-"
+#             ax.text(
+#                 freqs[j],
+#                 min(v + 0.05 * acts.max(), 0.95 * acts.max()),
+#                 f"@{freqs[j]:.3f}:\nMag {v:.1e}\nPhase {phase[j]/np.pi:.2f}π",
+#                 rotation=0,
+#                 fontsize=10,
+#             )
 
-#     Note that the input to the FFT is N^2 numbers, so the output needs to be 4 values for every
-#     pair of two frequencies (4*63^2)
 
-#     The derivation follows from the 1D FFT. We know that B_f e^(i2π/113 f x) + B_f* e^(i2π/113 f x)
-#     is equal to a cos(2π/113 f x + c), so e^(i2π/113 (f_x x + f_y y))
-#     is equal to cos(2π/113 (f_x x + f_y y) + c). Note that this goes from 113**2 complex terms
-#     (with 1 discrete symmetry, so 226 DOF) to 113 terms with amplitude and phase (226 DOF).
-
-#     Note how the 2D FFT takes in 113**2 numbers, and outputs 62*63"""
-
-
-def annotated_fft_line_plot(
-    acts,
-    ax=None,
-    fftshift=True,
-    title="Default title",
-    figsize=(8, 8),
-    xlabel="Fourier frequency",
-    ylabel="Magnitude",
-    label=None,
-    annotation_magnitude_threshold=0.05,
+def fft_plot_eikx_2d(
+    acts_orig,
+    title="Default title eikx",
+    nrows=2,
+    ncols=2,
+    figsize=None,
 ):
-    if ax is None:
-        _, ax = plt.subplots(figsize=figsize)
-    freqs = torch.fft.fftfreq(acts.shape[0])
-    if fftshift:
-        freqs = torch.fft.fftshift(freqs)
-        acts = torch.fft.fftshift(acts)
-    phase = acts.angle()
-    acts = acts.abs()
-    ax.set_title(title)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.plot(freqs, acts, label=label)
-    for j, v in enumerate(acts):
-        if v > annotation_magnitude_threshold * acts.max():
-            sign = "+" if phase[j] >= 0 else "-"
-            ax.text(
-                freqs[j],
-                min(v + 0.05 * acts.max(), 0.95 * acts.max()),
-                f"@{freqs[j]:.3f}:\nMag {v:.1e}\nPhase {phase[j]/np.pi:.2f}π",
-                rotation=0,
-                fontsize=10,
-            )
+    figsize = (ncols * 4, nrows * 4) if figsize is None else figsize
+    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
+    freqs_shifted, acts_shifted = _fftshift_2d(acts_orig)
+    for i, ax in enumerate(axes.flatten()):
+        ax.set_title(f"Dim {i}")
+        _imshow_complex(freqs_shifted, acts_shifted[:, :, i], ax)
+    fig.suptitle(title)
+
+
+def fft_plot_cosplusminus(
+    acts_orig,
+    title="Default title cosplusminus",
+    nrows=2,
+    figsize=None,
+):
+    ncols = 2
+    figsize = (ncols * 4, nrows * 4) if figsize is None else figsize
+    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
+    freqs_shifted, acts_shifted = _fftshift_2d(acts_orig)
+    acts_plus, acts_minus = __ftshift_to_cosplusminus(acts_shifted)
+    for row, [ax_plus, ax_minus] in enumerate(axes):
+        ax_plus.set_title(f"Dim {row}, cos(f_x x + f_y y + φ)")
+        _imshow_complex(freqs_shifted, acts_plus[:, :, row], ax_plus)
+        ax_minus.set_title(f"Dim {row}, cos(f_x x - f_y y + φ)")
+        _imshow_complex(freqs_shifted, acts_minus[:, :, row], ax_minus)
+    fig.suptitle(title)
+
+
+def fft_plot_coscos_sinsin(
+    acts_orig,
+    title="Default title cosplusminus",
+    nrows=2,
+    figsize=None,
+):
+    ncols = 2
+    figsize = (ncols * 4, nrows * 4) if figsize is None else figsize
+    fig, axes = plt.subplots(nrows, ncols, constrained_layout=True, figsize=figsize)
+    freqs_shifted, acts_shifted = _fftshift_2d(acts_orig)
+    acts_plus, acts_minus = __ftshift_to_cosplusminus(acts_shifted)
+    mag_coscos = acts_plus.abs()
+    mag_coscos[1:, 1:] += acts_minus.abs()
+    mag_sinsin = acts_plus.abs()[1:, 1:] - acts_minus.abs()
+    for row, [ax_plus, ax_minus] in enumerate(axes):
+        ax_plus.set_title(f"Dim {row}, A cos(f_x x + φ_x) * cos(f_y y + φ_y)")
+        _imshow_complex(freqs=freqs_shifted, acts=mag_coscos[:, :, row], ax=ax_plus)
+        ax_minus.set_title(f"Dim {row}, B sin(f_x x + φ_x) * sin(f_y y + φ_y)")
+        _imshow_complex(freqs=freqs_shifted, acts=mag_sinsin[:, :, row], ax=ax_minus)
+    fig.suptitle(title)
+
+    # TODO phases
 
 
 def plot_activations(acts, title="Default title", nrows=2, ncols=2, figsize=(8, 8), center=True):
@@ -251,7 +479,7 @@ def plot_fft_activations(
             abs_norm = Normalize(vmin=0, vmax=vminmax)
             if col == 0:
                 im = ax.imshow(
-                    acts.abs()[:, :, row].numpy(),
+                    acts.abs()[:, :, row].numpy().T,
                     cmap="Greys",
                     norm=abs_norm,
                     aspect="equal",
@@ -360,18 +588,6 @@ def plot_fft_activations_cosphase(
     freqs_plus = freqs[n_freqs // 2 + 1 :]
     i_center = n_freqs // 2
 
-    def colorize(r, angle, vmin=0, vmax=None):
-        vmax = r.max() if vmax is None else vmax
-        pi = np.pi
-        h = (angle + pi) / (2 * pi) + 0.5
-        # l=1 for r=vmin, l=0 for r=vmax
-        l = 1 - (r - vmin) / (vmax - vmin)
-        s = 0.8
-        c = np.vectorize(hls_to_rgb)(h, l, s)  # --> tuple
-        c = np.array(c)  # -->  array of (3,n,m) shape, but need (n,m,3)
-        c = c.swapaxes(0, 2)
-        return c
-
     fig, axes = plt.subplots(nrows, ncols=2, constrained_layout=True, figsize=figsize)
     for row in range(nrows):
         acts = torch.fft.fftshift(acts_in[:, :, row], dim=[0, 1])
@@ -403,13 +619,13 @@ def plot_fft_activations_cosphase(
         phase_array2 = A_pm.angle()
         vmax = max(mag_array.max(), mag_array2.max())
         axes[row, 0].imshow(
-            colorize(mag_array, phase_array, vmax=vmax),
+            _colorize(mag_array, phase_array, vmax=vmax),
             extent=[0, i_center, 0, i_center],
             origin="lower",
         )
 
         axes[row, 1].imshow(
-            colorize(mag_array2, phase_array2, vmax=vmax),
+            _colorize(mag_array2, phase_array2, vmax=vmax),
             extent=[1, i_center, 1, i_center],
             origin="lower",
         )
@@ -484,7 +700,7 @@ def plot_fft_activations_coscos(
     def colorize(r, angle, vmin=0, vmax=None):
         vmax = r.max() if vmax is None else vmax
         pi = np.pi
-        h = (angle + pi) / (2 * pi) + 0.5
+        h = (angle + pi) / (2 * pi)
         # l=1 for r=vmin, l=0 for r=vmax
         l = 1 - (r - vmin) / (vmax - vmin)
         s = 0.8
@@ -535,7 +751,6 @@ def plot_fft_activations_coscos(
             origin="lower",
         )
         axes[row, 0].set_ylabel(f"k_y")
-        print("mag_array shape", mag_array.shape)
         axes[row, 0].text(0.5, 0.5, f"Max val: {mag_array.max():.2e}")
         axes[row, 1].text(0.5, 0.5, f"Max val: {mag_array2.max():.2e}")
         axes[row, 0].grid(color="grey", linestyle="--", alpha=0.3)

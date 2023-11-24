@@ -24,8 +24,6 @@ from typing import Literal, Optional, Union
 import fire
 import torch
 from pydantic import BaseModel, Field
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 
 from rib.ablations import (
     AblationAccuracies,
@@ -34,12 +32,12 @@ from rib.ablations import (
     load_basis_matrices,
     run_ablations,
 )
+from rib.data import VisionDatasetConfig
 from rib.hook_manager import HookedModel
-from rib.loader import load_mlp
+from rib.loader import create_data_loader, load_dataset, load_mlp
 from rib.log import logger
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
-    REPO_ROOT,
     check_outfile_overwrite,
     eval_model_accuracy,
     load_config,
@@ -65,15 +63,7 @@ class Config(BaseModel):
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
-
-
-def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
-    transform = transforms.ToTensor()
-    dataset = datasets.MNIST(
-        root=REPO_ROOT / ".data", train=train, download=True, transform=transform
-    )
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    return data_loader
+    dataset: VisionDatasetConfig = VisionDatasetConfig()
 
 
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> AblationAccuracies:
@@ -115,17 +105,20 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
     mlp.to(dtype)
     hooked_mlp = HookedModel(mlp)
 
-    test_loader = load_mnist_dataloader(train=False, batch_size=config.batch_size)
+    dataset = load_dataset(config.dataset, "train")
+    data_loader = create_data_loader(
+        dataset, shuffle=True, batch_size=config.batch_size, seed=config.seed
+    )
 
     # Test model accuracy before ablation
-    accuracy = eval_model_accuracy(hooked_mlp, test_loader, dtype=dtype, device=device)
+    accuracy = eval_model_accuracy(hooked_mlp, data_loader, dtype=dtype, device=device)
     logger.info("Accuracy before ablation: %.2f%%", accuracy * 100)
 
     accuracies: AblationAccuracies = run_ablations(
         basis_matrices=basis_matrices,
         ablation_node_layers=config.ablation_node_layers,
         hooked_model=hooked_mlp,
-        data_loader=test_loader,
+        data_loader=data_loader,
         eval_fn=eval_model_accuracy,
         graph_module_names=config.ablation_node_layers,
         schedule_config=config.schedule,

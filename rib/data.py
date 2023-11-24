@@ -1,5 +1,5 @@
 """Define custom datasets."""
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import torch
 from jaxtyping import Int
@@ -95,3 +95,13 @@ class ModularArithmeticDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self.data)
+
+
+class VisionDatasetConfig(BaseModel):
+    source: Literal["custom"] = "custom"
+    name: Literal["CIFAR10", "MNIST"] = "MNIST"
+    return_set_frac: Optional[float] = None
+    seed: Optional[int] = None
+
+
+DatasetConfig = Union[HFDatasetConfig, ModularArithmeticDatasetConfig, VisionDatasetConfig]

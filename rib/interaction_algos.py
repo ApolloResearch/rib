@@ -177,7 +177,8 @@ def calculate_interaction_rotations(
         ), f"Final node layer {node_layers[-1]} not in gram matrices."
         with torch.inference_mode():
             # Get the out_dim of logits by hackily passing a datapoint through it
-            out_samples = hooked_model(data_loader.dataset[0][0].to(device))
+            # data_loader.dataset[0][0] is the X tensor. We unsqueeze to preserve batchdim
+            out_samples = hooked_model(data_loader.dataset[0][0].unsqueeze(0).to(device))
             out_sample: Float[Tensor, "... out_dim"] = (
                 out_samples[0] if isinstance(out_samples, tuple) else out_samples
             )

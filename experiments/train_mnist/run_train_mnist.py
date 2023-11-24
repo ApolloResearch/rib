@@ -18,6 +18,8 @@ from torchvision import datasets, transforms
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
+from rib.data import VisionDatasetConfig
+from rib.loader import create_data_loader, load_dataset
 from rib.log import logger
 from rib.models import MLP
 from rib.models.utils import save_model
@@ -53,6 +55,7 @@ class Config(BaseModel):
     model: ModelConfig
     train: TrainConfig
     wandb: Optional[WandbConfig]
+    data: VisionDatasetConfig = VisionDatasetConfig()
 
 
 @logging_redirect_tqdm()
@@ -158,17 +161,17 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
 
-    # Load the MNIST train dataset
-    transform = transforms.ToTensor()
-    train_data = datasets.MNIST(
-        root=REPO_ROOT / ".data", train=True, download=True, transform=transform
+    dataset = load_dataset(config.data, "train")
+    train_loader = create_data_loader(
+        dataset, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
     )
-    train_loader = DataLoader(train_data, batch_size=config.train.batch_size, shuffle=True)
 
+    #  Get the input size from the flattened first batch
+    in_size = dataset[0][0].flatten().shape[0]
     # Initialize the MLP model
     model = MLP(
         config.model.hidden_sizes,
-        input_size=784,
+        input_size=in_size,
         output_size=10,
         activation_fn=config.model.activation_fn,
         bias=config.model.bias,
@@ -188,12 +191,12 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
     trained_model = train_model(config, model, train_loader, device, run_name)
 
     # Evaluate the model on the test set
-    test_data = datasets.MNIST(
-        root=REPO_ROOT / ".data", train=False, download=True, transform=transform
+    test_dataset = load_dataset(config.data, "test")
+    test_loader = create_data_loader(
+        test_dataset, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
     )
-    test_loader = DataLoader(test_data, batch_size=config.train.batch_size, shuffle=False)
     accuracy = evaluate_model(trained_model, test_loader, device)
-    logger.info("Accuracy of the network on the 10000 test images: %d %%", accuracy)
+    logger.info(f"Accuracy of the network on the {len(test_dataset)} test images: %d %%", accuracy)  # type: ignore
     if config.wandb:
         wandb.log({"test/accuracy": accuracy})
     return accuracy

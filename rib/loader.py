@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal, Optional, Sized, Union, overload
 
 import torch
+import torchvision
 import yaml
 from datasets import load_dataset as hf_load_dataset
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
@@ -11,14 +12,16 @@ from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
 
 from rib.data import (
+    DatasetConfig,
     HFDatasetConfig,
     ModularArithmeticDataset,
     ModularArithmeticDatasetConfig,
+    VisionDatasetConfig,
 )
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.converter import convert_tlens_weights
-from rib.utils import set_seed, train_test_split
+from rib.utils import REPO_ROOT, set_seed, train_test_split
 
 
 def load_sequential_transformer(
@@ -104,7 +107,7 @@ def load_sequential_transformer(
 def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
     mlp = MLP(
         hidden_sizes=config_dict["model"]["hidden_sizes"],
-        input_size=784,
+        input_size=784 if config_dict["data"]["name"] == "MNIST" else 3072,
         output_size=10,
         activation_fn=config_dict["model"]["activation_fn"],
         bias=config_dict["model"]["bias"],
@@ -219,7 +222,7 @@ def tokenize_dataset(
 
 @overload
 def load_dataset(
-    dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig],
+    dataset_config: DatasetConfig,
     return_set: Literal["train", "test", "all"],
     tlens_model_path: Optional[Path] = None,
 ) -> Dataset:
@@ -228,7 +231,7 @@ def load_dataset(
 
 @overload
 def load_dataset(
-    dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig],
+    dataset_config: DatasetConfig,
     return_set: Literal["both"],
     tlens_model_path: Optional[Path] = None,
 ) -> tuple[Dataset, Dataset]:
@@ -236,7 +239,7 @@ def load_dataset(
 
 
 def load_dataset(
-    dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig],
+    dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig, VisionDatasetConfig],
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
     tlens_model_path: Optional[Path] = None,
 ) -> Union[Dataset, tuple[Dataset, Dataset]]:
@@ -260,7 +263,7 @@ def load_dataset(
             https://huggingface.co/datasets/wikipedia)
 
     Args:
-        dataset_config (Union[ModularArithmeticDatasetConfig, HFDatasetConfig]): The dataset config.
+        dataset_config (DatasetConfig): The dataset config.
         return_set (Union[Literal["train", "test", "all"], Literal["both"]]): The dataset to return.
         tlens_model_path (Optional[Path]): The path to the tlens model. Used for collecting config
             for the modular arithmetic dataset used to train the model.
@@ -273,7 +276,7 @@ def load_dataset(
         return create_modular_arithmetic_dataset(
             dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
         )
-    else:
+    elif isinstance(dataset_config, HFDatasetConfig):
         # Load dataset from huggingface
         assert return_set in ["train", "test"], "Can only load train or test sets from HF"
         assert not (
@@ -300,6 +303,21 @@ def load_dataset(
         tokenizer.pad_token = tokenizer.eos_token
         dataset = tokenize_dataset(dataset=raw_dataset, tokenizer=tokenizer, n_ctx=n_ctx)
         return dataset
+    else:
+        assert isinstance(dataset_config, VisionDatasetConfig)
+        assert dataset_config.name in ["MNIST", "CIFAR10"]
+        dataset_fn = getattr(torchvision.datasets, dataset_config.name)
+        all_data = dataset_fn(
+            root=REPO_ROOT / ".data",
+            train=return_set == "train",
+            download=True,
+            transform=torchvision.transforms.ToTensor(),
+        )
+        if dataset_config.return_set_frac is not None:
+            end_idx = int(len(all_data) * dataset_config.return_set_frac)
+            return all_data[:end_idx]
+        else:
+            return all_data
 
 
 @overload

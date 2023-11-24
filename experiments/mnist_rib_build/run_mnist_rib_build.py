@@ -25,11 +25,13 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+from tqdm.contrib.logging import logging_redirect_tqdm
 
+from rib.data import VisionDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
-from rib.loader import load_mlp
+from rib.loader import create_data_loader, load_dataset, load_mlp
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
@@ -51,17 +53,10 @@ class Config(BaseModel):
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
+    dataset: VisionDatasetConfig = VisionDatasetConfig()
 
 
-def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
-    transform = transforms.ToTensor()
-    dataset = datasets.MNIST(
-        root=REPO_ROOT / ".data", train=train, download=True, transform=transform
-    )
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    return data_loader
-
-
+@logging_redirect_tqdm()
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:
     """Implement the main algorithm and store the graph to disk."""
     config = load_config(config_path_or_obj, config_model=Config)
@@ -92,7 +87,10 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_mlp = HookedModel(mlp)
 
-    train_loader = load_mnist_dataloader(train=True, batch_size=config.batch_size)
+    dataset = load_dataset(config.dataset, "train")
+    train_loader = create_data_loader(
+        dataset, shuffle=True, batch_size=config.batch_size, seed=config.seed
+    )
 
     non_output_node_layers = [layer for layer in config.node_layers if layer != "output"]
     # Only need gram matrix for logits if we're rotating the final node layer

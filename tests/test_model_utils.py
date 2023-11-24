@@ -1,10 +1,19 @@
-from typing import TypeVar
+from typing import Any, TypeVar, Union
 
+import einops
 import pytest
 import torch
+from fancy_einsum import einsum
+from jaxtyping import Float
+from torch import Tensor
 
+from rib.hook_manager import Hook, HookedModel
+from rib.loader import load_sequential_transformer
 from rib.models import SequentialTransformer, SequentialTransformerConfig
+from rib.models.sequential_transformer.components import AttentionOut
+from rib.models.sequential_transformer.transformer import MultiSequential
 from rib.models.utils import create_list_partitions
+from rib.utils import set_seed
 
 T = TypeVar("T")
 
@@ -213,3 +222,144 @@ def test_validate_node_layers_valid(node_layers: list[str], module_ids: list[str
 def test_validate_node_layers_invalid(node_layers: list[str], module_ids: list[str]):
     with pytest.raises(ValueError):
         SequentialTransformer.validate_node_layers(node_layers, module_ids)
+
+
+def _attn_scores_pre_forward_hook(
+    module: torch.nn.Module,
+    inputs: tuple[Float[Tensor, "batch pos head_index_d_head"], ...],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+) -> None:
+    """Calculate and store the attention scores.
+
+    inputs consists of (residual, q, k, v), as per the input to AttentionOut.forward
+    """
+    assert isinstance(module, AttentionOut)
+    _, q, k, v = inputs
+    # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)
+    q = einops.rearrange(
+        q,
+        "... pos (head_index d_head) -> ... pos head_index d_head",
+        head_index=module.cfg.n_heads,
+    )
+    k = einops.rearrange(
+        k,
+        "... pos (head_index d_head) -> ... pos head_index d_head",
+        head_index=module.cfg.n_heads,
+    )
+    v = einops.rearrange(
+        v,
+        "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
+        head_index=module.cfg.n_heads,
+    )
+
+    in_dtype = v.dtype
+
+    if in_dtype not in [torch.float32, torch.float64]:
+        # If using 16 bits, increase the precision to avoid numerical instabilities
+        q = q.to(torch.float32)
+        k = k.to(torch.float32)
+    attn_scores = (
+        einsum(
+            "... query_pos head_index d_head, \
+                    ... key_pos head_index d_head \
+                    -> ... head_index query_pos key_pos",
+            q,
+            k,
+        )
+        / module.attn_scale
+    )  # [..., head_index, query_pos, key_pos]
+
+    # Only supports causal attention (not bidirectional)
+    # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
+    attn_scores = module.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
+
+    hooked_data[hook_name] = {data_key: attn_scores}
+
+
+def test_n_ctx_attn_pattern_pythia():
+    """Test that varying n_ctx produces the same attention scores for pythia-14m.
+
+    Note that this test doesn't test any particular feature that we've implemented, but rather
+    that pythia will work regardless of the value of n_ctx.
+
+    Process is a follows:
+    1. Initialize a pythia-14m model.
+    2. Create a fake data sample of length short_n_ctx.
+    3. Add random tokens to the fake data sample so that it is length long_n_ctx=2048.
+    4. Apply a pre-forward hook to attn_out.0 to calculate and save the attention scores.
+    5. Assert that the attention scores are the same for the first short_n_ctx positions.
+    """
+    set_seed(0)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float32
+    atol = 1e-6
+    module_id = "attn_out.0"
+    batch_size = 2
+    short_n_ctx = 20
+    long_n_ctx = 2048
+
+    seq_model, _ = load_sequential_transformer(
+        node_layers=[module_id],
+        last_pos_module_type=None,
+        tlens_pretrained="pythia-14m",
+        tlens_model_path=None,
+        eps=1e-5,
+        fold_bias=True,
+        dtype=torch.float32,
+        device=device,
+    )
+
+    # We only care about the first module in section_0, so remove the rest
+    seq_model.sections.section_0 = MultiSequential(seq_model.sections.section_0[0])
+
+    seq_model.eval()
+    seq_model.to(device=torch.device(device), dtype=dtype)
+    hooked_model = HookedModel(seq_model)
+
+    # Create a fake data sample of length short_n_ctx
+    input_ids_short = torch.randint(
+        0, seq_model.cfg.d_vocab, (batch_size, short_n_ctx), device=device
+    )
+    # Add extra tokens to the fake data sample so that it is length n_ctx=2048
+    input_ids_long = torch.cat(
+        [
+            input_ids_short,
+            torch.randint(
+                0, seq_model.cfg.d_vocab, (batch_size, long_n_ctx - short_n_ctx), device=device
+            ),
+        ],
+        dim=1,
+    )
+
+    # Add a pre-forward hook to attn_out.0 and save the attention scores
+    hook = Hook(
+        name="pre_forward_attn_out.0",
+        data_key="attn_scores",
+        fn=_attn_scores_pre_forward_hook,
+        module_name=seq_model.module_id_to_section_id[module_id],
+    )
+    with torch.inference_mode():
+        # Ran short_ctx example through model
+        hooked_model(input_ids_short, hooks=[hook])
+
+    attn_scores = hooked_model.hooked_data["pre_forward_attn_out.0"]["attn_scores"].detach().clone()
+
+    with torch.inference_mode():
+        # Ran long_ctx example through model
+        hooked_model(input_ids_long, hooks=[hook])
+
+    # Collect the attention scores for the first short_n_ctx positions
+    attn_scores_long = (
+        hooked_model.hooked_data["pre_forward_attn_out.0"]["attn_scores"][
+            ..., :short_n_ctx, :short_n_ctx
+        ]
+        .detach()
+        .clone()
+    )
+
+    assert torch.allclose(attn_scores, attn_scores_long, atol=atol), (
+        f"Attention scores for short_n_ctx={short_n_ctx} and long_n_ctx={long_n_ctx} are not equal."
+        f"Max difference: {torch.max(torch.abs(attn_scores - attn_scores_long))}"
+    )

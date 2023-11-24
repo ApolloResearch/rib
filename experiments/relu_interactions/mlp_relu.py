@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import fire
 import torch
@@ -11,15 +11,13 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
+from experiments.relu_interactions.config_schemas import MLPConfig
 from experiments.relu_interactions.relu_interaction_utils import (
     edit_weights_fn,
     relu_plot_and_cluster,
     swap_all_layers_using_clusters,
 )
-from rib.data_accumulator import (
-    collect_gram_matrices,
-    collect_relu_interactions,
-)
+from rib.data_accumulator import collect_gram_matrices, collect_relu_interactions
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,
@@ -30,28 +28,6 @@ from rib.loader import load_mlp
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, load_config, set_seed
-
-
-class Config(BaseModel):
-    exp_name: str
-    mlp_path: Path
-    batch_size: int
-    seed: int
-    truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
-    rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
-    n_intervals: int  # The number of intervals to use for integrated gradients.
-    dtype: str  # Data type of all tensors (except those overriden in certain functions).
-    activation_layers: list[str]
-    node_layers: list[str]
-    relu_metric_type: int
-    edit_weights: bool
-    threshold: float # For dendrogram distance cutting with fcluster to make clusters
-    use_residual_stream: bool
-
-    @field_validator("dtype")
-    def dtype_validator(cls, v):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
 
 
 def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoader:
@@ -67,19 +43,16 @@ def load_mnist_dataloader(train: bool = False, batch_size: int = 64) -> DataLoad
 
 def get_Cs(
     model: nn.Module,
-    config: Config,
+    hooked_model: HookedModel,
+    config: MLPConfig,
     file_path: str,
+    device: str,
 ) -> dict[str,
     Union[list[InteractionRotation],
     list[Eigenvectors],
     list[Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"]],
     list[Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"]]],
 ]:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-    hooked_model = HookedModel(model)
-    assert model.has_folded_bias
-
     train_loader = load_mnist_dataloader(train=True, batch_size=config.batch_size)
 
     non_output_node_layers = [layer for layer in config.node_layers if layer != "output"]
@@ -121,21 +94,16 @@ def get_Cs(
 
 def get_relu_similarities(
     model: nn.Module,
-    config: Config,
+    hooked_model: HookedModel,
+    config: MLPConfig,
     file_path: Path,
+    device: str,
     Cs_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    layer_list = ["layers.0.linear", "layers.1.linear"]
-    model.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-    hooked_mlp = HookedModel(model)
-
-    train_loader = load_mnist_dataloader(
-        train=True, batch_size=config.batch_size)
+    train_loader = load_mnist_dataloader(train=True, batch_size=config.batch_size)
 
     relu_similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
-        hooked_model=hooked_mlp,
+        hooked_model=hooked_model,
         module_names=config.activation_layers,
         data_loader=train_loader,
         dtype=TORCH_DTYPES[config.dtype],
@@ -156,10 +124,11 @@ def get_relu_similarities(
 
 
 def check_and_open_file(
-    file_path: Path,
     get_var_fn: callable,
     model: nn.Module,
-    config: Config,
+    hooked_model: Optional[HookedModel] = None,
+    config: MLPConfig,
+    file_path: Path,
     device: str,
     **kwargs
 ) -> Union[Any, tuple[Any, ...]]:
@@ -171,7 +140,14 @@ def check_and_open_file(
         with file_path.open("rb") as f:
             var = torch.load(f, map_location=device)
     else:
-        var = get_var_fn(model, config, file_path, **kwargs)
+        var = get_var_fn(
+            model=model,
+            hooked_model=hooked_model,
+            config=config,
+            file_path=file_path,
+            device=device,
+            **kwargs
+        )
 
     return var
 
@@ -180,7 +156,7 @@ def check_and_open_file(
 def mlp_relu_main(config_path_str: str) -> None:
     """MAIN FUNCTION 1. Test for ReLU interactions (separate to main RIB algorithm)."""
     config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+    config = load_config(config_path, config_model=MLPConfig)
     set_seed(config.seed)
 
     relu_matrices_save_file = Path(__file__).parent / f"similarity_metric_{config.relu_metric_type}_mlp"
@@ -197,6 +173,7 @@ def mlp_relu_main(config_path_str: str) -> None:
     hooked_model = HookedModel(model)
     # print_all_modules(model) # Check module names were correctly defined
     model.eval()  # Run in inference only
+    assert model.has_folded_bias
 
     # dict of InteractionRotation objects or Tensors
     Cs_and_Lambdas: dict[str, list[Union[InteractionRotation, Float[Tensor, ...]]]] = check_and_open_file(
@@ -205,6 +182,7 @@ def mlp_relu_main(config_path_str: str) -> None:
         config=config,
         model=model,
         device=device,
+        hooked_model=hooked_model,
     )
 
     relu_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = check_and_open_file(
@@ -213,6 +191,7 @@ def mlp_relu_main(config_path_str: str) -> None:
         config=config,
         model=model,
         device=device,
+        hooked_model=hooked_model,
         Cs_list=Cs_and_Lambdas["C"],
     )
 
@@ -230,6 +209,3 @@ def mlp_relu_main(config_path_str: str) -> None:
 
 if __name__ == "__main__":
     fire.Fire(mlp_relu_main)
-    """Run above: python run_relu_interactions.py relu_interactions.yaml
-    Check ReLU metric used and whether weights are edited in yaml file
-    """

@@ -168,139 +168,139 @@ def detect_edges(matrix, sigma=1):
 
 # Swapping ReLUs ==========================================================
 
-def swap_single_layer(
-    hooked_model: HookedModel,
-    relu_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
-    config: "Config",
-    data_loader: DataLoader,
-    device: str,
-    layer_num: int,
-    out_dir: str,
-) -> None:
-    """Now that we have gotten our similarity matrices, swap in forward pass.
-    Check loss and accuracy drop, and plot as a function of similarity tolerance for pruning."""
-    num_valid_swaps_list: list[int] = []
-    loss_change_list: list[float] = []
-    acc_change_list: list[float] = []
-    random_loss_change_list: list[float] = []
-    random_acc_change_list: list[float] = []
-    tols = [[1e-3, 7e-4, 4e-4, 1e-4, 7e-5, 4e-5],
-            [1e-4, 7e-5, 4e-5, 1e-5, 7e-6, 4e-6]]
-    matrix = list(relu_matrices.values())[layer_num]
-    module_name = list(config.activation_layers)[layer_num]
+# def swap_single_layer(
+#     hooked_model: HookedModel,
+#     relu_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
+#     config: "Config",
+#     data_loader: DataLoader,
+#     device: str,
+#     layer_num: int,
+#     out_dir: str,
+# ) -> None:
+#     """Now that we have gotten our similarity matrices, swap in forward pass.
+#     Check loss and accuracy drop, and plot as a function of similarity tolerance for pruning."""
+#     num_valid_swaps_list: list[int] = []
+#     loss_change_list: list[float] = []
+#     acc_change_list: list[float] = []
+#     random_loss_change_list: list[float] = []
+#     random_acc_change_list: list[float] = []
+#     tols = [[1e-3, 7e-4, 4e-4, 1e-4, 7e-5, 4e-5],
+#             [1e-4, 7e-5, 4e-5, 1e-5, 7e-6, 4e-6]]
+#     matrix = list(relu_matrices.values())[layer_num]
+#     module_name = list(config.activation_layers)[layer_num]
 
-    for i in range(len(tols[0])):
-        tol = tols[layer_num][i]
-        row_min_idxs, num_valid_swaps = find_indices_to_replace(matrix, tol)
-        num_valid_swaps_list.apeend(num_valid_swaps)
+#     for i in range(len(tols[0])):
+#         tol = tols[layer_num][i]
+#         row_min_idxs, num_valid_swaps = _find_indices_to_replace(matrix, tol)
+#         num_valid_swaps_list.apeend(num_valid_swaps)
 
-        print(f"num_valid_swaps: {num_valid_swaps}")
+#         print(f"num_valid_swaps: {num_valid_swaps}")
 
-        unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_swapped_relu_loss(
-            hooked_model=hooked_model,
-            module_name=module_name,  # Used for hooks
-            data_loader=data_loader,
-            dtype=TORCH_DTYPES[config.dtype],
-            device=device,
-            replacement_idx_list=row_min_idxs,
-            num_replaced=num_valid_swaps,
-        )
+#         unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_swapped_relu_loss(
+#             hooked_model=hooked_model,
+#             module_name=module_name,  # Used for hooks
+#             data_loader=data_loader,
+#             dtype=TORCH_DTYPES[config.dtype],
+#             device=device,
+#             replacement_idxs=row_min_idxs,
+#             num_replaced=num_valid_swaps,
+#         )
 
-        print(
-            f"unhooked loss {unhooked_loss}",
-            f"hooked loss {hooked_loss}",
-            f"random hooked loss {random_hooked_loss}"
-            f"unhooked accuracy {unhooked_accuracy}",
-            f"hooked accuracy {hooked_accuracy}",
-            f"random hooked accuracy {random_hooked_accuracy}"
-        )
+#         print(
+#             f"unhooked loss {unhooked_loss}",
+#             f"hooked loss {hooked_loss}",
+#             f"random hooked loss {random_hooked_loss}"
+#             f"unhooked accuracy {unhooked_accuracy}",
+#             f"hooked accuracy {hooked_accuracy}",
+#             f"random hooked accuracy {random_hooked_accuracy}"
+#         )
 
-        loss_change_list.append((hooked_loss - unhooked_loss) / unhooked_loss)
-        acc_change_list.append(
-            (hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
-        random_loss_change_list.append(
-            (random_hooked_loss - unhooked_loss) / unhooked_loss)
-        random_acc_change_list.append(
-            (random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+#         loss_change_list.append((hooked_loss - unhooked_loss) / unhooked_loss)
+#         acc_change_list.append(
+#             (hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+#         random_loss_change_list.append(
+#             (random_hooked_loss - unhooked_loss) / unhooked_loss)
+#         random_acc_change_list.append(
+#             (random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
 
-    plot_changes(num_valid_swaps_list, loss_change_list, random_loss_change_list,
-                 acc_change_list, random_acc_change_list, out_dir, layer_num)
+#     plot_changes(num_valid_swaps_list, loss_change_list, random_loss_change_list,
+#                  acc_change_list, random_acc_change_list, out_dir, layer_num)
 
 
-def swap_all_layers(
-    hooked_model: HookedModel,
-    relu_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
-    tols: list[list[float]],
-    config: "Config",
-    data_loader: DataLoader,
-    device: str,
-    out_dir: str,
-) -> None:
-    """Assuming universal synchronisation matrices (no need to recalculate in forward pass due to
-    changes in previous layer), swap out subsets of all layers. Plot resulting loss and accuracy
-    loss.
+# def swap_all_layers(
+#     hooked_model: HookedModel,
+#     relu_matrices: list[Float[Tensor, "d_hidden d_hidden"]],
+#     tols: list[list[float]],
+#     config: "Config",
+#     data_loader: DataLoader,
+#     device: str,
+#     out_dir: str,
+# ) -> None:
+#     """Assuming universal synchronisation matrices (no need to recalculate in forward pass due to
+#     changes in previous layer), swap out subsets of all layers. Plot resulting loss and accuracy
+#     loss.
 
-    Currently only tested on MLP.
+#     Currently only tested on MLP.
 
-    If it is true that the sychronisation swaps made in the previous layer(s) are accurate, the
-    fundamental computation in future layers should not break, because only activations (0s or 1s)
-    are swapped, not pre-activations or post-activations.
-    """
-    # list[float]
-    loss_change_list, acc_change_list, random_loss_change_list, random_acc_change_list = [], [], [], []
-    # Outer loop: tolerance value; inner loop: layer
-    num_valid_swaps_list_list: list[list[int]] = []
-    matrix_list = list(relu_matrices.values())
-    module_list = list(config.activation_layers)
+#     If it is true that the sychronisation swaps made in the previous layer(s) are accurate, the
+#     fundamental computation in future layers should not break, because only activations (0s or 1s)
+#     are swapped, not pre-activations or post-activations.
+#     """
+#     # list[float]
+#     loss_change_list, acc_change_list, random_loss_change_list, random_acc_change_list = [], [], [], []
+#     # Outer loop: tolerance value; inner loop: layer
+#     num_valid_swaps_list_list: list[list[int]] = []
+#     matrix_list = list(relu_matrices.values())
+#     module_list = list(config.activation_layers)
 
-    for i in range(len(tols[0])):
-        # Count number of swaps in each layer - for plotting
-        num_valid_swaps_list: list[int] = []
-        # Outer loop: modules; inner loop: indices of hidden layer
-        # Passed into hook function
-        replacement_idx_list: list[Int[Tensor, "d_hidden"]] = []
-        for layer_num, (module, matrix) in enumerate(zip(module_list, matrix_list)):
-            tol = tols[layer_num][i]
-            row_min_idxs, num_valid_swaps = find_indices_to_replace(
-                matrix, tol)
-            replacement_idx_list.append(row_min_idxs)
-            num_valid_swaps_list.apeend(num_valid_swaps)
+#     for i in range(len(tols[0])):
+#         # Count number of swaps in each layer - for plotting
+#         num_valid_swaps_list: list[int] = []
+#         # Outer loop: modules; inner loop: indices of hidden layer
+#         # Passed into hook function
+#         replacement_idx_list: list[Int[Tensor, "d_hidden"]] = []
+#         for layer_num, (module, matrix) in enumerate(zip(module_list, matrix_list)):
+#             tol = tols[layer_num][i]
+#             row_min_idxs, num_valid_swaps = _find_indices_to_replace(
+#                 matrix, tol)
+#             replacement_idx_list.append(row_min_idxs)
+#             num_valid_swaps_list.append(num_valid_swaps)
 
-        print(f"Num valid swaps: {num_valid_swaps_list}")
-        num_valid_swaps_list_list.append(num_valid_swaps_list)
+#         print(f"Num valid swaps: {num_valid_swaps_list}")
+#         num_valid_swaps_list_list.append(num_valid_swaps_list)
 
-        unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_relu_loss(
-            hooked_model=hooked_model,
-            module_names=module_list,  # Used for hooks
-            data_loader=data_loader,
-            dtype=TORCH_DTYPES[config.dtype],
-            device=device,
-            replacement_idx_list=replacement_idx_list,
-            num_replaced_list=num_valid_swaps_list,
-            use_residual_stream=config.use_residual_stream,
-        )
+#         unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_relu_loss(
+#             hooked_model=hooked_model,
+#             module_names=module_list,  # Used for hooks
+#             data_loader=data_loader,
+#             dtype=TORCH_DTYPES[config.dtype],
+#             device=device,
+#             replacement_idx_list=replacement_idx_list,
+#             num_replaced_list=num_valid_swaps_list,
+#             use_residual_stream=config.use_residual_stream,
+#         )
 
-        print(
-            f"unhooked loss {unhooked_loss}",
-            f"hooked loss {hooked_loss}",
-            f"random hooked loss {random_hooked_loss}\n"
-            f"unhooked accuracy {unhooked_accuracy}",
-            f"hooked accuracy {hooked_accuracy}",
-            f"random hooked accuracy {random_hooked_accuracy}"
-        )
+#         print(
+#             f"unhooked loss {unhooked_loss}",
+#             f"hooked loss {hooked_loss}",
+#             f"random hooked loss {random_hooked_loss}\n"
+#             f"unhooked accuracy {unhooked_accuracy}",
+#             f"hooked accuracy {hooked_accuracy}",
+#             f"random hooked accuracy {random_hooked_accuracy}"
+#         )
 
-        loss_change_list.append((hooked_loss - unhooked_loss) / unhooked_loss)
-        acc_change_list.append(
-            (hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
-        random_loss_change_list.append(
-            (random_hooked_loss - unhooked_loss) / unhooked_loss)
-        random_acc_change_list.append(
-            (random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+#         loss_change_list.append((hooked_loss - unhooked_loss) / unhooked_loss)
+#         acc_change_list.append(
+#             (hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
+#         random_loss_change_list.append(
+#             (random_hooked_loss - unhooked_loss) / unhooked_loss)
+#         random_acc_change_list.append(
+#             (random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
 
-    mean_swaps_list = [sum(swaps) / len(swaps)
-                       for swaps in num_valid_swaps_list_list]
-    plot_changes(mean_swaps_list, loss_change_list, random_loss_change_list,
-                 acc_change_list, random_acc_change_list, out_dir)
+#     mean_swaps_list = [sum(swaps) / len(swaps)
+#                        for swaps in num_valid_swaps_list_list]
+#     plot_changes(mean_swaps_list, loss_change_list, random_loss_change_list,
+#                  acc_change_list, random_acc_change_list, out_dir)
 
 
 def swap_all_layers_using_clusters(
@@ -313,14 +313,12 @@ def swap_all_layers_using_clusters(
 ) -> None:
     """Swap based on indices of clusters. Currently only tested on transformer.
 
+    Hook activation layers only.
+
     Args:
         replacement_idxs_from_cluster: Swap indices from clustering algorithm run beforehand.
         num_valid_swaps_from_cluster: List of total swaps made, calculated while running clustering.
     """
-    loss_change_list: list[float] = []
-    acc_change_list: list[float] = []
-    random_loss_change_list: list[float] = []
-    random_acc_change_list: list[float] = []
     module_list = list(config.activation_layers)
 
     unhooked_loss, hooked_loss, random_hooked_loss, unhooked_accuracy, hooked_accuracy, random_hooked_accuracy = calculate_all_swapped_relu_loss(
@@ -343,16 +341,8 @@ def swap_all_layers_using_clusters(
         f"random hooked accuracy {random_hooked_accuracy}"
     )
 
-    loss_change_list.append((hooked_loss - unhooked_loss) / unhooked_loss)
-    acc_change_list.append(
-        (hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
-    random_loss_change_list.append(
-        (random_hooked_loss - unhooked_loss) / unhooked_loss)
-    random_acc_change_list.append(
-        (random_hooked_accuracy - unhooked_accuracy) / unhooked_accuracy)
 
-
-def find_indices_to_replace(matrix: Float[Tensor, "d1 d1"], tol: float) -> tuple[Float[Tensor, "d1"], int]:
+def _find_indices_to_replace(matrix: Float[Tensor, "d1 d1"], tol: float) -> tuple[Float[Tensor, "d1"], int]:
     """Use for swapping function to, for each row (m, index to swap), find:
     - The minimum distance to another neuron
     - Whether this minimum distance is below a given threshold -> if true, then swap mth row with nth column
@@ -376,7 +366,8 @@ def find_indices_to_replace(matrix: Float[Tensor, "d1 d1"], tol: float) -> tuple
 # Weights/ Models ========================================================
 
 def edit_weights_fn(model: HookedModel, layer_name: str) -> None:
-    """Make the bias really big.
+    """Make the bias really big. Used for toy test case in MLP.
+
     Weight matrix dimensions are (output, input).
     """
     layer = get_nested_attribute(model, layer_name)

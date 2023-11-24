@@ -9,6 +9,7 @@ each hook function. Therefore, these arguments must be included in the signature
 
 Otherwise, the hook function operates like a regular pytorch hook function.
 """
+from copy import deepcopy
 from functools import partial
 from typing import Any, Optional, Union
 
@@ -17,7 +18,6 @@ import torch.nn as nn
 from einops import rearrange, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
-from copy import deepcopy
 
 from rib.linalg import (
     calc_gram_matrix,
@@ -800,7 +800,9 @@ def cluster_gram_forward_hook_fn(
     cluster_idxs: list[Int[Tensor, "d_hidden"]],
     use_residual_stream: bool,
 ) -> None:
-    """Calculate gram matrix of each cluster, where cluster replacement has already been tested for
+    """Status: temporary research function.
+
+    Calculate gram matrix of each cluster, where cluster replacement has already been tested for
     100% accuracy retention.
 
     Hook should be on section containing mlp_in layer and mlp_act layer in modadd transformer.
@@ -832,7 +834,4 @@ def cluster_gram_forward_hook_fn(
 
     whole_layer_gram = calc_gram_matrix(inputs, dataset_size=dataset_size)
     _add_to_hooked_matrix(hooked_data, hook_name, "whole layer", whole_layer_gram.detach())
-
-
-
 

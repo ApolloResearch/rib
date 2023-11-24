@@ -157,5 +157,14 @@
             "console": "integratedTerminal",
             "justMyCode": true
         },
+        {
+            "name": "lm_delete_cluster_duplicate",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/relu_interactions/transformer_cluster_del.py",
+            "args": "${workspaceFolder}/experiments/relu_interactions/transformer_relu.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
     ]
 }

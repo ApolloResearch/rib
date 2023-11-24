@@ -1,31 +1,3 @@
-"""This script builds a RIB graph for a language model.
-We build the graph using a SequentialTransformer model, with weights ported over from a
-transformer-lens model.
-
-Steps to build the graph:
-1. Load a model from transformerlens (either from_pretrained or via ModelConfig).
-2. Fold in the biases into the weights.
-3. Convert the model to a SequentialTransformer model, which has nn.Modules corresponding to each
-    node layer.
-5. Collect the gram matrices at each node layer.
-6. Calculate the interaction basis matrices (labelled C in the paper) for each node layer, starting
-    from the final node layer and working backwards.
-7. Calculate the edges of the interaction graph between each node layer.
-
-Usage:
-    python run_lm_rib_build.py <path/to/config.yaml>
-
-The config.yaml should contain the `node_layers` field. This describes the sections of the
-graph that will be built: A graph layer will be built on the inputs to each specified node layer,
-as well as the output of the final node layer. For example, if `node_layers` is ["attn.0",
-"mlp_act.0"], this script will build the following graph layers:
-- One on the inputs to the "attn.0" node layer. This will include the residual stream concatenated
-    with the output of ln1.0.
-- One on the input to "mlp_act.0". This will include the residual stream concatenated with the
-    output of "mlp_in.0".
-- One on the output of "mlp_act.0". This will include the residual stream concatenated with the
-    output of "mlp_act.0".
-"""
 import re
 from pathlib import Path
 from typing import Any, Iterable, Literal, Optional, Union, cast
@@ -35,25 +7,27 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from jaxtyping import Float, Int
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch import Tensor
 from torch.utils.data import Dataset
 
+from experiments.relu_interactions.config_schemas import (
+    LMConfig,
+    _verify_compatible_configs,
+)
 from experiments.relu_interactions.relu_interaction_utils import (
+    plot_eigenvalues,
+    plot_eigenvectors,
     print_all_modules,
     relu_plot_and_cluster,
     swap_all_layers_using_clusters,
-    plot_eigenvalues,
-    plot_eigenvectors,
 )
-from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import (
+    collect_cluster_grams,
     collect_clustered_relu_P_mats,
     collect_clustered_relu_P_mats_no_W,
     collect_gram_matrices,
     collect_relu_interactions,
     collect_test_edges,
-    collect_cluster_grams,
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
@@ -69,159 +43,17 @@ from rib.types import TORCH_DTYPES
 from rib.utils import load_config, set_seed
 
 
-class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    exp_name: str = Field(..., description="The name of the experiment")
-    seed: int = Field(...,
-                      description="The random seed value for reproducibility")
-    tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
-        None, description="Pretrained transformer lens model."
-    )
-    tlens_model_path: Optional[Path] = Field(
-        None, description="Path to saved transformer lens model."
-    )
-    interaction_matrices_path: Optional[Path] = Field(
-        None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
-    )
-    node_layers: list[str] = Field(
-        ..., description="Names of the modules whose inputs correspond to node layers in the graph."
-    )
-    activation_layers: list[str] = Field(
-        ..., description="Names of activation modules to hook ReLUs in."
-    )
-    rotate_final_node_layer: bool = Field(
-        ...,
-        description="Whether to rotate the final node layer to its eigenbasis or not.",
-    )
-    dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig] = Field(
-        ...,
-        discriminator="source",
-        description="The dataset to use to build the graph.",
-    )
-    batch_size: int = Field(...,
-                            description="The batch size to use when building the graph.")
-    gram_batch_size: Optional[int] = Field(
-        None,
-        description="The batch size to use when calculating the gram matrices. If None, use the same"
-        "batch size as the one used to build the graph.",
-    )
-    edge_batch_size: Optional[int] = Field(
-        None,
-        description="The batch size to use when calculating the edges. If None, use the same batch"
-        "size as the one used to build the graph.",
-    )
-    truncation_threshold: float = Field(
-        ...,
-        description="Remove eigenvectors with eigenvalues below this threshold.",
-    )
-    last_pos_module_type: Optional[Literal["add_resid1", "unembed"]] = Field(
-        None,
-        description="Module type in which to only output the last position index.",
-    )
-    n_intervals: int = Field(
-        ...,
-        description="The number of intervals to use for the integrated gradient approximation.",
-    )
-    out_dim_chunk_size: Optional[int] = Field(
-        None,
-        description="The size of the chunks to use for calculating the jacobian. If none, calculate"
-        "the jacobian on all output dimensions at once.",
-    )
-    dtype: str = Field(...,
-                       description="The dtype to use when building the graph.")
-    eps: float = Field(
-        1e-5,
-        description="The epsilon value to use for numerical stability in layernorm layers.",
-    )
-    calculate_edges: bool = Field(
-        True,
-        description="Whether to calculate the edges of the interaction graph.",
-    )
-    eval_type: Optional[Literal["accuracy", "ce_loss"]] = Field(
-        None,
-        description="The type of evaluation to perform on the model before building the graph."
-        "If None, skip evaluation.",
-    )
-    threshold: float = Field(
-        None,
-        description="Dendrogram distance cutting with fcluster to make clusters"
-    )
-    relu_metric_type: Literal[0, 1, 2, 3] = Field(
-        None,
-        description="Which similarity metric to use to calculate whether ReLUs are synced."
-    )
-    edit_weights: bool = Field(
-        False,
-        description="Whether to edit weights to push biases up so all ReLUs are synced - for debugging. Typically turned off."
-    )
-    use_residual_stream: bool = Field(
-        False,
-        description="Whether to count residual stream in ReLU clustering alongside the MLP neurons."
-    )
-
-    @field_validator("dtype")
-    def dtype_validator(cls, v):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
-
-    @model_validator(mode="after")
-    def verify_model_info(self) -> "Config":
-        if sum(1 for val in [self.tlens_pretrained, self.tlens_model_path] if val is not None) != 1:
-            raise ValueError(
-                "Exactly one of [tlens_pretrained, tlens_model_path] must be specified"
-            )
-        return self
-
-
-def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
-    """Ensure that the config for calculating edges is compatible with that used to calculate Cs."""
-
-    assert config.node_layers == loaded_config.node_layers[-len(config.node_layers):], (
-        "node_layers in the config must be a subsequence of the node layers in the config used to"
-        "calculate the C matrices, ending at the final node layer. Otherwise, the C matrices won't"
-        "match those needed to correctly calculate the edges."
-    )
-
-    # The following attributes must exactly match across configs
-    for attr in [
-        "tlens_model_path",
-        "tlens_pretrained",
-    ]:
-        assert getattr(config, attr) == getattr(loaded_config, attr), (
-            f"{attr} in config ({getattr(config, attr)}) does not match "
-            f"{attr} in loaded matrices ({getattr(loaded_config, attr)})"
-        )
-
-    # Verify that, for huggingface datasets, we're not trying to calculate edges on data that
-    # wasn't used to calculate the Cs
-    assert config.dataset.name == loaded_config.dataset.name, "Dataset names must match"
-    assert config.dataset.return_set == loaded_config.dataset.return_set, "Return sets must match"
-    if isinstance(config.dataset, HFDatasetConfig):
-        assert isinstance(loaded_config.dataset, HFDatasetConfig)
-        if config.dataset.return_set_frac is not None:
-            assert loaded_config.dataset.return_set_frac is not None
-            assert (
-                config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
-            ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
-        elif config.dataset.return_set_n_samples is not None:
-            assert loaded_config.dataset.return_set_n_samples is not None
-            assert (
-                config.dataset.return_set_n_samples <= loaded_config.dataset.return_set_n_samples
-            ), "Cannot use a larger return_set_n_samples for edges than to calculate the Cs"
-
-
 def load_interaction_rotations(
-    config: Config,
+    config: LMConfig,
 ) -> tuple[
     dict[str, Float[Tensor, "d_hidden d_hidden"]
          ], list[InteractionRotation], list[Eigenvectors]
 ]:
-    logger.info("Loading pre-saved C matrices from %s",
-                config.interaction_matrices_path)
+    logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
     assert config.interaction_matrices_path is not None
     matrices_info = torch.load(config.interaction_matrices_path)
 
-    loaded_config = Config(**matrices_info["config"])
+    loaded_config = LMConfig(**matrices_info["config"])
     _verify_compatible_configs(config, loaded_config)
 
     gram_matrices = matrices_info["gram_matrices"]
@@ -259,7 +91,7 @@ def plot_and_save_Ps(
 
 def get_Cs(
     model: nn.Module,
-    config: Config,
+    config: LMConfig,
     file_path: str,
     dataset: Dataset,
     device: str,
@@ -332,7 +164,7 @@ def get_Cs(
 
 def get_relu_similarities(
     model: nn.Module,
-    config: Config,
+    config: LMConfig,
     file_path: Path,
     dataset: Dataset,
     device: str,
@@ -411,7 +243,7 @@ def get_rotated_Ws(
 
 def get_cluster_gram(
     model: nn.Module,
-    config: Config,
+    config: LMConfig,
     file_path: Path,
     dataset: Dataset,
     device: str,
@@ -439,7 +271,7 @@ def get_cluster_gram(
 
 # def get_P_matrices(
 #     model: nn.Module,
-#     config: Config,
+#     config: LMConfig,
 #     file_path: Path,
 #     dataset: Dataset,
 #     device: str,
@@ -468,7 +300,7 @@ def get_cluster_gram(
 
 # def get_edges(
 #     model: nn.Module,
-#     config: Config,
+#     config: LMConfig,
 #     file_path: str,
 #     dataset: Dataset,
 #     device: str,
@@ -500,11 +332,11 @@ def get_cluster_gram(
 def check_and_open_file(
     get_var_fn: callable,
     model: nn.Module,
-    config: Config,
+    config: LMConfig,
     file_path: Path,
     dataset: Dataset,
     device: str,
-    hooked_model: HookedModel = None,
+    hooked_model: Optional[HookedModel] = None,
     **kwargs
 ) -> Union[Any, tuple[Any, ...]]:
     """Load information from pickle file into a variable and return it.
@@ -526,7 +358,7 @@ def check_and_open_file(
 def transformer_relu_main(config_path_str: str):
     """Build the interaction graph and store it on disk."""
     config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=Config)
+    config = load_config(config_path, config_model=LMConfig)
     set_seed(config.seed)
 
     relu_matrices_save_file = Path(__file__).parent / f"similarity_metric_{config.relu_metric_type}_transformer"
@@ -554,18 +386,16 @@ def transformer_relu_main(config_path_str: str):
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    print_all_modules(seq_model)  # Check module names were correctly defined
+    print_all_modules(seq_model)
     hooked_model = HookedModel(seq_model)
 
-    # This script doesn't need both train and test sets
     return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
     )
-    graph_train_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
     # dict of InteractionRotation objects or Tensors
     Cs_and_Lambdas: dict[str, list[Union[InteractionRotation, Float[Tensor, ...]]]] = check_and_open_file(
@@ -578,8 +408,7 @@ def transformer_relu_main(config_path_str: str):
         hooked_model=hooked_model,
     )
 
-    C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list, U_D_sqrt_pinv_Vs_list, U_D_sqrt_Vs_list, Cs, Us, gram_matrices = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"], Cs_and_Lambdas[
-        "Lambda_abs_sqrts"], Cs_and_Lambdas["Lambda_abs_sqrt_pinvs"], Cs_and_Lambdas["U_D_sqrt_pinv_Vs"], Cs_and_Lambdas["U_D_sqrt_Vs"], Cs_and_Lambdas["Cs raw"], Cs_and_Lambdas["Us raw"], Cs_and_Lambdas["gram matrices"]
+    C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list, U_D_sqrt_pinv_Vs_list, U_D_sqrt_Vs_list, Cs, Us, gram_matrices = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"], Cs_and_Lambdas["Lambda_abs_sqrts"], Cs_and_Lambdas["Lambda_abs_sqrt_pinvs"], Cs_and_Lambdas["U_D_sqrt_pinv_Vs"], Cs_and_Lambdas["U_D_sqrt_Vs"], Cs_and_Lambdas["Cs raw"], Cs_and_Lambdas["Us raw"], Cs_and_Lambdas["gram matrices"]
 
     relu_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = check_and_open_file(
         get_var_fn=get_relu_similarities,
@@ -592,8 +421,7 @@ def transformer_relu_main(config_path_str: str):
         Cs_list=C_list,
     )
 
-    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(
-        relu_matrices, out_dir, config)
+    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)
 
     swap_all_layers_using_clusters(
         replacement_idxs_from_cluster=replacement_idxs_from_cluster,
@@ -643,6 +471,7 @@ def transformer_relu_main(config_path_str: str):
             plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"{module_name}_{cluster_idx}")
             # plot_eigenvectors(sorted_eigenvectors, f"{out_dir}/cluster_gram", title=f"{module_name}_{cluster_idx}")
 
+    # IRRELEVANT - from quick check of output gram vs what I was getting for cluster-specific gram
     # for (module_name, layer_gram_list) in list(output_cluster_grams.items()):
     #     for (cluster_idx, matrix) in enumerate(layer_gram_list):
     #         sorted_eigenvalues, sorted_eigenvectors = eigendecompose(matrix)
@@ -651,7 +480,7 @@ def transformer_relu_main(config_path_str: str):
     sorted_eigenvalues, sorted_eigenvectors = eigendecompose(whole_layer_gram)
     plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"whole_layer_{module_name}")
 
-    ## BELOW IS IRRELEVANT CODE FOR NOW
+    ## BELOW IS IRRELEVANT CODE FOR NOW - relic from when we wanted to compare P mats to edges
     # # Has to be after editing node_layers so this contains the linear layers to extract weights from
     # W_hat_dict: dict[str, float[Tensor, "d_trunc_C_pinv, d_out_W"]] = get_rotated_Ws(
     #     model=seq_model,

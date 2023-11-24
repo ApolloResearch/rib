@@ -17,18 +17,21 @@ from tqdm import tqdm
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
     acts_pre_forward_hook_fn,
+    cluster_gram_forward_hook_fn,
     function_size_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
     relu_interaction_forward_hook_fn,
     test_edges_forward_hook_fn,
-    cluster_gram_forward_hook_fn
 )
-from rib.hook_fns_non_static import relu_swap_forward_hook_fn
+from rib.hook_fns_non_static import (
+    delete_cluster_duplicate_forward_hook_fn,
+    relu_swap_forward_hook_fn,
+)
 from rib.hook_manager import Hook, HookedModel
-from rib.utils import eval_model_accuracy, eval_model_metrics
 from rib.log import logger
+from rib.utils import eval_model_accuracy, eval_model_metrics
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -501,7 +504,7 @@ def calculate_swapped_relu_loss(
     replacement_idxs: Int[Tensor, "d_hidden"],
     num_replaced: list[int],
     hook_name: Optional[str] = None,
-) -> tuple[list[float], ...]:
+) -> tuple[float, ...]:
     """Calculate loss for unedited forward pass, and then on forward pass with specific ReLUs
     swapped.
 
@@ -580,10 +583,9 @@ def calculate_all_swapped_relu_loss(
     num_replaced_list: list[list[int]],
     use_residual_stream: bool,
     hook_names: Optional[list[str]] = None,
-) -> tuple[list[float], ...]:
+) -> tuple[float, ...]:
     """Calculate loss for unedited forward pass, and then on forward pass with specific ReLUs
-    swapped.
-    """
+    swapped. Acts on all layers."""
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(
@@ -756,7 +758,6 @@ def collect_cluster_grams(
     )
 
     cluster_grams: dict[str, list[Float[Tensor, "d_cluster, d_cluster"]]] = {}
-    cluster_output_grams: dict[str, list[Float[Tensor, "d_cluster d_cluster"]]] = {}
     for layer_idx, hook_name in enumerate(hook_names):
         cluster_grams[hook_name] = [hooked_model.hooked_data[hook_name][i] for i in range(len(all_cluster_idxs[layer_idx]))]
         # cluster_output_grams[hook_name] = [hooked_model.hooked_data[hook_name][f"output_{i}"] for
@@ -765,3 +766,53 @@ def collect_cluster_grams(
     hooked_model.clear_hooked_data()
 
     return cluster_grams, whole_layer_gram
+
+
+def calculate_delete_cluster_duplicate_loss(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
+    use_residual_stream: bool,
+    hook_names: Optional[list[str]] = None,
+) -> tuple[float, ...]:
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    cluster_delete_hooks = []
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        cluster_delete_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="relu_swap",
+                fn=delete_cluster_duplicate_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"cluster_idxs": all_cluster_idxs[i], "use_residual_stream": use_residual_stream}
+            )
+        )
+
+    unhooked_accuracy, unhooked_loss = eval_model_metrics(
+        hooked_model=hooked_model,
+        dataloader=data_loader,
+        hooks=None,
+        dtype=dtype,
+        device=device,
+    )
+
+    hooked_accuracy, hooked_loss = eval_model_metrics(
+        hooked_model=hooked_model,
+        dataloader=data_loader,
+        hooks=cluster_delete_hooks,
+        dtype=dtype,
+        device=device,
+    )
+
+    hooked_model.remove_hooks()
+
+    return unhooked_loss, hooked_loss, unhooked_accuracy, hooked_accuracy

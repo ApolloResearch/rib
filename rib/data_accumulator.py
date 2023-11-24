@@ -261,7 +261,7 @@ def collect_interaction_edges(
         }
 
     run_dataset_through_model(
-        hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
+        hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=False
     )
 
     edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {

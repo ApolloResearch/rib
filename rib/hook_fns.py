@@ -154,7 +154,7 @@ def attn_scores_pre_forward_hook(
     """
 
     assert isinstance(module, AttentionOut), "This hook can only be applied to AttentionOut."
-    _, q, k, v = inputs
+    resid, q, k, v = inputs
     # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)
     q = einops.rearrange(
         q,
@@ -189,9 +189,58 @@ def attn_scores_pre_forward_hook(
         / module.attn_scale
     )  # [..., head_index, query_pos, key_pos]
 
-    attn_scores = module.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
+    import torch.nn.functional as F
 
-    hooked_data[hook_name] = {data_key: attn_scores}
+    attn_scores = module.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
+    pattern = F.softmax(attn_scores, dim=-1)  # [..., head_index, query_pos, key_pos]
+    pattern = pattern.to(in_dtype)
+    z = einsum(
+        "... key_pos head_index d_head, \
+            ... head_index query_pos key_pos -> \
+            ... query_pos head_index d_head",
+        v,
+        pattern,
+    )  # [..., pos, head_index, d_head]
+
+    hooked_data[hook_name] = {
+        data_key: attn_scores,
+        "resid": resid,
+        "q": q,
+        "k": k,
+        "v": v,
+        "z": z,
+        "pattern": pattern,
+    }
+
+
+def attn_scores_forward_hook(
+    module: torch.nn.Module,
+    inputs: tuple[Float[Tensor, "batch pos head_index_d_head"], ...],
+    output: Float[Tensor, "batch pos head_index_d_head"],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+) -> None:
+    """Calculate and store the attention scores.
+
+    This should only be applied to the AttentionOut module.
+
+    Note that this function overwrites hooked_data[hook_name] each time it is called since it is
+    expected to only be used on a single batch.
+
+    Args:
+        module: Module that the hook is attached to.
+        inputs: Inputs to the module. The first input is the residual, and the remaining inputs
+            are the q, k, and v tensors.
+        output: Output of the module. The attention scores.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+    """
+
+    assert isinstance(module, AttentionOut), "This hook can only be applied to AttentionOut."
+    resid, attn_out = output
+    hooked_data[hook_name] = {"attn_out": attn_out, "resid": resid}
 
 
 def rotate_pre_forward_hook_fn(

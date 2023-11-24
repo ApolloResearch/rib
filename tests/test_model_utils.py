@@ -2,8 +2,9 @@ from typing import TypeVar
 
 import pytest
 import torch
+from transformers import AutoTokenizer
 
-from rib.hook_fns import attn_scores_pre_forward_hook
+from rib.hook_fns import attn_scores_forward_hook, attn_scores_pre_forward_hook
 from rib.hook_manager import Hook, HookedModel
 from rib.loader import load_sequential_transformer
 from rib.models import SequentialTransformer, SequentialTransformerConfig
@@ -220,7 +221,7 @@ def test_validate_node_layers_invalid(node_layers: list[str], module_ids: list[s
         SequentialTransformer.validate_node_layers(node_layers, module_ids)
 
 
-@pytest.mark.slow()
+# @pytest.mark.slow()
 def test_n_ctx_attn_pattern_pythia():
     """Test that varying n_ctx produces the same attention scores for pythia-14m.
 
@@ -236,9 +237,9 @@ def test_n_ctx_attn_pattern_pythia():
     """
     set_seed(0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float32
+    dtype = torch.float64
     atol = 1e-6
-    module_id = "attn_out.0"
+    module_id = "attn_out.4"
     batch_size = 2
     short_n_ctx = 20
     long_n_ctx = 2048
@@ -250,7 +251,7 @@ def test_n_ctx_attn_pattern_pythia():
         tlens_model_path=None,
         eps=1e-5,
         fold_bias=True,
-        dtype=torch.float32,
+        dtype=dtype,
         device=device,
     )
 
@@ -283,15 +284,28 @@ def test_n_ctx_attn_pattern_pythia():
         fn=attn_scores_pre_forward_hook,
         module_name=seq_model.module_id_to_section_id[module_id],
     )
+    hook_forward = Hook(
+        name="forward_attn_out.0",
+        data_key="attn_out",
+        fn=attn_scores_forward_hook,
+        module_name=seq_model.module_id_to_section_id[module_id],
+    )
     with torch.inference_mode():
         # Ran short_ctx example through model
-        hooked_model(input_ids_short, hooks=[hook])
+        hooked_model(input_ids_short, hooks=[hook, hook_forward])
 
     attn_scores = hooked_model.hooked_data["pre_forward_attn_out.0"]["attn_scores"].detach().clone()
+    resid = hooked_model.hooked_data["pre_forward_attn_out.0"]["resid"].detach().clone()
+    q = hooked_model.hooked_data["pre_forward_attn_out.0"]["q"].detach().clone()
+    k = hooked_model.hooked_data["pre_forward_attn_out.0"]["k"].detach().clone()
+    v = hooked_model.hooked_data["pre_forward_attn_out.0"]["v"].detach().clone()
+    attn_out = hooked_model.hooked_data["forward_attn_out.0"]["attn_out"].detach().clone()
+    z = hooked_model.hooked_data["pre_forward_attn_out.0"]["z"].detach().clone()
+    pattern = hooked_model.hooked_data["pre_forward_attn_out.0"]["pattern"].detach().clone()
 
     with torch.inference_mode():
         # Ran long_ctx example through model
-        hooked_model(input_ids_long, hooks=[hook])
+        hooked_model(input_ids_long, hooks=[hook, hook_forward])
 
     # Collect the attention scores for the first short_n_ctx positions
     attn_scores_long = (
@@ -301,8 +315,113 @@ def test_n_ctx_attn_pattern_pythia():
         .detach()
         .clone()
     )
+    # attn_pattern_long = attn_scores_long.argmax(dim=-1)
+    # from fancy_einsum import einsum
 
+    resid_long = (
+        hooked_model.hooked_data["pre_forward_attn_out.0"]["resid"][:, :short_n_ctx, :]
+        .detach()
+        .clone()
+    )
+
+    q_long = hooked_model.hooked_data["pre_forward_attn_out.0"]["q"][:, :short_n_ctx, :].detach()
+    k_long = hooked_model.hooked_data["pre_forward_attn_out.0"]["k"][:, :short_n_ctx, :].detach()
+    v_long = hooked_model.hooked_data["pre_forward_attn_out.0"]["v"][:, :short_n_ctx, :].detach()
+    attn_out_long = (
+        hooked_model.hooked_data["forward_attn_out.0"]["attn_out"][:, :short_n_ctx, :]
+        .detach()
+        .clone()
+    )
+    z_long = hooked_model.hooked_data["pre_forward_attn_out.0"]["z"][:, :short_n_ctx, :].detach()
+    pattern_long = (
+        hooked_model.hooked_data["pre_forward_attn_out.0"]["pattern"][
+            ..., :short_n_ctx, :short_n_ctx
+        ]
+        .detach()
+        .clone()
+    )
+
+    _, ln_resid = seq_model.sections.pre[1](resid)
+    _, ln_resid_long = seq_model.sections.pre[1](resid_long)
+
+    print("q_diff", (q - q_long).abs().max())
+    print("k_diff", (k - k_long).abs().max())
+    print("v_diff", (v - v_long).abs().max())
+    print("diff", (resid - resid_long).abs().max())
+    print("ln_resid diff", (ln_resid - ln_resid_long).abs().max())
+    print("attn_out diff", (attn_out - attn_out_long).abs().max())
+    print("z diff", (z - z_long).abs().max())
+    print("pattern diff", (pattern - pattern_long)[:, :, :, 10].abs().max())
+    print("attn_scores diff", (attn_scores - attn_scores_long).abs().max())
+    print("ratio res / resid_long", (resid / resid_long - 1).abs().max())
+    print("ratio resid_long / resid", (resid / resid_long - 1).abs().max())
+    assert torch.allclose(resid, resid_long, atol=atol)
     assert torch.allclose(attn_scores, attn_scores_long, atol=atol), (
         f"Attention scores for short_n_ctx={short_n_ctx} and long_n_ctx={long_n_ctx} are not equal."
         f"Max difference: {torch.max(torch.abs(attn_scores - attn_scores_long))}"
+    )
+
+
+def test_n_ctx_padding_pythia():
+    """Test that padding a short context does not change the model output for pythia-14m."""
+
+    set_seed(0)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float64
+    atol = 1e-6
+    module_id = "attn_out.0"
+    batch_size = 2
+    short_n_ctx = 20
+    long_n_ctx = 2048
+
+    seq_model, _ = load_sequential_transformer(
+        node_layers=[module_id],
+        last_pos_module_type=None,
+        tlens_pretrained="pythia-14m",
+        tlens_model_path=None,
+        eps=1e-5,
+        fold_bias=True,
+        dtype=dtype,
+        device=device,
+    )
+
+    seq_model.eval()
+    seq_model.to(device=torch.device(device), dtype=dtype)
+    hooked_model = HookedModel(seq_model)
+
+    # Create a fake data sample of length short_n_ctx
+    input_ids_short = torch.randint(
+        0,
+        seq_model.cfg.d_vocab,
+        (batch_size, short_n_ctx),
+        device=device,
+    )
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
+    tokenizer.pad_token = tokenizer.eos_token
+    # Add padding tokens to the fake data sample so that it is length n_ctx=2048
+    input_ids_long = torch.cat(
+        [
+            input_ids_short,
+            torch.full(
+                (batch_size, long_n_ctx - short_n_ctx),
+                tokenizer.pad_token_id,
+                dtype=torch.long,
+                device=device,
+            ),
+        ],
+        dim=1,
+    )
+
+    # Ran short_ctx example through model
+    with torch.inference_mode():
+        out_short = hooked_model(input_ids_short)
+
+    # Ran long_ctx example through model
+    with torch.inference_mode():
+        out_long = hooked_model(input_ids_long)
+
+    # Check that the output for the first short_n_ctx positions is the same
+    assert torch.allclose(out_short[0], out_long[0][:, :short_n_ctx, :], atol=atol), (
+        f"Model output for short_n_ctx={short_n_ctx} and long_n_ctx={long_n_ctx} are not equal."
+        f"Max difference: {torch.max(torch.abs(out_short[0] - out_long[0][..., :short_n_ctx, :]))}"
     )

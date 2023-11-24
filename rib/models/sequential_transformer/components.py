@@ -495,7 +495,7 @@ class AttentionOut(nn.Module):
         return torch.where(
             mask[:query_ctx_length, :key_ctx_length],
             attn_scores,
-            cast(Tensor, self.IGNORE),
+            cast(Tensor, torch.tensor(-1e10, dtype=attn_scores.dtype, device=attn_scores.device)),
         )
 
 

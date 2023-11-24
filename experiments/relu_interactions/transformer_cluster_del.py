@@ -88,10 +88,11 @@ def del_neurons_main(config_path_str: str):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     dtype = TORCH_DTYPES[config.dtype]
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
 
     seq_model, tlens_cfg_dict = load_sequential_transformer(
-        node_layers=["mlp_out.0, unembed"],
+        node_layers=config.node_layers,
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
@@ -122,7 +123,7 @@ def del_neurons_main(config_path_str: str):
         Cs_list=None, # This can be none if you're sure the relu matrices already exist in a file
     )
 
-    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)
+    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs, all_centroid_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)
 
     unhooked_loss, hooked_loss, unhooked_accuracy, hooked_accuracy = calculate_delete_cluster_duplicate_loss(
         hooked_model=hooked_model,
@@ -131,6 +132,7 @@ def del_neurons_main(config_path_str: str):
         dtype=dtype,
         device=device,
         all_cluster_idxs=all_cluster_idxs,
+        all_centroid_idxs=all_centroid_idxs,
         use_residual_stream=config.use_residual_stream,
     )
 

@@ -28,22 +28,28 @@ def relu_plot_and_cluster(
     similarity_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]],
     out_dir: Path,
     config: "Config",
-) -> tuple[list[Int[Tensor, "d_hidden"]], list[list[int]], list[list[Int[Tensor, "cluster_size"]]]]:
+) -> tuple[list[Int[Tensor, "d_hidden"]], list[list[int]], list[list[Int[Tensor, "cluster_size"]]], list[list[int]]]:
     """Form clustering. Plot original and clustered matrices.
 
     Returns:
-        return_index_list: Outer idx layers. Tensor idx hidden neurons.
+        return_index_list: Outer idx layers. Tensor idx hidden neurons. Repeats the cluster centroid
+            index in places where all neurons in each cluster are.
         all_num_valid_swaps:
         all_cluser_idxs: Outer idx layers. Inner idx cluster number. Tensor idx hidden neurons in cluster.
+        all_centroid_idxs: As on tin.
     """
     return_index_list: list[Int[Tensor, "d_hidden"]] = []
     all_num_valid_swaps: list[list[int]] = []
     all_cluster_idxs: list[list[Int[Tensor, "cluster_size"]]] = []
+    all_centroid_idxs: [list[list[int]]] = []
 
     for i, similarity_matrix in enumerate(list(similarity_matrices.values())):
         similarity_matrix = similarity_matrix.detach().cpu()
+
         layer_cluster_idxs = []
         layer_num_valid_swaps = []
+        layer_centroid_idxs = []
+
         # Plot raw matrix values before clustering
         plt.figure(figsize=(10, 8))
         sns.heatmap(similarity_matrix, annot=False,
@@ -88,12 +94,11 @@ def relu_plot_and_cluster(
         dendrogram(Z)
         plt.savefig(out_dir / f"dendrogram.png", dpi=300)
 
-        # Cut dendrogram
-        # ith `clusters` element is flat cluster number to which original observation i belonged
+        # Cut dendrogram - ith `clusters` element is flat cluster number to which original observation i belonged
         # Idxs of `clusters` is original element idxs
         clusters = fcluster(Z, t=config.threshold, criterion="distance")
         unique_clusters = np.unique(clusters)
-        print(f"unique clusters {len(unique_clusters)}")
+        print(f"Unique clusters {len(unique_clusters)}")
 
         # Important: this index vector will be what's passed into hook function
         # To replace elements of operator vector within clusters with `centroid member` of each cluster
@@ -118,18 +123,20 @@ def relu_plot_and_cluster(
             # *distance matrix values*)
             # Want instead indices with which to permute the O(x) vector in forward hook
             indices_of_original_O[cluster_idx] = centroid_idx_original
+            layer_centroid_idxs.append(centroid_idx_original)
 
         all_cluster_idxs.append(layer_cluster_idxs)
         all_num_valid_swaps.append(layer_num_valid_swaps)
-        print(f"swaps {layer_num_valid_swaps}")
-
+        all_centroid_idxs.append(layer_centroid_idxs)
         # Cast indices to tensor and add to list of returns - one item per layer
         return_index_list.append(torch.tensor(indices_of_original_O))
+
+        # Printing etc for logging purposes
         layer_num_swaps_dict = {i: swap_num for i, swap_num in enumerate(layer_num_valid_swaps)}
         degeneracy_total = sum([(n+1)**2-n-1 for n in layer_num_valid_swaps])
-        print(f"swaps dict {layer_num_swaps_dict}")
-        print(f"degeneracy total {degeneracy_total}")
-
+        print(f"Swaps {layer_num_valid_swaps}")
+        print(f"Swaps dict {layer_num_swaps_dict}")
+        print(f"Degeneracy total {degeneracy_total}")
         with open('relu_clusters.txt', 'w') as file:
             for item in all_cluster_idxs:
                 file.write("%s\n" % item)
@@ -141,10 +148,9 @@ def relu_plot_and_cluster(
         sns.heatmap(rearranged_similarity_matrix, annot=False,
                     cmap="YlGnBu", cbar=True, square=True)
         plt.title("Reordered Similarity Matrix")
-        plt.savefig(
-            out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}.png")
+        plt.savefig(out_dir / f"rearr_mat_{i}_type_{config.relu_metric_type}.png")
 
-    return return_index_list, all_num_valid_swaps, all_cluster_idxs
+    return return_index_list, all_num_valid_swaps, all_cluster_idxs, all_centroid_idxs
 
 
 def detect_edges(matrix, sigma=1):

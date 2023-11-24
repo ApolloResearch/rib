@@ -421,7 +421,7 @@ def transformer_relu_main(config_path_str: str):
         Cs_list=C_list,
     )
 
-    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)
+    replacement_idxs_from_cluster, num_valid_swaps_from_cluster, all_cluster_idxs, all_centroid_idxs = relu_plot_and_cluster(relu_matrices, out_dir, config)
 
     swap_all_layers_using_clusters(
         replacement_idxs_from_cluster=replacement_idxs_from_cluster,

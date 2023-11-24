@@ -4,7 +4,8 @@ from copy import deepcopy
 from typing import Any, Union
 
 import torch
-from einops import rearrange, repeat
+import math
+from einops import rearrange
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -104,6 +105,7 @@ def delete_cluster_duplicate_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     cluster_idxs: list[Int[Tensor, "d_hidden"]],
+    centroid_idxs: list[int],
     use_residual_stream: bool,
 ) -> Union[
         tuple[Float[Tensor, "batch d_hidden"]],
@@ -135,14 +137,36 @@ def delete_cluster_duplicate_forward_hook_fn(
         outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
     with torch.no_grad():
-        for cluster_num, idxs in enumerate(cluster_idxs):
-            idxs_to_delete = idxs[1:]
-            inputs[..., idxs_to_delete] = 0 # Kill off all but first member of cluster
-            w = module.weight.data
-            # Add weight rows of deleted neurons to weight row of first member of cluster
-            w[idxs[0]] += torch.sum(w[idxs_to_delete, :], dim=0)
+        for cluster_num, (idxs, centroid_idx) in enumerate(zip(cluster_idxs, centroid_idxs)):
+            assert centroid_idx in idxs, "centroid idx does not match cluster"
+            idx_to_keep = torch.where(idxs == centroid_idx)[0]
+            delete_mask = torch.arange(idxs.size(0)) != idx_to_keep
+            for name, param in module.named_parameters():
+                if "W" in name: # Unembed matrix
+                    w = param # [input, output]
 
-        edited_output = inputs @ w.T
+            # # Commented out because scale factor method here is very sensitive to small values so not as good as second one used below
+            # for row_idx in idxs[1:]: # Find data-point agnostic activation function scale factor (see writeup)
+            #     act_to_throw = inputs[:, row_idx]
+            #     act_to_keep = inputs[:, idxs[0]]
+            #     division_result = torch.div(act_to_throw, act_to_keep)
+            #     # Do not include inf or nan in mean calculation
+            #     scale_factor = torch.mean(division_result[torch.isfinite(division_result)])
+            #     w[idxs[0], :] += torch.div(w[row_idx, :], scale_factor)
+
+            for row_idx in idxs[delete_mask]:
+                act_to_throw = inputs[:, row_idx].squeeze()
+                act_to_keep = inputs[:, centroid_idx].squeeze()
+                denominator = torch.dot(act_to_keep, act_to_keep)
+                tol = 1e-10
+                if torch.abs(denominator) < tol: continue
+                scale_factor = torch.div(torch.dot(act_to_throw, act_to_keep), torch.dot(act_to_keep, act_to_keep))
+                if torch.abs(scale_factor) < tol: continue
+                w[centroid_idx, :] += torch.div(w[row_idx, :], scale_factor)
+
+            inputs[:, idxs[delete_mask]] = 0 # Kill off all but first member of cluster
+
+        edited_output = inputs @ w
 
     if output_is_tuple:     # Put back in tuple form if ouput should have been tuple
         return resid_stream_outputs, edited_output

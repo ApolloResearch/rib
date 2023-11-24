@@ -775,6 +775,7 @@ def calculate_delete_cluster_duplicate_loss(
     dtype: torch.dtype,
     device: str,
     all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
+    all_centroid_idxs: list[list[int]],
     use_residual_stream: bool,
     hook_names: Optional[list[str]] = None,
 ) -> tuple[float, ...]:
@@ -793,7 +794,10 @@ def calculate_delete_cluster_duplicate_loss(
                 data_key="relu_swap",
                 fn=delete_cluster_duplicate_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"cluster_idxs": all_cluster_idxs[i], "use_residual_stream": use_residual_stream}
+                fn_kwargs={
+                    "cluster_idxs": all_cluster_idxs[i],
+                    "centroid_idxs": all_centroid_idxs[i],
+                    "use_residual_stream": use_residual_stream}
             )
         )
 

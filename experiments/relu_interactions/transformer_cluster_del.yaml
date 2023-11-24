@@ -1,0 +1,26 @@
+exp_name: modular_arithmetic
+seed: 0
+tlens_pretrained: null
+tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
+interaction_matrices_path: null
+dataset:
+  source: custom
+  name: modular_arithmetic
+  return_set: train
+node_layers: # For whole layer hooking
+  - mlp_out.0
+  - unembed
+activation_layers: # For activation layer hooking - ssection num depends on structure of node layers
+  - sections.section_0.0
+rotate_final_node_layer: true # Whether unembed is rotated. If you want output node layer C, need to
+# manually add to node_layers
+batch_size: 256
+truncation_threshold: 1e-6
+last_pos_module_type: add_resid1  # module type in which to only output the last position index
+n_intervals: 50
+dtype: float32
+eval_type: accuracy
+relu_metric_type: 3
+edit_weights: False
+threshold: 2.5e-4
+use_residual_stream: false

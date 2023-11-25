@@ -45,7 +45,13 @@ sec_pre_2_resid_embed_acts = activations.get_section_activations(section="sectio
     sec_pre_2_resid_embed_acts_z,
 ) = einops.rearrange(sec_pre_2_resid_embed_acts, "x y p h -> p x y h")
 
-sec_0_2_resid_post_attn_acts = activations.get_section_activations(section="sections.section_0.2")[
+sec_0_1_emed_parallel, sec_0_1_attn_out = activations.get_section_activations(
+    section="sections.section_0.1",
+)
+assert torch.allclose(sec_0_1_emed_parallel[:,:,2,:], sec_pre_2_resid_embed_acts_z)
+sec_0_1_attn_out_z = sec_0_1_attn_out[:, :, 2, :]
+
+sec_0_2_resid_post_attn_acts = activations.get_section_acstivations(section="sections.section_0.2")[
     0
 ]
 
@@ -111,6 +117,9 @@ fft_plot_eikx_2d(attention_pattern_p_to_x_svd_fft, title="Attn pattern, SVD over
 fft_plot_cosplusminus(attention_pattern_p_to_x_svd_fft, title="SVD Attn pattern, A_{+/-} cos(2π/113 f_x x +/- f_y y + φ_{+/-})", nrows=4)
 
 fft_plot_coscos_sinsin(attention_pattern_p_to_x_svd_fft, title="SVD Attn pattern\n A_cos cos(2π/113 f_x x + φ_x) cos(2π/113 f_y y + φ_y) \n+ A_sin sin(2π/113 f_x x + φ_x) sin(2π/113 f_y y + φ_y)", nrows=4)
+
+
+fft_plot_cosplusminus(attention_pattern_p_to_x_fft, title="Indiv head attn pattern, A_{+/-} cos(2π/113 f_x x +/- f_y y + φ_{+/-})", nrows=4)
 
 # %%
 

@@ -4,12 +4,13 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from rib.data_accumulator import collect_gram_matrices
 from rib.hook_manager import HookedModel
+from rib.utils import set_seed
 
 
 def test_collect_gram_matrices():
     """Test collect gram matrices function"""
 
-    torch.manual_seed(0)
+    set_seed(0)
     dtype = torch.float32
     device = "cpu"
 

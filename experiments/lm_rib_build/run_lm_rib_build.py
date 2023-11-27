@@ -277,7 +277,6 @@ def main(
         device=device,
     )
     seq_model.eval()
-    seq_model.to(device=torch.device(device), dtype=dtype)
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need both train and test sets

@@ -57,7 +57,7 @@ def build_get_lambdas(config: Union[LMRibConfig, MnistRibConfig], build_graph_ma
 def graph_build_test(
     config: Union[LMRibConfig, MnistRibConfig],
     build_graph_main_fn: Callable,
-    atol=1e-5,
+    atol: float,
 ):
     results, Lambdas = build_get_lambdas(config, build_graph_main_fn)
 
@@ -99,7 +99,10 @@ def graph_build_test(
 
 @pytest.mark.slow
 def test_modular_arithmetic_build_graph():
-    config_str = """
+    dtype_str = "float32"
+    atol = 1e-6  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-6 for CPU
+
+    config_str = f"""
     exp_name: test
     seed: 0
     tlens_pretrained: null
@@ -114,24 +117,26 @@ def test_modular_arithmetic_build_graph():
         name: modular_arithmetic
         return_set: train
     batch_size: 128
-    truncation_threshold: 1e-6
+    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
     last_pos_module_type: add_resid1
     n_intervals: 0
-    dtype: float32
+    dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null
     """
-
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
 
-    graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main)
+    graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
 
 
 @pytest.mark.slow
 def test_pythia_14m_build_graph():
-    config_str = """
+    dtype_str = "float64"
+    atol = 0  # Works with 1e-7 for float32 and 0 for float64
+
+    config_str = f"""
     exp_name: test
     seed: 0
     tlens_pretrained: pythia-14m
@@ -148,10 +153,10 @@ def test_pythia_14m_build_graph():
         - ln2.1
         - unembed
     batch_size: 2
-    truncation_threshold: 1e-6
+    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
     n_intervals: 0
-    dtype: float32
+    dtype: {dtype_str}
     calculate_edges: false
     eval_type: ce_loss
     out_dir: null
@@ -162,20 +167,25 @@ def test_pythia_14m_build_graph():
     graph_build_test(
         config=config,
         build_graph_main_fn=lm_build_graph_main,
+        atol=atol,
     )
 
 
 @pytest.mark.slow
 def test_mnist_build_graph():
-    config_str = """
+    dtype_str = "float32"
+    # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
+    atol = 1e-6
+
+    config_str = f"""
     exp_name: test
     mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
     batch_size: 256
     seed: 0
-    truncation_threshold: 1e-6
+    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
     n_intervals: 0
-    dtype: float32
+    dtype: {dtype_str}
     node_layers:
         - layers.0
         - layers.1
@@ -190,6 +200,7 @@ def test_mnist_build_graph():
     graph_build_test(
         config=config,
         build_graph_main_fn=mnist_build_graph_main,
+        atol=atol,
     )
 
 
@@ -200,7 +211,7 @@ def test_mnist_build_graph_invalid_node_layers():
     mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
     batch_size: 256
     seed: 0
-    truncation_threshold: 1e-6
+    truncation_threshold: 1e-15
     rotate_final_node_layer: false
     n_intervals: 0
     dtype: float32
@@ -217,4 +228,5 @@ def test_mnist_build_graph_invalid_node_layers():
         graph_build_test(
             config=config,
             build_graph_main_fn=mnist_build_graph_main,
+            atol=0,
         )

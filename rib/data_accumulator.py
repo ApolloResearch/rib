@@ -133,6 +133,8 @@ def collect_M_dash_and_Lambda_dash(
     dtype: torch.dtype,
     device: str,
     hook_name: Optional[str] = None,
+    M_dtype: torch.dtype = torch.float64,
+    Lambda_einsum_dtype: torch.dtype = torch.float64,
 ) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -149,6 +151,12 @@ def collect_M_dash_and_Lambda_dash(
         dtype: The data type to use for model computations.
         device: The device to run the model on.
         hook_name: The name of the hook to use to store the matrices in the hooked model.
+        M_dtype: The data type to use for the M_dash matrix. Needs to be
+            float64 for Pythia-14m (empirically). Defaults to float64.
+        Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
+            Lambda_dash matrix. Does not affect the output, only used for the einsum within
+            M_dash_and_Lambda_dash_pre_forward_hook_fn. Needs to be float64 on CPU but float32 was
+            fine on GPU. Defaults to float64.
 
     Returns:
         A tuple containing M' and Lambda'.
@@ -165,6 +173,8 @@ def collect_M_dash_and_Lambda_dash(
             "C_out": C_out,
             "n_intervals": n_intervals,
             "dataset_size": len(data_loader.dataset),  # type: ignore
+            "M_dtype": M_dtype,
+            "Lambda_einsum_dtype": Lambda_einsum_dtype,
         },
     )
 
@@ -216,7 +226,10 @@ def collect_interaction_edges(
         through.
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
+
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
+    assert len(edge_modules) == len(Cs) - 1, "Number of edge modules not the same as Cs - 1."
+
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
     edge_hooks: list[Hook] = []
     for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):

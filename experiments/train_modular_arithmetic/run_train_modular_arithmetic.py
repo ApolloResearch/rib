@@ -14,7 +14,7 @@ import fire
 import torch
 import torch.optim as optim
 import wandb
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -25,6 +25,7 @@ from rib.data import ModularArithmeticDatasetConfig
 from rib.loader import create_data_loader, load_dataset
 from rib.log import logger
 from rib.models.utils import save_model
+from rib.types import RootPath
 from rib.utils import load_config, set_seed
 
 
@@ -45,7 +46,11 @@ class TrainConfig(BaseModel):
     batch_size: int  # Set to max(batch_size, <number of samples in dataset>)
     epochs: int
     eval_every_n_epochs: int
-    save_dir: Optional[Path] = None
+    save_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / ".checkpoints" / "modular_arithmetic",
+        description="Directory for the output files. Defaults to `./.checkpoints/modular_arithmetic`."
+        "If None, no output is written. If a relative path, it is relative to the root of the rib repo.",
+    )
     save_every_n_epochs: Optional[int] = None
 
 
@@ -188,9 +193,6 @@ def main(config_path_or_obj: Union[str, Config]) -> tuple[float, float]:
     set_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
-
-    if not config.train.save_dir:
-        config.train.save_dir = Path(__file__).parent / ".checkpoints" / "modular_arithmetic"
 
     datasets = load_dataset(dataset_config=config.dataset, return_set=config.dataset.return_set)
     train_loader, test_loader = create_data_loader(

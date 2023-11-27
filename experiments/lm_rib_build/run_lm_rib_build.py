@@ -38,12 +38,12 @@ from typing import Literal, Optional, Union, cast
 import fire
 import torch
 from jaxtyping import Float
-from mpi4py import MPI
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,
@@ -57,13 +57,7 @@ from rib.loader import (
     load_sequential_transformer,
 )
 from rib.log import logger
-from rib.mpi_utils import (
-    adjust_logger_mpi,
-    check_sizes_mpi,
-    get_device_mpi,
-    get_mpi_info,
-)
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
@@ -76,17 +70,19 @@ from rib.utils import (
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exp_name: str = Field(..., description="The name of the experiment")
-    force_overwrite_output: Optional[bool] = Field(
-        False, description="Don't ask before overwriting the output file."
+    out_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     seed: int = Field(..., description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."
     )
-    tlens_model_path: Optional[Path] = Field(
+    tlens_model_path: Optional[RootPath] = Field(
         None, description="Path to saved transformer lens model."
     )
-    interaction_matrices_path: Optional[Path] = Field(
+    interaction_matrices_path: Optional[RootPath] = Field(
         None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
     node_layers: list[str] = Field(
@@ -130,7 +126,7 @@ class Config(BaseModel):
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
 
-    dtype: str = Field(..., description="The dtype to use when building the graph.")
+    dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
 
     eps: float = Field(
         1e-5,
@@ -145,16 +141,6 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-
-    out_dir: Optional[Path] = Field(
-        None,
-        description="Directory for the output files. If not provided it is `./out/` relative to this file.",
-    )
-
-    @field_validator("dtype")
-    def dtype_validator(cls, v):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "Config":
@@ -239,7 +225,9 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False):
+def main(
+    config_path_or_obj: Union[str, Config], force: bool = False, n_pods: int = 1, pod_rank: int = 0
+) -> RibBuildResults:
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
@@ -252,26 +240,25 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
 
     Args:
         config: a str or Config object. If str must point at YAML config file
-        kwargs: modifications to passed config
     """
     config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
 
-    mpi_info = get_mpi_info()
-    adjust_logger_mpi(logger)
-    device = get_device_mpi(logger)
+    dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
 
-    out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-    if config.calculate_edges:
-        out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
-    else:
-        out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if mpi_info.is_main_process and not check_outfile_overwrite(
-        out_file, config.force_overwrite_output or force, logger=logger
-    ):
-        mpi_info.comm.Abort()  # stop this and other processes
-        return None  # this is unreachable as Abort will terminate
+    adjust_logger_dist(dist_info)
+    device = get_device_mpi(dist_info)
+
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        obj_name = "graph" if config.calculate_edges else "Cs"
+        global_rank_suffix = (
+            f"_global_rank{dist_info.global_rank}" if dist_info.global_size > 1 else ""
+        )
+        f_name = f"{config.exp_name}_rib_{obj_name}{global_rank_suffix}.pt"
+        out_file = config.out_dir / f_name
+        if not check_outfile_overwrite(out_file, force):
+            dist_info.local_comm.Abort()  # stop this and other processes
 
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
@@ -290,7 +277,6 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
         device=device,
     )
     seq_model.eval()
-    seq_model.to(device=torch.device(device), dtype=dtype)
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need both train and test sets
@@ -374,7 +360,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
         full_dataset_len = len(dataset)  # type: ignore
         # no-op if only 1 process
         data_subset = get_dataset_chunk(
-            dataset, chunk_idx=mpi_info.rank, total_chunks=mpi_info.size
+            dataset, chunk_idx=dist_info.global_rank, total_chunks=dist_info.global_size
         )
 
         edge_train_loader = create_data_loader(
@@ -397,19 +383,6 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
             data_set_size=full_dataset_len,  # includes data for other processes
         )
 
-        if mpi_info.is_parallelised:
-            for m_name, edge_vals in E_hats.items():
-                check_sizes_mpi(edge_vals)
-                receiver_tensor = None
-                if mpi_info.is_main_process:
-                    receiver_tensor = torch.empty_like(edge_vals).cpu()
-                # we sum across the edge_val tensors in each process, putting the result in
-                # the root process's reciever_tensor.
-                mpi_info.comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
-                if mpi_info.is_main_process:
-                    assert receiver_tensor is not None
-                    E_hats[m_name] = receiver_tensor
-
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)
 
@@ -423,23 +396,26 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False):
 
     eigenvectors = [asdict(U_info) for U_info in Us]
 
-    results = {
+    results: RibBuildResults = {
         "exp_name": config.exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
         "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
+        "dist_info": dist_info.to_dict(),
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
         "calc_C_time": calc_C_time,
         "calc_edges_time": calc_edges_time,
     }
 
-    if mpi_info.is_main_process:
+    if config.out_dir is not None:
         # Save the results (which include torch tensors) to file
         torch.save(results, out_file)
         logger.info("Saved results to %s", out_file)
 
+    return results
+
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    fire.Fire(main, serialize=lambda _: "")

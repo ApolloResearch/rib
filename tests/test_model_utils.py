@@ -237,8 +237,8 @@ def test_n_ctx_attn_pattern_pythia():
     """
     set_seed(0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float64
-    atol = 1e-8
+    dtype = torch.float32
+    atol = 1e-6  # Works with atol=0 for float64 and 1e-6 for float32
     module_id = "attn_out.0"
     batch_size = 2
     short_n_ctx = 20
@@ -249,17 +249,20 @@ def test_n_ctx_attn_pattern_pythia():
         last_pos_module_type=None,
         tlens_pretrained="pythia-14m",
         tlens_model_path=None,
-        eps=1e-5,
         fold_bias=True,
-        dtype=torch.float32,
+        dtype=dtype,
         device=device,
     )
+    seq_model.eval()
 
     # We only care about the first module in section_0, so remove the rest
     seq_model.sections.section_0 = MultiSequential(seq_model.sections.section_0[0])
 
-    seq_model.eval()
-    seq_model.to(device=torch.device(device), dtype=dtype)
+    # Set the buffer "IGNORE" to -1e20 for every buffer in the model
+    for name, buffer in seq_model.named_buffers():
+        if "IGNORE" in name:
+            buffer.fill_(-1e20)
+
     hooked_model = HookedModel(seq_model)
 
     # Create a fake data sample of length short_n_ctx
@@ -316,7 +319,7 @@ def test_n_ctx_padding_pythia():
     set_seed(0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float64
-    atol = 1e-8
+    atol = 0
     module_id = "attn_out.0"
     batch_size = 2
     short_n_ctx = 20
@@ -327,14 +330,16 @@ def test_n_ctx_padding_pythia():
         last_pos_module_type=None,
         tlens_pretrained="pythia-14m",
         tlens_model_path=None,
-        eps=1e-5,
         fold_bias=True,
         dtype=dtype,
         device=device,
     )
+    # Set the buffer "IGNORE" to -1e20 for every buffer in the model
+    for name, buffer in seq_model.named_buffers():
+        if "IGNORE" in name:
+            buffer.fill_(-1e20)
 
     seq_model.eval()
-    seq_model.to(device=torch.device(device), dtype=dtype)
     hooked_model = HookedModel(seq_model)
 
     # Create a fake data sample of length short_n_ctx

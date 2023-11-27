@@ -51,7 +51,7 @@ sec_0_1_emed_parallel, sec_0_1_attn_out = activations.get_section_activations(
 assert torch.allclose(sec_0_1_emed_parallel[:,:,2,:], sec_pre_2_resid_embed_acts_z)
 sec_0_1_attn_out_z = sec_0_1_attn_out[:, :, 2, :]
 
-sec_0_2_resid_post_attn_acts = activations.get_section_acstivations(section="sections.section_0.2")[
+sec_0_2_resid_post_attn_acts = activations.get_section_activations(section="sections.section_0.2")[
     0
 ]
 
@@ -131,9 +131,9 @@ sec_0_2_resid_post_attn_acts_z_pca = pca_activations(sec_0_2_resid_post_attn_act
 sec_0_2_resid_post_attn_acts_z_svd_fft = fft2(sec_0_2_resid_post_attn_acts_z_svd)
 sec_0_2_resid_post_attn_acts_z_pca_fft = fft2(sec_0_2_resid_post_attn_acts_z_pca)
 
-fft_plot_eikx_2d(sec_0_2_resid_post_attn_acts_z_svd_fft, nrows=10, title="Resid Mid, SVD over heads, each term corresponds to e^(i2π/113 f_x x + f_y y + φ)")
-fft_plot_cosplusminus(sec_0_2_resid_post_attn_acts_z_svd_fft, title="Resid Mid pattern, A_{+/-} cos(2π/113 f_x x +/- f_y y + φ_{+/-})", nrows=5)
-fft_plot_coscos_sinsin(sec_0_2_resid_post_attn_acts_z_svd_fft, title="Resid mid\n A_cos cos(2π/113 f_x x + φ_x) cos(2π/113 f_y y + φ_y) \n+ A_sin sin(2π/113 f_x x + φ_x) sin(2π/113 f_y y + φ_y)", nrows=5)
+fft_plot_eikx_2d(sec_0_2_resid_post_attn_acts_z_svd_fft, nrows=10, title="Resid Mid SVD each term corresponds to e^(i2π/113 f_x x + f_y y + φ)")
+fft_plot_cosplusminus(sec_0_2_resid_post_attn_acts_z_svd_fft, title="Resid Mid SVD, A_{+/-} cos(2π/113 f_x x +/- f_y y + φ_{+/-})", nrows=5)
+fft_plot_coscos_sinsin(sec_0_2_resid_post_attn_acts_z_svd_fft, title="Resid mid SVD\n A_cos cos(2π/113 f_x x + φ_x) cos(2π/113 f_y y + φ_y) \n+ A_sin sin(2π/113 f_x x + φ_x) sin(2π/113 f_y y + φ_y)", nrows=5)
 
 # %%
 
@@ -145,9 +145,9 @@ sec_2_1_resid_post_mlp_acts_z_pca = pca_activations(sec_2_1_resid_post_mlp_acts_
 sec_2_1_resid_post_mlp_acts_z_svd_fft = fft2(sec_2_1_resid_post_mlp_acts_z_svd)
 sec_2_1_resid_post_mlp_acts_z_pca_fft = fft2(sec_2_1_resid_post_mlp_acts_z_pca)
 
-fft_plot_eikx_2d(sec_2_1_resid_post_mlp_acts_z_svd_fft, nrows=10, title="Post MLP, SVD over heads, each term corresponds to e^(i2π/113 f_x x + f_y y + φ)")
-fft_plot_cosplusminus(sec_2_1_resid_post_mlp_acts_z_svd_fft, title="Post MLP pattern, A_{+/-} cos(2π/113 f_x x +/- f_y y + φ_{+/-})", nrows=5)
-fft_plot_coscos_sinsin(sec_2_1_resid_post_mlp_acts_z_svd_fft, title="Post MLP\n A_cos cos(2π/113 f_x x + φ_x) cos(2π/113 f_y y + φ_y) \n+ A_sin sin(2π/113 f_x x + φ_x) sin(2π/113 f_y y + φ_y)", nrows=5)
+fft_plot_eikx_2d(sec_2_1_resid_post_mlp_acts_z_svd_fft, nrows=10, title="Post MLP SVD, each term corresponds to e^(i2π/113 f_x x + f_y y + φ)")
+fft_plot_cosplusminus(sec_2_1_resid_post_mlp_acts_z_svd_fft, title="Post MLP SVD, A_{+/-} cos(2π/113 f_x x +/- f_y y + φ_{+/-})", nrows=5)
+fft_plot_coscos_sinsin(sec_2_1_resid_post_mlp_acts_z_svd_fft, title="Post MLP SVD\n A_cos cos(2π/113 f_x x + φ_x) cos(2π/113 f_y y + φ_y) \n+ A_sin sin(2π/113 f_x x + φ_x) sin(2π/113 f_y y + φ_y)", nrows=5)
 
 # %%
 

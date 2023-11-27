@@ -4,6 +4,7 @@ from pathlib import Path
 
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
 import plotly.express as px
 import torch
@@ -155,7 +156,7 @@ def _extent_from_acts(acts, modes):
 
 
 def _imshow_complex(
-    freqs, acts, ax, mag_colorbar=True, phase_colorbar=False, extent=None, phase=None
+    freqs, acts, ax, mag_colorbar=True, phase_colorbar=False, extent=None, phase=None, vmax=None
 ):
     """Take in default FFT acts and plot the magnitude and phase in a single imshow plot."""
     assert acts.ndim == 2, "acts must be 2D"
@@ -172,7 +173,7 @@ def _imshow_complex(
         assert acts.shape == phase.shape
         mag = acts
 
-    vmax = mag.max()
+    vmax = vmax or mag.max()
     im = ax.imshow(
         _colorize(mag, phase, vmax=vmax),
         extent=extent,
@@ -190,6 +191,7 @@ def _imshow_complex(
         sm2.set_array([])
         cbar2 = plt.colorbar(sm2, ax=ax)
         # Rotate labels 45
+        cbar2.ax.yaxis.set_major_formatter(ticker.StrMethodFormatter('{x:,.0f}'))
         cbar2.ax.set_yticklabels(cbar2.ax.get_yticklabels(), rotation=45)
 
 
@@ -368,6 +370,7 @@ def fft_plot_cosplusminus(
     title="Default title cosplusminus",
     nrows=2,
     figsize=None,
+    equalize=False,
 ):
     ncols = 2
     figsize = (ncols * 4, nrows * 4) if figsize is None else figsize
@@ -375,10 +378,19 @@ def fft_plot_cosplusminus(
     freqs_shifted, acts_shifted = _fftshift_2d(acts_orig)
     acts_plus, acts_minus = __ftshift_to_cosplusminus(acts_shifted)
     for row, [ax_plus, ax_minus] in enumerate(axes):
+        vmax = max(acts_plus[:, :, row].abs().max(), acts_minus[:, :, row].abs().max())
         ax_plus.set_title(f"Dim {row}, cos(f_x x + f_y y + φ)")
-        _imshow_complex(freqs_shifted, acts_plus[:, :, row], ax_plus)
+        _imshow_complex(
+            freqs_shifted,
+            acts_plus[:, :, row],
+            ax_plus,
+            vmax=vmax if equalize else None,
+            mag_colorbar=not equalize,
+        )
         ax_minus.set_title(f"Dim {row}, cos(f_x x - f_y y + φ)")
-        _imshow_complex(freqs_shifted, acts_minus[:, :, row], ax_minus)
+        _imshow_complex(
+            freqs_shifted, acts_minus[:, :, row], ax_minus, vmax=vmax if equalize else None
+        )
     fig.suptitle(title)
 
 
@@ -387,6 +399,7 @@ def fft_plot_coscos_sinsin(
     title="Default title cosplusminus",
     nrows=2,
     figsize=None,
+    equalize=False,
 ):
     ncols = 2
     figsize = (ncols * 4, nrows * 4) if figsize is None else figsize
@@ -397,10 +410,22 @@ def fft_plot_coscos_sinsin(
     mag_coscos[1:, 1:] += acts_minus.abs()
     mag_sinsin = acts_plus.abs()[1:, 1:] - acts_minus.abs()
     for row, [ax_plus, ax_minus] in enumerate(axes):
+        vmax = max(mag_coscos[:, :, row].abs().max(), mag_sinsin[:, :, row].abs().max())
         ax_plus.set_title(f"Dim {row}, A cos(f_x x + φ_x) * cos(f_y y + φ_y)", fontsize=8)
-        _imshow_complex(freqs=freqs_shifted, acts=mag_coscos[:, :, row], ax=ax_plus)
+        _imshow_complex(
+            freqs=freqs_shifted,
+            acts=mag_coscos[:, :, row],
+            ax=ax_plus,
+            vmax=vmax if equalize else None,
+            mag_colorbar=not equalize,
+        )
         ax_minus.set_title(f"Dim {row}, B sin(f_x x + φ_x) * sin(f_y y + φ_y)", fontsize=8)
-        _imshow_complex(freqs=freqs_shifted, acts=mag_sinsin[:, :, row], ax=ax_minus)
+        _imshow_complex(
+            freqs=freqs_shifted,
+            acts=mag_sinsin[:, :, row],
+            ax=ax_minus,
+            vmax=vmax if equalize else None,
+        )
     fig.suptitle(title)
 
     # TODO phases

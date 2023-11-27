@@ -359,7 +359,7 @@ def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Da
     Returns:
         The DataLoader or a tuple of DataLoaders.
     """
-    assert chunk_idx < total_chunks, "chunk_idx greater than total number of chunks"
+    assert chunk_idx < total_chunks, f"chunk_idx {chunk_idx} >= total # of chunks {total_chunks}"
     if total_chunks == 1:
         return dataset
     dataset_len = len(dataset)  # type: ignore

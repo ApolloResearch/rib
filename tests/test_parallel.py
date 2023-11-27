@@ -1,36 +1,28 @@
-import subprocess
-import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 import torch
+import yaml
+from mpi4py import MPI
 from torch.utils.data import ConcatDataset, TensorDataset
 
+from experiments.lm_rib_build.combine_edges import main as combine_edges
+from experiments.lm_rib_build.distributed_edges import main as run_edges
+from experiments.lm_rib_build.run_lm_rib_build import Config
+from experiments.lm_rib_build.run_lm_rib_build import main as run_rib_build
 from rib.loader import get_dataset_chunk
-from rib.log import logger
 
 
 @pytest.mark.slow
-@pytest.mark.skip_ci
-@pytest.mark.xfail
-def test_edges_when_parallel():
-    """
-    This test fails in ci, at least when run as part of the test suite.
-    """
-
-    def make_config(
-        exp_name: str,
-        temp_dir: str,
-        rib_dir: str,
-        compute_edges: bool,
-        interaction_matrices_path: str = "null",
-    ):
+class TestDistributed:
+    def make_config_dict(self, exp_name: str, **kwargs):
         config_str = f"""
         exp_name: {exp_name}
         seed: 0
         tlens_pretrained: null
-        tlens_model_path: {rib_dir}/experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
-        interaction_matrices_path: {interaction_matrices_path}
+        tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
+        interaction_matrices_path: null
         node_layers:
             - ln1.0
             - mlp_in.0
@@ -47,54 +39,50 @@ def test_edges_when_parallel():
         n_intervals: 0
         dtype: float64
         eval_type: accuracy
-        out_dir: {temp_dir}
-        calculate_edges: {'true' if compute_edges else 'false'}
+        out_dir: null
         """
-        config_path = f"{temp_dir}/{exp_name}.yaml"
-        with open(config_path, "w") as f:
-            f.write(config_str)
-        return config_path
+        config_dict: dict[str, Any] = yaml.safe_load(config_str)
+        config_dict.update(kwargs)
+        return config_dict
 
-    rib_dir = str(Path(__file__).parent.parent)
-    run_file = rib_dir + "/experiments/lm_rib_build/run_lm_rib_build.py"
+    def get_single_edges(self, tmpdir):
+        single_config_dict = self.make_config_dict(
+            "test_single",
+            calculate_edges=True,
+            interaction_matrices_path=f"{tmpdir}/compute_cs_rib_Cs.pt",
+        )
+        return run_rib_build(Config(**single_config_dict))["edges"]
 
-    with tempfile.TemporaryDirectory() as temp_dir:
+    def get_double_edges(self, tmpdir):
+        double_config_path = f"{tmpdir}/double_config.yaml"
+        double_outdir_path = f"{tmpdir}/double_out/"
+
+        double_config = self.make_config_dict(
+            "test_double",
+            calculate_edges=True,
+            interaction_matrices_path=f"{tmpdir}/compute_cs_rib_Cs.pt",
+            out_dir=double_outdir_path,
+        )
+        with open(double_config_path, "w") as f:
+            yaml.dump(double_config, f)
+
+        # mpi might be initialized which causes problems for running an mpiexec subcommand.
+        MPI.Finalize()
+        run_edges(double_config_path, n_pods=1, pod_rank=0, n_processes=2)
+        combine_edges(double_outdir_path)
+        results = torch.load(f"{double_outdir_path}/test_double_rib_graph_combined.pt")
+        return results["edges"]
+
+    def test_edges_are_same(self, tmpdir):
         # first we compute the cs. we do this separately as there are occasional reproducibility
         # issues with computing them.
-        cs_config_path = make_config(
-            "compute_cs", temp_dir=temp_dir, rib_dir=rib_dir, compute_edges=False
+        cs_config = Config(
+            **self.make_config_dict("compute_cs", out_dir=tmpdir, calculate_edges=False)
         )
-        subprocess.run(["python", run_file, cs_config_path], capture_output=True, check=True)
-
-        # then we compute the edges on a single process
-        single_config_path = make_config(
-            "test_single",
-            temp_dir=temp_dir,
-            rib_dir=rib_dir,
-            compute_edges=True,
-            interaction_matrices_path=f"{temp_dir}/compute_cs_rib_Cs.pt",
-        )
-        subprocess.run(["python", run_file, single_config_path], capture_output=True, check=True)
-        logger.info("done with single!")
-
-        # and with two processes
-        double_config_path = make_config(
-            "test_double",
-            temp_dir=temp_dir,
-            rib_dir=rib_dir,
-            compute_edges=True,
-            interaction_matrices_path=f"{temp_dir}/compute_cs_rib_Cs.pt",
-        )
-        subprocess.run(
-            ["mpiexec", "--verbose", "-n", "2", "python", run_file, double_config_path],
-            capture_output=True,
-            check=True,
-        )
-        logger.info("done with double!")
-
-        single_edges = torch.load(f"{temp_dir}/test_single_rib_graph.pt")["edges"]
-        double_edges = torch.load(f"{temp_dir}/test_double_rib_graph.pt")["edges"]
-
+        run_rib_build(cs_config)
+        # not using fixtures as we need to compute Cs first
+        single_edges = self.get_single_edges(tmpdir)
+        double_edges = self.get_double_edges(tmpdir)
         for (module, s_edges), (_, d_edges) in zip(single_edges, double_edges):
             assert (
                 s_edges.shape == d_edges.shape

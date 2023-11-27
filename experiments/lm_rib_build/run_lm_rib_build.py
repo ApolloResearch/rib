@@ -274,7 +274,6 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         eps=config.eps,
         fold_bias=True,
         dtype=dtype,
-        device=device,
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)

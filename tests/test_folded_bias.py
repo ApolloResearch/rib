@@ -10,7 +10,6 @@ from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.hook_manager import HookedModel
 from rib.models import SequentialTransformer, SequentialTransformerConfig
-from rib.models.sequential_transformer.components import AttentionIn
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.models.utils import get_model_attr
 from rib.utils import set_seed
@@ -20,8 +19,7 @@ from rib.utils import set_seed
 def _folded_bias_comparison(
     model_raw: SequentialTransformer,
     model_folded: SequentialTransformer,
-    atol=1e-6,
-    attn_in_atol=1e-6,
+    atol=1e-8,
 ) -> None:
     """Compare the outputs of raw model and one with biases folded into its weights.
 
@@ -49,7 +47,9 @@ def _folded_bias_comparison(
                     "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
                     head_index=model_folded.cfg.n_heads,
                 )
-                assert torch.allclose(vB[..., :, -1], torch.tensor(1, dtype=vB.dtype))
+                assert torch.allclose(
+                    vB[..., :, -1], torch.tensor(1, dtype=vB.dtype), atol=0, rtol=0
+                )
                 vB = vB[..., :-1]
                 vB = einops.rearrange(
                     vB, "... pos head_index d_head_v -> ... pos (head_index d_head_v)"
@@ -57,44 +57,33 @@ def _folded_bias_comparison(
 
             assert vA.shape == vB.shape, f"shape mismatch for {k}: {vA.shape} vs {vB.shape}"
 
-            # Check if this is a Pythia attention module:
-            if (
-                isinstance(get_model_attr(model_raw, k), AttentionIn)
-                and model_raw.cfg.rotary_dim is not None
-            ):
-                comparison_atol = attn_in_atol
-            else:
-                comparison_atol = atol
+            assert not torch.isnan(vA).any(), f"NaNs in {k}"
+            assert not torch.isnan(vB).any(), f"NaNs in {k}"
 
-            assert torch.allclose(
-                vA, vB, atol=comparison_atol
-            ), f"WARNING: mismatched values for {k}"
+            assert torch.allclose(vA, vB, atol=atol), f"WARNING: mismatched values for {k}"
 
     for outA, outB in zip(outputA, outputB):
         assert torch.allclose(outA, outB, atol=atol), "WARNING: mismatched output values"
 
 
 def test_modular_arithmetic_folded_bias() -> None:
-    """Test that the folded bias trick works for a model used for modular arithmetic.
-
-    Floating point errors heavily accumulate here with float32 or less, so we use float64.
-    """
+    """Test that the folded bias trick works for a model used for modular arithmetic."""
     set_seed(42)
+    dtype = torch.float32
+    # Works with atol=0 for float64 and atol=1e-3 for float32
+    atol = 1e-3
     cfg = {
-        "n_layers": 2,
+        "n_layers": 2,  # If going up to 50 layers, need atol=1e-1
         "d_model": 129,
         "d_head": 32,
         "n_heads": 4,
         "d_mlp": 512,
         "d_vocab": 114,  # modulus + 1
         "n_ctx": 3,
-        "act_fn": "gelu_new",
+        "act_fn": "gelu_new",  # Even though we use relu, this will test our root_one conversion
         "normalization_type": "LNPre",
-        "dtype": torch.float64,
+        "dtype": dtype,
     }
-    # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
-    atol = 1e-8
-    attn_in_atol = 1e-8
 
     tlens_cfg = HookedTransformerConfig.from_dict(cfg)
     cfg = SequentialTransformerConfig(**asdict(tlens_cfg))
@@ -103,57 +92,56 @@ def test_modular_arithmetic_folded_bias() -> None:
 
     model_raw = SequentialTransformer(cfg, node_layers)
     model_raw.eval()
-    # Manually set all bias vectors to random values (to avoid the default of 0)
+    # Manually set all params to random values (but not the buffers which include the mask tensor)
+    seq_param_names = [named_param[0] for named_param in model_raw.named_parameters()]
 
-    seq_param_names = list(model_raw.state_dict().keys())
     # Initialise all params to random values
     for key in seq_param_names:
         module = get_model_attr(model_raw, key)
-        if module.dtype != torch.bool:  # Ignore the preset boolean mask tensor
-            # Use kaiming normal initialisation for weights
-            torch.nn.init.normal_(module)
+        # Use kaiming normal initialisation for weights
+        torch.nn.init.normal_(module)
 
     model_folded = SequentialTransformer(cfg, node_layers)
     model_folded.load_state_dict(model_raw.state_dict())
     model_folded.fold_bias()
     model_folded.eval()
 
-    _folded_bias_comparison(model_raw, model_folded, atol=atol, attn_in_atol=attn_in_atol)
+    _folded_bias_comparison(model_raw, model_folded, atol=atol)
 
 
 def pretrained_lm_folded_bias_comparison(
     hf_model_str: str,
     node_layers: list[str],
     positional_embedding_type: Literal["standard", "rotary"],
-    atol: float = 1e-6,
-    attn_atol: float = 1e-6,
+    atol: float = 1e-11,
+    dtype: torch.dtype = torch.float64,
 ) -> None:
     """Test that the folded bias trick works for a pretrained language model.
 
     Uses float64 to avoid floating point errors.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tlens_model = HookedTransformer.from_pretrained(hf_model_str)
+
+    tlens_model = HookedTransformer.from_pretrained(hf_model_str, device="cpu", torch_dtype=dtype)
     cfg = SequentialTransformerConfig(**asdict(tlens_model.cfg))
+    assert cfg.dtype == dtype
     model_raw = SequentialTransformer(cfg, node_layers)
     # Load the transformer-lens weights into the sequential transformer model
     state_dict = convert_tlens_weights(
-        seq_param_names=list(model_raw.state_dict().keys()),
+        seq_model=model_raw,
         tlens_model=tlens_model,
         positional_embedding_type=positional_embedding_type,
     )
     model_raw.load_state_dict(state_dict)
-    model_raw.to(torch.float64)
     model_raw.to(device=device)
     model_raw.eval()
     model_folded = SequentialTransformer(cfg, node_layers)
     model_folded.load_state_dict(state_dict)
     model_folded.fold_bias()
-    model_folded.to(torch.float64)
     model_folded.to(device=device)
     model_folded.eval()
 
-    _folded_bias_comparison(model_raw, model_folded, atol=atol, attn_in_atol=attn_atol)
+    _folded_bias_comparison(model_raw, model_folded, atol=atol)
 
 
 @pytest.mark.slow()
@@ -165,8 +153,8 @@ def test_gpt2_folded_bias() -> None:
         hf_model_str="gpt2",
         node_layers=node_layers,
         positional_embedding_type="standard",
-        atol=1e-5,
-        attn_atol=1e-5,
+        atol=1e-10,  # float64 can do 1e-10, float32 can do 1e-3
+        dtype=torch.float64,
     )
 
 
@@ -179,6 +167,6 @@ def test_pythia_folded_bias() -> None:
         hf_model_str="pythia-14m",
         node_layers=node_layers,
         positional_embedding_type="rotary",
-        atol=1e-4,
-        attn_atol=1e-3,
+        atol=1e-11,  # float64 can do 1e-11, float32 can do 1e2
+        dtype=torch.float64,
     )

@@ -13,6 +13,7 @@ from tqdm import tqdm
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
 from rib.linalg import eigendecompose, pinv_diag
+from rib.types import TORCH_DTYPES
 
 
 @dataclass
@@ -177,7 +178,12 @@ def calculate_interaction_rotations(
         ), f"Final node layer {node_layers[-1]} not in gram matrices."
         with torch.inference_mode():
             # Get the out_dim of logits by hackily passing a datapoint through it
-            out_samples = hooked_model(data_loader.dataset[0][0].to(device))
+            input_sample = data_loader.dataset[0][0].to(device=device)
+            assert isinstance(input_sample, Tensor)
+            if input_sample.dtype in tuple(TORCH_DTYPES.values()):
+                input_sample = input_sample.to(dtype=dtype)
+
+            out_samples = hooked_model(input_sample)
             out_sample: Float[Tensor, "... out_dim"] = (
                 out_samples[0] if isinstance(out_samples, tuple) else out_samples
             )

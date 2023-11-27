@@ -125,7 +125,6 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         eps=config.eps,
         fold_bias=True,
         dtype=dtype,
-        device=device,
     )
 
     seq_model.eval()

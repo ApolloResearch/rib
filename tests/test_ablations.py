@@ -18,18 +18,13 @@ import pytest
 import torch
 import yaml
 
-from rib.ablations import AblationAccuracies
-
-# Append the root directory to sys.path
-ROOT_DIR = Path(__file__).parent.parent.resolve()
-sys.path.append(str(ROOT_DIR))
-
 from experiments.lm_ablations.run_lm_ablations import Config as LMAblationConfig
 from experiments.lm_ablations.run_lm_ablations import main as lm_ablations_main
 from experiments.mnist_ablations.run_mnist_ablations import (
     Config as MNISTAblationConfig,
 )
 from experiments.mnist_ablations.run_mnist_ablations import main as mnist_ablations_main
+from rib.ablations import AblationAccuracies
 
 
 def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool = False) -> bool:

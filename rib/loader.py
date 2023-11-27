@@ -29,7 +29,6 @@ def load_sequential_transformer(
     eps: Optional[float],
     fold_bias: bool = True,
     dtype: torch.dtype = torch.float32,
-    device: str = "cpu",
 ) -> tuple[SequentialTransformer, dict]:
     """Load a SequentialTransformer model from a pretrained transformerlens model.
 
@@ -45,9 +44,8 @@ def load_sequential_transformer(
         tlens_pretrained (Optional[str]): The name of a pretrained transformerlens model.
         tlens_model_path (Optional[Path]): The path to a transformerlens model.
         eps (Optional[float]): The epsilon value to use for the layernorms in the model.
-        fold_bias (bool): Whether to fold the bias into the weights.
-        dtype (Optional[torch.dtype]): The dtype to use for the model.
-        device (Optional[str]): The device to use for the model.
+        fold_bias (bool): Whether to fold the bias into the weights. Defaults to True.
+        dtype (torch.dtype): The dtype to use for the model. Defaults to float32.
 
     Returns:
         - SequentialTransformer: The SequentialTransformer model.
@@ -57,7 +55,9 @@ def load_sequential_transformer(
         tlens_pretrained is not None or tlens_model_path is not None
     ), "Either `tlens_pretrained` or `tlens_model_path` must be specified."
     if tlens_pretrained is not None:
-        tlens_model = HookedTransformer.from_pretrained(tlens_pretrained)
+        tlens_model = HookedTransformer.from_pretrained(
+            tlens_pretrained, device="cpu", torch_dtype=dtype
+        )
         # Create a SequentialTransformerConfig from the HookedTransformerConfig
         tlens_cfg_dict = tlens_model.cfg.to_dict()
 
@@ -68,18 +68,21 @@ def load_sequential_transformer(
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
             # The config specified in the YAML file used to train the tlens model
             provided_tlens_cfg_dict = yaml.safe_load(f)["model"]
-        tlens_model = HookedTransformer(provided_tlens_cfg_dict)
+
+        # Set the dtype to the one specified in the config for this script
+        provided_tlens_cfg_dict["dtype"] = dtype
+
+        tlens_model = HookedTransformer(provided_tlens_cfg_dict, move_to_device=False)
         # The entire tlens config (including default values)
         tlens_cfg_dict = tlens_model.cfg.to_dict()
 
         # Load the weights from the tlens model
-        tlens_model.load_state_dict(torch.load(tlens_model_path, map_location=device))
+        tlens_model.load_state_dict(torch.load(tlens_model_path, map_location="cpu"))
 
     seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
 
-    # Set the dtype and layernorm epsilon to the one specified in the config for this script (as
-    # opposed to the one used to train the tlens model)
-    seq_cfg.dtype = dtype
+    # Set the layernorm epsilon to the one specified in the config for this script (not the one
+    # used to train the model)
     if eps is not None:
         seq_cfg.eps = eps
 
@@ -89,7 +92,7 @@ def load_sequential_transformer(
 
     # Load the transformer-lens weights into the sequential transformer model
     state_dict = convert_tlens_weights(
-        seq_param_names=list(seq_model.state_dict().keys()),
+        seq_model=seq_model,
         tlens_model=tlens_model,
         positional_embedding_type=seq_cfg.positional_embedding_type,
     )

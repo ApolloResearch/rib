@@ -34,7 +34,7 @@ class HFDatasetConfig(BaseModel):
     )
     n_ctx: int = Field(
         2048,
-        description="Dataset will be packed to sequences of this lenght. Should be <1024 for gpt2."
+        description="Dataset will be packed to sequences of this length. Should be <1024 for gpt2."
         "<2048 for most other models.",
     )
 

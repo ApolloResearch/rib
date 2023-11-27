@@ -291,8 +291,6 @@ def load_dataset(
             dataset_config.return_set_frac and dataset_config.return_set_n_samples
         ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
 
-        # TODO: maybe assert n_ctx is supported
-
         if dataset_config.return_set_frac:
             percent = int(dataset_config.return_set_frac * 100)
             if dataset_config.return_set_portion == "first":

@@ -22,7 +22,7 @@ from rib.data_accumulator_november_A import collect_gram_matrices as collect_gra
 from rib.interaction_algos_november_A import calculate_interaction_rotations as calculate_interaction_rotations_A
 
 from rib.log import logger
-from rib.models import MLP
+from rib.models import MLP, MLP_A
 from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, load_config, check_outfile_overwrite, set_seed
 from dataclasses import dataclass, asdict
@@ -47,6 +47,23 @@ def random_block_diagonal_matrix(n, k, variances = None, dtype = torch.float32):
 class BlockDiagonalDNN(MLP):
     def __init__(self, layers = 4, n=4, k=2, dtype = torch.float32, bias = None, activation_fn = 'relu', variances = None):
         super(BlockDiagonalDNN, self).__init__(hidden_sizes = [n] * layers, 
+                                       input_size = n, output_size = n,
+                                       dtype = dtype, fold_bias = False,
+                                       activation_fn=activation_fn)
+        # self.dtype = dtype
+        # # Define layers
+        # self.fc = nn.ModuleList([nn.Linear(n, n,dtype=self.dtype) for _ in range(layers)])
+
+        # Hardcode weights and biases
+        for i in range(layers+1):
+            self.layers[i].W = nn.Parameter(random_block_diagonal_matrix(n, k, variances = variances, dtype=dtype))
+            if bias is not None:
+                self.layers[i].b = nn.Parameter(bias * torch.ones(n,dtype=dtype))
+        self.fold_bias()
+        
+class BlockDiagonalDNN_A(MLP_A):
+    def __init__(self, layers = 4, n=4, k=2, dtype = torch.float32, bias = None, activation_fn = 'relu', variances = None):
+        super(BlockDiagonalDNN_A, self).__init__(hidden_sizes = [n] * layers, 
                                        input_size = n, output_size = n,
                                        dtype = dtype, fold_bias = False,
                                        activation_fn=activation_fn)

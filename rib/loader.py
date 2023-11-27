@@ -1,7 +1,7 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Sized, Union, overload
+from typing import Literal, Optional, Union, overload
 
 import torch
 import yaml
@@ -29,6 +29,7 @@ def load_sequential_transformer(
     eps: Optional[float],
     fold_bias: bool = True,
     dtype: torch.dtype = torch.float32,
+    device: str = "cpu",
 ) -> tuple[SequentialTransformer, dict]:
     """Load a SequentialTransformer model from a pretrained transformerlens model.
 
@@ -46,6 +47,7 @@ def load_sequential_transformer(
         eps (Optional[float]): The epsilon value to use for the layernorms in the model.
         fold_bias (bool): Whether to fold the bias into the weights. Defaults to True.
         dtype (torch.dtype): The dtype to use for the model. Defaults to float32.
+        device (str): The device to use for the model. Defaults to "cpu".
 
     Returns:
         - SequentialTransformer: The SequentialTransformer model.
@@ -101,7 +103,12 @@ def load_sequential_transformer(
     if fold_bias:
         seq_model.fold_bias()
 
-    return seq_model, tlens_cfg_dict
+    # Ensure that our model has the correct dtype (by checking the dtype of the first parameter)
+    assert next(seq_model.parameters()).dtype == dtype, (
+        f"Model dtype ({next(seq_model.parameters()).dtype}) does not match specified dtype "
+        f"({dtype})."
+    )
+    return seq_model.to(device), tlens_cfg_dict
 
 
 def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:

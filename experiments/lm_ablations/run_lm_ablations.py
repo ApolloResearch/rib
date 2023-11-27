@@ -125,10 +125,10 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         eps=config.eps,
         fold_bias=True,
         dtype=dtype,
+        device=device,
     )
 
     seq_model.eval()
-    seq_model.to(device=torch.device(device), dtype=dtype)
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need train and test sets (i.e. the "both" argument)

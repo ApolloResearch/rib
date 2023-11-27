@@ -17,6 +17,10 @@ import yaml
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
+
+from rib.data_accumulator_november_A import collect_gram_matrices as collect_gram_matrices_A, collect_interaction_edges as collect_interaction_edges_A
+from rib.interaction_algos_november_A import calculate_interaction_rotations as calculate_interaction_rotations_A
+
 from rib.log import logger
 from rib.models import MLP
 from rib.types import TORCH_DTYPES
@@ -170,6 +174,7 @@ class Config:
                      activation_fn = 'relu',
                      variances = None,
                      data_variances = None,
+                     binarise = False,
                     #  basis: str = 'rib',
                      ):
             """
@@ -210,6 +215,7 @@ class Config:
             self.activation_fn = activation_fn
             self.variances = variances
             self.data_variances = data_variances
+            self.binarise = binarise
             # self.basis = basis
     def to_dict(self):
         return vars(self)
@@ -270,6 +276,15 @@ def main(config: Config) -> None:
         device=device,
         collect_output_gram=collect_output_gram,
     )
+    
+    gram_matrices_A = collect_gram_matrices_A(
+        hooked_model=hooked_mlp,
+        module_names=non_output_node_layers,
+        data_loader=dataloader,
+        dtype=dtype,
+        device=device,
+        collect_output_gram=collect_output_gram,
+    )
 
     Cs, Us = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
@@ -284,8 +299,31 @@ def main(config: Config) -> None:
         rotate_final_node_layer=config.rotate_final_node_layer,
     )
     
+    Cs_A, Us_A = calculate_interaction_rotations_A(
+        gram_matrices=gram_matrices_A,
+        section_names=non_output_node_layers,
+        node_layers=node_layers,
+        hooked_model=hooked_mlp,
+        data_loader=dataloader,
+        dtype=dtype,
+        device=device,
+        n_intervals=config.n_intervals,
+        truncation_threshold=config.truncation_threshold,
+        rotate_final_node_layer=config.rotate_final_node_layer,
+    )
+    
     E_hats_rib = collect_interaction_edges(
         Cs=Cs,
+        hooked_model=hooked_mlp,
+        n_intervals=config.n_intervals,
+        section_names=node_layers,
+        data_loader=dataloader,
+        dtype=dtype,
+        device=device,
+    )
+    
+    E_hats_rib_A = collect_interaction_edges_A(
+        Cs=Cs_A,
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
         section_names=node_layers,
@@ -314,9 +352,9 @@ def main(config: Config) -> None:
         dtype=dtype,
         device=device,
     )
-    
-    E_hats_binary_rib = binarise(E_hats_rib)
-    E_hats_binary_pca = binarise(E_hats_pca)
+    if config.binarise:
+        E_hats_binary_rib = binarise(E_hats_rib)
+        E_hats_binary_pca = binarise(E_hats_pca)
     
     
     # Move interaction matrices to the cpu and store in dict
@@ -326,15 +364,28 @@ def main(config: Config) -> None:
         info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
         info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
         interaction_rotations.append(info_dict)
+    
+    interaction_rotations_A = []
+    for C_info in Cs_A:
+        info_dict = asdict(C_info)
+        info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
+        info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
+        interaction_rotations_A.append(info_dict)
 
     eigenvectors = [asdict(U_info) for U_info in Us]
+    
+    eigenvectors_A = [asdict(U_info) for U_info in Us_A]
 
     results = {
         "exp_name": exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
+        "gram_matrices_A": {k: v.cpu() for k, v in gram_matrices_A.items()},
         "interaction_rotations": interaction_rotations,
+        "interaction_rotations_A": interaction_rotations_A,
         "eigenvectors": eigenvectors,
+        "eigenvectors_A": eigenvectors_A,
         "rib_edges": [(module, E_hats_rib[module].cpu()) for module in E_hats_rib],
+        "rib_edges_A": [(module, E_hats_rib_A[module].cpu()) for module in E_hats_rib_A],
         "neuron_edges": [(module, E_hats_neuron[module].cpu()) for module in E_hats_neuron],
         "pca_edges": [(module, E_hats_pca[module].cpu()) for module in E_hats_pca],
         "model_config_dict": config.to_dict(),
@@ -347,11 +398,13 @@ def main(config: Config) -> None:
     # Plot the graphs
     parent_dir = out_file.parent
     out_file_graph = parent_dir / "rib_graph.png"
+    out_file_graph_A = parent_dir / "rib_graph_A.png"
     out_file_mlp = parent_dir / "mlp_graph.png"
     out_file_neuron_basis = parent_dir / "neuron_basis_graph.png"
     out_file_pca = parent_dir / "pca_graph.png"
-    out_file_rib_binary = parent_dir / "rib_binary_graph.png"
-    out_file_pca_binary = parent_dir / "pca_binary_graph.png"
+    if config.binarise:
+        out_file_rib_binary = parent_dir / "rib_binary_graph.png"
+        out_file_pca_binary = parent_dir / "pca_binary_graph.png"
 
     mlp = mlp.cpu()
     mlp_edges = []
@@ -373,13 +426,14 @@ def main(config: Config) -> None:
         nodes_per_layer=nodes_per_layer,
         out_file=out_file_graph,
     )
-    #make binary rib graph
+    
+    #make rib graph november norm A
     plot_interaction_graph(
-        raw_edges=[(module, E_hats_binary_rib[module].cpu()) for module in E_hats_binary_rib],
+        raw_edges=results["rib_edges_A"],
         layer_names=layer_names,
         exp_name=results["exp_name"],
         nodes_per_layer=nodes_per_layer,
-        out_file=out_file_rib_binary,
+        out_file=out_file_graph_A,
     )
 
     #make graph of model weights
@@ -399,15 +453,24 @@ def main(config: Config) -> None:
         nodes_per_layer=nodes_per_layer,
         out_file=out_file_pca,
     )
-    
-    #make binary pca graph
-    plot_interaction_graph(
-        raw_edges=[(module, E_hats_binary_pca[module].cpu()) for module in E_hats_binary_pca],
-        layer_names=layer_names,
-        exp_name=results["exp_name"],
-        nodes_per_layer=nodes_per_layer,
-        out_file=out_file_pca_binary,
-    )
+    if config.binarise:
+        #make binary rib graph
+        plot_interaction_graph(
+            raw_edges=[(module, E_hats_binary_rib[module].cpu()) for module in E_hats_binary_rib],
+            layer_names=layer_names,
+            exp_name=results["exp_name"],
+            nodes_per_layer=nodes_per_layer,
+            out_file=out_file_rib_binary,
+        )
+        
+        #make binary pca graph
+        plot_interaction_graph(
+            raw_edges=[(module, E_hats_binary_pca[module].cpu()) for module in E_hats_binary_pca],
+            layer_names=layer_names,
+            exp_name=results["exp_name"],
+            nodes_per_layer=nodes_per_layer,
+            out_file=out_file_pca_binary,
+        )
     
     #make neuron basis graph
     plot_interaction_graph(

@@ -8,7 +8,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from rib.hook_fns import (
+from rib.hook_fns_november_A import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,

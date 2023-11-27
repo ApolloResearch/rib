@@ -510,7 +510,7 @@ class MLPIn(nn.Module):
         self,
         residual: Float[Tensor, "... d_model"],
         x: Float[Tensor, "... d_model"],
-    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_mlp"]]:
         pre_act = einsum("... d_model, d_model d_mlp -> ... d_mlp", x, self.W_in) + self.b_in
         return residual, pre_act
 
@@ -533,7 +533,7 @@ class MLPAct(nn.Module):
     def forward(
         self,
         residual: Float[Tensor, "... d_model"],
-        pre_act: Float[Tensor, "... d_model"],
+        pre_act: Float[Tensor, "... d_mlp"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         # Technically, all these einsums could be done with a single matmul, but this is more readable.
         post_act = self.act_fn(pre_act)  # [..., d_mlp]
@@ -550,7 +550,7 @@ class MLPOut(nn.Module):
     def forward(
         self,
         residual: Float[Tensor, "... d_model"],
-        post_act: Float[Tensor, "... d_model"],
+        post_act: Float[Tensor, "... d_mlp"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         out = (
             einsum(

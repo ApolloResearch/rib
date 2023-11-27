@@ -11,7 +11,7 @@ from typing import Optional, Union
 import fire
 import torch
 import wandb
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
@@ -21,6 +21,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from rib.log import logger
 from rib.models import MLP
 from rib.models.utils import save_model
+from rib.types import RootPath
 from rib.utils import REPO_ROOT, load_config, set_seed
 
 
@@ -28,14 +29,17 @@ class ModelConfig(BaseModel):
     hidden_sizes: Optional[list[int]]
     activation_fn: str = "relu"
     bias: bool = True
-    fold_bias: bool = True
 
 
 class TrainConfig(BaseModel):
     learning_rate: float
     batch_size: int
     epochs: int
-    save_dir: Optional[Path]
+    save_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / ".checkpoints" / "mnist",
+        description="Directory for the output files. Defaults to `./.checkpoints/mnist`. If None, "
+        "no output is written. If a relative path, it is relative to the root of the rib repo.",
+    )
     save_every_n_epochs: Optional[int]
 
 
@@ -154,9 +158,6 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
 
-    if not config.train.save_dir:
-        config.train.save_dir = Path(__file__).parent / ".checkpoints" / "mnist"
-
     # Load the MNIST train dataset
     transform = transforms.ToTensor()
     train_data = datasets.MNIST(
@@ -171,7 +172,7 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
         output_size=10,
         activation_fn=config.model.activation_fn,
         bias=config.model.bias,
-        fold_bias=config.model.fold_bias,
+        fold_bias=False,  # false even if config.model.fold_bias is true; we fold after training
     )
     model = model.to(device)
 

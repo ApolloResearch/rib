@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 class HFDatasetConfig(BaseModel):
     """Config for the HuggingFace datasets library."""
 
-    source: Literal["huggingface"]
+    source: Literal["huggingface"] = "huggingface"
     name: str = Field(
         ..., description="The name of the dataset to load from the HuggingFace datasets library."
     )
@@ -56,8 +56,8 @@ class ModularArithmeticDatasetConfig(BaseModel):
     file (see `rib/loader.create_modular_arithmetic_dataset`)
     """
 
-    source: Literal["custom"]
-    name: Literal["modular_arithmetic"]
+    source: Literal["custom"] = "custom"
+    name: Literal["modular_arithmetic"] = "modular_arithmetic"
     return_set: Literal["train", "test", "all", "both"] = Field(
         ...,
         description="The dataset to return. If 'both', returns both the train and test datasets."

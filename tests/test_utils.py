@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from rib.models import MLP, Layer
+from rib.models import MLP, MLPLayer
 from rib.models.utils import gelu_new, get_model_attr
 from rib.utils import calc_exponential_ablation_schedule, eval_model_accuracy, find_root
 
@@ -26,12 +26,12 @@ def test_get_model_attr() -> None:
     assert isinstance(layers, nn.ModuleList)
 
     layer_0 = get_model_attr(model, "layers.0")
-    assert isinstance(layer_0, Layer)
+    assert isinstance(layer_0, MLPLayer)
 
-    layer_0_linear = get_model_attr(model, "layers.0.linear")
-    assert isinstance(layer_0_linear, torch.nn.Linear)
-    assert layer_0_linear.in_features == 2
-    assert layer_0_linear.out_features == 5
+    layer_0_W = get_model_attr(model, "layers.0.W")
+    assert isinstance(layer_0_W, torch.nn.Parameter)
+    assert layer_0.in_features == 2
+    assert layer_0.out_features == 5
 
     if hasattr(layer_0, "activation"):
         layer_0_activation = get_model_attr(model, "layers.0.activation")
@@ -39,10 +39,9 @@ def test_get_model_attr() -> None:
             layer_0_activation, nn.Module
         )  # replace nn.Module with specific activation function if known
 
-    layer_1_linear = get_model_attr(model, "layers.1.linear")
-    assert isinstance(layer_1_linear, torch.nn.Linear)
-    assert layer_1_linear.in_features == 5
-    assert layer_1_linear.out_features == 3
+    layer_1 = get_model_attr(model, "layers.1")
+    assert layer_1.in_features == 5
+    assert layer_1.out_features == 3
 
 
 def test_eval_model_accuracy() -> None:

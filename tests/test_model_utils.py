@@ -237,8 +237,8 @@ def test_n_ctx_attn_pattern_pythia():
     """
     set_seed(0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float32
-    atol = 1e-6  # Works with atol=0 for float64 and 1e-6 for float32
+    dtype = torch.float64
+    atol = 0  # Works with atol=0 for float64 and 1e-6 for float32
     module_id = "attn_out.0"
     batch_size = 2
     short_n_ctx = 20
@@ -319,7 +319,7 @@ def test_n_ctx_padding_pythia():
     set_seed(0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float64
-    atol = 0
+    atol = 0  # Need 1e-1 for float32 and 0 for float64
     module_id = "attn_out.0"
     batch_size = 2
     short_n_ctx = 20

@@ -222,7 +222,7 @@ def test_validate_node_layers_invalid(node_layers: list[str], module_ids: list[s
 
 
 @pytest.mark.slow()
-def test_n_ctx_attn_pattern_pythia():
+def test_n_ctx_attn_scores_pythia():
     """Test that varying n_ctx produces the same attention scores for pythia-14m.
 
     Note that this test doesn't test any particular feature that we've implemented, but rather

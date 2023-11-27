@@ -452,5 +452,5 @@ def calc_linear_edge_analytic(
         W_hat = W_C_pinv
     else:
         W_hat = einsum("out out_trunc, out in_trunc -> out_trunc in_trunc", C_out, W_C_pinv)
-    edge = einsum("out_trunc in_trunc, in_trunc -> out_trunc in_trunc", W_hat**2, f_hat_norm**2)
+    edge = einsum("out_trunc in_trunc, in_trunc -> out_trunc in_trunc", W_hat**2, f_hat_norm)
     return edge

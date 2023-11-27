@@ -244,7 +244,7 @@ def collect_interaction_edges(
 
     integrated_gradient_types: dict[str, Literal["linear", "numerical"]] = {}
     edge_hooks: list[Hook] = []
-    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], section_ids)):
+    for idx, (C_info, section_id) in enumerate(zip(Cs[:-1], section_ids)):
         C_in = C_info.C
         C_in_pinv = C_info.C_pinv
         C_out = Cs[idx + 1].C
@@ -253,7 +253,7 @@ def collect_interaction_edges(
         assert C_in_pinv is not None, "C_pinv matrix is None."
 
         # Get the list of modules in the section
-        section = get_model_attr(hooked_model.model, module_name)
+        section = get_model_attr(hooked_model.model, section_id)
 
         if use_analytic_integrad:
             # Check if only a single module in the section
@@ -269,7 +269,7 @@ def collect_interaction_edges(
                             name=C_info.node_layer_name,
                             data_key="f_hat_norm",
                             fn=linear_integrated_gradient_pre_forward_hook_fn,
-                            module_name=module_name,
+                            module_name=section_id,
                             fn_kwargs={
                                 "C_in": C_in.to(device),  # C from the current node layer
                                 "dataset_size": dataset_size,
@@ -288,7 +288,7 @@ def collect_interaction_edges(
                     name=C_info.node_layer_name,
                     data_key="edge",
                     fn=interaction_edge_pre_forward_hook_fn,
-                    module_name=module_name,
+                    module_name=section_id,
                     fn_kwargs={
                         "C_in": C_in.to(device),  # C from the current node layer
                         "C_in_pinv": C_in_pinv.to(device),  # C_pinv from current node layer

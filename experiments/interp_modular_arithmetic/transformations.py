@@ -1,5 +1,7 @@
+import einops
 import numpy as np
 import torch
+from jaxtyping import Float
 from sklearn.decomposition import PCA
 
 
@@ -51,3 +53,7 @@ def svd_activations(acts):
     # Reshape back into the original form (disentangling data (x, y) and token dimensions)
     acts_transformed = acts_transformed.reshape(acts_shape)
     return acts_transformed
+
+
+def get_importance(rib_acts: Float[torch.Tensor, "x y seq node"]) -> Float[torch.Tensor, "node"]:
+    return einops.einsum(rib_acts, rib_acts, "x y seq node, x y seq node -> node")

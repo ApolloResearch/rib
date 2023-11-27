@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from activations import Activations
-from jaxtyping import Float
 from plotting import annotated_fft_line_plot, plot_activations, plot_fft_activations
 from transformations import fft2, pca_activations, svd_activations
 
@@ -184,6 +183,21 @@ plt.xlabel("RIB_out")
 plt.ylabel("RIB_in")
 plt.colorbar()
 
+
+# %%
+
+# look at edges into ln2 node 9
+
+graph_path = "/mnt/ssd-apollo/stefan/rib/modular_arithmetic_interaction_graph.pt"
+edges = dict(torch.load(graph_path)["edges"])
+
+plt.plot(dict(edges)["ln1.0"][9, :])  # edges: [layer l + 1 nodes, layer l nodes]
+plt.xlim(0, 12)
+plt.xlabel("ln 1.0 node index")
+plt.ylabel("edge strength to ln2.0 #9")
+
+# %%
+
 # %%
 
 
@@ -244,7 +258,6 @@ y = [f(five) for five in x]
 # plt.scatter(x, y, marker=".", s=1)
 plt.scatter(x[1:], np.diff(y), marker=".", s=1)
 plt.grid()
-plt.savefig("diffs2.png", dpi=600)
 
 # Should we check if this is the same relus for this dp than for other DAta Pointss?
 
@@ -268,7 +281,6 @@ def plot_function(x, y, output=2, xlim=(0.5, 2)):
     # grdi
     ax1.grid()
     ax2.grid()
-    plt.savefig("diffs2.png", dpi=600)
 
 
 plot_function(3, 9, 2, xlim=(0.3, 23))
@@ -293,7 +305,6 @@ y = [f(five) for five in x]
 # plt.scatter(x[1:], np.diff(y), marker=".", s=1)
 plt.scatter(x, y, marker=".", s=1)
 plt.grid()
-plt.savefig("diffs2.png", dpi=600)
 
 
 # %%

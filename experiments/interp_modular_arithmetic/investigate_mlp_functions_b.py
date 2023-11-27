@@ -248,12 +248,10 @@ plt.legend()
 
 plt.hist(mlp_impacts[:, 0, 0, 0, 2], bins=100)
 plt.xlabel("MLP neuron impact on output 2")
-plt.savefig("mlp_impacts.png", dpi=600)
 
 plt.figure()
 plt.hist(resid_impacts[:, 0, 1, 8, 0], bins=100)
 plt.xlabel("Residual neuron impact on output 2")
-plt.savefig("resid_impacts.png", dpi=600)
 # plt.hist(torch.stack(mlp_impacts)[:, 1], bins=100)
 
 # if False:

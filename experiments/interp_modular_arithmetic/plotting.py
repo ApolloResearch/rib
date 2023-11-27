@@ -191,7 +191,7 @@ def _imshow_complex(
         sm2.set_array([])
         cbar2 = plt.colorbar(sm2, ax=ax)
         # Rotate labels 45
-        cbar2.ax.yaxis.set_major_formatter(ticker.StrMethodFormatter('{x:,.0f}'))
+        cbar2.ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
         cbar2.ax.set_yticklabels(cbar2.ax.get_yticklabels(), rotation=45)
 
 
@@ -304,41 +304,6 @@ def fft_plot_cos_phase_1d(acts, rtol=1e-4, labels=True, title=""):
     fig.suptitle(title)
     ax.grid(color="grey", linestyle="--", alpha=0.3)
     return fig, ax
-
-
-# def annotated_fft_line_plot(
-#     acts,
-#     ax=None,
-#     fftshift=True,
-#     title="Default title",
-#     figsize=(8, 8),
-#     xlabel="Fourier frequency",
-#     ylabel="Magnitude",
-#     label=None,
-#     annotation_magnitude_threshold=0.05,
-# ):
-#     if ax is None:
-#         _, ax = plt.subplots(figsize=figsize)
-#     freqs = torch.fft.fftfreq(acts.shape[0])
-#     if fftshift:
-#         freqs = torch.fft.fftshift(freqs)
-#         acts = torch.fft.fftshift(acts)
-#     phase = acts.angle()
-#     acts = acts.abs()
-#     ax.set_title(title)
-#     ax.set_xlabel(xlabel)
-#     ax.set_ylabel(ylabel)
-#     ax.plot(freqs, acts, label=label)
-#     for j, v in enumerate(acts):
-#         if v > annotation_magnitude_threshold * acts.max():
-#             sign = "+" if phase[j] >= 0 else "-"
-#             ax.text(
-#                 freqs[j],
-#                 min(v + 0.05 * acts.max(), 0.95 * acts.max()),
-#                 f"@{freqs[j]:.3f}:\nMag {v:.1e}\nPhase {phase[j]/np.pi:.2f}π",
-#                 rotation=0,
-#                 fontsize=10,
-#             )
 
 
 def fft_plot_eikx_2d(
@@ -806,3 +771,53 @@ def plot_fft_activations_coscos(
     axes[-1, 1].set_xlabel(f"k_x")
     axes[0, 0].set_title("cos cos")
     axes[0, 1].set_title("sin sin")
+
+
+def annotated_fft_line_plot(
+    acts,
+    ax=None,
+    fftshift=True,
+    title="Default title",
+    figsize=(8, 8),
+    xlabel="Fourier frequency",
+    ylabel="Magnitude",
+    label=None,
+    annotation_magnitude_threshold=0.05,
+):
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+    freqs = torch.fft.fftfreq(acts.shape[0])
+    if fftshift:
+        freqs = torch.fft.fftshift(freqs)
+        acts = torch.fft.fftshift(acts)
+    phase = acts.angle()
+    acts = acts.abs()
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.plot(freqs, acts, label=label)
+    for j, v in enumerate(acts):
+        if v > annotation_magnitude_threshold * acts.max():
+            sign = "+" if phase[j] >= 0 else "-"
+            ax.text(
+                freqs[j],
+                min(v + 0.05 * acts.max(), 0.95 * acts.max()),
+                f"@{freqs[j]:.3f}:\nMag {v:.1e}\nPhase {phase[j]/np.pi:.2f}π",
+                rotation=0,
+                fontsize=10,
+            )
+
+
+def print_acts_and_phases(ffted_acts, index, p=113, lower=600, upper=np.inf):
+    for x in range(p):
+        for y in range(p):
+            if ffted_acts[x, y, index].abs() > lower and ffted_acts[x, y, 0].abs() < upper:
+                freqs = torch.fft.fftfreq(ffted_acts.shape[0])
+                val = ffted_acts[x, y, index].abs().item()
+                phase = ffted_acts[x, y, index].angle().item()
+                print(
+                    f"({freqs[x]:.3f}, {freqs[y]:.3f})",
+                    f"Value {val:.4f}",
+                    f"Phase {phase/np.pi*180:.1f} deg",
+                    f"Phrase as real & imag: e^(i phi) = {np.cos(phase):.3f} + i {np.sin(phase):.3f}",
+                )

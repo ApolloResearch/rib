@@ -47,9 +47,7 @@ def _folded_bias_comparison(
                     "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
                     head_index=model_folded.cfg.n_heads,
                 )
-                assert torch.allclose(
-                    vB[..., :, -1], torch.tensor(1, dtype=vB.dtype), atol=0, rtol=0
-                )
+                assert torch.equal(vB[..., :, -1], torch.ones_like(vB[..., :, -1]))
                 vB = vB[..., :-1]
                 vB = einops.rearrange(
                     vB, "... pos head_index d_head_v -> ... pos (head_index d_head_v)"

@@ -12,7 +12,8 @@ from rib.log import logger
 
 @pytest.mark.slow
 @pytest.mark.skip_ci
-def same_edges_when_parallel():
+@pytest.mark.xfail
+def test_edges_when_parallel():
     """
     This test fails in ci, at least when run as part of the test suite.
     """

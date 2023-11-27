@@ -8,13 +8,13 @@ from jaxtyping import Float
 from torch import Tensor, nn
 from tqdm import tqdm
 
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, StrDtype
 
 
 def eigendecompose(
     x: Float[Tensor, "d_hidden d_hidden"],
     descending: bool = True,
-    dtype: str = "float64",
+    dtype: StrDtype = "float64",
 ) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """Calculate eigenvalues and eigenvectors of a real symmetric matrix.
 

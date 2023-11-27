@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, random_split
 
+from rib.log import logger
+
 if TYPE_CHECKING:
     from rib.hook_manager import Hook, HookedModel
 
@@ -147,14 +149,8 @@ def load_config(config_path_or_obj: Union[Path, str, T], config_model: Type[T]) 
     return config_model(**config_dict)
 
 
-def check_outfile_overwrite(out_file: Path, force: bool = False, logger=None) -> bool:
+def check_outfile_overwrite(out_file: Path, force: bool = False) -> bool:
     """Check if out_file exists and whether it should be overwritten."""
-
-    def _log(message):
-        if logger is not None:
-            logger.info(message)
-        else:
-            print(message)
 
     def _response():
         response = input(f"Output file {out_file} already exists. Overwrite? (y/n) ")
@@ -162,13 +158,13 @@ def check_outfile_overwrite(out_file: Path, force: bool = False, logger=None) ->
 
     if out_file.exists():
         if force:
-            _log(f"Overwriting {out_file} (reason: config or cmdline)")
+            logger.info(f"Overwriting {out_file} (reason: config or cmdline or multiprocessing)")
             return True
         elif _response():
-            _log(f"Overwriting {out_file} (based on user prompt)")
+            logger.info(f"Overwriting {out_file} (based on user prompt)")
             return True
         else:
-            _log("Exiting.")
+            logger.info("Exiting.")
             return False
     else:
         return True

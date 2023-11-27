@@ -144,12 +144,6 @@ class run_rib_model_scaling:
         scaled_parallel_acts = einops.einsum(
             scaled_in_acts, self.Cinv_ell, "... x y rib, rib emb -> ... x y emb"
         )
-        # Fake
-        # scaled_parallel_acts = einops.einsum(
-        #     self.parallel_acts,
-        #     torch.ones([self.parallel_acts.shape[-1], scaling.shape[-1]]),
-        #     "x y emb, emb ... -> ... x y emb",
-        # )
         pre_relu_acts = einops.einsum(
             scaled_in_acts, self.W_hat, "... x y rib, rib mlp -> ... x y mlp"
         )
@@ -167,44 +161,9 @@ class run_rib_model_scaling:
         return post_relu_rib_acts
 
 
-def plot(scaling, post_relu_rib_acts, output=2, x=0, y=0, filename="diffs.png"):
-    fig, [ax1, ax2] = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
-    ax1.scatter(scaling, post_relu_rib_acts[:, x, y, output], s=1, marker=".")
-    ax2.scatter(scaling[1:], np.diff(post_relu_rib_acts[:, x, y, output]), s=1, marker=".")
-    fig.suptitle(f"Scaling up input number 5, observing output {output} at data point x,y={x},{y}")
-    ax1.set_xlabel("Scaling of RIB dimension 5")
-    ax2.set_xlabel("Scaling of RIB dimension 5")
-    ax1.set_ylabel(f"Output RIB dimension {output}")
-    ax2.set_ylabel(f"Derivative of output RIB dimension {output}")
-    ax1.grid()
-    ax2.grid()
-    fig.savefig(filename, dpi=600)
-
-
 rib_model = run_rib_model_scaling()
-# %%
-
 rib_in_len = rib_acts_extended_embedding.shape[-1]
 batch_size = 100
-five_scaling = torch.ones([rib_in_len, batch_size])
-five_scaling[5] = torch.linspace(0.3, 5, batch_size)
-
-res = rib_model.forward(five_scaling)
-res_n0 = rib_model.forward(five_scaling, mlp_filter=130)
-res_n1 = rib_model.forward(five_scaling, mlp_filter=131)
-
-# if False:
-#     res_by_neuron = rib_model.forward(five_scaling)[:, 1, 8, :, :]
-#     np.save("res_by_neuron_18.npy", res_by_neuron.numpy())
-# else:
-#     res_by_neuron = np.load("res_by_neuron_18.npy")
-# res = res_by_neuron.sum(axis=-1)
-#  Save to file
-# %%
-
-plot(five_scaling[5], res, output=2, x=0, y=0)
-# plot(five_scaling[5], res_n0, output=2, x=0, y=0, filename="diffs_n0.png")
-# plot(five_scaling[5], res_n1, output=2, x=0, y=0, filename="diffs_n1.png")
 
 
 # %%

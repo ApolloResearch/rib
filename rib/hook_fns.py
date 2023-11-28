@@ -134,7 +134,9 @@ def rotate_pre_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
+    output_rotated: bool = True,
 ) -> tuple[Float[Tensor, "batch d_hidden"], ...]:
+    # TODO: update docs
     """Hook function for rotating the input tensor to a module.
 
     The input is rotated by the specified rotation matrix.
@@ -157,8 +159,13 @@ def rotate_pre_forward_hook_fn(
     in_hidden_dims = [x.shape[-1] for x in inputs]
     in_acts = torch.cat(inputs, dim=-1)
     rotated = in_acts @ rotation_matrix
-    adjusted_inputs = tuple(torch.split(rotated, in_hidden_dims, dim=-1))
-    return adjusted_inputs
+    if output_rotated:
+        adjusted_inputs = tuple(torch.split(rotated, in_hidden_dims, dim=-1))
+        return adjusted_inputs
+    else:
+        hooked_data.setdefault(hook_name, {}).setdefault(data_key, [])
+        hooked_data[hook_name][data_key].append(rotated.detach().cpu())
+        return None
 
 
 def M_dash_and_Lambda_dash_pre_forward_hook_fn(

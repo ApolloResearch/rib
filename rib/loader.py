@@ -56,7 +56,7 @@ def load_sequential_transformer(
         tlens_pretrained is not None or tlens_model_path is not None
     ), "Either `tlens_pretrained` or `tlens_model_path` must be specified."
     if tlens_pretrained is not None:
-        tlens_model = HookedTransformer.from_pretrained(tlens_pretrained)
+        tlens_model = HookedTransformer.from_pretrained(tlens_pretrained, device=device)
         # Create a SequentialTransformerConfig from the HookedTransformerConfig
         tlens_cfg_dict = tlens_model.cfg.to_dict()
 

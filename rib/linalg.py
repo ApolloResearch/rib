@@ -175,13 +175,18 @@ def edge_norm(
     alpha_input_tuples = torch.split(alpha_f_in_adjusted, in_hidden_dims, dim=-1)
 
     output_alpha = module(*alpha_input_tuples)
-    outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
+    # Concatenate the outputs over the hidden dimension
+    outputs_alpha = (
+        output_alpha if isinstance(output_alpha, torch.Tensor) else torch.cat(output_alpha, dim=-1)
+    )
+    outputs_const = (
+        outputs_const
+        if isinstance(outputs_const, torch.Tensor)
+        else torch.cat(outputs_const, dim=-1)
+    )
 
     # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
-    outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
-
-    # Concatenate the outputs over the hidden dimension
-    out_acts = torch.cat(outputs, dim=-1)
+    out_acts = outputs_const - outputs_alpha
 
     f_out_hat: Float[Tensor, "... out_hidden_combined_trunc"] = (
         out_acts @ C_out if C_out is not None else out_acts

@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Callable, Optional, Union
+from typing import Callable, Literal, Optional, Union
 
 import numpy as np
 import torch
@@ -312,6 +312,7 @@ def integrated_gradient_trapezoidal_norm(
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
+    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> Float[Tensor, "... in_hidden_combined"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
     following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
@@ -333,11 +334,27 @@ def integrated_gradient_trapezoidal_norm(
             integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
             ill-defined derivatives at 0 and 1.
             integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+        ig_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November A) version.
     """
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         output_const = module(*tuple(x.detach().clone() for x in inputs))
-        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+        # Concatenate the outputs over the hidden dimension
+        out_acts_const = (
+            output_const
+            if isinstance(output_const, torch.Tensor)
+            else torch.cat(output_const, dim=-1)
+        )
+        if ig_formula == "(1-0)*alpha":
+            output_zero = module(*tuple(torch.zeros_like(x) for x in inputs))
+            # Concatenate the outputs over the hidden dimension
+            out_acts_zero = (
+                output_zero
+                if isinstance(output_zero, torch.Tensor)
+                else torch.cat(output_zero, dim=-1)
+            )
 
     # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:
@@ -359,21 +376,30 @@ def integrated_gradient_trapezoidal_norm(
             if isinstance(output_alpha, torch.Tensor)
             else torch.cat(output_alpha, dim=-1)
         )
-        out_acts_const = (
-            outputs_const
-            if isinstance(outputs_const, torch.Tensor)
-            else torch.cat(outputs_const, dim=-1)
-        )
 
-        # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
-        out_acts = out_acts_const - out_acts_alpha
-
-        f_hat = out_acts @ C_out if C_out is not None else out_acts
-
-        # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
-        # to taking the gradient of each output element separately, but it lets us simply use
-        # backward() instead of more complex (and probably less efficient) vmap operations.
-        f_hat_norm = (f_hat**2).sum()
+        if ig_formula == "(1-alpha)^2":
+            # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
+            f_hat_1_alpha = (
+                (out_acts_const - out_acts_alpha) @ C_out
+                if C_out is not None
+                else (out_acts_const - out_acts_alpha)
+            )
+            # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
+            # to taking the gradient of each output element separately, but it lets us simply use
+            # backward() instead of more complex (and probably less efficient) vmap operations.
+            f_hat_norm = (f_hat_1_alpha**2).sum()
+        elif ig_formula == "(1-0)*alpha":
+            f_hat_alpha = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha
+            f_hat_1_0 = (
+                (out_acts_const - out_acts_zero) @ C_out
+                if C_out is not None
+                else (out_acts_const - out_acts_zero)
+            )
+            f_hat_norm = (f_hat_alpha * f_hat_1_0).sum()
+        else:
+            raise ValueError(
+                f"Unexpected integrated gradient formula {ig_formula} != '(1-alpha)^2' or '(1-0)*alpha'"
+            )
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors
         f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)

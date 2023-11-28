@@ -10,7 +10,6 @@ with an updated MLP path. This is necessary because the interaction graph is sav
 absolute path to the MLP, and a github action will not have access to the same absolute path.
 """
 
-import sys
 from pathlib import Path
 from typing import Union
 

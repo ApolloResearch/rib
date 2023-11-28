@@ -1,5 +1,5 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import Callable, Optional, Union, cast
+from typing import Callable, Union, cast
 
 import einops
 import numpy as np

@@ -18,7 +18,7 @@ from rib.hook_manager import Hook, HookedModel
 from rib.log import logger
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
-    from rib.interaction_algos import InteractionRotation
+    from rib.interaction_algos_november_A import InteractionRotation
 
 
 def run_dataset_through_model(

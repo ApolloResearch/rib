@@ -82,8 +82,8 @@ fft_plot_cos_phase_1d(rib_acts_embedding_x_fft[:, 0, 8:10], rtol=1e-2, title="RI
 rib_acts_extended_embedding_fft = fft2(rib_acts_extended_embedding)
 
 fft_plot_eikx_2d(rib_acts_extended_embedding_fft, nrows=10, title="Resid Mid RIB each term corresponds to e^(i2π/113 f_x x + f_y y + φ)")
-fft_plot_cosplusminus(rib_acts_extended_embedding_fft, title="Resid Mid RIB, A_{+/-} cos(2π/113 f_x x +/- f_y y + φ_{+/-})", nrows=5, equalize=True)
-fft_plot_coscos_sinsin(rib_acts_extended_embedding_fft, title="Resid mid RIB\n A_cos cos(2π/113 f_x x + φ_x) cos(2π/113 f_y y + φ_y) \n+ A_sin sin(2π/113 f_x x + φ_x) sin(2π/113 f_y y + φ_y)", nrows=5, equalize=True)
+fft_plot_cosplusminus(rib_acts_extended_embedding_fft, title="Resid Mid RIB, A_{+/-} cos(2π/113 f_x x +/- f_y y + φ_{+/-})", nrows=6, equalize=True)
+fft_plot_coscos_sinsin(rib_acts_extended_embedding_fft, title="Resid mid RIB\n A_cos cos(2π/113 f_x x + φ_x) cos(2π/113 f_y y + φ_y) \n+ A_sin sin(2π/113 f_x x + φ_x) sin(2π/113 f_y y + φ_y)", nrows=6, equalize=True)
 # %%
 
 # Post MLP
@@ -95,5 +95,3 @@ fft_plot_cosplusminus(rib_acts_mlp_post_fft, title="Post MLP RIB, A_{+/-} cos(2�
 fft_plot_coscos_sinsin(rib_acts_mlp_post_fft, title="Post MLP RIB\n A_cos cos(2π/113 f_x x + φ_x) cos(2π/113 f_y y + φ_y) \n+ A_sin sin(2π/113 f_x x + φ_x) sin(2π/113 f_y y + φ_y)", nrows=5, equalize=True)
 
 # %%
-
-# RIB

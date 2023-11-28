@@ -28,6 +28,7 @@ from rib.data_accumulator import (
     collect_gram_matrices,
     collect_relu_interactions,
     collect_test_edges,
+    collect_cluster_fns,
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
@@ -241,7 +242,7 @@ def get_rotated_Ws(
     return rotated_weights
 
 
-def get_cluster_gram(
+def get_cluster_grams(
     model: nn.Module,
     config: LMConfig,
     file_path: Path,
@@ -252,7 +253,7 @@ def get_cluster_gram(
 ) -> dict[str, list[Float[Tensor, "d_cluster d_cluster"]]]:
     graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
-    cluster_grams, output_cluster_grams = collect_cluster_grams(
+    cluster_grams = collect_cluster_grams(
         hooked_model=hooked_model,
         module_names=["sections.section_0.0"], # If you start defining node layers from mlp_in
         data_loader=graph_train_loader,
@@ -263,70 +264,37 @@ def get_cluster_gram(
         dataset_size=len(dataset)
     )
 
+    with open(file_path, "wb") as f:
+        torch.save(cluster_grams, f)
+
+    return cluster_grams
+
+
+def get_cluster_fns(
+    model: nn.Module,
+    config: LMConfig,
+    file_path: Path,
+    dataset: Dataset,
+    device: str,
+    hooked_model: HookedModel,
+    all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
+) -> dict[str, list[Float[Tensor, "d_cluster"]]]:
+    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size, drop_last=True)
+
+    cluster_fns = collect_cluster_fns(
+        hooked_model=hooked_model,
+        module_names=["sections.section_1.0"], # If you start defining node layers from mlp_in
+        data_loader=graph_train_loader,
+        dtype=TORCH_DTYPES[config.dtype],
+        device=device,
+        all_cluster_idxs=all_cluster_idxs,
+        use_residual_stream=config.use_residual_stream,
+    )
+
     # with open(file_path, "wb") as f:
-    #     torch.save(cluster_grams, f)
+    #     torch.save(cluster_fns, f)
 
-
-    return cluster_grams, output_cluster_grams
-
-# def get_P_matrices(
-#     model: nn.Module,
-#     config: LMConfig,
-#     file_path: Path,
-#     dataset: Dataset,
-#     device: str,
-#     hooked_model: HookedModel,
-#     C_list: list[Float[Tensor, "d_hidden d_hidden"]],
-#     W_hat_list: list[Float[Tensor,  "d_hidden d_hidden"]],
-#     all_cluster_idxs: list[list[np.ndarray]],
-# ) -> dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]]:
-#     """Helper function for P matrix collection method.
-
-#     In some cases this might include usage of W_hat_list, and in others it won't
-#     """
-#     graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
-
-#     Ps: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_clustered_relu_P_mats_no_W(
-#         module_names=graph_section_names,
-#         C_list=C_list,
-#         all_cluster_idxs=all_cluster_idxs,
-#     )
-
-#     with open(file_path, "wb") as f:
-#         torch.save(Ps, f)
-
-#     return Ps
-
-
-# def get_edges(
-#     model: nn.Module,
-#     config: LMConfig,
-#     file_path: str,
-#     dataset: Dataset,
-#     device: str,
-#     hooked_model: HookedModel,
-#     C_list: list[Float[Tensor, "d_hidden_out d_hidden_in"]],
-#     C_unscaled_list: list[Float[Tensor, "d_hidden_out d_hidden_in"]],
-#     W_hat_list: list[Float[Tensor, "d_hidden_in d_hidden_out"]],
-# ) -> dict[str, Float[Tensor, "d_hidden_trunc_curr d_hidden_trunc_next"]]:
-#     graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
-
-#     """NOTE CODE BELOW HAS C_UNSCALED_LIST = C_LIST. THIS SHOULD NOT ALWAYS BE TRUE."""
-#     edges: dict[str, Float[Tensor, "d_hidden_trunc_1 d_hiddn_trunc_2"]] = collect_test_edges(
-#         C_unscaled_list=C_list,
-#         C_list=C_list,
-#         W_hat_list=W_hat_list,
-#         hooked_model=hooked_model,
-#         module_names=config.activation_layers,
-#         data_loader=graph_train_loader,
-#         dtype=TORCH_DTYPES[config.dtype],
-#         device=device,
-#     )
-
-#     with open(file_path, "wb") as f:
-#         torch.save(edges, f)
-
-#     return edges
+    return cluster_fns
 
 
 def check_and_open_file(
@@ -347,8 +315,7 @@ def check_and_open_file(
         with file_path.open("rb") as f:
             var = torch.load(f, map_location=device)
     else:
-        var = get_var_fn(model, config, file_path, dataset,
-                         device, hooked_model, **kwargs)
+        var = get_var_fn(model, config, file_path, dataset, device, hooked_model, **kwargs)
 
     return var
 
@@ -367,13 +334,13 @@ def transformer_relu_main(config_path_str: str):
     Ps_save_file = Path(__file__).parent / "Ps_transformer"
     edges_save_file = Path(__file__).parent / "edges_transformer"
     cluster_gram_save_file = Path(__file__).parent / "cluster_gram_transformer"
+    cluster_fn_save_file = Path(__file__).parent / "cluster_fn_transformer"
 
     out_dir = Path(__file__).parent / f"out_transformer_relu / type_{config.relu_metric_type}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     dtype = TORCH_DTYPES[config.dtype]
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
-    device = "cpu"
+    device = "cpu" if torch.cuda.is_available() else "cpu"
 
     seq_model, tlens_cfg_dict = load_sequential_transformer(
         node_layers=config.node_layers,
@@ -435,8 +402,8 @@ def transformer_relu_main(config_path_str: str):
     # Separate part of main code ===================================================
     # Redefine layers and instantiate new transformer
 
-    mode = "cluster_grams"
-    new_node_layer_dict = {'weights': ["mlp_out.0, unembed"], "cluster_grams": ["mlp_in.0", "mlp_act.0"]}
+    mode = "weights"
+    new_node_layer_dict = {'weights': ["mlp_act.0", "mlp_out.0", "unembed"], "cluster_grams": ["mlp_in.0", "mlp_act.0"]}
     seq_model, tlens_cfg_dict = load_sequential_transformer(
         # CHANGE LAYERS FOR MLP - NOTE for w_hat this needs to start where previous model node
         # layers did, so using zip with previously saved C matrices list works
@@ -448,14 +415,14 @@ def transformer_relu_main(config_path_str: str):
         dtype=dtype,
         device=device,
     )
-
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
+    print_all_modules(seq_model)
     hooked_model = HookedModel(seq_model)
 
     # Keys: module name for layer; values: list of gram matrices
-    cluster_grams, whole_layer_gram = check_and_open_file(
-        get_var_fn=get_cluster_gram,
+    cluster_grams: dict[str, list[list[Float[Tensor, "d_cluster d_cluster"]]]] = check_and_open_file(
+        get_var_fn=get_cluster_grams,
         model=seq_model,
         config=config,
         file_path=cluster_gram_save_file,
@@ -465,20 +432,101 @@ def transformer_relu_main(config_path_str: str):
         all_cluster_idxs=all_cluster_idxs,
     )
 
+    cluster_fns: dict[str, list[list[Float[Tensor, "d_cluster"]]]] = check_and_open_file(
+        get_var_fn=get_cluster_fns,
+        model=seq_model,
+        config=config,
+        file_path=cluster_fn_save_file,
+        dataset=dataset,
+        device=device,
+        hooked_model=hooked_model,
+        all_cluster_idxs=all_cluster_idxs,
+    )
+
     for (module_name, layer_gram_list) in list(cluster_grams.items()):
+        # cluster_fns_layer = cluster_fns[module_name]
+        # cluster_layer_similarities = {}
+
         for (cluster_idx, matrix) in enumerate(layer_gram_list):
             sorted_eigenvalues, sorted_eigenvectors = eigendecompose(matrix)
             plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"{module_name}_{cluster_idx}")
-            # plot_eigenvectors(sorted_eigenvectors, f"{out_dir}/cluster_gram", title=f"{module_name}_{cluster_idx}")
+        #     similarities = [
+        #         (torch.div(torch.dot(fn, sorted_eigenvectors[0]), torch.dot(sorted_eigenvectors[0], sorted_eigenvectors[0])),
+        #         torch.div(torch.dot(fn, sorted_eigenvectors[1]), torch.dot(sorted_eigenvectors[1], sorted_eigenvectors[1])))
+        #         for fn in cluster_fns_layers
+        #     ]
+        #     cluster_layer_similarities[cluster_idx] = similarities
+            plot_eigenvectors(sorted_eigenvectors, out_dir, title=f"{module_name}_{cluster_idx}", num_vectors=2)
+        # print(cluster_layer_similarities)
 
-    # IRRELEVANT - from quick check of output gram vs what I was getting for cluster-specific gram
-    # for (module_name, layer_gram_list) in list(output_cluster_grams.items()):
-    #     for (cluster_idx, matrix) in enumerate(layer_gram_list):
-    #         sorted_eigenvalues, sorted_eigenvectors = eigendecompose(matrix)
-    #         plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"output_{module_name}_{cluster_idx}")
 
-    sorted_eigenvalues, sorted_eigenvectors = eigendecompose(whole_layer_gram)
-    plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"whole_layer_{module_name}")
+    ## For whole layer gram instead
+    # sorted_eigenvalues, sorted_eigenvectors = eigendecompose(whole_layer_gram)
+    # plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"whole_layer_{module_name}")
+
+
+
+if __name__ == "__main__":
+    fire.Fire(transformer_relu_main)
+
+    # def get_P_matrices(
+#     model: nn.Module,
+#     config: LMConfig,
+#     file_path: Path,
+#     dataset: Dataset,
+#     device: str,
+#     hooked_model: HookedModel,
+#     C_list: list[Float[Tensor, "d_hidden d_hidden"]],
+#     W_hat_list: list[Float[Tensor,  "d_hidden d_hidden"]],
+#     all_cluster_idxs: list[list[np.ndarray]],
+# ) -> dict[str, dict[Int[Tensor, "cluster_size"], Float[Tensor, "d_hidden_next_layer d_hidden"]]]:
+#     """Helper function for P matrix collection method.
+
+#     In some cases this might include usage of W_hat_list, and in others it won't
+#     """
+#     graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+
+#     Ps: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_clustered_relu_P_mats_no_W(
+#         module_names=graph_section_names,
+#         C_list=C_list,
+#         all_cluster_idxs=all_cluster_idxs,
+#     )
+
+#     with open(file_path, "wb") as f:
+#         torch.save(Ps, f)
+
+#     return Ps
+
+
+# def get_edges(
+#     model: nn.Module,
+#     config: LMConfig,
+#     file_path: str,
+#     dataset: Dataset,
+#     device: str,
+#     hooked_model: HookedModel,
+#     C_list: list[Float[Tensor, "d_hidden_out d_hidden_in"]],
+#     C_unscaled_list: list[Float[Tensor, "d_hidden_out d_hidden_in"]],
+#     W_hat_list: list[Float[Tensor, "d_hidden_in d_hidden_out"]],
+# ) -> dict[str, Float[Tensor, "d_hidden_trunc_curr d_hidden_trunc_next"]]:
+#     graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+
+#     """NOTE CODE BELOW HAS C_UNSCALED_LIST = C_LIST. THIS SHOULD NOT ALWAYS BE TRUE."""
+#     edges: dict[str, Float[Tensor, "d_hidden_trunc_1 d_hiddn_trunc_2"]] = collect_test_edges(
+#         C_unscaled_list=C_list,
+#         C_list=C_list,
+#         W_hat_list=W_hat_list,
+#         hooked_model=hooked_model,
+#         module_names=config.activation_layers,
+#         data_loader=graph_train_loader,
+#         dtype=TORCH_DTYPES[config.dtype],
+#         device=device,
+#     )
+
+#     with open(file_path, "wb") as f:
+#         torch.save(edges, f)
+
+#     return edges
 
     ## BELOW IS IRRELEVANT CODE FOR NOW - relic from when we wanted to compare P mats to edges
     # # Has to be after editing node_layers so this contains the linear layers to extract weights from
@@ -517,7 +565,3 @@ def transformer_relu_main(config_path_str: str):
     #     all_cluster_idxs=all_cluster_idxs,
     # )
     # plot_and_save_Ps(P_matrices, out_dir)
-
-
-if __name__ == "__main__":
-    fire.Fire(transformer_relu_main)

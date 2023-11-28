@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -502,8 +502,8 @@ def plot_eigenvalues(eigenvalues: Float[Tensor, "d_hidden"], out_dir: Path, titl
     plt.close()
 
 
-def plot_eigenvectors(eigenvectors: np.ndarray, out_dir: Path, title: str) -> None:
-    num_vectors = eigenvectors.shape[1]
+def plot_eigenvectors(eigenvectors: np.ndarray, out_dir: Path, title: str, num_vectors: Optional[int] = None) -> None:
+    num_vectors = min(num_vectors, eigenvectors.shape[1]) if num_vectors else eigenvectors.shape[1]
     num_components = eigenvectors.shape[0]
     x = np.arange(num_components)  # the label locations
 

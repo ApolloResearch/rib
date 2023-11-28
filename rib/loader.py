@@ -319,6 +319,7 @@ def create_data_loader(
     shuffle: bool,
     batch_size: int,
     seed: Optional[int] = None,
+    **kwargs,
 ) -> Union[DataLoader, tuple[DataLoader, DataLoader]]:
     """
     Create a DataLoader from the provided dataset.
@@ -337,8 +338,8 @@ def create_data_loader(
     if seed is not None:
         set_seed(seed)
     if isinstance(dataset, tuple):
-        train_loader = DataLoader(dataset[0], batch_size=batch_size, shuffle=shuffle)
-        test_loader = DataLoader(dataset[1], batch_size=batch_size, shuffle=shuffle)
+        train_loader = DataLoader(dataset[0], batch_size=batch_size, shuffle=shuffle, **kwargs)
+        test_loader = DataLoader(dataset[1], batch_size=batch_size, shuffle=shuffle, **kwargs)
         return train_loader, test_loader
     else:
         return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)

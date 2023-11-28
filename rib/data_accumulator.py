@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Optional, Union
 
 import torch
 import torch.nn as nn
-from einops import rearrange, reduce, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -24,6 +23,8 @@ from rib.hook_fns import (
     interaction_edge_pre_forward_hook_fn,
     relu_interaction_forward_hook_fn,
     test_edges_forward_hook_fn,
+    cluster_gram_forward_hook_fn,
+    cluster_fn_pre_forward_hook_fn,
 )
 from rib.hook_fns_non_static import (
     delete_cluster_duplicate_forward_hook_fn,
@@ -424,11 +425,10 @@ def collect_function_sizes(
     Args:
         rotate: Whether to rotate the functions to make f_hat.
     """
-    assert len(module_names) > 0, "No modules specified."
-
     fn_size_hooks = []
     if not is_lm:
         module_names = module_names[:-1]
+
     for i, (module_name, hook_name) in enumerate(zip(module_names[:-1], hook_names)):
         fn_size_hooks.append(
             Hook(
@@ -460,7 +460,6 @@ def collect_test_edges(
     hook_names: Optional[str] = None,
 ) -> Float[Tensor, ""]:
     """Collect test edge interactions with the C matrix between W and f edited to remove scaling."""
-    assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(
             module_names), "Must specify a hook name for each module."
@@ -511,8 +510,7 @@ def calculate_swapped_relu_loss(
     Act only on one layer. (See similar function below for one that a) iteratively replaces,
     b) acts on all layers.)
     """
-    if hook_name is None:
-        hook_name = module_name
+    if hook_name is None: hook_name = module_name
 
     relu_swap_hooks = []
     relu_swap_hooks.append(
@@ -586,7 +584,6 @@ def calculate_all_swapped_relu_loss(
 ) -> tuple[float, ...]:
     """Calculate loss for unedited forward pass, and then on forward pass with specific ReLUs
     swapped. Acts on all layers."""
-    assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(
             module_names), "Must specify a hook name for each module."
@@ -670,7 +667,6 @@ def collect_clustered_relu_P_mats(
     This case only works for a transformation where a weight matrix is included with ReLU.
     Turns out this is not quite true for modadd.
     """
-    assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
     else:
@@ -700,8 +696,6 @@ def collect_clustered_relu_P_mats_no_W(
     This case only works for a transformation where a weight matrix is included with ReLU.
     Turns out this is not quite true for modadd.
     """
-    assert len(module_names) > 0, "No modules specified."
-
     P_dict = {}
     for i, (module_name, layer_cluster_idxs) in enumerate(zip(module_names, all_cluster_idxs)):
         layer_P_dict = {}
@@ -731,7 +725,6 @@ def collect_cluster_grams(
         hook_names: Used for saving in hook data and retrieving hook data. If not specified,
             automatically set to be module_names.
     """
-    assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
     else:
@@ -742,7 +735,7 @@ def collect_cluster_grams(
         cluster_gram_hooks.append(
             Hook(
                 name=hook_name,
-                data_key="relu_swap",
+                data_key="cluster_gram",
                 fn=cluster_gram_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={"cluster_idxs": all_cluster_idxs[i], "use_residual_stream": use_residual_stream, "dataset_size": dataset_size}
@@ -750,8 +743,8 @@ def collect_cluster_grams(
         )
 
     run_dataset_through_model(
-        hooked_model,
-        data_loader,
+        hooked_model=hooked_model,
+        dataloader=data_loader,
         hooks=cluster_gram_hooks,
         dtype=dtype,
         device=device,
@@ -762,10 +755,56 @@ def collect_cluster_grams(
         cluster_grams[hook_name] = [hooked_model.hooked_data[hook_name][i] for i in range(len(all_cluster_idxs[layer_idx]))]
         # cluster_output_grams[hook_name] = [hooked_model.hooked_data[hook_name][f"output_{i}"] for
         # i in range(len(all_cluster_idxs[layer_idx]))]
-        whole_layer_gram = hooked_model.hooked_data[hook_name]["whole layer"]
+        ## Whole layer gram - only use when using second hook function
+        # whole_layer_gram = hooked_model.hooked_data[hook_name]["whole layer"]
     hooked_model.clear_hooked_data()
 
-    return cluster_grams, whole_layer_gram
+    return cluster_grams
+
+
+def collect_cluster_fns(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
+    use_residual_stream: bool,
+    hook_names: Optional[str] = None,
+) -> dict[str, list[Float[Tensor, "d_cluster"]]]:
+    if hook_names is not None:
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    cluster_fn_hooks = []
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        cluster_fn_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="relu_swap",
+                fn=cluster_fn_pre_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"cluster_idxs": all_cluster_idxs[i], "use_residual_stream": use_residual_stream}
+            )
+        )
+
+    run_dataset_through_model(
+        hooked_model=hooked_model,
+        dataloader=data_loader,
+        hooks=cluster_fn_hooks,
+        dtype=dtype,
+        device=device,
+    )
+
+    cluster_fns: dict[str, list[Float[Tensor, "d_cluster"]]] = {}
+    for layer_idx, hook_name in enumerate(hook_names):
+        cluster_fns[hook_name] = [torch.div(hooked_model.hooked_data[hook_name][i], len(data_loader.dataset)) \
+                                  for i in range(len(all_cluster_idxs[layer_idx]))]
+    hooked_model.clear_hooked_data()
+
+    return cluster_fns
 
 
 def calculate_delete_cluster_duplicate_loss(
@@ -779,7 +818,6 @@ def calculate_delete_cluster_duplicate_loss(
     use_residual_stream: bool,
     hook_names: Optional[list[str]] = None,
 ) -> tuple[float, ...]:
-    assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(
             module_names), "Must specify a hook name for each module."

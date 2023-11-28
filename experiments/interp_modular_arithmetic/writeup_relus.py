@@ -299,13 +299,17 @@ mlp_neuron_diff_output2 = mlp_impacts[:, 1, :, :, 2] - mlp_impacts[:, 0, :, :, 2
 
 # Iterate random datapoints
 fig, ax = plt.subplots(1, 1, figsize=(6, 6), constrained_layout=True)
+ax.set_title("Neuron effect (difference between input scale 1 and 1.01) via each neuron")
 for d, (x, y) in enumerate(random_coords):
     ax.hist(
         mlp_neuron_diff_output2[:, x, y], bins=100, histtype="step", label=f"Data point {x},{y}"
     )
+ax.legend()
+ax.set_xlabel("Gradient through individual neuron")
 
 # Scatter between two random datapoints
 plt.figure()
+plt.title("Correlation of neuron effect between different data points")
 d1 = random_coords[0]
 d2 = random_coords[1]
 plt.scatter(
@@ -314,19 +318,23 @@ plt.scatter(
     s=1,
     marker=".",
 )
+plt.xlabel(f"MLP neuron impact on output 2 at data point {d1[0]},{d1[1]}")
+plt.ylabel(f"MLP neuron impact on output 2 at data point {d2[0]},{d2[1]}")
+
 
 # %%
 
+# Plot MLP vs Resid impact
+resid_diff_output2 = resid_impacts[:, 1, :, :, 2] - resid_impacts[:, 0, :, :, 2]
 plt.figure()
-plt.scatter(
-    mlp_impacts[:, 0, 1, 8, 2] - mlp_impacts[:, 1, 1, 8, 2],
-    mlp_impacts[:, 0, 45, 76, 2] - mlp_impacts[:, 1, 45, 76, 2],
-    s=1,
-    marker=".",
+plt.title("MLP vs Resid impact")
+plt.hist(
+    resid_diff_output2[:, d1[0], d1[1]], bins=100, histtype="step", label="Resid", density=True
 )
-plt.xlabel("MLP neuron impact on output 2 at data point (1, 8)")
-plt.ylabel("MLP neuron impact on output 2 at data point (45, 76)")
-plt.show()
+plt.hist(
+    mlp_neuron_diff_output2[:, d1[0], d1[1]], bins=100, histtype="step", label="MLP", density=True
+)
+plt.legend()
 
 
 # %%

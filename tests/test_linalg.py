@@ -289,33 +289,51 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals():
     in_tensor = torch.randn(batch_size, in_hidden, requires_grad=True)
 
     linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
-    linear_edge_norm = lambda x: (linear(x) ** 2).sum(dim=0)  # Sum over batch dimension
+    linear_edge_norm = lambda x, **kwargs: (linear(x) ** 2).sum(dim=0)  # Sum over batch dimension
 
     result_point_estimate: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
 
     integrated_gradient_trapezoidal_jacobian(
         fn=linear_edge_norm,
-        x=in_tensor,
+        f_in_hat=in_tensor,
         n_intervals=0,
         jac_out=result_point_estimate,
         dataset_size=batch_size,
+        outputs_const=None,
+        module=None,
+        C_in_pinv=None,
+        C_out=None,
+        in_hidden_dims=None,
+        has_pos=False,
     )
     result_1: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
     integrated_gradient_trapezoidal_jacobian(
         fn=linear_edge_norm,
-        x=in_tensor,
+        f_in_hat=in_tensor,
         n_intervals=1,
         jac_out=result_1,
         dataset_size=batch_size,
+        outputs_const=None,
+        module=None,
+        C_in_pinv=None,
+        C_out=None,
+        in_hidden_dims=None,
+        has_pos=False,
     )
 
     result_5: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
     integrated_gradient_trapezoidal_jacobian(
         fn=linear_edge_norm,
-        x=in_tensor,
+        f_in_hat=in_tensor,
         n_intervals=5,
         jac_out=result_5,
         dataset_size=batch_size,
+        outputs_const=None,
+        module=None,
+        C_in_pinv=None,
+        C_out=None,
+        in_hidden_dims=None,
+        has_pos=False,
     )
 
     # Check that all results are close
@@ -360,15 +378,21 @@ def test_integrated_gradient_trapezoidal_jacobian_jacrev():
     in_tensor = torch.randn(batch_size, in_hidden, requires_grad=True)
 
     linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
-    linear_edge_norm = lambda x: (linear(x) ** 2).sum(dim=0)  # Sum over batch dimension
+    linear_edge_norm = lambda x, **kwargs: (linear(x) ** 2).sum(dim=0)  # Sum over batch dimension
 
     result_ours: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
     integrated_gradient_trapezoidal_jacobian(
         fn=linear_edge_norm,
-        x=in_tensor,
+        f_in_hat=in_tensor,
         n_intervals=5,
         jac_out=result_ours,
         dataset_size=batch_size,
+        outputs_const=None,
+        module=None,
+        C_in_pinv=None,
+        C_out=None,
+        in_hidden_dims=None,
+        has_pos=False,
     )
     result_jacrev: Float[Tensor, "out_dim in_dim"] = _integrated_gradient_jacobian_with_jacrev(
         fn=linear_edge_norm,

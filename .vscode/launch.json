@@ -131,7 +131,7 @@
             "justMyCode": true
         },
         {
-            "name": "mlp relu",
+            "name": "mlp mnist relu",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/experiments/relu_interactions/mlp_relu.py",
@@ -140,7 +140,7 @@
             "justMyCode": true
         },
         {
-            "name": "lm relu",
+            "name": "modadd relu",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/experiments/relu_interactions/transformer_relu.py",
@@ -149,7 +149,7 @@
             "justMyCode": true
         },
         {
-            "name": "lm_rlct",
+            "name": "modadd rlct",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/experiments/relu_interactions/rlct_estimation.py",
@@ -158,11 +158,20 @@
             "justMyCode": true
         },
         {
-            "name": "lm_delete_cluster_duplicate",
+            "name": "modadd delete cluster duplicate",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/experiments/relu_interactions/transformer_cluster_del.py",
             "args": "${workspaceFolder}/experiments/relu_interactions/transformer_cluster_del.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "pythia pile relu",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/relu_interactions/pythia_relu.py",
+            "args": "${workspaceFolder}/experiments/relu_interactions/pythia_relu.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },

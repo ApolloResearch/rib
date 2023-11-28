@@ -450,20 +450,18 @@ def transformer_relu_main(config_path_str: str):
         for (cluster_idx, matrix) in enumerate(layer_gram_list):
             sorted_eigenvalues, sorted_eigenvectors = eigendecompose(matrix)
             plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"{module_name}_{cluster_idx}")
+            plot_eigenvectors(sorted_eigenvectors, out_dir, title=f"{module_name}_{cluster_idx}", num_vectors=2)
         #     similarities = [
         #         (torch.div(torch.dot(fn, sorted_eigenvectors[0]), torch.dot(sorted_eigenvectors[0], sorted_eigenvectors[0])),
         #         torch.div(torch.dot(fn, sorted_eigenvectors[1]), torch.dot(sorted_eigenvectors[1], sorted_eigenvectors[1])))
         #         for fn in cluster_fns_layers
         #     ]
         #     cluster_layer_similarities[cluster_idx] = similarities
-            plot_eigenvectors(sorted_eigenvectors, out_dir, title=f"{module_name}_{cluster_idx}", num_vectors=2)
         # print(cluster_layer_similarities)
-
 
     ## For whole layer gram instead
     # sorted_eigenvalues, sorted_eigenvectors = eigendecompose(whole_layer_gram)
     # plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"whole_layer_{module_name}")
-
 
 
 if __name__ == "__main__":

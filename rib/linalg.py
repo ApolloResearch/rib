@@ -179,14 +179,14 @@ def edge_norm(
     outputs_alpha = (
         output_alpha if isinstance(output_alpha, torch.Tensor) else torch.cat(output_alpha, dim=-1)
     )
-    outputs_const = (
+    out_acts_const = (
         outputs_const
         if isinstance(outputs_const, torch.Tensor)
         else torch.cat(outputs_const, dim=-1)
     )
 
     # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
-    out_acts = outputs_const - outputs_alpha
+    out_acts = out_acts_const - outputs_alpha
 
     f_out_hat: Float[Tensor, "... out_hidden_combined_trunc"] = (
         out_acts @ C_out if C_out is not None else out_acts
@@ -353,13 +353,20 @@ def integrated_gradient_trapezoidal_norm(
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
-        outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
+        # Concatenate the outputs over the hidden dimension
+        out_acts_alpha = (
+            output_alpha
+            if isinstance(output_alpha, torch.Tensor)
+            else torch.cat(output_alpha, dim=-1)
+        )
+        out_acts_const = (
+            outputs_const
+            if isinstance(outputs_const, torch.Tensor)
+            else torch.cat(outputs_const, dim=-1)
+        )
 
         # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
-        outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
-
-        # Concatenate the outputs over the hidden dimension
-        out_acts = torch.cat(outputs, dim=-1)
+        out_acts = out_acts_const - out_acts_alpha
 
         f_hat = out_acts @ C_out if C_out is not None else out_acts
 

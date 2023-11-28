@@ -136,6 +136,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
     dataset = load_dataset(
         dataset_config=config.dataset,
         return_set=return_set,
+        model_n_ctx=seq_model.cfg.n_ctx,
         tlens_model_path=tlens_model_path,
     )
     data_loader = create_data_loader(

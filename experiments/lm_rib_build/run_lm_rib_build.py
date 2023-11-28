@@ -286,6 +286,7 @@ def main(
     dataset = load_dataset(
         dataset_config=config.dataset,
         return_set=return_set,
+        model_n_ctx=seq_model.cfg.n_ctx,
         tlens_model_path=config.tlens_model_path,
     )
 

@@ -232,6 +232,7 @@ def tokenize_dataset(
 def load_dataset(
     dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig],
     return_set: Literal["train", "test", "all"],
+    model_n_ctx: int,
     tlens_model_path: Optional[Path] = None,
 ) -> Dataset:
     ...
@@ -241,6 +242,7 @@ def load_dataset(
 def load_dataset(
     dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig],
     return_set: Literal["both"],
+    model_n_ctx: int,
     tlens_model_path: Optional[Path] = None,
 ) -> tuple[Dataset, Dataset]:
     ...
@@ -249,6 +251,7 @@ def load_dataset(
 def load_dataset(
     dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig],
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
+    model_n_ctx: int,
     tlens_model_path: Optional[Path] = None,
 ) -> Union[Dataset, tuple[Dataset, Dataset]]:
     """
@@ -273,6 +276,7 @@ def load_dataset(
     Args:
         dataset_config (Union[ModularArithmeticDatasetConfig, HFDatasetConfig]): The dataset config.
         return_set (Union[Literal["train", "test", "all"], Literal["both"]]): The dataset to return.
+        model_n_ctx (int): The max context length of the model.
         tlens_model_path (Optional[Path]): The path to the tlens model. Used for collecting config
             for the modular arithmetic dataset used to train the model.
 
@@ -280,11 +284,16 @@ def load_dataset(
         The loaded dataset or a tuple of datasets (train and test).
 
     """
+
     if isinstance(dataset_config, ModularArithmeticDatasetConfig):
         return create_modular_arithmetic_dataset(
             dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
         )
     else:
+        assert dataset_config.n_ctx <= model_n_ctx, (
+            f"Dataset context length ({dataset_config.n_ctx}) must be <= model context length "
+            f"({model_n_ctx})."
+        )
         # Load dataset from huggingface
         assert return_set in ["train", "test"], "Can only load train or test sets from HF"
         assert not (

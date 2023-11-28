@@ -21,7 +21,7 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
-from rib.data import ModularArithmeticDatasetConfig
+from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.loader import create_data_loader, load_dataset
 from rib.log import logger
 from rib.models.utils import save_model
@@ -194,16 +194,19 @@ def main(config_path_or_obj: Union[str, Config]) -> tuple[float, float]:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
 
-    datasets = load_dataset(dataset_config=config.dataset, return_set=config.dataset.return_set)
-    train_loader, test_loader = create_data_loader(
-        datasets, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
-    )
-
     # Initialize the Transformer model
     transformer_lens_config = HookedTransformerConfig(**config.model.model_dump())
     model = HookedTransformer(transformer_lens_config)
     model = model.to(device)
 
+    datasets = load_dataset(
+        dataset_config=config.dataset,
+        return_set=config.dataset.return_set,
+        model_n_ctx=model.cfg.n_ctx,
+    )
+    train_loader, test_loader = create_data_loader(
+        datasets, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
+    )
     run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}_norm-{config.model.normalization_type}"
     if config.wandb:
         wandb.init(

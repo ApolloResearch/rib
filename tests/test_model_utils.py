@@ -222,11 +222,11 @@ def test_validate_node_layers_invalid(node_layers: list[str], module_ids: list[s
 
 
 @pytest.mark.slow()
-def test_n_ctx_attn_scores_pythia():
-    """Test that varying n_ctx produces the same attention scores for pythia-14m.
+def test_n_ctx_pythia():
+    """Test that varying n_ctx produces the same attention scores and outputs for pythia-14m.
 
     Note that this test doesn't test any particular feature that we've implemented, but rather
-    that pythia will work regardless of the value of n_ctx.
+    that pythia in SequentialTransformer will work regardless of the value of n_ctx.
 
     Process is a follows:
     1. Initialize a pythia-14m model.
@@ -234,11 +234,12 @@ def test_n_ctx_attn_scores_pythia():
     3. Add random tokens to the fake data sample so that it is length long_n_ctx=2048.
     4. Apply a pre-forward hook to attn_out.0 to calculate and save the attention scores.
     5. Assert that the attention scores are the same for the first short_n_ctx positions.
+    6. Assert that the model outputs are the same for the first short_n_ctx positions.
     """
     set_seed(0)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float64
-    atol = 0  # Works with atol=0 for float64 and 1e-6 for float32
+    atol = 0  # Works with atol=0 for float64 and atol=1e-6 for float32
     module_id = "attn_out.0"
     batch_size = 2
     short_n_ctx = 20
@@ -289,13 +290,13 @@ def test_n_ctx_attn_scores_pythia():
     )
     with torch.inference_mode():
         # Ran short_ctx example through model
-        hooked_model(input_ids_short, hooks=[hook])
+        out_short = hooked_model(input_ids_short, hooks=[hook])
 
     attn_scores = hooked_model.hooked_data["pre_forward_attn_out.0"]["attn_scores"].detach().clone()
 
     with torch.inference_mode():
         # Ran long_ctx example through model
-        hooked_model(input_ids_long, hooks=[hook])
+        out_long = hooked_model(input_ids_long, hooks=[hook])
 
     # Collect the attention scores for the first short_n_ctx positions
     attn_scores_long = (
@@ -311,69 +312,7 @@ def test_n_ctx_attn_scores_pythia():
         f"Max difference: {torch.max(torch.abs(attn_scores - attn_scores_long))}"
     )
 
-
-@pytest.mark.slow()
-def test_n_ctx_padding_pythia():
-    """Test that padding a short context does not change the model output for pythia-14m."""
-
-    set_seed(0)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float64
-    atol = 0  # Need 1e-1 for float32 and 0 for float64
-    module_id = "attn_out.0"
-    batch_size = 2
-    short_n_ctx = 20
-    long_n_ctx = 2048
-
-    seq_model, _ = load_sequential_transformer(
-        node_layers=[module_id],
-        last_pos_module_type=None,
-        tlens_pretrained="pythia-14m",
-        tlens_model_path=None,
-        fold_bias=True,
-        dtype=dtype,
-        device=device,
-    )
-    # Set the buffer "IGNORE" to -1e20 for every buffer in the model
-    for name, buffer in seq_model.named_buffers():
-        if "IGNORE" in name:
-            buffer.fill_(-1e20)
-
-    seq_model.eval()
-    hooked_model = HookedModel(seq_model)
-
-    # Create a fake data sample of length short_n_ctx
-    input_ids_short = torch.randint(
-        0,
-        seq_model.cfg.d_vocab,
-        (batch_size, short_n_ctx),
-        device=device,
-    )
-    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-14m")
-    tokenizer.pad_token = tokenizer.eos_token
-    # Add padding tokens to the fake data sample so that it is length n_ctx=2048
-    input_ids_long = torch.cat(
-        [
-            input_ids_short,
-            torch.full(
-                (batch_size, long_n_ctx - short_n_ctx),
-                tokenizer.pad_token_id,
-                dtype=torch.long,
-                device=device,
-            ),
-        ],
-        dim=1,
-    )
-
-    # Ran short_ctx example through model
-    with torch.inference_mode():
-        out_short = hooked_model(input_ids_short)
-
-    # Ran long_ctx example through model
-    with torch.inference_mode():
-        out_long = hooked_model(input_ids_long)
-
-    # Check that the output for the first short_n_ctx positions is the same
+    # Check that the outputs for the first short_n_ctx positions are the same
     assert torch.allclose(out_short[0], out_long[0][:, :short_n_ctx, :], atol=atol), (
         f"Model output for short_n_ctx={short_n_ctx} and long_n_ctx={long_n_ctx} are not equal."
         f"Max difference: {torch.max(torch.abs(out_short[0] - out_long[0][..., :short_n_ctx, :]))}"

@@ -329,7 +329,7 @@ def interaction_edge_pre_forward_hook_fn(
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
     dataset_size: int,
-    edge_formula: Literal["october", "november_a"] = "october",
+    edge_formula: Literal["functional", "squared"] = "functional",
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -353,7 +353,7 @@ def interaction_edge_pre_forward_hook_fn(
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
-        edge_formula (Literal["october", "november_a"], optional): The edge formula to use for the calculation. Defaults to "october".
+        edge_formula (Literal["functional", "squared"], optional): The edge formula to use for the calculation. Defaults to "functional".
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -397,6 +397,7 @@ def interaction_edge_pre_forward_hook_fn(
         n_intervals=n_intervals,
         jac_out=jac_out,
         dataset_size=dataset_size,
+        edge_formula=edge_formula,
     )
 
 

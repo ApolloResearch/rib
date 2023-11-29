@@ -164,7 +164,7 @@ def collect_M_dash_and_Lambda_dash(
             ill-defined derivatives at 0 and 1.
             integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
         ig_formula: The formula to use for the integrated gradient. Must be one of
-            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (functional) version while the
             latter is a new (November A) version. Defaults to "(1-alpha)^2".
 
     Returns:
@@ -214,7 +214,7 @@ def collect_interaction_edges(
     dtype: torch.dtype,
     device: str,
     data_set_size: Optional[int] = None,
-    edge_formula: Literal["october", "november_a"] = "october",
+    edge_formula: Literal["functional", "squared"] = "functional",
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -232,7 +232,7 @@ def collect_interaction_edges(
         device: The device to run the model on.
         data_set_size: the total size of the dataset, used to normalize. Defaults to
         `len(data_loader)`. Important to set when parallelizing over the dataset.
-        edge_formula (Literal["october", "november_a"], optional): The edge formula to use for the calculation. Defaults to "october".
+        edge_formula (Literal["functional", "squared"], optional): The edge formula to use for the calculation. Defaults to "functional".
 
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes

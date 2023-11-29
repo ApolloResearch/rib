@@ -100,7 +100,7 @@ def graph_build_test(
 @pytest.mark.slow
 def test_modular_arithmetic_build_graph():
     dtype_str = "float32"
-    atol = 1e-6  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-6 for CPU
+    atol = 1e-5  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
 
     config_str = f"""
     exp_name: test

@@ -29,7 +29,6 @@ def load_sequential_transformer(
     last_pos_module_type: Optional[Literal["add_resid1", "unembed"]],
     tlens_pretrained: Optional[str],
     tlens_model_path: Optional[Path],
-    eps: Optional[float],
     fold_bias: bool = True,
     dtype: torch.dtype = torch.float32,
     device: str = "cpu",
@@ -47,7 +46,6 @@ def load_sequential_transformer(
             output the last position index.
         tlens_pretrained (Optional[str]): The name of a pretrained transformerlens model.
         tlens_model_path (Optional[Path]): The path to a transformerlens model.
-        eps (Optional[float]): The epsilon value to use for the layernorms in the model.
         fold_bias (bool): Whether to fold the bias into the weights. Defaults to True.
         dtype (torch.dtype): The dtype to use for the model. Defaults to float32.
         device (str): The device to use for the model. Defaults to "cpu".
@@ -85,11 +83,6 @@ def load_sequential_transformer(
         tlens_model.load_state_dict(torch.load(tlens_model_path, map_location="cpu"))
 
     seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
-
-    # Set the layernorm epsilon to the one specified in the config for this script (not the one
-    # used to train the model)
-    if eps is not None:
-        seq_cfg.eps = eps
 
     seq_model = SequentialTransformer(
         seq_cfg, node_layers, last_pos_module_type=last_pos_module_type
@@ -230,6 +223,7 @@ def tokenize_dataset(
 def load_dataset(
     dataset_config: DatasetConfig,
     return_set: Literal["train", "test", "all"],
+    model_n_ctx: int,
     tlens_model_path: Optional[Path] = None,
 ) -> Dataset:
     ...
@@ -239,6 +233,7 @@ def load_dataset(
 def load_dataset(
     dataset_config: DatasetConfig,
     return_set: Literal["both"],
+    model_n_ctx: int,
     tlens_model_path: Optional[Path] = None,
 ) -> tuple[Dataset, Dataset]:
     ...
@@ -247,6 +242,7 @@ def load_dataset(
 def load_dataset(
     dataset_config: DatasetConfig,
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
+    model_n_ctx: int,
     tlens_model_path: Optional[Path] = None,
 ) -> Union[Dataset, tuple[Dataset, Dataset]]:
     """
@@ -271,6 +267,8 @@ def load_dataset(
     Args:
         dataset_config (DatasetConfig): The dataset config.
         return_set (Union[Literal["train", "test", "all"], Literal["both"]]): The dataset to return.
+        model_n_ctx (int): The max context length of the model. Data sequences are packed to
+            dataset_config.n_ctx if it is not None and is <= model_n_ctx, otherwise to model_n_ctx.
         tlens_model_path (Optional[Path]): The path to the tlens model. Used for collecting config
             for the modular arithmetic dataset used to train the model.
 
@@ -278,18 +276,23 @@ def load_dataset(
         The loaded dataset or a tuple of datasets (train and test).
 
     """
+
     if isinstance(dataset_config, ModularArithmeticDatasetConfig):
         return create_modular_arithmetic_dataset(
             dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
         )
     elif isinstance(dataset_config, HFDatasetConfig):
+        n_ctx = dataset_config.n_ctx or model_n_ctx
+        assert n_ctx <= model_n_ctx, (
+            f"Dataset context length ({dataset_config.n_ctx}) must be <= model context length "
+            f"({model_n_ctx})."
+        )
+
         # Load dataset from huggingface
         assert return_set in ["train", "test"], "Can only load train or test sets from HF"
         assert not (
             dataset_config.return_set_frac and dataset_config.return_set_n_samples
         ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
-
-        n_ctx = 1024 if "gpt2" in dataset_config.tokenizer_name else 2048
 
         if dataset_config.return_set_frac:
             percent = int(dataset_config.return_set_frac * 100)

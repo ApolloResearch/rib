@@ -1,7 +1,7 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Sized, Union, overload
+from typing import Literal, Optional, Union, overload
 
 import torch
 import torchvision
@@ -48,9 +48,9 @@ def load_sequential_transformer(
         tlens_pretrained (Optional[str]): The name of a pretrained transformerlens model.
         tlens_model_path (Optional[Path]): The path to a transformerlens model.
         eps (Optional[float]): The epsilon value to use for the layernorms in the model.
-        fold_bias (bool): Whether to fold the bias into the weights.
-        dtype (Optional[torch.dtype]): The dtype to use for the model.
-        device (Optional[str]): The device to use for the model.
+        fold_bias (bool): Whether to fold the bias into the weights. Defaults to True.
+        dtype (torch.dtype): The dtype to use for the model. Defaults to float32.
+        device (str): The device to use for the model. Defaults to "cpu".
 
     Returns:
         - SequentialTransformer: The SequentialTransformer model.
@@ -60,7 +60,9 @@ def load_sequential_transformer(
         tlens_pretrained is not None or tlens_model_path is not None
     ), "Either `tlens_pretrained` or `tlens_model_path` must be specified."
     if tlens_pretrained is not None:
-        tlens_model = HookedTransformer.from_pretrained(tlens_pretrained)
+        tlens_model = HookedTransformer.from_pretrained(
+            tlens_pretrained, device="cpu", torch_dtype=dtype
+        )
         # Create a SequentialTransformerConfig from the HookedTransformerConfig
         tlens_cfg_dict = tlens_model.cfg.to_dict()
 
@@ -71,18 +73,21 @@ def load_sequential_transformer(
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
             # The config specified in the YAML file used to train the tlens model
             provided_tlens_cfg_dict = yaml.safe_load(f)["model"]
-        tlens_model = HookedTransformer(provided_tlens_cfg_dict)
+
+        # Set the dtype to the one specified in the config for this script
+        provided_tlens_cfg_dict["dtype"] = dtype
+
+        tlens_model = HookedTransformer(provided_tlens_cfg_dict, move_to_device=False)
         # The entire tlens config (including default values)
         tlens_cfg_dict = tlens_model.cfg.to_dict()
 
         # Load the weights from the tlens model
-        tlens_model.load_state_dict(torch.load(tlens_model_path, map_location=device))
+        tlens_model.load_state_dict(torch.load(tlens_model_path, map_location="cpu"))
 
     seq_cfg = SequentialTransformerConfig(**tlens_cfg_dict)
 
-    # Set the dtype and layernorm epsilon to the one specified in the config for this script (as
-    # opposed to the one used to train the tlens model)
-    seq_cfg.dtype = dtype
+    # Set the layernorm epsilon to the one specified in the config for this script (not the one
+    # used to train the model)
     if eps is not None:
         seq_cfg.eps = eps
 
@@ -92,7 +97,7 @@ def load_sequential_transformer(
 
     # Load the transformer-lens weights into the sequential transformer model
     state_dict = convert_tlens_weights(
-        seq_param_names=list(seq_model.state_dict().keys()),
+        seq_model=seq_model,
         tlens_model=tlens_model,
         positional_embedding_type=seq_cfg.positional_embedding_type,
     )
@@ -101,7 +106,12 @@ def load_sequential_transformer(
     if fold_bias:
         seq_model.fold_bias()
 
-    return seq_model, tlens_cfg_dict
+    # Ensure that our model has the correct dtype (by checking the dtype of the first parameter)
+    assert next(seq_model.parameters()).dtype == dtype, (
+        f"Model dtype ({next(seq_model.parameters()).dtype}) does not match specified dtype "
+        f"({dtype})."
+    )
+    return seq_model.to(device), tlens_cfg_dict
 
 
 def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
@@ -135,9 +145,9 @@ def create_modular_arithmetic_dataset(
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
             cfg = yaml.safe_load(f)
 
-        modulus = cfg["train"]["modulus"]
-        fn_name = cfg["train"]["fn_name"]
-        frac_train = cfg["train"]["frac_train"]
+        modulus = cfg["dataset"]["modulus"]
+        fn_name = cfg["dataset"]["fn_name"]
+        frac_train = cfg["dataset"]["frac_train"]
         seed = cfg["seed"]
 
     modulus = dataset_config.modulus or modulus
@@ -373,7 +383,7 @@ def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Da
     Returns:
         The DataLoader or a tuple of DataLoaders.
     """
-    assert chunk_idx < total_chunks, "chunk_idx greater than total number of chunks"
+    assert chunk_idx < total_chunks, f"chunk_idx {chunk_idx} >= total # of chunks {total_chunks}"
     if total_chunks == 1:
         return dataset
     dataset_len = len(dataset)  # type: ignore

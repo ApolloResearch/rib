@@ -58,6 +58,7 @@ def test_modular_arithmetic_conversion() -> None:
     Floating point errors heavily accumulate here with float32 or less, so we use float64.
     """
     set_seed(42)
+    dtype = torch.float32
     cfg = {
         "n_layers": 2,
         "d_model": 129,
@@ -68,25 +69,23 @@ def test_modular_arithmetic_conversion() -> None:
         "n_ctx": 3,
         "act_fn": "gelu_new",
         "normalization_type": "LNPre",
-        "dtype": torch.float64,
+        "dtype": dtype,
+        "device": "cpu",
     }
-    # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
-    atol = 1e-8
 
     tlens_cfg = HookedTransformerConfig.from_dict(cfg)
     tlens_model = HookedTransformer(tlens_cfg)
-    tlens_model.to(torch.float64)
-    tlens_model.to("cpu")
     tlens_model.eval()
 
     cfg = SequentialTransformerConfig(**asdict(tlens_cfg))
 
     node_layers = ["mlp_act.0", "unembed"]
-    seq_model_raw = SequentialTransformer(cfg, node_layers).to(torch.float64)
+    seq_model_raw = SequentialTransformer(cfg, node_layers)
+    assert seq_model_raw.cfg.dtype == dtype
     seq_model_raw.eval()
     # Load the transformer-lens weights into the sequential transformer model
     state_dict = convert_tlens_weights(
-        seq_param_names=list(seq_model_raw.state_dict().keys()),
+        seq_model=seq_model_raw,
         tlens_model=tlens_model,
         positional_embedding_type=cfg.positional_embedding_type,
     )
@@ -98,15 +97,15 @@ def test_modular_arithmetic_conversion() -> None:
     # Mapping from some tlens cache keys to SequentialTransformer cache keys (and their tuple index)
     mappings = {
         "blocks.0.hook_resid_pre": {
-            "seq_key": "sections.pre.2",
+            "section_id": "sections.pre.2",
             "tuple_idx": 0,
         },
         "blocks.0.hook_resid_mid": {
-            "seq_key": "sections.pre.6",
+            "section_id": "sections.pre.6",
             "tuple_idx": 0,
         },
         "blocks.1.hook_mlp_out": {
-            "seq_key": "sections.section_0.10",
+            "section_id": "sections.section_0.10",
             "tuple_idx": 1,
         },
     }
@@ -115,38 +114,36 @@ def test_modular_arithmetic_conversion() -> None:
     cacheA = [cacheA[key] for key in mappings]
 
     outputB, cacheB = seq_model.run_with_cache(input_ids)
-    cacheB = [cacheB[v["seq_key"]]["acts"][v["tuple_idx"]] for v in mappings.values()]
+    cacheB = [cacheB[v["section_id"]]["acts"][v["tuple_idx"]] for v in mappings.values()]
 
-    assert torch.allclose(outputA, outputB[0], atol=atol), "Outputs are not equal"
+    assert torch.equal(outputA, outputB[0]), "Outputs are not equal"
     for i, (tlens_act, seq_act) in enumerate(zip(cacheA, cacheB)):
-        assert torch.allclose(
-            tlens_act, seq_act, atol=atol
-        ), f"Activations are not equal for mapping index {i}"
+        assert torch.equal(tlens_act, seq_act), f"Activations are not equal for mapping index {i}"
 
 
-def pretrained_lm_comparison(
-    hf_model_str: str, mappings: dict[str, dict[str, str]], atol: float
-) -> None:
+def pretrained_lm_comparison(hf_model_str: str, mappings: dict[str, dict[str, str]]) -> None:
     """Test that a pretrained lm in tlens and SequentialTransformer give the same outputs and
     internal activations.
 
     Args:
         hf_model_str: The model to test.
         mappings: A mapping from some tlens cache keys to SequentialTransformer cache keys.
-        atol: The absolute tolerance to use for torch.allclose.
     """
-    tlens_model = HookedTransformer.from_pretrained(hf_model_str)
-    tlens_model.to(torch.float64)
-    tlens_model.to("cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float32
+
+    tlens_model = HookedTransformer.from_pretrained(hf_model_str, device=device, torch_dtype=dtype)
     tlens_model.eval()
 
     seq_cfg = SequentialTransformerConfig(**asdict(tlens_model.cfg))
     node_layers = ["ln2.1", "unembed"]
-    seq_model_raw = SequentialTransformer(seq_cfg, node_layers).to(torch.float64)
+    seq_model_raw = SequentialTransformer(seq_cfg, node_layers).to(device=device)
+    assert seq_model_raw.cfg.dtype == dtype
     seq_model_raw.eval()
+
     # Load the transformer-lens weights into the sequential transformer model
     state_dict = convert_tlens_weights(
-        seq_param_names=list(seq_model_raw.state_dict().keys()),
+        seq_model=seq_model_raw,
         tlens_model=tlens_model,
         positional_embedding_type=seq_cfg.positional_embedding_type,
     )
@@ -159,31 +156,29 @@ def pretrained_lm_comparison(
     tlens_cache = []
 
     def tlens_store_activations_hook(output, hook):
-        tlens_cache.append(output.detach().clone())
+        tlens_cache.append(output.detach().cpu())
 
     tlens_hooks = [(name, tlens_store_activations_hook) for name in mappings]
     tlens_output = tlens_model.run_with_hooks(input_ids, fwd_hooks=tlens_hooks)
 
     # Collect activations from the sequential transformer model
     seq_hooks: list[Hook] = []
-    for module_name in [v["seq_key"] for v in mappings.values()]:
+    for section_id in [v["section_id"] for v in mappings.values()]:
         seq_hooks.append(
             Hook(
-                name=module_name,
+                name=section_id,
                 data_key="acts",
                 fn=acts_forward_hook_fn,
-                module_name=module_name,
+                module_name=section_id,
             )
         )
     seq_output = seq_model(input_ids, hooks=seq_hooks)[0]
     seq_cache = [
-        seq_model.hooked_data[v["seq_key"]]["acts"][v["tuple_idx"]] for v in mappings.values()
+        seq_model.hooked_data[v["section_id"]]["acts"][v["tuple_idx"]] for v in mappings.values()
     ]
-    assert torch.allclose(tlens_output, seq_output, atol=atol), "Outputs are not equal"
+    assert torch.equal(tlens_output, seq_output), "Outputs are not equal"
     for i, (tlens_act, seq_act) in enumerate(zip(tlens_cache, seq_cache)):
-        assert torch.allclose(
-            tlens_act, seq_act, atol=atol
-        ), f"Activations are not equal for mapping index {i}"
+        assert torch.equal(tlens_act, seq_act), f"Activations are not equal for mapping index {i}"
 
 
 @pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
@@ -234,25 +229,23 @@ def test_gpt2_conversion():
     Floating point errors heavily accumulate here with float32 or less, so we use float64.
     """
     set_seed(42)
-    # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
-    atol = 1e-8
     # Mapping from some tlens cache keys to SequentialTransformer cache keys
     # The tuple_idx is the index of the module's output to use
     mappings = {
         "blocks.0.hook_resid_pre": {
-            "seq_key": "sections.pre.2",
+            "section_id": "sections.pre.2",
             "tuple_idx": 0,
         },
         "blocks.3.hook_resid_mid": {
-            "seq_key": "sections.section_0.17",
+            "section_id": "sections.section_0.17",
             "tuple_idx": 0,
         },
         "blocks.8.hook_resid_post": {
-            "seq_key": "sections.section_0.67",
+            "section_id": "sections.section_0.67",
             "tuple_idx": 0,
         },
     }
-    pretrained_lm_comparison("gpt2", mappings, atol)
+    pretrained_lm_comparison("gpt2", mappings)
 
 
 @pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
@@ -302,22 +295,20 @@ def test_pythia_conversion():
     Floating point errors heavily accumulate here with float32 or less, so we use float64.
     """
     set_seed(42)
-    # Need atols to be larger for lower precision dtypes (1e3 for bfloat16, 1e-2 for float32)
-    atol = 1e-8
     # Mapping from some tlens cache keys to SequentialTransformer cache keys
     # The tuple_idx is the index of the module's output to use
     mappings = {
         "blocks.0.hook_resid_pre": {
-            "seq_key": "sections.pre.0",
+            "section_id": "sections.pre.0",
             "tuple_idx": 0,
         },
         "blocks.3.hook_mlp_out": {
-            "seq_key": "sections.section_0.21",
+            "section_id": "sections.section_0.21",
             "tuple_idx": 1,
         },
         "blocks.4.hook_resid_post": {
-            "seq_key": "sections.section_0.31",
+            "section_id": "sections.section_0.31",
             "tuple_idx": 0,
         },
     }
-    pretrained_lm_comparison("pythia-14m", mappings, atol)
+    pretrained_lm_comparison("pythia-14m", mappings)

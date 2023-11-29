@@ -1,5 +1,5 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import Callable, Optional, Union, cast
+from typing import Callable, Union, cast
 
 import einops
 import numpy as np
@@ -393,7 +393,7 @@ class AttentionOut(nn.Module):
         )
         self.register_buffer("mask", causal_mask)
 
-        self.register_buffer("IGNORE", torch.tensor(-1e5))
+        self.register_buffer("IGNORE", torch.tensor(-torch.inf))
 
         # attn_scale is a constant that we divide the attention scores by pre-softmax.
         # I'm not entirely sure why it matters, but it's probably a mix of softmax not being

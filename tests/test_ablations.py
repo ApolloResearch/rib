@@ -10,7 +10,6 @@ with an updated MLP path. This is necessary because the interaction graph is sav
 absolute path to the MLP, and a github action will not have access to the same absolute path.
 """
 
-import sys
 from pathlib import Path
 from typing import Union
 
@@ -18,18 +17,13 @@ import pytest
 import torch
 import yaml
 
-from rib.ablations import AblationAccuracies
-
-# Append the root directory to sys.path
-ROOT_DIR = Path(__file__).parent.parent.resolve()
-sys.path.append(str(ROOT_DIR))
-
 from experiments.lm_ablations.run_lm_ablations import Config as LMAblationConfig
 from experiments.lm_ablations.run_lm_ablations import main as lm_ablations_main
 from experiments.mnist_ablations.run_mnist_ablations import (
     Config as MNISTAblationConfig,
 )
 from experiments.mnist_ablations.run_mnist_ablations import main as mnist_ablations_main
+from rib.ablations import AblationAccuracies
 
 
 def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool = False) -> bool:
@@ -166,7 +160,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     ```
     import torch
     rib_graph = torch.load("experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
-    rib_graph['config']['tlens_model_path'] = "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
+    rib_graph['config']['tlens_model_path'] = "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt"
     torch.save(rib_graph, "experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
     ```
     """

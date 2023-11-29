@@ -596,6 +596,7 @@ relu_block_shuffle_cancellation = einops.einsum(
 plt.figure()
 plt.title("Full cancellation (square of sum)")
 vmax = full_cancellation.abs().max()
+vmax_full = vmax
 plt.imshow(full_cancellation, cmap="RdBu", vmin=-vmax, vmax=vmax)
 plt.colorbar()
 
@@ -617,5 +618,22 @@ plt.figure()
 plt.title("Randomized ReLU blocks")
 vmax = relu_block_shuffle_cancellation.abs().max()
 plt.imshow(relu_block_shuffle_cancellation, cmap="RdBu", vmin=-vmax, vmax=vmax)
+plt.colorbar()
+
+# %%
+
+# The last two plots with the first colorbar
+
+plt.figure()
+plt.title(
+    "Cancellation allowed within ReLU-syncing block\n(sum-over-blocks of squares of sums-within-blocks)"
+)
+plt.imshow(relu_block_cancellation, cmap="RdBu", vmin=-vmax_full, vmax=vmax_full)
+plt.colorbar()
+
+plt.figure()
+plt.title("Randomized ReLU blocks")
+plt.imshow(relu_block_shuffle_cancellation, cmap="RdBu", vmin=-vmax_full, vmax=vmax_full)
+plt.colorbar()
 
 # %%

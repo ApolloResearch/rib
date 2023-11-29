@@ -32,6 +32,11 @@ class HFDatasetConfig(BaseModel):
     return_set_portion: Literal["first", "last"] = Field(
         "first", description="Whether to load the first or last portion of the return_set."
     )
+    n_ctx: Optional[int] = Field(
+        None,
+        description="Dataset will be packed to sequences of this length. Should be <1024 for gpt2."
+        "<2048 for most other models.",
+    )
 
     @field_validator("return_set_frac")
     def check_return_set_frac(cls, v):

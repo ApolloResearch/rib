@@ -1,5 +1,5 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import Callable, Optional, Union, cast
+from typing import Callable, Union, cast
 
 import einops
 import numpy as np
@@ -393,7 +393,7 @@ class AttentionOut(nn.Module):
         )
         self.register_buffer("mask", causal_mask)
 
-        self.register_buffer("IGNORE", torch.tensor(-1e5))
+        self.register_buffer("IGNORE", torch.tensor(-torch.inf))
 
         # attn_scale is a constant that we divide the attention scores by pre-softmax.
         # I'm not entirely sure why it matters, but it's probably a mix of softmax not being
@@ -489,10 +489,11 @@ class AttentionOut(nn.Module):
         # The key context length is the number of positions in the past - this includes all positions in the cache
         # If not caching, query_ctx_length == key_ctx_length
         key_ctx_length = attn_scores.size(-1)
+        query_ctx_length = attn_scores.size(-2)
 
         mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
         return torch.where(
-            mask[:key_ctx_length],
+            mask[:query_ctx_length, :key_ctx_length],
             attn_scores,
             cast(Tensor, self.IGNORE),
         )

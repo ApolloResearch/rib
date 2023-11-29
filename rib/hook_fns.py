@@ -13,16 +13,19 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 from functools import partial
 from typing import Any, Optional, Union, Literal
 
+import einops
 import torch
+from fancy_einsum import einsum
 from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
     calc_gram_matrix,
-    edge_norm,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
 )
+from rib.models.sequential_transformer.components import AttentionOut
+from rib.utils import module_hat
 
 
 def _add_to_hooked_matrix(
@@ -125,6 +128,70 @@ def gram_pre_forward_hook_fn(
     gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
+
+
+def attn_scores_pre_forward_hook(
+    module: torch.nn.Module,
+    inputs: tuple[Float[Tensor, "batch pos head_index_d_head"], ...],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+) -> None:
+    """Calculate and store the attention scores.
+
+    This should only be applied to the AttentionOut module.
+
+    Note that this function overwrites hooked_data[hook_name] each time it is called since it is
+    expected to only be used on a single batch.
+
+    Args:
+        module: Module that the hook is attached to.
+        inputs: Inputs to the module. The first input is the residual, and the remaining inputs
+            are the q, k, and v tensors.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+    """
+
+    assert isinstance(module, AttentionOut), "This hook can only be applied to AttentionOut."
+    _, q, k, v = inputs
+    # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)
+    q = einops.rearrange(
+        q,
+        "... pos (head_index d_head) -> ... pos head_index d_head",
+        head_index=module.cfg.n_heads,
+    )
+    k = einops.rearrange(
+        k,
+        "... pos (head_index d_head) -> ... pos head_index d_head",
+        head_index=module.cfg.n_heads,
+    )
+    v = einops.rearrange(
+        v,
+        "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
+        head_index=module.cfg.n_heads,
+    )
+
+    in_dtype = v.dtype
+
+    if in_dtype not in [torch.float32, torch.float64]:
+        # If using 16 bits, increase the precision to avoid numerical instabilities
+        q = q.to(torch.float32)
+        k = k.to(torch.float32)
+    attn_scores = (
+        einsum(
+            "... query_pos head_index d_head, \
+                    ... key_pos head_index d_head \
+                    -> ... head_index query_pos key_pos",
+            q,
+            k,
+        )
+        / module.attn_scale
+    )  # [..., head_index, query_pos, key_pos]
+
+    attn_scores = module.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
+
+    hooked_data[hook_name] = {data_key: attn_scores}
 
 
 def rotate_pre_forward_hook_fn(
@@ -301,13 +368,13 @@ def interaction_edge_pre_forward_hook_fn(
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
     f_hat = in_acts @ C_in
 
-    in_hidden_dims = [x.shape[-1] for x in inputs]
+    in_tuple_dims = [x.shape[-1] for x in inputs]
 
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
         f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_hat @ C_in_pinv
-        input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
+        input_tuples = torch.split(f_in_adjusted, in_tuple_dims, dim=-1)
 
         output_const = module(*tuple(x.detach().clone() for x in input_tuples))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
@@ -316,19 +383,20 @@ def interaction_edge_pre_forward_hook_fn(
 
     jac_out = hooked_data[hook_name][data_key]
 
+    module_hat_partial = partial(
+        module_hat,
+        module=module,
+        C_in_pinv=C_in_pinv,
+        C_out=C_out,
+        in_tuple_dims=in_tuple_dims,
+    )
+
     integrated_gradient_trapezoidal_jacobian(
-        fn=edge_norm,
+        module_hat=module_hat_partial,
         f_in_hat=f_hat,
         n_intervals=n_intervals,
         jac_out=jac_out,
         dataset_size=dataset_size,
-        outputs_const=outputs_const,
-        module=module,
-        C_in_pinv=C_in_pinv,
-        C_out=C_out,
-        in_hidden_dims=in_hidden_dims,
-        has_pos=has_pos,
-        edge_formula = edge_formula,
     )
 
 

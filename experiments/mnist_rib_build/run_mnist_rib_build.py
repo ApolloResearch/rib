@@ -22,7 +22,7 @@ from typing import Optional, Union
 import fire
 import torch
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -31,7 +31,6 @@ from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import load_mlp
 from rib.log import logger
-from rib.models import MLP
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 

@@ -1,9 +1,7 @@
 from contextlib import nullcontext
-from typing import Optional, Tuple
 
 import pytest
 import torch
-from torch import nn
 
 from rib.models import MLP, MLPLayer
 from rib.models.utils import ACTIVATION_MAP

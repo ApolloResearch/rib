@@ -1,4 +1,3 @@
-from functools import partial
 from typing import Callable, Literal, Optional, Union
 
 import numpy as np
@@ -6,7 +5,6 @@ import torch
 from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
-from torch.func import jacrev, vmap
 from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES, StrDtype

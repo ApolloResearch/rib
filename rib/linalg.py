@@ -335,7 +335,9 @@ def integrated_gradient_trapezoidal_jacobian(
                         alpha_f_in_hat,
                         retain_graph=True,
                     )
-                    inner_token_sums[:, out_dim, :] -= inner_token_sum.to(inner_token_sums.device)
+                    inner_token_sums[:, out_dim, :] -= torch.einsum(
+                        einsum_pattern, grad[0] * interval_size * scaler, f_in_hat
+                    ).to(inner_token_sums.device)
 
         # Finished alpha integral, integral result present in inner_token_sums
         # Square, and sum over batch size and t (not tprime)

@@ -215,6 +215,8 @@ def collect_interaction_edges(
     dtype: torch.dtype,
     device: str,
     data_set_size: Optional[int] = None,
+    integral_boundary_relative_epsilon: float = 1e-3,
+    edge_formula: Literal["functional", "squared"] = "functional",
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -232,6 +234,13 @@ def collect_interaction_edges(
         device: The device to run the model on.
         data_set_size: the total size of the dataset, used to normalize. Defaults to
         `len(data_loader)`. Important to set when parallelizing over the dataset.
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+        edge_formula: The formula to use for the attribution. Must be one of "functional" or
+            "squared". The former is the old (October) functional version, the latter is a new
+            (November) version.
 
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes
@@ -263,6 +272,8 @@ def collect_interaction_edges(
                     "C_out": C_out,
                     "n_intervals": n_intervals,
                     "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
+                    "integral_boundary_relative_epsilon": integral_boundary_relative_epsilon,
+                    "edge_formula": edge_formula,
                 },
             )
         )

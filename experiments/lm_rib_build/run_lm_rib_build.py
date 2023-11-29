@@ -125,6 +125,11 @@ class Config(BaseModel):
         description="The number of intervals to use for the integrated gradient approximation."
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
+    integral_boundary_relative_epsilon: float = Field(
+        1e-3,
+        description="The relative epsilon to use for the integrated gradient integral boundaries."
+        "A non-zero value avoids issues with ill-defined derivatives at 0 and 1.",
+    )
 
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
 
@@ -136,6 +141,14 @@ class Config(BaseModel):
         None,
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
+    )
+    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
+        "(1-0)*alpha",
+        description="The integrated gradient formula to use to calculate the basis.",
+    )
+    edge_formula: Literal["functional", "squared"] = Field(
+        "functional",
+        description="The attribution method to use to calculate the edges.",
     )
 
     @model_validator(mode="after")
@@ -342,6 +355,8 @@ def main(
             n_intervals=config.n_intervals,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
+            integral_boundary_relative_epsilon=config.integral_boundary_relative_epsilon,
+            ig_formula=config.ig_formula,
         )
         # Cs used to calculate edges
         edge_Cs = Cs
@@ -380,6 +395,8 @@ def main(
             dtype=dtype,
             device=device,
             data_set_size=full_dataset_len,  # includes data for other processes
+            integral_boundary_relative_epsilon=config.integral_boundary_relative_epsilon,
+            edge_formula=config.edge_formula,
         )
 
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"

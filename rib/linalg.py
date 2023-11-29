@@ -183,7 +183,7 @@ def integrated_gradient_trapezoidal_jacobian(
     n_intervals: int,
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
-    edge_formula: Literal["october", "november_a"] = "october",
+    edge_formula: Literal["functional", "squared"] = "functional",
 ) -> None:
     """Calculate the integrated gradient of the jacobian of a function w.r.t its input.
 
@@ -204,7 +204,7 @@ def integrated_gradient_trapezoidal_jacobian(
     alphas, interval_size = _calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon=1e-3
     )
-    if edge_formula == "october":
+    if edge_formula == "functional":
         f_out_hat_const = module_hat(f_in_hat)
         for alpha_index, alpha in tqdm(
             enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
@@ -255,7 +255,7 @@ def integrated_gradient_trapezoidal_jacobian(
                     # Note that jac_out is initialised to zeros in
                     # `rib.data_accumulator.collect_interaction_edges`
                     jac_out[i] -= E
-    elif edge_formula == "november_a":
+    elif edge_formula == "squared":
         out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = jac_out.shape
         if has_pos:
             out_pos_size = f_in_hat.shape[1]
@@ -343,7 +343,7 @@ def integrated_gradient_trapezoidal_norm(
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
-    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
+    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
 ) -> Float[Tensor, "... in_hidden_combined"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
     following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
@@ -367,7 +367,9 @@ def integrated_gradient_trapezoidal_norm(
             integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
         ig_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
-            latter is a new (November A) version.
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
     """
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
@@ -418,7 +420,9 @@ def integrated_gradient_trapezoidal_norm(
             # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
             # to taking the gradient of each output element separately, but it lets us simply use
             # backward() instead of more complex (and probably less efficient) vmap operations.
-            f_hat_norm = (f_hat_1_alpha**2).sum()
+            # Note the minus sign here. In the paper this minus is in front of the integral, but
+            # for generality we put it here.
+            f_hat_norm = -(f_hat_1_alpha**2).sum()
         elif ig_formula == "(1-0)*alpha":
             f_hat_alpha = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha
             f_hat_1_0 = (
@@ -446,9 +450,6 @@ def integrated_gradient_trapezoidal_norm(
         for x in alpha_inputs:
             assert x.grad is not None, "Input grad should not be None."
             x.grad.zero_()
-
-    # Add the minus sign in front of the IG integral, see e.g. the definition of g_j in equation (3.27)
-    in_grads *= -1
 
     return in_grads
 

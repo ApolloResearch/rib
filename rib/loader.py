@@ -276,7 +276,8 @@ def load_dataset(
     Args:
         dataset_config (Union[ModularArithmeticDatasetConfig, HFDatasetConfig]): The dataset config.
         return_set (Union[Literal["train", "test", "all"], Literal["both"]]): The dataset to return.
-        model_n_ctx (int): The max context length of the model.
+        model_n_ctx (int): The max context length of the model. Data sequences are packed to
+            dataset_config.n_ctx if it is not None and is <= model_n_ctx, otherwise to model_n_ctx.
         tlens_model_path (Optional[Path]): The path to the tlens model. Used for collecting config
             for the modular arithmetic dataset used to train the model.
 
@@ -290,10 +291,12 @@ def load_dataset(
             dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
         )
     else:
-        assert dataset_config.n_ctx <= model_n_ctx, (
+        n_ctx = dataset_config.n_ctx or model_n_ctx
+        assert n_ctx <= model_n_ctx, (
             f"Dataset context length ({dataset_config.n_ctx}) must be <= model context length "
             f"({model_n_ctx})."
         )
+
         # Load dataset from huggingface
         assert return_set in ["train", "test"], "Can only load train or test sets from HF"
         assert not (
@@ -316,9 +319,7 @@ def load_dataset(
 
         tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
         tokenizer.pad_token = tokenizer.eos_token
-        dataset = tokenize_dataset(
-            dataset=raw_dataset, tokenizer=tokenizer, n_ctx=dataset_config.n_ctx
-        )
+        dataset = tokenize_dataset(dataset=raw_dataset, tokenizer=tokenizer, n_ctx=n_ctx)
         return dataset
 
 

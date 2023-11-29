@@ -336,7 +336,9 @@ def _integrated_gradient_jacobian_with_jacrev(
     jac_out = None
     for alpha_index, alpha in enumerate(alphas):
         alpha_x = alpha * x
-        fn_norm = lambda x: (module_hat(x) ** 2).sum(dim=0)  # Sum over batch dimension
+        fn_norm = lambda f: ((module_hat(x) - module_hat(f)) ** 2).sum(
+            dim=0
+        )  # Sum over batch dimension
         alpha_jac_out = jacrev(fn_norm)(alpha_x)  # [out_dim, batch_size, in_dim]
 
         scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1

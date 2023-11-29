@@ -128,10 +128,6 @@ class Config(BaseModel):
 
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
 
-    eps: float = Field(
-        1e-5,
-        description="The epsilon value to use for numerical stability in layernorm layers.",
-    )
     calculate_edges: bool = Field(
         True,
         description="Whether to calculate the edges of the interaction graph.",
@@ -273,7 +269,6 @@ def main(
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
-        eps=config.eps,
         fold_bias=True,
         dtype=dtype,
         device=device,

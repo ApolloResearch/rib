@@ -20,7 +20,7 @@ class TestDistributed:
         exp_name: {exp_name}
         seed: 0
         tlens_pretrained: null
-        tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
+        tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
         interaction_matrices_path: null
         node_layers:
             - ln1.0

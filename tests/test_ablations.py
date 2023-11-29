@@ -155,7 +155,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     ```
     import torch
     rib_graph = torch.load("experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
-    rib_graph['config']['tlens_model_path'] = "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
+    rib_graph['config']['tlens_model_path'] = "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt"
     torch.save(rib_graph, "experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
     ```
     """

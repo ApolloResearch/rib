@@ -1,6 +1,6 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import torch
 from jaxtyping import Float
@@ -135,6 +135,8 @@ def collect_M_dash_and_Lambda_dash(
     hook_name: Optional[str] = None,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
+    integral_boundary_relative_epsilon: float = 1e-3,
+    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -157,7 +159,15 @@ def collect_M_dash_and_Lambda_dash(
             Lambda_dash matrix. Does not affect the output, only used for the einsum within
             M_dash_and_Lambda_dash_pre_forward_hook_fn. Needs to be float64 on CPU but float32 was
             fine on GPU. Defaults to float64.
-
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+        ig_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
     Returns:
         A tuple containing M' and Lambda'.
     """
@@ -175,6 +185,8 @@ def collect_M_dash_and_Lambda_dash(
             "dataset_size": len(data_loader.dataset),  # type: ignore
             "M_dtype": M_dtype,
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
+            "integral_boundary_relative_epsilon": integral_boundary_relative_epsilon,
+            "ig_formula": ig_formula,
         },
     )
 

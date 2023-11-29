@@ -2,7 +2,7 @@
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 from jaxtyping import Float, Int
@@ -107,6 +107,8 @@ def calculate_interaction_rotations(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
+    integral_boundary_relative_epsilon: float = 1e-3,
+    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -139,6 +141,15 @@ def calculate_interaction_rotations(
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+        ig_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
 
     Returns:
         - A list of objects containing the interaction rotation matrices and their pseudoinverses,
@@ -258,6 +269,8 @@ def calculate_interaction_rotations(
             hook_name=node_layer,
             M_dtype=M_dtype,
             Lambda_einsum_dtype=Lambda_einsum_dtype,
+            integral_boundary_relative_epsilon=integral_boundary_relative_epsilon,
+            ig_formula=ig_formula,
         )
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()

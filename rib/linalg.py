@@ -180,21 +180,28 @@ def _calc_integration_intervals(
 def integrated_gradient_trapezoidal_jacobian(
     module_hat: Callable,
     f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
-    n_intervals: int,
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
+    n_intervals: int,
+    integral_boundary_relative_epsilon: float = 1e-3,
     edge_formula: Literal["functional", "squared"] = "functional",
 ) -> None:
-    """Calculate the integrated gradient of the jacobian of a function w.r.t its input.
+    """Calculate the interaction attribution (edges) for module_hat with inputs f_in_hat.
 
     Args:
-        fn: The function to calculate the jacobian of.
-        x: The input to the function.
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        module_hat: The RIB-wrapped module to calculate edges for.
+        f_in_hat: The inputs to the module. May or may not include a position dimension.
         jac_out: The output of the jacobian calculation. This is modified in-place.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
-
+        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+        edge_formula: The formula to use for the attribution. Must be one of "functional" or
+            "squared". The former is the old (October) functional version, the latter is a new
+            (November) version.
     """
     has_pos = f_in_hat.ndim == 3
     # Ensure inputs require grads
@@ -202,10 +209,11 @@ def integrated_gradient_trapezoidal_jacobian(
 
     # Prepare integral
     alphas, interval_size = _calc_integration_intervals(
-        n_intervals, integral_boundary_relative_epsilon=1e-3
+        n_intervals, integral_boundary_relative_epsilon=integral_boundary_relative_epsilon
     )
     if edge_formula == "functional":
-        f_out_hat_const = module_hat(f_in_hat)
+        with torch.inference_mode():
+            f_out_hat_const = module_hat(f_in_hat)
         for alpha_index, alpha in tqdm(
             enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
         ):
@@ -347,10 +355,6 @@ def integrated_gradient_trapezoidal_jacobian(
         else:
             jac_out[:, :] = inner_token_sums.sum(dim=0)
     else:
-        if edge_formula == "october":
-            print("edge_formula='october' is now edge_formula='functional', update your code.")
-        if edge_formula == "november_a":
-            print("edge_formula='november_a' is now edge_formula='squared', update your code.")
         raise ValueError(f"Unexpected edge_formula {edge_formula} != 'functional' or 'squared'")
 
 
@@ -383,7 +387,7 @@ def integrated_gradient_trapezoidal_norm(
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
         integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
             integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
-            ill-defined derivatives at 0 and 1.
+            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
             integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
         ig_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the

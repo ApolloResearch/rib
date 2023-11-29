@@ -79,6 +79,7 @@ def graph_build_test(
         # to the outgoing edges of a node
         act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
         if E_hats:
+            # E_hats[i] is a tuple (name, tensor)
             edge_size = E_hats[i][1].sum(0).abs()
             assert torch.allclose(
                 act_size / act_size.abs().max(),

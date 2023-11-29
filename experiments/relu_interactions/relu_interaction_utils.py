@@ -498,8 +498,7 @@ def plot_eigenvalues(eigenvalues: Float[Tensor, "d_hidden"], out_dir: Path, titl
     plt.xlabel('Index')
     plt.ylabel('Eigenvalue')
     plt.grid(True)
-    plt.savefig(out_dir / f"eigenvalues_{title}.png")
-    plt.close()
+    plt.savefig(out_dir / f"eigenvalues_{title}.png", format="png")
 
 
 def plot_eigenvectors(eigenvectors: np.ndarray, out_dir: Path, title: str, num_vectors: Optional[int] = None) -> None:
@@ -523,4 +522,4 @@ def plot_eigenvectors(eigenvectors: np.ndarray, out_dir: Path, title: str, num_v
     plt.grid(True)
 
     plt.savefig(out_dir / f"eigenvectors_{title}.png")
-    plt.close()
+    plt.show()

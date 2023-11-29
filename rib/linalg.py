@@ -3,7 +3,8 @@ from typing import Callable, Optional, Union
 
 import numpy as np
 import torch
-from einops import rearrange
+import copy
+from einops import rearrange, repeat
 from jaxtyping import Float
 from torch import Tensor
 from torch.func import jacrev, vmap
@@ -419,3 +420,50 @@ def calc_gram_matrix(
         raise ValueError("Unexpected tensor rank")
 
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
+
+
+def get_local_jacobian(
+    modules: list[torch.nn.Module],
+    weight_module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
+    use_residual_stream: bool = False
+) -> Float[Tensor, "d_to_do"]:
+    """Used to find derivative of some subspace of model's activations wrt some subset of its
+    layers' weights."""
+    inputs = tuple(x.requires_grad_(True) for x in inputs)
+    for name, param in weight_module.named_parameters():
+        if "W" in name: weights = param
+    assert weights is not None, "Weights module did not have weights."
+
+    with torch.set_grad_enabled(True):
+        outputs = inputs
+        for module in modules:
+            outputs = module(*outputs)
+
+    if use_residual_stream:
+        outputs = torch.cat(outputs, dim=-1) if isinstance(outputs, tuple) else outputs
+        outputs = rearrange(outputs, "b p d_hidden -> (b p) d_hidden")
+    else:
+        outputs = rearrange(outputs[1], "b p d_hidden -> (b p) d_hidden")
+
+    batch_size, output_dim = outputs.shape
+    jac = torch.zeros((output_dim, weights.numel()))
+
+    with torch.set_grad_enabled(True):
+        for i in range(output_dim):
+
+            outputs[:, i].sum().backward(retain_graph=True) # It's fine to sum over batch dim due to linearity of derivative
+            for name, param in weight_module.named_parameters():
+                if "W" in name:
+                    grads = param.grad
+            jac[i, :] = rearrange(grads, 'i j -> (j i)')
+
+            for module in modules:
+                for name, param in module.named_parameters():
+                    if "W" in name and param.grad is not None:
+                        param.grad.zero_()
+
+    return jac

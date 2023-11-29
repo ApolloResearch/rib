@@ -15,7 +15,6 @@ from tqdm import tqdm
 
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
-    acts_pre_forward_hook_fn,
     cluster_gram_forward_hook_fn,
     function_size_forward_hook_fn,
     gram_forward_hook_fn,
@@ -25,6 +24,7 @@ from rib.hook_fns import (
     test_edges_forward_hook_fn,
     cluster_gram_forward_hook_fn,
     cluster_fn_pre_forward_hook_fn,
+    collect_jacobian_pre_forward_hook_fn,
 )
 from rib.hook_fns_non_static import (
     delete_cluster_duplicate_forward_hook_fn,
@@ -858,3 +858,51 @@ def calculate_delete_cluster_duplicate_loss(
     hooked_model.remove_hooks()
 
     return unhooked_loss, hooked_loss, unhooked_accuracy, hooked_accuracy
+
+
+def collect_acts_and_get_jacobian(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    dtype: torch.dtype,
+    device: str,
+    jac_modules: list[torch.nn.Module],
+    weight_module: list[torch.nn.Module],
+    is_lm: Optional[bool] = True,
+    hook_names: Optional[str] = None,
+) -> list[float]:
+    """Calculate denominator for ReLU similarity metrics as l2 norm of function sizes in layer l+1.
+
+    Args:
+        rotate: Whether to rotate the functions to make f_hat.
+        module_names: In this function, this is a list of all modules whose inputs are considered
+        inputs for the model to end the backpropagation on. For each module, a separate Jacobian is calculated.
+    """
+    if hook_names is not None:
+        assert len(hook_names) == len(
+            module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    act_hooks = []
+    if not is_lm: module_names = module_names[:-1]
+    for i, (module_name, hook_name) in enumerate(zip(module_names, hook_names)):
+        act_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="jac",
+                fn=collect_jacobian_pre_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={
+                    "jac_modules": jac_modules,
+                    "weight_module": weight_module,
+                }
+            )
+        )
+
+    run_dataset_through_model(hooked_model, data_loader, hooks=act_hooks, dtype=dtype, device=device)
+    jacobian = {f"input {hook_name}": torch.div(hooked_model.hooked_data[hook_name]["jac"], len(data_loader.dataset))
+                for hook_name in hooked_model.hooked_data}
+    hooked_model.clear_hooked_data()
+
+    return jacobian

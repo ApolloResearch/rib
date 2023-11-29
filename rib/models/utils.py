@@ -86,9 +86,6 @@ def get_model_weight(model: torch.nn.Module, attr_path: str) -> list[torch.Tenso
     """Retrieve the weight matrix of a specific layer in a PyTorch model. Call on get_model_attr to
     do so.
 
-    Note in MLP, weights don't have an output that accounts for auto-appending 1 to next layer. In this model,
-    they do.
-
     Quick explanation:
     - Obtain the higher level Sequential objects then iterates over.
     their members to check if the module class matches the assigned module class.

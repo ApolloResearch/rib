@@ -29,6 +29,7 @@ from rib.data_accumulator import (
     collect_relu_interactions,
     collect_test_edges,
     collect_cluster_fns,
+    collect_acts_and_get_jacobian,
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
@@ -36,12 +37,14 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
-from rib.linalg import eigendecompose
+from rib.linalg import eigendecompose, get_local_jacobian
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.models.utils import get_model_attr, get_model_weight
 from rib.types import TORCH_DTYPES
 from rib.utils import load_config, set_seed
+
+torch.set_printoptions(threshold=50)
 
 
 def load_interaction_rotations(
@@ -464,8 +467,90 @@ def transformer_relu_main(config_path_str: str):
     # plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"whole_layer_{module_name}")
 
 
+def hessian_main(config_path_str: str):
+    """For this main function, sections should start being named from mlp_in."""
+    config_path = Path(config_path_str)
+    config = load_config(config_path, config_model=LMConfig)
+    set_seed(config.seed)
+
+    out_dir = Path(__file__).parent / f"out_transformer_relu"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    dtype = TORCH_DTYPES[config.dtype]
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    seq_model, tlens_cfg_dict = load_sequential_transformer(
+        node_layers=config.node_layers,
+        last_pos_module_type=config.last_pos_module_type,
+        tlens_pretrained=config.tlens_pretrained,
+        tlens_model_path=config.tlens_model_path,
+        eps=config.eps,
+        dtype=dtype,
+        device=device,
+    )
+    seq_model.eval()
+    seq_model.to(device=torch.device(device), dtype=dtype)
+    hooked_model = HookedModel(seq_model)
+
+    # Use for passing modules in Jacobian forward pass without having hooks on modules
+    copy_seq_model, tlens_cfg_dict_copy = load_sequential_transformer(
+        node_layers=config.node_layers,
+        last_pos_module_type=config.last_pos_module_type,
+        tlens_pretrained=config.tlens_pretrained,
+        tlens_model_path=config.tlens_model_path,
+        eps=config.eps,
+        dtype=dtype,
+        device=device,
+    )
+    copy_seq_model.to(device=torch.device(device), dtype=dtype)
+
+    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
+    dataset = load_dataset(
+        dataset_config=config.dataset,
+        return_set=return_set,
+        tlens_model_path=config.tlens_model_path,
+    )
+    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+
+    # Has to be in order of passing through model
+    weight_module_names = ["sections.section_0.0", "sections.section_1.0"]
+    module_dict = {name: get_model_attr(copy_seq_model, name) for name in weight_module_names}
+
+    jacobians = {}
+    for name in weight_module_names:
+        # inputs need to be given by hook function return
+        jacobians[f"derivative wrt {name}"] = collect_acts_and_get_jacobian(
+            hooked_model=hooked_model,
+            module_names=["sections.section_0.0"],
+            data_loader=graph_train_loader,
+            dtype=dtype,
+            device=device,
+            jac_modules=module_dict.values(),
+            weight_module=module_dict[name],
+            is_lm=True,
+        )
+
+    ## Now make Hessian
+    J1 = jacobians["derivative wrt sections.section_0.0"]["input sections.section_0.0"].to(device)
+    J2 = J1 = jacobians["derivative wrt sections.section_1.0"]["input sections.section_0.0"].to(device)
+    H1 = torch.matmul(J1.T, J1)
+    H2 = torch.matmul(J2.T, J2)
+    # Compute the mixed terms
+    M12 = torch.matmul(J1.T, J2)
+    M21 = torch.matmul(J2.T, J1)
+    # Form the top and bottom rows of the final Hessian
+    top_row = torch.cat((H1, M12), dim=1)
+    bottom_row = torch.cat((M21, H2), dim=1)
+    # Concatenate to form the final Hessian
+    H = torch.cat((top_row, bottom_row), dim=0)
+
+    sorted_eigenvalues, sorted_eigenvectors = eigendecompose(H.detach().cpu())
+    plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"Hessian MLP")
+
+
 if __name__ == "__main__":
-    fire.Fire(transformer_relu_main)
+    # fire.Fire(transformer_relu_main)
+    fire.Fire(hessian_main)
 
     # def get_P_matrices(
 #     model: nn.Module,

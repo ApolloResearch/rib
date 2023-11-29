@@ -18,12 +18,14 @@ import torch.nn as nn
 from einops import rearrange, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
+import io
 
 from rib.linalg import (
     calc_gram_matrix,
     edge_norm,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
+    get_local_jacobian,
 )
 from rib.models.utils import get_model_attr
 
@@ -360,14 +362,12 @@ def acts_forward_hook_fn(
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
         tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"],
-              Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
     ],
     output: Union[
         Float[Tensor, "batch d_hidden"],
         Float[Tensor, "batch pos d_hidden"],
-        tuple[Float[Tensor, "batch pos d_hidden1"],
-              Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -386,9 +386,9 @@ def acts_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
     outputs = output if isinstance(output, tuple) else (output,)
-    outputs = [x.detach().cpu() for x in outputs]
+    detached_outputs = [x.detach().cpu() for x in outputs]
     # Store the output activations
-    hooked_data[hook_name] = {data_key: outputs}
+    hooked_data[hook_name] = {data_key: detached_outputs}
 
 
 def acts_pre_forward_hook_fn(
@@ -463,10 +463,7 @@ def relu_interaction_forward_hook_fn(
         n_intervals: Also for in_grads.
         use_residual_stream: Whether to use residual stream for ReLU clustering.
     """
-    assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
-    if module._forward_hooks:
-        module._forward_hooks.popitem()
-    assert not module._forward_hooks, "Module has multiple forward hooks"
+    module = _remove_hooks(module)
 
     is_lm: bool = True if inputs[0].dim() == 3 else False
     outputs = output if isinstance(output, tuple) else (output,)
@@ -619,10 +616,7 @@ def function_size_forward_hook_fn(
         rotate: Whether to rotate the functions to calculate l2 norm of fhat
         C_next_layer: Optional, provide for rotate=True case.
     """
-    assert isinstance(data_key, list) or isinstance(data_key, str), "data_key must be a str or list of strings."
-    if module._forward_hooks:
-        module._forward_hooks.popitem()
-    assert not module._forward_hooks, "Module has multiple forward hooks"
+    module = _remove_hooks(module)
 
     outputs = output if isinstance(output, tuple) else (output,)
     outputs = torch.cat([x for x in outputs], dim=-1) # Concat over hidden dimension
@@ -678,12 +672,7 @@ def test_edges_forward_hook_fn(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
     """
-    assert isinstance(data_key, str), "data_key must be a string."
-    if module._forward_hooks:
-        module._forward_hooks.popitem()
-    elif module._forward_pre_hooks:
-        module._forward_pre_hooks.popitem()
-    assert not module._forward_hooks, "Module has multiple forward hooks"
+    module = _remove_hooks(module)
 
     is_lm: bool = True if inputs[0].dim() == 3 else False
     if is_lm:
@@ -757,7 +746,6 @@ def cluster_gram_forward_hook_fn(
 
     Hook only valid for activation layer.
     """
-    assert isinstance(data_key, str), "data_key must be a string."
     is_lm = True if inputs[0].dim() == 3 else False
     outputs = output if isinstance(output, tuple) else (output,)
 
@@ -812,7 +800,6 @@ def cluster_gram_forward_hook_fn(
 
 #     Hook should be on section containing mlp_in layer and mlp_act layer in modadd transformer.
 #     """
-#     assert isinstance(data_key, str), "data_key must be a string."
 #     is_lm = True if inputs[0].dim() == 3 else False
 #     outputs = output if isinstance(output, tuple) else (output,)
 
@@ -856,7 +843,6 @@ def cluster_fn_pre_forward_hook_fn(
     use_residual_stream: bool,
 ) -> None:
     """For post-ReLU activations of modadd tranformer (in this case in unembed layer)."""
-    assert isinstance(data_key, str), "data_key must be a string."
     is_lm = True if inputs[0].dim() == 3 else False
 
     # Once again, fold in token dimension into batch
@@ -870,3 +856,52 @@ def cluster_fn_pre_forward_hook_fn(
     for cluster_num, idxs in enumerate(cluster_idxs):
         cluster_outputs = torch.einsum('bi -> i', inputs[..., idxs])
         _add_to_hooked_matrix(hooked_data, hook_name, cluster_num, cluster_outputs.detach())
+
+
+def collect_jacobian_pre_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    jac_modules: list[torch.nn.Module],
+    weight_module: torch.nn.Module,
+) -> None:
+    """Hook function for collecting output activations and passing into Jacobian.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module (not used).
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+    """
+    jac_modules = list(map(_remove_hooks, jac_modules))
+
+    jac = get_local_jacobian(
+        modules=jac_modules,
+        weight_module=weight_module,
+        inputs=inputs,
+    )
+
+    _add_to_hooked_matrix(hooked_data, hook_name, "jac", jac.detach())
+
+
+def _remove_hooks(module: torch.nn.Module) -> torch.nn.Module:
+    """Remove module hooks. Should be careful if these hooks are needed later in code, since this
+    operates directly on the module and not a copy."""
+    if module._forward_hooks:
+        module._forward_hooks.popitem()
+    if module._forward_pre_hooks:
+        module._forward_pre_hooks.popitem()
+    assert not module._forward_hooks, "Module has multiple forward hooks."
+    assert not module._forward_pre_hooks, "Module has multiple pre-forward hooks."
+    return module
+

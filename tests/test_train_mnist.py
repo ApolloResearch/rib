@@ -9,6 +9,8 @@ from experiments.train_mnist.run_train_mnist import main as train_main
 CONFIG_STR = """
 seed: 0
 model:
+  input_size: 784
+  output_size: 10
   hidden_sizes: [30, 30]
   activation_fn: relu
   bias: true

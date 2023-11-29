@@ -106,11 +106,7 @@ def load_sequential_transformer(
 
 def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
     mlp = MLP(
-        hidden_sizes=config_dict["model"]["hidden_sizes"],
-        input_size=784 if config_dict["data"]["name"] == "MNIST" else 3072,
-        output_size=10,
-        activation_fn=config_dict["model"]["activation_fn"],
-        bias=config_dict["model"]["bias"],
+        **config_dict["model"],
         fold_bias=False,
     )
     mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))

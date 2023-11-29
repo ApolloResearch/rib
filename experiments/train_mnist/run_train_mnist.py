@@ -29,6 +29,8 @@ from rib.utils import REPO_ROOT, load_config, set_seed
 
 class ModelConfig(BaseModel):
     hidden_sizes: Optional[list[int]]
+    input_size: int
+    output_size: int
     activation_fn: str = "relu"
     bias: bool = True
 
@@ -166,16 +168,15 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
         dataset, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
     )
 
-    #  Get the input size from the flattened first batch
-    in_size = dataset[0][0].flatten().shape[0]
+    #  Get the input size from the flattened first input
+    data_in_dim = len(dataset[0][0].flatten())
+    assert (
+        config.model.input_size == data_in_dim
+    ), f"mismatch between data size {data_in_dim} and config in_dim {config.model.input_size}"
     # Initialize the MLP model
     model = MLP(
-        config.model.hidden_sizes,
-        input_size=in_size,
-        output_size=10,
-        activation_fn=config.model.activation_fn,
-        bias=config.model.bias,
-        fold_bias=False,  # false even if config.model.fold_bias is true; we fold after training
+        **config.model.model_dump(),
+        fold_bias=False,
     )
     model = model.to(device)
 

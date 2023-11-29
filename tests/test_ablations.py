@@ -144,7 +144,7 @@ def test_run_mnist_ablations(ablation_type):
         - layers.1
         - layers.2
     dataset:
-        return_set_frac: 0.5
+        return_set_frac: 0.1
     batch_size: 64
     seed: 0
     eval_type: accuracy

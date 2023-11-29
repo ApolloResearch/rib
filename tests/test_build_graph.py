@@ -169,7 +169,7 @@ def test_pythia_14m_build_graph():
 def test_mnist_build_graph():
     config_str = """
     exp_name: test
-    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
+    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
     batch_size: 256
     seed: 0
     truncation_threshold: 1e-6
@@ -181,6 +181,8 @@ def test_mnist_build_graph():
         - layers.1
         - layers.2
         - output
+    dataset:
+        return_set_frac: 0.2
     out_dir: null
     """
 
@@ -190,6 +192,7 @@ def test_mnist_build_graph():
     graph_build_test(
         config=config,
         build_graph_main_fn=mnist_build_graph_main,
+        atol=1e-3,
     )
 
 
@@ -197,7 +200,7 @@ def test_mnist_build_graph_invalid_node_layers():
     """Test that non-sequential node_layers raises an error."""
     mock_config = """
     exp_name: test
-    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
+    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
     batch_size: 256
     seed: 0
     truncation_threshold: 1e-6

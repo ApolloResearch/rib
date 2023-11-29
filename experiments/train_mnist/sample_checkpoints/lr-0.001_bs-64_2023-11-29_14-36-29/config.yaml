@@ -1,0 +1,23 @@
+data:
+  name: MNIST
+  return_set_frac: null
+  seed: null
+  source: custom
+model:
+  activation_fn: relu
+  bias: true
+  hidden_sizes:
+  - 100
+  - 100
+  input_size: 784
+  output_size: 10
+seed: 0
+train:
+  batch_size: 64
+  epochs: 12
+  learning_rate: 0.001
+  save_dir: experiments/train_mnist/sample_checkpoints
+  save_every_n_epochs: null
+wandb:
+  entity: null
+  project: mlp-mnist

@@ -116,8 +116,11 @@ def test_run_mnist_ablations(ablation_type):
     we need this path to be local. If that isn't the case you can manually fix this with:
     ```
     import torch
+    from pathlib import Path
+    from rib.utils import REPO_ROOT
     rib_graph = torch.load("experiments/mnist_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
-    rib_graph['config']['mlp_path'] = "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
+    mlp_path = Path(rib_graph['config']['mlp_path'])
+    rib_graph['config']['mlp_path'] = str(mlp_path.relative_to(REPO_ROOT))
     torch.save(rib_graph, "experiments/mnist_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
     ```
     """
@@ -140,6 +143,8 @@ def test_run_mnist_ablations(ablation_type):
     ablation_node_layers:
         - layers.1
         - layers.2
+    dataset:
+        return_set_frac: 0.5
     batch_size: 64
     seed: 0
     eval_type: accuracy

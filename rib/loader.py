@@ -245,7 +245,7 @@ def load_dataset(
 
 
 def load_dataset(
-    dataset_config: Union[ModularArithmeticDatasetConfig, HFDatasetConfig, VisionDatasetConfig],
+    dataset_config: DatasetConfig,
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
     tlens_model_path: Optional[Path] = None,
 ) -> Union[Dataset, tuple[Dataset, Dataset]]:

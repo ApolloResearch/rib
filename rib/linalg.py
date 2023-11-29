@@ -139,71 +139,6 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
     return res
 
 
-def edge_norm(
-    alpha_f_in_hat: Float[Tensor, "... in_hidden_combined"],
-    outputs_const: tuple[Float[Tensor, "... out_hidden_combined"]],
-    module: torch.nn.Module,
-    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
-    in_hidden_dims: list[int],
-    has_pos: bool,
-) -> Float[Tensor, "out_hidden_combined_trunc"]:
-    """Calculates the norm (square, and sum over batch and position) of the difference
-    `module(alpha_f_in_hat @ C_in_pinv) - outputs_const`.
-
-    Since the module may take a tuple of inputs, we need to split the `x` tensor into a tuple
-    based on the `in_hidden_dims` of each input.
-
-    Args:
-        alpha_f_in_hat: The alpha-adjusted concatenated inputs to the model.
-            i.e. alpha * in_acts @ C_in (included in grad)
-        outputs_const: The non-adjusted outputs of the module, i.e.
-            module(in_acts) = module(f_in_hat @ C_in_pinv). Not in RIB basis.
-        module: The model to pass the f_in_hat through.
-        C_in_pinv: The pseudoinverse of C_in.
-        C_out: The truncated interaction rotation matrix for the output node layer.
-        in_hidden_dims: The hidden dimension of the original inputs to the module.
-        has_pos: Whether the module has a position dimension.
-
-    Returns:
-        The norm (over batch and position) of the output of the module for every
-            out-(RIB)-dimension i.
-    """
-
-    # Compute f^{l+1}(f^l(alpha x))
-    alpha_f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = alpha_f_in_hat @ C_in_pinv
-    alpha_input_tuples = torch.split(alpha_f_in_adjusted, in_hidden_dims, dim=-1)
-
-    output_alpha = module(*alpha_input_tuples)
-    # Concatenate the outputs over the hidden dimension
-    outputs_alpha = (
-        output_alpha if isinstance(output_alpha, torch.Tensor) else torch.cat(output_alpha, dim=-1)
-    )
-    out_acts_const = (
-        outputs_const
-        if isinstance(outputs_const, torch.Tensor)
-        else torch.cat(outputs_const, dim=-1)
-    )
-
-    # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
-    out_acts = out_acts_const - outputs_alpha
-
-    f_out_hat: Float[Tensor, "... out_hidden_combined_trunc"] = (
-        out_acts @ C_out if C_out is not None else out_acts
-    )
-
-    f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = f_out_hat**2
-    if has_pos:
-        # f_out_hat is shape (batch, pos, hidden)
-        assert f_out_hat.dim() == 3, f"f_out_hat should have 3 dims, got {f_out_hat.dim()}"
-        f_out_hat_norm = f_out_hat_norm.sum(dim=1)
-
-    # Sum over the batch dimension
-    f_out_hat_norm = f_out_hat_norm.sum(dim=0)
-
-    return f_out_hat_norm
-
-
 def _calc_integration_intervals(
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
@@ -245,17 +180,11 @@ def _calc_integration_intervals(
 
 
 def integrated_gradient_trapezoidal_jacobian(
-    fn: Callable,
+    module_hat: Callable,
     f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
     n_intervals: int,
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
-    outputs_const: tuple[Float[Tensor, "... out_hidden_combined"]],
-    module: torch.nn.Module,
-    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
-    in_hidden_dims: list[int],
-    has_pos: bool,
     edge_formula: Literal["october", "november_a"] = "october",
 ) -> None:
     """Calculate the integrated gradient of the jacobian of a function w.r.t its input.
@@ -269,6 +198,7 @@ def integrated_gradient_trapezoidal_jacobian(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
 
     """
+    has_pos = f_in_hat.ndim == 3
     # Ensure inputs require grads
     f_in_hat.requires_grad_(True)
 
@@ -277,6 +207,7 @@ def integrated_gradient_trapezoidal_jacobian(
         n_intervals, integral_boundary_relative_epsilon=1e-3
     )
     if edge_formula == "october":
+        f_out_hat_const = module_hat(f_in_hat)
         for alpha_index, alpha in tqdm(
             enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
         ):
@@ -291,15 +222,17 @@ def integrated_gradient_trapezoidal_jacobian(
             normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
             # Need to define alpha_f_in_hat for autograd!
             alpha_f_in_hat = alpha * f_in_hat
-            f_out_hat_norm = fn(
-                alpha_f_in_hat,
-                outputs_const=outputs_const,
-                module=module,
-                C_in_pinv=C_in_pinv,
-                C_out=C_out,
-                in_hidden_dims=in_hidden_dims,
-                has_pos=has_pos,
-            )
+            f_out_hat_alpha = module_hat(alpha_f_in_hat)
+
+            f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = (
+                f_out_hat_const - f_out_hat_alpha
+            ) ** 2
+            if has_pos:
+                # Sum over the position dimension
+                f_out_hat_norm = f_out_hat_norm.sum(dim=1)
+
+            # Sum over the batch dimension
+            f_out_hat_norm = f_out_hat_norm.sum(dim=0)
 
             assert (
                 f_out_hat_norm.ndim == 1
@@ -325,16 +258,18 @@ def integrated_gradient_trapezoidal_jacobian(
                     # `rib.data_accumulator.collect_interaction_edges`
                     jac_out[i] -= E
     elif edge_formula == "november_a":
-        out_pos_size = outputs_const[0].shape[1] if has_pos else 0
+        out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = jac_out.shape
+        if has_pos:
+            out_pos_size = f_in_hat.shape[1]
+        # TODO What if out pos and in_pos are different?
         batch_size = f_in_hat.shape[0]
-        out_hidden_dims = [x.shape[-1] for x in outputs_const]
         # tprime is the in position, token index of the inputs
+        # tprime = t_input
+        # t = t_output
         tprime_size = f_in_hat.shape[1] if has_pos else None
         # in_hidden_size_comb_trunc is the f_in_hat dimension
         # out_hidden_size_comb_trunc is the f_out_hat dimension
         # in_hidden_dims and out_hidden_dims are the f_in and f_out dimensions (for module calls)
-        in_hidden_size_comb_trunc = C_in_pinv.shape[0]
-        out_hidden_size_comb_trunc = C_out.shape[1] if C_out is not None else sum(out_hidden_dims)
 
         # Inner sum in Lucius' new formula is over tprime (p) only
         einsum_pattern = "bpj,bpj->bj" if has_pos else "bj,bj->bj"
@@ -361,12 +296,7 @@ def integrated_gradient_trapezoidal_jacobian(
             #
             # We have to compute inputs from f_hat to make autograd work
             alpha_f_in_hat = alpha * f_in_hat
-            alpha_f_in = alpha_f_in_hat @ C_in_pinv
-            alpha_inputs = torch.split(alpha_f_in, in_hidden_dims, dim=-1)
-            f_out_alpha = module(*alpha_inputs)
-            f_out_alpha = (f_out_alpha,) if isinstance(f_out_alpha, torch.Tensor) else f_out_alpha
-            f_out_alpha_comb = torch.cat(f_out_alpha, dim=-1)
-            f_out_alpha_hat = f_out_alpha_comb @ C_out if C_out is not None else f_out_alpha_comb
+            f_out_alpha_hat = module_hat(alpha_f_in_hat)
 
             # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
             # estimate at alpha=1)
@@ -388,12 +318,12 @@ def integrated_gradient_trapezoidal_jacobian(
                     )
                     # No idea why this is a tuple
                     assert len(grad) == 1
-                    grad = grad[0]
+                    grad_0 = grad[0]
 
                     # Sum over tprime (p, input pos) as per Lucius' formula (A.18)
                     with torch.inference_mode():
                         inner_token_sum = torch.einsum(
-                            einsum_pattern, grad * interval_size * scaler, f_in_hat
+                            einsum_pattern, grad_0 * interval_size * scaler, f_in_hat
                         )
                         # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
                         # in equation (3.27)

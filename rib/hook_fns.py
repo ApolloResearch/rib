@@ -19,10 +19,10 @@ from torch import Tensor
 
 from rib.linalg import (
     calc_gram_matrix,
-    edge_norm,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
 )
+from rib.utils import module_hat
 
 
 def _add_to_hooked_matrix(
@@ -288,13 +288,13 @@ def interaction_edge_pre_forward_hook_fn(
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
     f_hat = in_acts @ C_in
 
-    in_hidden_dims = [x.shape[-1] for x in inputs]
+    in_tuple_dims = [x.shape[-1] for x in inputs]
 
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
         f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_hat @ C_in_pinv
-        input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
+        input_tuples = torch.split(f_in_adjusted, in_tuple_dims, dim=-1)
 
         output_const = module(*tuple(x.detach().clone() for x in input_tuples))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
@@ -303,18 +303,20 @@ def interaction_edge_pre_forward_hook_fn(
 
     jac_out = hooked_data[hook_name][data_key]
 
+    module_hat_partial = partial(
+        module_hat,
+        module=module,
+        C_in_pinv=C_in_pinv,
+        C_out=C_out,
+        in_tuple_dims=in_tuple_dims,
+    )
+
     integrated_gradient_trapezoidal_jacobian(
-        fn=edge_norm,
+        module_hat=module_hat_partial,
         f_in_hat=f_hat,
         n_intervals=n_intervals,
         jac_out=jac_out,
         dataset_size=dataset_size,
-        outputs_const=outputs_const,
-        module=module,
-        C_in_pinv=C_in_pinv,
-        C_out=C_out,
-        in_hidden_dims=in_hidden_dims,
-        has_pos=has_pos,
     )
 
 

@@ -259,11 +259,6 @@ def test_n_ctx_pythia():
     # We only care about the first module in section_0, so remove the rest
     seq_model.sections.section_0 = MultiSequential(seq_model.sections.section_0[0])
 
-    # Set the buffer "IGNORE" to -1e20 for every buffer in the model
-    for name, buffer in seq_model.named_buffers():
-        if "IGNORE" in name:
-            buffer.fill_(-1e20)
-
     hooked_model = HookedModel(seq_model)
 
     # Create a fake data sample of length short_n_ctx

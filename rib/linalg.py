@@ -331,7 +331,10 @@ def integrated_gradient_trapezoidal_jacobian(
         # Finished alpha integral, integral result present in inner_token_sums
         # Square, and sum over batch size and t (not tprime)
         inner_token_sums = inner_token_sums**2
-        jac_out[:, :] = inner_token_sums.sum(dim=(0, 1))
+        if has_pos:
+            jac_out[:, :] = inner_token_sums.sum(dim=(0, 1))
+        else:
+            jac_out[:, :] = inner_token_sums.sum(dim=0)
 
 
 def integrated_gradient_trapezoidal_norm(

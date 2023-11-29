@@ -243,7 +243,6 @@ def _calc_integration_intervals(
         ), f"n_intervals * interval_size ({n_intervals * interval_size}) != 1"
     return alphas, interval_size
 
-
 def integrated_gradient_trapezoidal_jacobian(
     fn: Callable,
     f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
@@ -261,17 +260,25 @@ def integrated_gradient_trapezoidal_jacobian(
     """Calculate the integrated gradient of the jacobian of a function w.r.t its input.
 
     Args:
-        fn: The function to calculate the jacobian of.
-        x: The input to the function.
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+        fn (Callable): The function to calculate the jacobian of.
+        f_in_hat (Float[Tensor, "... out_hidden_combined_trunc"]): The input to the function.
+        n_intervals (int): The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        jac_out: The output of the jacobian calculation. This is modified in-place.
-        dataset_size: The size of the dataset. Used for normalizing the gradients.
-
+        jac_out (Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"]): The output of the jacobian calculation. This is modified in-place.
+        dataset_size (int): The size of the dataset. Used for normalizing the gradients.
+        outputs_const (tuple[Float[Tensor, "... out_hidden_combined"]]): The constant outputs of the function.
+        module (torch.nn.Module): The module representing the function.
+        C_in_pinv (Float[Tensor, "in_hidden_trunc in_hidden"]): The pseudo-inverse of the input.
+        C_out (Optional[Float[Tensor, "out_hidden out_hidden_trunc"]]): The output transformation matrix.
+        in_hidden_dims (list[int]): The dimensions of the input hidden layers.
+        has_pos (bool): Indicates whether the input has a position dimension.
+        edge_formula (Literal["october", "november_a"], optional): The edge formula to use for the calculation. Defaults to "october".
+        
+    Returns:
+        None: This function modifies the `jac_out` tensor in-place.
     """
     # Ensure inputs require grads
     f_in_hat.requires_grad_(True)
-
     # Prepare integral
     alphas, interval_size = _calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon=1e-3
@@ -403,7 +410,11 @@ def integrated_gradient_trapezoidal_jacobian(
         # Finished alpha integral, integral result present in inner_token_sums
         # Square, and sum over batch size and t (not tprime)
         inner_token_sums = inner_token_sums**2
-        jac_out[:, :] = inner_token_sums.sum(dim=(0, 1))
+        
+        if has_pos:
+            jac_out[:, :] = inner_token_sums.sum(dim=(0, 1))
+        else:
+            jac_out[:, :] = inner_token_sums.sum(dim=(0))
 
 
 def integrated_gradient_trapezoidal_norm(

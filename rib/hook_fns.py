@@ -11,7 +11,7 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 """
 
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Literal
 
 import torch
 from jaxtyping import Float
@@ -175,6 +175,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
+    integral_boundary_relative_epsilon: float = 1e-3,
+    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -194,6 +196,13 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
             Lambda_dash matrix. Does not affect the output, only used for the einsum itself.
             Needs to be float64 on CPU but float32 was fine on GPU. Defaults to float64.
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+        ig_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November A) version. Defaults to "(1-alpha)^2".
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -206,6 +215,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         inputs=inputs,
         C_out=C_out,
         n_intervals=n_intervals,
+        integral_boundary_relative_epsilon=integral_boundary_relative_epsilon,
+        ig_formula=ig_formula,
     )
     in_dtype = in_grads.dtype
 
@@ -251,6 +262,7 @@ def interaction_edge_pre_forward_hook_fn(
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
     dataset_size: int,
+    edge_formula: Literal["october", "november_a"] = "october",
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -274,6 +286,7 @@ def interaction_edge_pre_forward_hook_fn(
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
+        edge_formula (Literal["october", "november_a"], optional): The edge formula to use for the calculation. Defaults to "october".
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -315,6 +328,7 @@ def interaction_edge_pre_forward_hook_fn(
         C_out=C_out,
         in_hidden_dims=in_hidden_dims,
         has_pos=has_pos,
+        edge_formula = edge_formula,
     )
 
 

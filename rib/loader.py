@@ -223,7 +223,7 @@ def tokenize_dataset(
 def load_dataset(
     dataset_config: DatasetConfig,
     return_set: Literal["train", "test", "all"],
-    model_n_ctx: int,
+    model_n_ctx: Optional[int] = None,
     tlens_model_path: Optional[Path] = None,
 ) -> Dataset:
     ...
@@ -233,7 +233,7 @@ def load_dataset(
 def load_dataset(
     dataset_config: DatasetConfig,
     return_set: Literal["both"],
-    model_n_ctx: int,
+    model_n_ctx: Optional[int] = None,
     tlens_model_path: Optional[Path] = None,
 ) -> tuple[Dataset, Dataset]:
     ...
@@ -242,7 +242,7 @@ def load_dataset(
 def load_dataset(
     dataset_config: DatasetConfig,
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
-    model_n_ctx: int,
+    model_n_ctx: Optional[int] = None,
     tlens_model_path: Optional[Path] = None,
 ) -> Union[Dataset, tuple[Dataset, Dataset]]:
     """
@@ -282,6 +282,7 @@ def load_dataset(
             dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
         )
     elif isinstance(dataset_config, HFDatasetConfig):
+        assert model_n_ctx is not None
         n_ctx = dataset_config.n_ctx or model_n_ctx
         assert n_ctx <= model_n_ctx, (
             f"Dataset context length ({dataset_config.n_ctx}) must be <= model context length "

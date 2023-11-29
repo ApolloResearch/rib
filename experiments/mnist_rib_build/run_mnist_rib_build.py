@@ -22,10 +22,7 @@ from typing import Optional, Union
 import fire
 import torch
 import yaml
-from pydantic import BaseModel, Field, field_validator
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
-from tqdm.contrib.logging import logging_redirect_tqdm
+from pydantic import BaseModel, Field
 
 from rib.data import VisionDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
@@ -33,9 +30,8 @@ from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import create_data_loader, load_dataset, load_mlp
 from rib.log import logger
-from rib.models import MLP
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
-from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
+from rib.utils import check_outfile_overwrite, load_config, set_seed
 
 
 class Config(BaseModel):
@@ -56,7 +52,6 @@ class Config(BaseModel):
     dataset: VisionDatasetConfig = VisionDatasetConfig()
 
 
-@logging_redirect_tqdm()
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:
     """Implement the main algorithm and store the graph to disk."""
     config = load_config(config_path_or_obj, config_model=Config)

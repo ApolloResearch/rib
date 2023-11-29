@@ -1,6 +1,6 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
-from typing import TYPE_CHECKING, Optional, Union, Literal
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import torch
 from jaxtyping import Float
@@ -16,6 +16,7 @@ from rib.hook_fns import (
 )
 from rib.hook_manager import Hook, HookedModel
 from rib.log import logger
+from rib.models import SequentialTransformer
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -161,12 +162,13 @@ def collect_M_dash_and_Lambda_dash(
             fine on GPU. Defaults to float64.
         integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
             integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
-            ill-defined derivatives at 0 and 1.
+            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
             integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
         ig_formula: The formula to use for the integrated gradient. Must be one of
-            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (functional) version while the
-            latter is a new (November A) version. Defaults to "(1-alpha)^2".
-
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
     Returns:
         A tuple containing M' and Lambda'.
     """
@@ -214,6 +216,7 @@ def collect_interaction_edges(
     dtype: torch.dtype,
     device: str,
     data_set_size: Optional[int] = None,
+    integral_boundary_relative_epsilon: float = 1e-3,
     edge_formula: Literal["functional", "squared"] = "functional",
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
@@ -232,7 +235,13 @@ def collect_interaction_edges(
         device: The device to run the model on.
         data_set_size: the total size of the dataset, used to normalize. Defaults to
         `len(data_loader)`. Important to set when parallelizing over the dataset.
-        edge_formula (Literal["functional", "squared"], optional): The edge formula to use for the calculation. Defaults to "functional".
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+        edge_formula: The formula to use for the attribution. Must be one of "functional" or
+            "squared". The former is the old (October) functional version, the latter is a new
+            (November) version.
 
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes
@@ -240,10 +249,17 @@ def collect_interaction_edges(
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
 
+    if isinstance(hooked_model.model, SequentialTransformer):
+        variable_position_dimension = hooked_model.model.last_pos_module_type == "add_resid1"
+    else:
+        variable_position_dimension = False
+
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
     print("edge_modules", edge_modules)
     print("Cs", [C.node_layer_name for C in Cs])
-    assert len(edge_modules) == len(Cs) - 1, f"Number of edge modules not the same as Cs - 1. Num edge modules: {len(edge_modules)}, Cs - 1: {len(Cs) - 1}"
+    assert (
+        len(edge_modules) == len(Cs) - 1
+    ), f"Number of edge modules not the same as Cs - 1. Num edge modules: {len(edge_modules)}, Cs - 1: {len(Cs) - 1}"
 
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
     edge_hooks: list[Hook] = []
@@ -266,7 +282,9 @@ def collect_interaction_edges(
                     "C_out": C_out,
                     "n_intervals": n_intervals,
                     "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
+                    "integral_boundary_relative_epsilon": integral_boundary_relative_epsilon,
                     "edge_formula": edge_formula,
+                    "variable_position_dimension": variable_position_dimension,
                 },
             )
         )

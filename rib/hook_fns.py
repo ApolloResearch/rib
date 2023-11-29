@@ -11,7 +11,7 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 """
 
 from functools import partial
-from typing import Any, Optional, Union, Literal
+from typing import Any, Literal, Optional, Union
 
 import einops
 import torch
@@ -265,11 +265,13 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             Needs to be float64 on CPU but float32 was fine on GPU. Defaults to float64.
         integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
             integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
-            ill-defined derivatives at 0 and 1.
+            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
             integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
         ig_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
-            latter is a new (November A) version. Defaults to "(1-alpha)^2".
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -329,7 +331,9 @@ def interaction_edge_pre_forward_hook_fn(
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
     dataset_size: int,
+    integral_boundary_relative_epsilon: float = 1e-3,
     edge_formula: Literal["functional", "squared"] = "functional",
+    variable_position_dimension: bool = False,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -353,7 +357,15 @@ def interaction_edge_pre_forward_hook_fn(
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
-        edge_formula (Literal["functional", "squared"], optional): The edge formula to use for the calculation. Defaults to "functional".
+        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
+            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
+            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
+            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+        edge_formula: The formula to use for the attribution. Must be one of "functional" or
+            "squared". The former is the old (October) functional version, the latter is a new
+            (November) version.
+        variable_position_dimension: If True, the size of the position dimension may vary between
+            input and output of a module. Applies only to mod add currently.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -361,28 +373,7 @@ def interaction_edge_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    has_pos = inputs[0].dim() == 3
-
-    # We first concatenate the inputs over the hidden dimension
-    in_acts = torch.cat(inputs, dim=-1)
-    # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
-    f_hat = in_acts @ C_in
-
     in_tuple_dims = [x.shape[-1] for x in inputs]
-
-    # Compute f^{l+1}(x) to which the derivative is not applied.
-    with torch.inference_mode():
-        # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
-        f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_hat @ C_in_pinv
-        input_tuples = torch.split(f_in_adjusted, in_tuple_dims, dim=-1)
-
-        output_const = module(*tuple(x.detach().clone() for x in input_tuples))
-        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
-
-    has_pos = f_hat.dim() == 3
-
-    jac_out = hooked_data[hook_name][data_key]
-
     module_hat_partial = partial(
         module_hat,
         module=module,
@@ -391,13 +382,21 @@ def interaction_edge_pre_forward_hook_fn(
         in_tuple_dims=in_tuple_dims,
     )
 
+    # We first concatenate the inputs over the hidden dimension
+    # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
+    in_acts = torch.cat(inputs, dim=-1)
+    f_hat = in_acts @ C_in
+    jac_out = hooked_data[hook_name][data_key]
+
     integrated_gradient_trapezoidal_jacobian(
         module_hat=module_hat_partial,
         f_in_hat=f_hat,
-        n_intervals=n_intervals,
         jac_out=jac_out,
         dataset_size=dataset_size,
+        n_intervals=n_intervals,
+        integral_boundary_relative_epsilon=integral_boundary_relative_epsilon,
         edge_formula=edge_formula,
+        variable_position_dimension=variable_position_dimension,
     )
 
 

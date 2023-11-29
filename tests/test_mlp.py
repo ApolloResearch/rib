@@ -9,10 +9,7 @@ from rib.utils import set_seed
 
 set_seed(0)
 
-<<<<<<< HEAD
-=======
 
->>>>>>> main
 @pytest.mark.parametrize("hidden_sizes", [[], [4, 3]])
 @pytest.mark.parametrize("activation_fn", ["relu", "gelu", "sigmoid"])
 @pytest.mark.parametrize("bias, fold_bias", [(False, False), (True, False), (True, True)])
@@ -76,11 +73,7 @@ def test_mlp_layers(
             # No activation function for the last layer
             assert not hasattr(layer, "activation")
 
-<<<<<<< HEAD
-    batch_size = 5
-=======
     batch_size = 10
->>>>>>> main
     rand_input = torch.rand((batch_size, input_size), requires_grad=True)
     output = model(rand_input)
     in_grad = torch.autograd.grad(output.sum(), rand_input)[0]

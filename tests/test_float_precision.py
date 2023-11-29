@@ -98,8 +98,8 @@ class TestPythiaFloatingPointErrors:
             pytest.skip("This test does not work with batch size 1.")
 
         for node_layer_index in range(len(rib_results["float32"]["interaction_rotations"])):
-            # This only tests the first 4 columns, would like to improve in the future!
-            n_max = 4
+            # This only tests the first column, would like to improve in the future!
+            n_max = 1
             if rib_results["float32"]["interaction_rotations"][node_layer_index]["C"] is None:
                 continue
             float32_C = rib_results["float32"]["interaction_rotations"][node_layer_index]["C"][

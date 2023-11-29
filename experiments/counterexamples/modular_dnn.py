@@ -24,7 +24,7 @@ from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 
 
 # %%
-METHOD_NAMES = {"O": "october", "A": "november_a", "B": "november_b"}
+METHOD_NAMES = {"O": "functional", "A": "squared", "B": "november_b"}
 
 def random_block_diagonal_matrix(n, k, variances=None, dtype=torch.float32):
     """Generate a random block diagonal matrix of size n x n with two blocks of size k x k and n - k x n - k."""
@@ -37,8 +37,23 @@ def random_block_diagonal_matrix(n, k, variances=None, dtype=torch.float32):
     # Zero out the blocks
     A[:k, :k] = variances[0] * torch.randn(k, k, dtype=dtype)
     if k < n:
-        A[k:n, k:n] = variances[1] * torch.randn(k, k, dtype=dtype)
+        A[k:n, k:n] = variances[1] * torch.randn(n-k, n-k, dtype=dtype)
 
+    return A
+
+def random_block_diagonal_matrix_column_equal(n, k, variances=None, dtype=torch.float32):
+    """generate a random block diagonal matrix of size n x n with two blocks of size k X k and n - k x n - k. Each column of each block is the same."""
+    #generate random matrix
+    A = torch.zeros((n,n), dtype=dtype)
+    
+    if variances is None:
+        variances = [1, 1]
+        
+    #zero out the blocks
+    A[:k, :k] = variances[0] * torch.randn(1, k, dtype=dtype).repeat(k, 1).T
+    if k < n:
+        A[k:n, k:n] = variances[1] * torch.randn(1, n-k, dtype=dtype).repeat(n-k, 1).T
+    
     return A
 
 
@@ -69,6 +84,39 @@ class BlockDiagonalDNN(MLP):
         for i in range(layers + 1):
             self.layers[i].W = nn.Parameter(
                 random_block_diagonal_matrix(n, k, variances=variances, dtype=dtype)
+            )
+            if bias is not None:
+                self.layers[i].b = nn.Parameter(bias * torch.ones(n, dtype=dtype))
+        self.fold_bias()
+        
+        
+class BlockDiagonalEqualColumnDNN(MLP):
+    def __init__(
+        self,
+        layers=4,
+        n=4,
+        k=2,
+        dtype=torch.float32,
+        bias=None,
+        activation_fn="relu",
+        variances=None,
+    ):
+        super(BlockDiagonalEqualColumnDNN, self).__init__(
+            hidden_sizes=[n] * layers,
+            input_size=n,
+            output_size=n,
+            dtype=dtype,
+            fold_bias=False,
+            activation_fn=activation_fn,
+        )
+        # self.dtype = dtype
+        # # Define layers
+        # self.fc = nn.ModuleList([nn.Linear(n, n,dtype=self.dtype) for _ in range(layers)])
+
+        # Hardcode weights and biases
+        for i in range(layers + 1):
+            self.layers[i].W = nn.Parameter(
+                random_block_diagonal_matrix_column_equal(n, k, variances=variances, dtype=dtype)
             )
             if bias is not None:
                 self.layers[i].b = nn.Parameter(bias * torch.ones(n, dtype=dtype))
@@ -208,6 +256,7 @@ class Config:
         data_variances=None,
         binarise=False,
         ribmethods: str = "OA",
+        column_equal: bool = False,
     ):
         """
         Initializes the configuration for the experiment.
@@ -252,6 +301,7 @@ class Config:
         self.data_variances = data_variances
         self.binarise = binarise
         self.ribmethods = ribmethods
+        self.column_equal = column_equal
 
     def to_dict(self):
         return vars(self)
@@ -328,6 +378,8 @@ def main(config: Config) -> None:
         exp_name += f"_variances{config.variances[0]}_{config.variances[1]}"
     if config.data_variances is not None:
         exp_name += f"_data_variances{config.data_variances[0]}_{config.data_variances[1]}"
+    if config.column_equal:
+        exp_name += "_column_equal"
     assert config.datatype in ["strongcorrelated", "random"]
     assert all([method in ["O", "A", "B"] for method in config.ribmethods]), "Invalid ribmethods"
 
@@ -340,15 +392,26 @@ def main(config: Config) -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = config.dtype
-    mlp = BlockDiagonalDNN(
-        config.layers,
-        config.n,
-        config.k,
-        dtype=dtype,
-        bias=config.hardcode_bias,
-        variances=config.variances,
-        activation_fn=config.activation_fn,
-    )
+    if config.column_equal:
+        mlp = BlockDiagonalEqualColumnDNN(
+            config.layers,
+            config.n,
+            config.k,
+            dtype=dtype,
+            bias=config.hardcode_bias,
+            variances=config.variances,
+            activation_fn=config.activation_fn,
+        )
+    else:
+        mlp = BlockDiagonalDNN(
+            config.layers,
+            config.n,
+            config.k,
+            dtype=dtype,
+            bias=config.hardcode_bias,
+            variances=config.variances,
+            activation_fn=config.activation_fn,
+        )
     mlp.eval()
     mlp.to(device=torch.device(device), dtype=config.dtype)
     hooked_mlp = HookedModel(mlp)
@@ -469,9 +532,9 @@ def main(config: Config) -> None:
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "rib_edges": {methodname:[(module, E_hats[module].cpu()) for module in E_hats] for methodname, E_hats in E_hats_rib.items()},
-        "neuron_edges": {methodname:[(module, E_hats[module].cpu()) for module in E_hats] for methodname, E_hats in E_hats_neuron.items()},
-        "pca_edges": {methodname:[(module, E_hats[module].cpu()) for module in E_hats] for methodname, E_hats in E_hats_pca.items()},
+        "rib_edges": {methodname:[(module, E_hats[module].cpu().detach()) for module in E_hats] for methodname, E_hats in E_hats_rib.items()},
+        "neuron_edges": {methodname:[(module, E_hats[module].cpu().detach()) for module in E_hats] for methodname, E_hats in E_hats_neuron.items()},
+        "pca_edges": {methodname:[(module, E_hats[module].cpu().detach()) for module in E_hats] for methodname, E_hats in E_hats_pca.items()},
         "model_config_dict": config.to_dict(),
         "mlp": mlp.cpu().state_dict(),
     }
@@ -527,7 +590,11 @@ def main(config: Config) -> None:
 
         test = (method_name, [torch.all(t >= 0) for _, t in results["rib_edges"][method_name]])
 
-        print('results check', test)
+        for i, var in enumerate([results["rib_edges"][method_name], results["neuron_edges"][method_name], results["pca_edges"][method_name]]):
+            for v in var:
+                if v[1].requires_grad:
+                    print(i)
+                
         # make rib graph
         plot_interaction_graph(
             raw_edges=results["rib_edges"][method_name],

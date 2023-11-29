@@ -167,7 +167,6 @@ def test_pythia_folded_bias() -> None:
     dtype = torch.float64
     # float64 can do atol=1e-11, float32 can do atol=1e2.
     atol = 1e-11
-
     node_layers = ["mlp_in.1", "add_resid2.3"]
     pretrained_lm_folded_bias_comparison(
         hf_model_str="pythia-14m",

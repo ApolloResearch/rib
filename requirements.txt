@@ -1,12 +1,12 @@
-torch~=2.0.1
-torchvision~=0.15.2
+torch~=2.1.1
+torchvision~=0.16.1
 pydantic~=2.0
 wandb~=0.15.4
 fire~=0.5.0
 tqdm~=4.65.0
 jaxtyping~=0.2.20
 matplotlib~=3.7.2
-transformer-lens~=1.5.0
+transformer-lens~=1.10.0
 # sometimes mpi4py has trouble installing with pip into conda enviroments
 # if you have trouble try `conda install mpi4py`
 # You will also need to have a proper mpi installation (should be in the docker)

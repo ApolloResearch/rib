@@ -147,9 +147,9 @@ def create_modular_arithmetic_dataset(
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
             cfg = yaml.safe_load(f)
 
-        modulus = cfg["train"]["modulus"]
-        fn_name = cfg["train"]["fn_name"]
-        frac_train = cfg["train"]["frac_train"]
+        modulus = cfg["dataset"]["modulus"]
+        fn_name = cfg["dataset"]["fn_name"]
+        frac_train = cfg["dataset"]["frac_train"]
         seed = cfg["seed"]
 
     modulus = dataset_config.modulus or modulus

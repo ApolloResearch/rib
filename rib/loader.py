@@ -21,6 +21,7 @@ from rib.data import (
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.converter import convert_tlens_weights
+from rib.types import to_root_path
 from rib.utils import REPO_ROOT, set_seed, train_test_split
 
 
@@ -112,6 +113,7 @@ def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = T
         **config_dict["model"],
         fold_bias=False,
     )
+    mlp_path = to_root_path(mlp_path)  # if relative, fixes root to be ROOT_DIR
     mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
     if fold_bias:
         mlp.fold_bias()

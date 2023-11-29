@@ -146,13 +146,17 @@ def pretrained_lm_folded_bias_comparison(
 def test_gpt2_folded_bias() -> None:
     """Test that the folded bias trick works for GPT2."""
     set_seed(42)
+    dtype = torch.float32
+    # float64 can do 1e-10, float32 can do 1e-3. We use float32 in this test because it's faster and
+    # to avoid OOM errors in the Github runner.
+    atol = 1e-3
     node_layers = ["attn_in.0", "mlp_act.0"]
     pretrained_lm_folded_bias_comparison(
         hf_model_str="gpt2",
         node_layers=node_layers,
         positional_embedding_type="standard",
-        atol=1e-10,  # float64 can do 1e-10, float32 can do 1e-3
-        dtype=torch.float64,
+        atol=atol,
+        dtype=dtype,
     )
 
 
@@ -160,11 +164,14 @@ def test_gpt2_folded_bias() -> None:
 def test_pythia_folded_bias() -> None:
     """Test that the folded bias trick works for Pythia."""
     set_seed(42)
+    dtype = torch.float64
+    # float64 can do atol=1e-11, float32 can do atol=1e2.
+    atol = 1e-11
     node_layers = ["mlp_in.1", "add_resid2.3"]
     pretrained_lm_folded_bias_comparison(
         hf_model_str="pythia-14m",
         node_layers=node_layers,
         positional_embedding_type="rotary",
-        atol=1e-11,  # float64 can do 1e-11, float32 can do 1e2
-        dtype=torch.float64,
+        atol=atol,
+        dtype=dtype,
     )

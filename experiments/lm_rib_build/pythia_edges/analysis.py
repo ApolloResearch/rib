@@ -120,14 +120,16 @@ dataset = load_dataset(
     tlens_model_path=None,
 )
 print("total length:", len(dataset))
-data_loader = create_data_loader(dataset, shuffle=False, batch_size=32, seed=0)
+data_loader = create_data_loader(dataset, shuffle=False, batch_size=16, seed=0)
 
 # %%
+
+all_node_layers = [c_info["node_layer_name"] for c_info in results["interaction_rotations"]]
 
 
 def get_c(module_id):
     c_info = [d for d in results["interaction_rotations"] if d["node_layer_name"] == module_id][0]
-    return c_info["C"]
+    return c_info["C"]  # [orig_dim, rib_dim]
 
 
 hooks = [
@@ -138,60 +140,63 @@ hooks = [
         module_name=model.module_id_to_section_id[module_id],
         fn_kwargs={"rotation_matrix": get_c(module_id).to("cuda"), "output_rotated": False},
     )
-    for module_id in [input_mname, output_mname]
+    for module_id in all_node_layers
 ]
 
-run_dataset_through_model(
-    hooked_model, data_loader, hooks, dtype=torch.float64, device="cuda", use_tqdm=True
-)
+with torch.inference_mode():
+    run_dataset_through_model(
+        hooked_model, data_loader, hooks, dtype=torch.float64, device="cuda", use_tqdm=True
+    )
 
 rib_acts = {
     module_id: torch.concatenate(hooked_model.hooked_data["rotated_acts"][module_id], dim=0)
-    for module_id in [input_mname, output_mname]
+    for module_id in all_node_layers
 }
 
 # %%
-
-fig, axs = plt.subplots(4, 4, figsize=(10, 10))
-for i in range(16):
-    ax = axs[i // 4, i % 4]
-    acts = rib_acts[input_mname][:, :, i].flatten()
-    ax.hist(acts, bins=100)
-
-
-# %%
-MAX_BATCHES = 10
-model_ids_of_interest = [input_mname, output_mname]
-
-with torch.inference_mode():
-    acts = defaultdict(list)
-    for batch in tqdm(data_loader):
-        data, _ = batch
-        out, cache = hooked_model.run_with_cache(data)
-        for model_id in model_ids_of_interest:
-            x = cache[model.module_id_to_section_id[model_id]]["acts"][0].cpu()
-            acts[model_id].append(x)
-
-    acts = {k: torch.concat(v, axis=0) for k, v in acts.items()}
-
+for module_id in ["attn_in.5"]:  # all_node_layers:
+    fig, axs = plt.subplots(4, 4, figsize=(10, 10), sharey=False)
+    for i in range(16):
+        ax = axs[i // 4, i % 4]
+        acts = rib_acts[module_id][:, :, i].flatten()
+        ax.hist(acts, bins=50, density=True)
+    fig.suptitle(f"Rib activations for {module_id}")
+    fig.tight_layout()
+    fig.savefig(f"experiments/lm_rib_build/pythia_edges/out/rib_acts_{module_id}.png")
 
 # %%
-acts_in_rib = {
-    c_info["node_layer_name"]: einsum(
-        "orig rib, ... orig -> ... rib", c_info["C"], acts[c_info["node_layer_name"]]
-    )
-    for c_info in results["interaction_rotations"]
-    if c_info["node_layer_name"] in acts
-}
+# MAX_BATCHES = 10
+# model_ids_of_interest = [input_mname, output_mname]
 
-acts_in_rib
-# TODO: input / output mismatch??
-# %%
+# with torch.inference_mode():
+#     acts = defaultdict(list)
+#     for batch in tqdm(data_loader):
+#         data, _ = batch
+#         out, cache = hooked_model.run_with_cache(data)
+#         for model_id in model_ids_of_interest:
+#             x = cache[model.module_id_to_section_id[model_id]]["acts"][0].cpu()
+#             acts[model_id].append(x)
 
-acts_in_rib = {
-    c_info["node_layer_name"]: (c_info["C"].shape, acts[c_info["node_layer_name"]].shape)
-    for c_info in results["interaction_rotations"]
-    if c_info["node_layer_name"] in acts
-}
+#     acts = {k: torch.concat(v, axis=0) for k, v in acts.items()}
+
+
+# # %%
+# acts_in_rib = {
+#     c_info["node_layer_name"]: einsum(
+#         "orig rib, ... orig -> ... rib", c_info["C"], acts[c_info["node_layer_name"]]
+#     )
+#     for c_info in results["interaction_rotations"]
+#     if c_info["node_layer_name"] in acts
+# }
+
+# acts_in_rib
+# # TODO: input / output mismatch??
+# # %%
+
+# acts_in_rib = {
+#     c_info["node_layer_name"]: (c_info["C"].shape, acts[c_info["node_layer_name"]].shape)
+#     for c_info in results["interaction_rotations"]
+#     if c_info["node_layer_name"] in acts
+# }
 
 # %%

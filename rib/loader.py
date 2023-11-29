@@ -311,7 +311,7 @@ def load_dataset(
         )
         if dataset_config.return_set_frac is not None:
             end_idx = int(len(all_data) * dataset_config.return_set_frac)
-            return all_data[:end_idx]
+            return Subset(all_data, range(end_idx))
         else:
             return all_data
 

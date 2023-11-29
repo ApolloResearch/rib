@@ -333,6 +333,7 @@ def interaction_edge_pre_forward_hook_fn(
     dataset_size: int,
     integral_boundary_relative_epsilon: float = 1e-3,
     edge_formula: Literal["functional", "squared"] = "functional",
+    variable_position_dimension: bool = False,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -363,6 +364,8 @@ def interaction_edge_pre_forward_hook_fn(
         edge_formula: The formula to use for the attribution. Must be one of "functional" or
             "squared". The former is the old (October) functional version, the latter is a new
             (November) version.
+        variable_position_dimension: If True, the size of the position dimension may vary between
+            input and output of a module. Applies only to mod add currently.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -393,6 +396,7 @@ def interaction_edge_pre_forward_hook_fn(
         n_intervals=n_intervals,
         integral_boundary_relative_epsilon=integral_boundary_relative_epsilon,
         edge_formula=edge_formula,
+        variable_position_dimension=variable_position_dimension,
     )
 
 

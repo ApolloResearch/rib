@@ -185,6 +185,7 @@ def integrated_gradient_trapezoidal_jacobian(
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
     edge_formula: Literal["functional", "squared"] = "functional",
+    variable_position_dimension: bool = False,
 ) -> None:
     """Calculate the interaction attribution (edges) for module_hat with inputs f_in_hat.
 
@@ -202,6 +203,8 @@ def integrated_gradient_trapezoidal_jacobian(
         edge_formula: The formula to use for the attribution. Must be one of "functional" or
             "squared". The former is the old (October) functional version, the latter is a new
             (November) version.
+        variable_position_dimension: If True, the size of the position dimension may vary between
+            input and output of a module. Applies only to mod add currently.
     """
     has_pos = f_in_hat.ndim == 3
     # Ensure inputs require grads
@@ -266,8 +269,16 @@ def integrated_gradient_trapezoidal_jacobian(
     elif edge_formula == "squared":
         out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = jac_out.shape
         if has_pos:
-            out_pos_size = f_in_hat.shape[1]
-        # TODO What if out pos and in_pos are different?
+            # out_pos_size and in_pos_size are the same except in mod add where we throw
+            # away all but one position dimension at some point
+            if not variable_position_dimension:
+                out_pos_size = f_in_hat.shape[1]
+            else:
+                # Just run the model to see what the output pos size is
+                with torch.inference_mode():
+                    f_out_hat_const = module_hat(f_in_hat)
+                out_pos_size = f_out_hat_const.shape[1]
+
         batch_size = f_in_hat.shape[0]
         # tprime is the in position, token index of the inputs
         # tprime = t_input

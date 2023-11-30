@@ -217,7 +217,6 @@ def integrated_gradient_trapezoidal_jacobian(
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
-    integral_boundary_relative_epsilon: float = 1e-3,
     edge_formula: Literal["functional", "squared"] = "functional",
     variable_position_dimension: bool = False,
 ) -> None:
@@ -230,10 +229,6 @@ def integrated_gradient_trapezoidal_jacobian(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
-            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
-            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
-            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
         edge_formula: The formula to use for the attribution. Must be one of "functional" or
             "squared". The former is the old (October) functional version, the latter is a new
             (November) version.
@@ -245,9 +240,7 @@ def integrated_gradient_trapezoidal_jacobian(
     f_in_hat.requires_grad_(True)
 
     # Prepare integral
-    alphas, interval_size = _calc_integration_intervals(
-        n_intervals, integral_boundary_relative_epsilon=integral_boundary_relative_epsilon
-    )
+    alphas, interval_size = _calc_integration_intervals(n_intervals)
     if edge_formula == "functional":
         with torch.inference_mode():
             f_out_hat_const = module_hat(f_in_hat)
@@ -411,7 +404,6 @@ def integrated_gradient_trapezoidal_norm(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
-    integral_boundary_relative_epsilon: float = 1e-3,
     ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
 ) -> Float[Tensor, "... in_hidden_combined"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
@@ -430,10 +422,6 @@ def integrated_gradient_trapezoidal_norm(
         C_out: The truncated interaction rotation matrix for the module's outputs.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
-            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
-            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
-            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
         ig_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
             latter is a new (November) version that should be used from now on. The latter makes
@@ -464,9 +452,7 @@ def integrated_gradient_trapezoidal_norm(
 
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    alphas, interval_size = _calc_integration_intervals(
-        n_intervals, integral_boundary_relative_epsilon
-    )
+    alphas, interval_size = _calc_integration_intervals(n_intervals)
 
     for alpha_index, alpha in enumerate(alphas):
         # Compute f^{l+1}(f^l(alpha x))

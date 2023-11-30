@@ -30,6 +30,7 @@ from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import create_data_loader, load_dataset, load_mlp
 from rib.log import logger
+from rib.models.mlp import MLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import check_outfile_overwrite, load_config, set_seed
 
@@ -68,7 +69,8 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
-    mlp = load_mlp(model_config_dict, config.mlp_path, device=device)
+    mlp_config = MLPConfig(**model_config_dict["model"])
+    mlp = load_mlp(mlp_config, config.mlp_path, fold_bias=True, device=device)
     assert mlp.has_folded_bias, "MLP must have folded bias to run RIB"
 
     all_possible_node_layers = [f"layers.{i}" for i in range(len(mlp.layers))] + ["output"]

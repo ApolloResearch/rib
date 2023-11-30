@@ -19,7 +19,7 @@ from rib.data import (
     VisionDatasetConfig,
 )
 from rib.models import SequentialTransformer, SequentialTransformerConfig
-from rib.models.mlp import MLP
+from rib.models.mlp import MLP, MLPConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.types import to_root_path
 from rib.utils import REPO_ROOT, set_seed, train_test_split
@@ -108,11 +108,8 @@ def load_sequential_transformer(
     return seq_model.to(device), tlens_cfg_dict
 
 
-def load_mlp(config_dict: dict, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
-    mlp = MLP(
-        **config_dict["model"],
-        fold_bias=False,
-    )
+def load_mlp(config: MLPConfig, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
+    mlp = MLP.from_config(config)
     mlp_path = to_root_path(mlp_path)  # if relative, fixes root to be ROOT_DIR
     mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
     if fold_bias:

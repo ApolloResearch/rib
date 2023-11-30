@@ -36,6 +36,7 @@ from rib.data import VisionDatasetConfig
 from rib.hook_manager import HookedModel
 from rib.loader import create_data_loader, load_dataset, load_mlp
 from rib.log import logger
+from rib.models.mlp import MLPConfig
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
@@ -95,9 +96,11 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         device=device,
     )
 
+    mlp_config = MLPConfig(**interaction_graph_info["model_config_dict"]["model"])
     mlp = load_mlp(
-        config_dict=interaction_graph_info["model_config_dict"],
+        config=mlp_config,
         mlp_path=interaction_graph_info["config"]["mlp_path"],
+        fold_bias=True,
         device=device,
     )
     mlp.eval()

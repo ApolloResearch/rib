@@ -361,13 +361,15 @@ def integrated_gradient_trapezoidal_jacobian_squared(
         # Note that t (output pos) is different from p (tprime, input pos)
         for out_dim in range(out_hidden_size_comb_trunc):
             if has_pos:
-                for token_index in range(out_pos_size):
+                for output_pos_idx in range(out_pos_size):
                     # autograd gives us the derivative w.r.t. j (input dim) and p (tprime, input pos).
-                    # We sum over p (tprime) != token_index (t) according to Lucius' formula.
-                    # The sum is just a trick to get the grad for every batch index vectorized.
+                    # Later (in the einsum) we sum over p (tprime) != output_pos_idx (t) according
+                    # to Lucius' formula.
+                    # The sum in the autograd is just a trick to get the grad for every batch index
+                    # vectorized.
                     i_grad = (
                         torch.autograd.grad(
-                            f_out_alpha_hat[:, token_index, out_dim].sum(dim=0),
+                            f_out_alpha_hat[:, output_pos_idx, out_dim].sum(dim=0),
                             alpha_f_in_hat,
                             retain_graph=True,
                         )[0]
@@ -382,7 +384,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
                             "bpj,bpj->bj", i_grad * interval_size * scaler, f_in_hat
                         )
                         # We have a minus sign in front of the IG integral
-                        inner_token_sums[:, token_index, out_dim, :] -= inner_token_sum
+                        inner_token_sums[:, output_pos_idx, out_dim, :] -= inner_token_sum
             else:
                 i_grad = (
                     torch.autograd.grad(

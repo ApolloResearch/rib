@@ -167,7 +167,7 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
         config.model.input_size == data_in_dim
     ), f"mismatch between data size {data_in_dim} and config in_dim {config.model.input_size}"
     # Initialize the MLP model
-    model = MLP.from_config(config.model)
+    model = MLP(config.model)
     model = model.to(device)
 
     run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}"

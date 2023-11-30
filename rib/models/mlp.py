@@ -6,18 +6,37 @@ from typing import Optional, Tuple
 import torch
 from fancy_einsum import einsum
 from jaxtyping import Float
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from rib.models.utils import ACTIVATION_MAP, fold_mlp_in
+from rib.types import TORCH_DTYPES, StrDtype
 
 
 class MLPConfig(BaseModel):
-    hidden_sizes: Optional[list[int]]
-    input_size: int
-    output_size: int
-    activation_fn: str = "relu"
-    bias: bool = True
+    hidden_sizes: Optional[list[int]] = Field(
+        None,
+        description="A list of integers specifying the sizes of the hidden layers. If None, "
+        "there are no hidden layers.",
+    )
+    input_size: int = Field(..., description="The size of each input sample (after flattening)")
+    output_size: int = Field(..., description="The size of each output sample")
+    activation_fn: str = Field(
+        "relu",
+        description="The activation function to use for all but the last layer. Default is "
+        '"relu".',
+    )
+    bias: bool = Field(
+        True,
+        description="Whether to add a bias term to the linear transformations. Default is True.",
+    )
+    fold_bias: bool = Field(
+        False,
+        description="Whether to fold the bias in after initialization. If done, model is no "
+        "longer valid to train! Doesn't change the input / output behavior or input / output "
+        "gradients, but will append a 1 to intermediate activations between layers.",
+    )
+    dtype: StrDtype = Field("float32", description="The dtype to initialize the model with.")
 
 
 class MLP(nn.Module):
@@ -37,55 +56,35 @@ class MLP(nn.Module):
 
     def __init__(
         self,
-        hidden_sizes: Optional[list[int]],
-        input_size: int,
-        output_size: int,
-        activation_fn: str = "relu",
-        bias: bool = True,
-        fold_bias: bool = False,
-        dtype: torch.dtype = torch.float32,
+        config: MLPConfig,
     ):
         super().__init__()
 
-        self.hidden_sizes = hidden_sizes
-        self.input_size = input_size
-        self.output_size = output_size
-
-        if hidden_sizes is None:
-            hidden_sizes = []
+        self.hidden_sizes = config.hidden_sizes if config.hidden_sizes is not None else []
+        self.input_size = config.input_size
+        self.output_size = config.output_size
 
         # Size of each layer (including input and output)
-        sizes = [input_size] + hidden_sizes + [output_size]
+        sizes = [self.input_size] + self.hidden_sizes + [self.output_size]
 
         self.layers: nn.ModuleList = nn.ModuleList()
         for i in range(len(sizes) - 1):
             final_layer = i == len(sizes) - 2
             # No activation for final layer
-            layer_act = activation_fn if not final_layer else None
+            layer_act = config.activation_fn if not final_layer else None
             self.layers.append(
                 MLPLayer(
                     in_features=sizes[i],
                     out_features=sizes[i + 1],
                     activation_fn=layer_act,
-                    use_bias=bias,
-                    dtype=dtype,
+                    use_bias=config.bias,
+                    dtype=TORCH_DTYPES[config.dtype],
                 )
             )
 
         self.has_folded_bias = False
-        if fold_bias:
+        if config.fold_bias:
             self.fold_bias()
-
-    @classmethod
-    def from_config(cls, config: MLPConfig) -> "MLP":
-        """Loads an mlp according to config. Does not fold bias."""
-        return cls(
-            hidden_sizes=config.hidden_sizes,
-            input_size=config.input_size,
-            output_size=config.output_size,
-            activation_fn=config.activation_fn,
-            bias=config.bias,
-        )
 
     def forward(self, x: Float[Tensor, "batch ..."]) -> Float[Tensor, "batch outdim"]:
         """Run the MLP on the input.

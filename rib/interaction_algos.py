@@ -107,7 +107,7 @@ def calculate_interaction_rotations(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
-    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -140,7 +140,7 @@ def calculate_interaction_rotations(
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
-        ig_formula: The formula to use for the integrated gradient. Must be one of
+        basis_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
             latter is a new (November) version that should be used from now on. The latter makes
             sense especially in light of the new attribution (edge_formula="squared") but is
@@ -264,7 +264,7 @@ def calculate_interaction_rotations(
             hook_name=node_layer,
             M_dtype=M_dtype,
             Lambda_einsum_dtype=Lambda_einsum_dtype,
-            ig_formula=ig_formula,
+            basis_formula=basis_formula,
         )
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()

@@ -12,7 +12,8 @@ from rib.linalg import (
     calc_gram_matrix,
     calc_rotation_matrix,
     eigendecompose,
-    integrated_gradient_trapezoidal_jacobian,
+    integrated_gradient_trapezoidal_jacobian_functional,
+    integrated_gradient_trapezoidal_jacobian_squared,
     integrated_gradient_trapezoidal_norm,
     pinv_diag,
 )
@@ -275,12 +276,22 @@ def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
     ), "Integrated grad norms are not decreasing"
 
 
-def test_integrated_gradient_trapezoidal_jacobian_n_intervals():
+@pytest.mark.parametrize("edge_formula", ["functional", "squared"])
+def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
     """Check independence of n_intervals for integrated gradient jacobian over a linear module
     without bias.
 
     This should be the case as we're integrating over alpha * inputs, which is linear in alpha.
     """
+    if edge_formula == "functional":
+        integrated_gradient_trapezoidal_jacobian = (
+            integrated_gradient_trapezoidal_jacobian_functional
+        )
+    elif edge_formula == "squared":
+        integrated_gradient_trapezoidal_jacobian = integrated_gradient_trapezoidal_jacobian_squared
+    else:
+        raise ValueError(f"edge_formula {edge_formula} not recognized")
+
     torch.manual_seed(0)
     batch_size = 2
     in_hidden = 3
@@ -352,8 +363,18 @@ def _integrated_gradient_jacobian_with_jacrev(
     return jac_out
 
 
-def test_integrated_gradient_trapezoidal_jacobian_jacrev():
+@pytest.mark.parametrize("edge_formula", ["functional", "squared"])
+def test_integrated_gradient_trapezoidal_jacobian_jacrev(edge_formula):
     """Check that our custom jacobian in the integrated gradient matches torch.func.jacrev."""
+    if edge_formula == "functional":
+        integrated_gradient_trapezoidal_jacobian = (
+            integrated_gradient_trapezoidal_jacobian_functional
+        )
+    elif edge_formula == "squared":
+        pytest.skip("squared edge formula not implemented in the jacrev test")
+    else:
+        raise ValueError(f"edge_formula {edge_formula} not recognized")
+
     torch.manual_seed(0)
     batch_size = 2
     in_hidden = 3

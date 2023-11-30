@@ -22,9 +22,9 @@ from rib.plotting import plot_interaction_graph
 from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 
-
 # %%
 METHOD_NAMES = {"O": "functional", "A": "squared", "B": "november_b"}
+
 
 def random_block_diagonal_matrix(n, k, variances=None, dtype=torch.float32):
     """Generate a random block diagonal matrix of size n x n with two blocks of size k x k and n - k x n - k."""
@@ -37,23 +37,24 @@ def random_block_diagonal_matrix(n, k, variances=None, dtype=torch.float32):
     # Zero out the blocks
     A[:k, :k] = variances[0] * torch.randn(k, k, dtype=dtype)
     if k < n:
-        A[k:n, k:n] = variances[1] * torch.randn(n-k, n-k, dtype=dtype)
+        A[k:n, k:n] = variances[1] * torch.randn(n - k, n - k, dtype=dtype)
 
     return A
 
+
 def random_block_diagonal_matrix_column_equal(n, k, variances=None, dtype=torch.float32):
     """generate a random block diagonal matrix of size n x n with two blocks of size k X k and n - k x n - k. Each column of each block is the same."""
-    #generate random matrix
-    A = torch.zeros((n,n), dtype=dtype)
-    
+    # generate random matrix
+    A = torch.zeros((n, n), dtype=dtype)
+
     if variances is None:
         variances = [1, 1]
-        
-    #zero out the blocks
+
+    # zero out the blocks
     A[:k, :k] = variances[0] * torch.randn(1, k, dtype=dtype).repeat(k, 1).T
     if k < n:
-        A[k:n, k:n] = variances[1] * torch.randn(1, n-k, dtype=dtype).repeat(n-k, 1).T
-    
+        A[k:n, k:n] = variances[1] * torch.randn(1, n - k, dtype=dtype).repeat(n - k, 1).T
+
     return A
 
 
@@ -88,8 +89,8 @@ class BlockDiagonalDNN(MLP):
             if bias is not None:
                 self.layers[i].b = nn.Parameter(bias * torch.ones(n, dtype=dtype))
         self.fold_bias()
-        
-        
+
+
 class BlockDiagonalEqualColumnDNN(MLP):
     def __init__(
         self,
@@ -121,6 +122,7 @@ class BlockDiagonalEqualColumnDNN(MLP):
             if bias is not None:
                 self.layers[i].b = nn.Parameter(bias * torch.ones(n, dtype=dtype))
         self.fold_bias()
+
 
 # %%
 
@@ -282,7 +284,7 @@ class Config:
         :param variances: The variances to use for the neural network layers.
         :param data_variances: The variances to use for the dataset.
         :param binarise: Whether to binarise the interaction edges.
-        :param ribmethods: The methods to use for calculating the interaction edges. 
+        :param ribmethods: The methods to use for calculating the interaction edges.
             If O is included, the October method is used. If A is included, new_norm_november_A is used. If B is included, new_norm_november_B is used.
         """
         self.exp_name = exp_name
@@ -311,7 +313,6 @@ class Config:
         return vars(self)
 
 
-
 # @dataclass
 # class Config:
 #     """
@@ -334,7 +335,7 @@ class Config:
 #     :param variances: The variances to use for the neural network layers.
 #     :param data_variances: The variances to use for the dataset.
 #     :param binarise: Whether to binarise the interaction edges.
-#     :param ribmethods: The methods to use for calculating the interaction edges. 
+#     :param ribmethods: The methods to use for calculating the interaction edges.
 #         If O is included, the October method is used. If A is included, new_norm_november_A is used. If B is included, new_norm_november_B is used.
 #     """
 #     exp_name: str = "small_modular_dnn"
@@ -467,7 +468,7 @@ def main(config: Config) -> None:
                 n_intervals=config.n_intervals,
                 truncation_threshold=config.truncation_threshold,
                 rotate_final_node_layer=config.rotate_final_node_layer,
-                basis_formula = "(1-alpha)^2",
+                basis_formula="(1-alpha)^2",
             )
         if method == "A":
             Cs[method_name], Us[method_name] = calculate_interaction_rotations(
@@ -481,7 +482,7 @@ def main(config: Config) -> None:
                 n_intervals=config.n_intervals,
                 truncation_threshold=config.truncation_threshold,
                 rotate_final_node_layer=config.rotate_final_node_layer,
-                basis_formula = "(1-0)*alpha",
+                basis_formula="(1-0)*alpha",
             )
 
         E_hats_rib[method_name] = collect_interaction_edges(
@@ -492,7 +493,7 @@ def main(config: Config) -> None:
             data_loader=dataloader,
             dtype=dtype,
             device=device,
-            edge_formula = method_name,
+            edge_formula=method_name,
         )
 
         neuron_cs = cs_to_identity(Cs[method_name])
@@ -506,8 +507,10 @@ def main(config: Config) -> None:
             device=device,
             edge_formula=method_name,
         )
-        print('neuron:', method_name, [torch.all(t >= 0) for t in E_hats_neuron[method_name].values()])
-        
+        print(
+            "neuron:", method_name, [torch.all(t >= 0) for t in E_hats_neuron[method_name].values()]
+        )
+
         pca_cs = cs_to_us(Cs[method_name], Us[method_name])
         E_hats_pca[method_name] = collect_interaction_edges(
             Cs=pca_cs,
@@ -528,7 +531,9 @@ def main(config: Config) -> None:
         for C_info in Cs[method_name]:
             info_dict = asdict(C_info)
             info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
-            info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
+            info_dict["C_pinv"] = (
+                info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
+            )
             interaction_rotations[method_name].append(info_dict)
 
         eigenvectors[method_name] = [asdict(U_info) for U_info in Us[method_name]]
@@ -538,9 +543,18 @@ def main(config: Config) -> None:
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "rib_edges": {methodname:[(module, E_hats[module].cpu().detach()) for module in E_hats] for methodname, E_hats in E_hats_rib.items()},
-        "neuron_edges": {methodname:[(module, E_hats[module].cpu().detach()) for module in E_hats] for methodname, E_hats in E_hats_neuron.items()},
-        "pca_edges": {methodname:[(module, E_hats[module].cpu().detach()) for module in E_hats] for methodname, E_hats in E_hats_pca.items()},
+        "rib_edges": {
+            methodname: [(module, E_hats[module].cpu().detach()) for module in E_hats]
+            for methodname, E_hats in E_hats_rib.items()
+        },
+        "neuron_edges": {
+            methodname: [(module, E_hats[module].cpu().detach()) for module in E_hats]
+            for methodname, E_hats in E_hats_neuron.items()
+        },
+        "pca_edges": {
+            methodname: [(module, E_hats[module].cpu().detach()) for module in E_hats]
+            for methodname, E_hats in E_hats_pca.items()
+        },
         "model_config_dict": config.to_dict(),
         "mlp": mlp.cpu().state_dict(),
     }
@@ -554,7 +568,7 @@ def main(config: Config) -> None:
     out_file_mlp = parent_dir / f"mlp_graph.png"
     if not check_outfile_overwrite(out_file_mlp, config.force):
         return
-    
+
     nodes_per_layer = config.n + 1
     layer_names = results["model_config_dict"]["node_layers"] + ["output"]
 
@@ -572,7 +586,7 @@ def main(config: Config) -> None:
         nodes_per_layer=nodes_per_layer,
         out_file=out_file_mlp,
     )
-    
+
     for method in config.ribmethods:
         method_name = METHOD_NAMES[method]
         out_file_graph = parent_dir / f"rib_graph_{method_name}.png"
@@ -596,11 +610,17 @@ def main(config: Config) -> None:
 
         test = (method_name, [torch.all(t >= 0) for _, t in results["rib_edges"][method_name]])
 
-        for i, var in enumerate([results["rib_edges"][method_name], results["neuron_edges"][method_name], results["pca_edges"][method_name]]):
+        for i, var in enumerate(
+            [
+                results["rib_edges"][method_name],
+                results["neuron_edges"][method_name],
+                results["pca_edges"][method_name],
+            ]
+        ):
             for v in var:
                 if v[1].requires_grad:
                     print(i)
-                
+
         # make rib graph
         plot_interaction_graph(
             raw_edges=results["rib_edges"][method_name],
@@ -627,11 +647,14 @@ def main(config: Config) -> None:
             nodes_per_layer=nodes_per_layer,
             out_file=out_file_neuron_basis,
         )
-        
+
         if config.binarise:
             # make binary rib graph
             plot_interaction_graph(
-                raw_edges=[(module, E_hats_binary_rib[method_name][module].cpu()) for module in E_hats_binary_rib[method_name]],
+                raw_edges=[
+                    (module, E_hats_binary_rib[method_name][module].cpu())
+                    for module in E_hats_binary_rib[method_name]
+                ],
                 layer_names=layer_names,
                 exp_name=results["exp_name"],
                 nodes_per_layer=nodes_per_layer,
@@ -640,7 +663,10 @@ def main(config: Config) -> None:
 
             # make binary pca graph
             plot_interaction_graph(
-                raw_edges=[(module, E_hats_binary_pca[method_name][module].cpu()) for module in E_hats_binary_pca[method_name]],
+                raw_edges=[
+                    (module, E_hats_binary_pca[method_name][module].cpu())
+                    for module in E_hats_binary_pca[method_name]
+                ],
                 layer_names=layer_names,
                 exp_name=results["exp_name"],
                 nodes_per_layer=nodes_per_layer,

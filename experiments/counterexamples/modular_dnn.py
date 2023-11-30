@@ -2,6 +2,7 @@
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Optional
 
 import fire
 import numpy as np
@@ -13,7 +14,11 @@ from pydantic import BaseModel, field_validator
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.data_accumulator import (
+    collect_dataset_means,
+    collect_gram_matrices,
+    collect_interaction_edges,
+)
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
 from rib.log import logger
@@ -429,6 +434,31 @@ def main(config: Config) -> None:
     node_layers = config.node_layers
     non_output_node_layers = [layer for layer in node_layers if layer != "output"]
     # print(non_output_node_layers)
+    collect_output_dataset_means = node_layers[-1] == "output" and config.rotate_final_node_layer
+    dataset_means = collect_dataset_means(
+        hooked_model=hooked_mlp,
+        module_names=non_output_node_layers,
+        data_loader=dataloader,
+        dtype=dtype,
+        device=device,
+        collect_output_dataset_means=collect_output_dataset_means,
+    )
+    # Matrices to subtract the dataset mean
+    Gamma_matrices: dict[str, torch.Tensor] = {}
+    for module_name in node_layers:
+        model_width = dataset_means[module_name].shape[0]
+        Gamma_matrices[module_name] = torch.eye(model_width, dtype=dtype, device=device)
+        # Where -1 is the bias dimension
+        Gamma_matrices[module_name][-1, :] = -dataset_means[module_name]
+    Gamma_inv_matrices: dict[str, torch.Tensor] = {}
+    for module_name in node_layers:
+        model_width = dataset_means[module_name].shape[0]
+        Gamma_inv_matrices[module_name] = torch.eye(model_width, dtype=dtype, device=device)
+        # Where -1 is the bias dimension
+        Gamma_inv_matrices[module_name][-1, :] = dataset_means[module_name]
+
+    # Gamma_matrices, Gamma_inv_matrices = (None, None)
+
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = node_layers[-1] == "output" and config.rotate_final_node_layer
     gram_matrices = collect_gram_matrices(
@@ -438,6 +468,7 @@ def main(config: Config) -> None:
         dtype=dtype,
         device=device,
         collect_output_gram=collect_output_gram,
+        Gamma_matrices=Gamma_matrices,
     )
     Cs = {}
     Us = {}
@@ -463,6 +494,8 @@ def main(config: Config) -> None:
                 truncation_threshold=config.truncation_threshold,
                 rotate_final_node_layer=config.rotate_final_node_layer,
                 basis_formula="(1-alpha)^2",
+                Gamma_matrices=Gamma_matrices,
+                Gamma_inv_matrices=Gamma_inv_matrices,
             )
         if method == "A":
             Cs[method_name], Us[method_name] = calculate_interaction_rotations(
@@ -477,7 +510,11 @@ def main(config: Config) -> None:
                 truncation_threshold=config.truncation_threshold,
                 rotate_final_node_layer=config.rotate_final_node_layer,
                 basis_formula="(1-0)*alpha",
+                Gamma_matrices=Gamma_matrices,
+                Gamma_inv_matrices=Gamma_inv_matrices,
             )
+            # Us["functional"][3].U.shape= 5,4
+            # Gamma_matrices["output"].shape= 4,4
 
         E_hats_rib[method_name] = collect_interaction_edges(
             Cs=Cs[method_name],

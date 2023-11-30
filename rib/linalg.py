@@ -535,6 +535,7 @@ def calc_gram_matrix(
         Float[Tensor, "batch d_hidden"],
     ],
     dataset_size: int,
+    Gammas: Optional[Float[Tensor, "d_hidden d_hidden"]] = None,
 ) -> Float[Tensor, "d_hidden d_hidden"]:
     """Calculate the gram matrix for a given tensor.
 

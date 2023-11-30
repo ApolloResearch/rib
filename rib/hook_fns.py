@@ -23,9 +23,9 @@ from rib.linalg import (
     calc_gram_matrix,
     integrated_gradient_trapezoidal_jacobian,
     integrated_gradient_trapezoidal_norm,
+    module_hat,
 )
 from rib.models.sequential_transformer.components import AttentionOut
-from rib.utils import module_hat
 
 
 def _add_to_hooked_matrix(

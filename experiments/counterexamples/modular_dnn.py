@@ -461,7 +461,7 @@ def main(config: Config) -> None:
                 n_intervals=config.n_intervals,
                 truncation_threshold=config.truncation_threshold,
                 rotate_final_node_layer=config.rotate_final_node_layer,
-                ig_formula = "(1-alpha)^2",
+                basis_formula = "(1-alpha)^2",
             )
         if method == "A":
             Cs[method_name], Us[method_name] = calculate_interaction_rotations(
@@ -475,7 +475,7 @@ def main(config: Config) -> None:
                 n_intervals=config.n_intervals,
                 truncation_threshold=config.truncation_threshold,
                 rotate_final_node_layer=config.rotate_final_node_layer,
-                ig_formula = "(1-0)*alpha",
+                basis_formula = "(1-0)*alpha",
             )
 
         E_hats_rib[method_name] = collect_interaction_edges(

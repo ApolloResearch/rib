@@ -243,7 +243,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
-    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -263,7 +263,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
             Lambda_dash matrix. Does not affect the output, only used for the einsum itself.
             Needs to be float64 on CPU but float32 was fine on GPU. Defaults to float64.
-        ig_formula: The formula to use for the integrated gradient. Must be one of
+        basis_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
             latter is a new (November) version that should be used from now on. The latter makes
             sense especially in light of the new attribution (edge_formula="squared") but is
@@ -280,7 +280,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         inputs=inputs,
         C_out=C_out,
         n_intervals=n_intervals,
-        ig_formula=ig_formula,
+        basis_formula=basis_formula,
     )
     in_dtype = in_grads.dtype
 

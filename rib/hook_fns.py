@@ -21,7 +21,8 @@ from torch import Tensor
 
 from rib.linalg import (
     calc_gram_matrix,
-    integrated_gradient_trapezoidal_jacobian,
+    integrated_gradient_trapezoidal_jacobian_functional,
+    integrated_gradient_trapezoidal_jacobian_squared,
     integrated_gradient_trapezoidal_norm,
     module_hat,
 )
@@ -377,15 +378,28 @@ def interaction_edge_pre_forward_hook_fn(
     f_hat = in_acts @ C_in
     jac_out = hooked_data[hook_name][data_key]
 
-    integrated_gradient_trapezoidal_jacobian(
-        module_hat=module_hat_partial,
-        f_in_hat=f_hat,
-        jac_out=jac_out,
-        dataset_size=dataset_size,
-        n_intervals=n_intervals,
-        edge_formula=edge_formula,
-        variable_position_dimension=variable_position_dimension,
-    )
+    if edge_formula == "functional":
+        integrated_gradient_trapezoidal_jacobian_functional(
+            module_hat=module_hat_partial,
+            f_in_hat=f_hat,
+            jac_out=jac_out,
+            dataset_size=dataset_size,
+            n_intervals=n_intervals,
+        )
+    elif edge_formula == "squared":
+        integrated_gradient_trapezoidal_jacobian_squared(
+            module_hat=module_hat_partial,
+            f_in_hat=f_hat,
+            jac_out=jac_out,
+            dataset_size=dataset_size,
+            n_intervals=n_intervals,
+            variable_position_dimension=variable_position_dimension,
+            squared=True,
+        )
+    else:
+        raise ValueError(
+            f"edge_formula must be one of 'functional' or 'squared', got {edge_formula}"
+        )
 
 
 def acts_forward_hook_fn(

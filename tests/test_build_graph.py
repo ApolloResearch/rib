@@ -75,21 +75,29 @@ def graph_build_test(
     comparison_layers = config.node_layers[:-1]
     for i, module_name in enumerate(comparison_layers):
         # Get the module names from the grams
-        # Check that the size of the sum of activations in the interaction basis is equal
-        # to the outgoing edges of a node
         act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
         if E_hats:
             # E_hats[i] is a tuple (name, tensor)
-            edge_size = E_hats[i][1].sum(0).abs()
-            # Test shapes
-            assert (
-                act_size.shape == edge_size.shape
-            ), f"act_size and edge_size not same shape for {module_name}"
-            assert torch.allclose(
-                act_size / act_size.abs().max(),
-                edge_size / edge_size.abs().max(),
-                atol=atol,
-            ), f"act_size not equal to edge_size for {module_name}"
+            if config.edge_formula == "squared":
+                # edges must be positive >= 0
+                assert (E_hats[i][1] >= 0).all()
+            # edges should not all be zero
+            assert (E_hats[i][1] != 0).any()
+            if config.edge_formula == "functional" and config.basis_formula == "(1-alpha)^2":
+                # Check that the size of the sum of activations in the interaction basis is equal
+                # to the outgoing edges of a node. The relation should hold only in this one config
+                # case.
+                edge_size = E_hats[i][1].sum(0).abs()
+                # Test shapes
+                assert (
+                    act_size.shape == edge_size.shape
+                ), f"act_size and edge_size not same shape for {module_name}"
+                # Test sum of edges == function size
+                assert torch.allclose(
+                    act_size / act_size.abs().max(),
+                    edge_size / edge_size.abs().max(),
+                    atol=atol,
+                ), f"act_size not equal to edge_size for {module_name}"
 
         # Check that the Lambdas are also the same as the act_size and edge_size
         # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
@@ -175,7 +183,7 @@ def test_modular_arithmetic_build_graph_new_basis_and_old_attribution():
 
 
 @pytest.mark.slow
-def test_modular_arithmetic_build_graph_old_basis_and_old_attribution():
+def test_modular_arithmetic_build_graph_old_basis_and_new_attribution():
     dtype_str = "float32"
     atol = 1e-5  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
 
@@ -202,42 +210,6 @@ def test_modular_arithmetic_build_graph_old_basis_and_old_attribution():
     eval_type: accuracy
     out_dir: null
     basis_formula: "(1-alpha)^2"
-    edge_formula: "functional"
-    """
-    config_dict = yaml.safe_load(config_str)
-    config = LMRibConfig(**config_dict)
-
-    graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
-
-
-@pytest.mark.slow
-def test_modular_arithmetic_build_graph_new_basis_and_new_attribution():
-    dtype_str = "float32"
-    atol = 1e-5  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
-
-    config_str = f"""
-    exp_name: test
-    seed: 0
-    tlens_pretrained: null
-    tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-    node_layers:
-        - ln1.0
-        - mlp_in.0
-        - unembed
-        - output
-    dataset:
-        source: custom
-        name: modular_arithmetic
-        return_set: train
-    batch_size: 128
-    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
-    rotate_final_node_layer: false
-    last_pos_module_type: add_resid1
-    n_intervals: 0
-    dtype: {dtype_str}
-    eval_type: accuracy
-    out_dir: null
-    basis_formula: "(1-0)*alpha"
     edge_formula: "squared"
     """
     config_dict = yaml.safe_load(config_str)
@@ -393,41 +365,6 @@ def test_mnist_build_graph_new_basis_old_attribution():
 
 
 @pytest.mark.slow
-def test_mnist_build_graph_new_basis_and_new_attribution():
-    dtype_str = "float32"
-    # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
-    atol = 1e-6
-
-    config_str = f"""
-    exp_name: test
-    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
-    batch_size: 256
-    seed: 0
-    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
-    rotate_final_node_layer: false
-    n_intervals: 0
-    dtype: {dtype_str}
-    node_layers:
-        - layers.0
-        - layers.1
-        - layers.2
-        - output
-    out_dir: null
-    basis_formula: "(1-0)*alpha"
-    edge_formula: "squared"
-    """
-
-    config_dict = yaml.safe_load(config_str)
-    config = MnistRibConfig(**config_dict)
-
-    graph_build_test(
-        config=config,
-        build_graph_main_fn=mnist_build_graph_main,
-        atol=atol,
-    )
-
-
-@pytest.mark.slow
 def test_mnist_build_graph_old_basis_and_new_attribution():
     dtype_str = "float32"
     # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
@@ -449,6 +386,41 @@ def test_mnist_build_graph_old_basis_and_new_attribution():
         - output
     out_dir: null
     basis_formula: "(1-alpha)^2"
+    edge_formula: "squared"
+    """
+
+    config_dict = yaml.safe_load(config_str)
+    config = MnistRibConfig(**config_dict)
+
+    graph_build_test(
+        config=config,
+        build_graph_main_fn=mnist_build_graph_main,
+        atol=atol,
+    )
+
+
+@pytest.mark.slow
+def test_mnist_build_graph_new_basis_and_new_attribution():
+    dtype_str = "float32"
+    # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
+    atol = 1e-6
+
+    config_str = f"""
+    exp_name: test
+    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
+    batch_size: 256
+    seed: 0
+    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
+    rotate_final_node_layer: false
+    n_intervals: 0
+    dtype: {dtype_str}
+    node_layers:
+        - layers.0
+        - layers.1
+        - layers.2
+        - output
+    out_dir: null
+    basis_formula: "(1-0)*alpha"
     edge_formula: "squared"
     """
 

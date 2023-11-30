@@ -217,6 +217,88 @@ def tokenize_dataset(
     return TensorDataset(input_ids, labels)
 
 
+def create_hf_dataset(
+    dataset_config: HFDatasetConfig,
+    return_set: Union[Literal["train", "test", "all"], Literal["both"]],
+    model_n_ctx: Optional[int] = None,
+) -> Union[Dataset, tuple[Dataset, Dataset]]:
+    """Create a HuggingFace dataset from the provided arguments.
+
+    Useful hugginface datasets (credit to TransformerLens authors for creating/collecting these):
+    - stas/openwebtext-10k (approx the GPT-2 training data
+        https://huggingface.co/datasets/openwebtext)
+    - NeelNanda/pile-10k (The Pile, a big mess of tons of diverse data
+        https://pile.eleuther.ai/)
+    - NeelNanda/c4-10k (Colossal, Cleaned, Common Crawl - basically openwebtext but bigger
+        https://huggingface.co/datasets/c4)
+    - NeelNanda/code-10k (Codeparrot Clean, a Python code dataset
+        https://huggingface.co/datasets/codeparrot/codeparrot-clean)
+    - NeelNanda/c4-code-20k (c4 + code - the 20K data points from c4-10k and code-10k. This is
+        the mix of datasets used to train my interpretability-friendly models, though note that
+        they are *not* in the correct ratio! There's 10K texts for each, but about 22M tokens of
+        code and 5M tokens of C4)
+    - NeelNanda/wiki-10k (Wikipedia, generated from the 20220301.en split of
+        https://huggingface.co/datasets/wikipedia)
+
+    Args:
+        dataset_config (HFDatasetConfig): The dataset config.
+        return_set (Union[Literal["train", "test", "all"], Literal["both"]]): The dataset to return.
+        model_n_ctx (int): The max context length of the model. Used for HFDatasetConfigs. Data
+            sequences are packed to dataset_config.n_ctx if it is not None and is <= model_n_ctx,
+            otherwise to model_n_ctx.
+    """
+    assert model_n_ctx is not None
+    n_ctx = dataset_config.n_ctx or model_n_ctx
+    assert n_ctx <= model_n_ctx, (
+        f"Dataset context length ({dataset_config.n_ctx}) must be <= model context length "
+        f"({model_n_ctx})."
+    )
+
+    # Load dataset from huggingface
+    assert return_set in ["train", "test"], "Can only load train or test sets from HF"
+    assert not (
+        dataset_config.return_set_frac and dataset_config.return_set_n_samples
+    ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
+
+    if dataset_config.return_set_frac:
+        percent = int(dataset_config.return_set_frac * 100)
+        if dataset_config.return_set_portion == "first":
+            data_split = f"{return_set}[:{percent}%]"
+        elif dataset_config.return_set_portion == "last":
+            data_split = f"{return_set}[-{percent}%:]"
+    elif dataset_config.return_set_n_samples:
+        if dataset_config.return_set_portion == "first":
+            data_split = f"{return_set}[:{dataset_config.return_set_n_samples}]"
+        elif dataset_config.return_set_portion == "last":
+            data_split = f"{return_set}[-{dataset_config.return_set_n_samples}:]"
+
+    raw_dataset = hf_load_dataset(dataset_config.name, split=data_split)
+
+    tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
+    tokenizer.pad_token = tokenizer.eos_token
+    return tokenize_dataset(dataset=raw_dataset, tokenizer=tokenizer, n_ctx=n_ctx)
+
+
+def create_vision_dataset(
+    dataset_config: VisionDatasetConfig,
+    return_set: Union[Literal["train", "test", "all"], Literal["both"]],
+):
+    dataset_fn = getattr(torchvision.datasets, dataset_config.name)
+    if return_set in ["all", "both"]:
+        raise NotImplementedError("Haven't yet implimented 'all' or 'both' for vision datasets.")
+    all_data = dataset_fn(
+        root=REPO_ROOT / ".data",
+        train=return_set == "train",
+        download=True,
+        transform=torchvision.transforms.ToTensor(),
+    )
+    if dataset_config.return_set_frac is not None:
+        end_idx = int(len(all_data) * dataset_config.return_set_frac)
+        return Subset(all_data, range(end_idx))
+    else:
+        return all_data
+
+
 @overload
 def load_dataset(
     dataset_config: DatasetConfig,
@@ -246,29 +328,14 @@ def load_dataset(
     """
     Load a dataset based on the provided type and arguments.
 
-    Useful hugginface datasets (credit to TransformerLens authors for creating/collecting these):
-        - stas/openwebtext-10k (approx the GPT-2 training data
-            https://huggingface.co/datasets/openwebtext)
-        - NeelNanda/pile-10k (The Pile, a big mess of tons of diverse data
-            https://pile.eleuther.ai/)
-        - NeelNanda/c4-10k (Colossal, Cleaned, Common Crawl - basically openwebtext but bigger
-            https://huggingface.co/datasets/c4)
-        - NeelNanda/code-10k (Codeparrot Clean, a Python code dataset
-            https://huggingface.co/datasets/codeparrot/codeparrot-clean)
-        - NeelNanda/c4-code-20k (c4 + code - the 20K data points from c4-10k and code-10k. This is
-            the mix of datasets used to train my interpretability-friendly models, though note that
-            they are *not* in the correct ratio! There's 10K texts for each, but about 22M tokens of
-            code and 5M tokens of C4)
-        - NeelNanda/wiki-10k (Wikipedia, generated from the 20220301.en split of
-            https://huggingface.co/datasets/wikipedia)
-
     Args:
         dataset_config (DatasetConfig): The dataset config.
         return_set (Union[Literal["train", "test", "all"], Literal["both"]]): The dataset to return.
-        model_n_ctx (int): The max context length of the model. Data sequences are packed to
-            dataset_config.n_ctx if it is not None and is <= model_n_ctx, otherwise to model_n_ctx.
-        tlens_model_path (Optional[Path]): The path to the tlens model. Used for collecting config
-            for the modular arithmetic dataset used to train the model.
+        model_n_ctx (int): The max context length of the model, used for HFDatasetConfigs. Data
+            sequences are packed to dataset_config.n_ctx if it is not None and is <= model_n_ctx,
+            otherwise to model_n_ctx.
+        tlens_model_path (Optional[Path]): The path to the tlens model, used for modular arithmetic
+            to collect config info used to train the model.
 
     Returns:
         The loaded dataset or a tuple of datasets (train and test).
@@ -280,51 +347,12 @@ def load_dataset(
             dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
         )
     elif isinstance(dataset_config, HFDatasetConfig):
-        assert model_n_ctx is not None
-        n_ctx = dataset_config.n_ctx or model_n_ctx
-        assert n_ctx <= model_n_ctx, (
-            f"Dataset context length ({dataset_config.n_ctx}) must be <= model context length "
-            f"({model_n_ctx})."
+        return create_hf_dataset(
+            dataset_config=dataset_config, return_set=return_set, model_n_ctx=model_n_ctx
         )
-
-        # Load dataset from huggingface
-        assert return_set in ["train", "test"], "Can only load train or test sets from HF"
-        assert not (
-            dataset_config.return_set_frac and dataset_config.return_set_n_samples
-        ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
-
-        if dataset_config.return_set_frac:
-            percent = int(dataset_config.return_set_frac * 100)
-            if dataset_config.return_set_portion == "first":
-                data_split = f"{return_set}[:{percent}%]"
-            elif dataset_config.return_set_portion == "last":
-                data_split = f"{return_set}[-{percent}%:]"
-        elif dataset_config.return_set_n_samples:
-            if dataset_config.return_set_portion == "first":
-                data_split = f"{return_set}[:{dataset_config.return_set_n_samples}]"
-            elif dataset_config.return_set_portion == "last":
-                data_split = f"{return_set}[-{dataset_config.return_set_n_samples}:]"
-
-        raw_dataset = hf_load_dataset(dataset_config.name, split=data_split)
-
-        tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
-        tokenizer.pad_token = tokenizer.eos_token
-        dataset = tokenize_dataset(dataset=raw_dataset, tokenizer=tokenizer, n_ctx=n_ctx)
-        return dataset
     else:
         assert isinstance(dataset_config, VisionDatasetConfig)
-        dataset_fn = getattr(torchvision.datasets, dataset_config.name)
-        all_data = dataset_fn(
-            root=REPO_ROOT / ".data",
-            train=return_set == "train",
-            download=True,
-            transform=torchvision.transforms.ToTensor(),
-        )
-        if dataset_config.return_set_frac is not None:
-            end_idx = int(len(all_data) * dataset_config.return_set_frac)
-            return Subset(all_data, range(end_idx))
-        else:
-            return all_data
+        return create_vision_dataset(dataset_config=dataset_config, return_set=return_set)
 
 
 @overload

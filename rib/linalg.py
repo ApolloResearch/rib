@@ -227,11 +227,6 @@ def integrated_gradient_trapezoidal_jacobian_functional(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        edge_formula: The formula to use for the attribution. Must be one of "functional" or
-            "squared". The former is the old (October) functional version, the latter is a new
-            (November) version.
-        variable_position_dimension: If True, the size of the position dimension may vary between
-            input and output of a module. Applies only to mod add currently.
     """
     has_pos = f_in_hat.ndim == 3
     # Ensure inputs require grads
@@ -239,8 +234,11 @@ def integrated_gradient_trapezoidal_jacobian_functional(
 
     # Prepare integral
     alphas, interval_size = _calc_integration_intervals(n_intervals)
+
+    # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         f_out_hat_const = module_hat(f_in_hat)
+
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
@@ -251,7 +249,7 @@ def integrated_gradient_trapezoidal_jacobian_functional(
         einsum_pattern = "bpj,bpj->j" if f_in_hat.ndim == 3 else "bj,bj->j"
         # Normalize by the dataset size and the number of positions (if the input has a position dim)
         normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
-        # Need to define alpha_f_in_hat for autograd!
+        # Need to define alpha_f_in_hat for autograd
         alpha_f_in_hat = alpha * f_in_hat
         f_out_hat_alpha = module_hat(alpha_f_in_hat)
 
@@ -305,9 +303,6 @@ def integrated_gradient_trapezoidal_jacobian_squared(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        edge_formula: The formula to use for the attribution. Must be one of "functional" or
-            "squared". The former is the old (October) functional version, the latter is a new
-            (November) version.
         variable_position_dimension: If True, the size of the position dimension may vary between
             input and output of a module. Applies only to mod add currently.
     """
@@ -317,6 +312,9 @@ def integrated_gradient_trapezoidal_jacobian_squared(
 
     # Prepare integral
     alphas, interval_size = _calc_integration_intervals(n_intervals)
+
+    # Get sizes for intermediate resullt storage
+    batch_size = f_in_hat.shape[0]
     out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = jac_out.shape
     if has_pos:
         # out_pos_size and in_pos_size are the same except in mod add where we throw
@@ -329,7 +327,6 @@ def integrated_gradient_trapezoidal_jacobian_squared(
                 f_out_hat_const = module_hat(f_in_hat)
             out_pos_size = f_out_hat_const.shape[1]
 
-    batch_size = f_in_hat.shape[0]
     # Inner sum in Lucius' new formula is over tprime (p) only
     einsum_pattern = "bpj,bpj->bj" if has_pos else "bj,bj->bj"
 
@@ -347,6 +344,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
         if has_pos
         else torch.zeros(batch_size, out_hidden_size_comb_trunc, in_hidden_size_comb_trunc)
     )
+
     # Integral
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False

@@ -313,7 +313,6 @@ def load_dataset(
         return dataset
     else:
         assert isinstance(dataset_config, VisionDatasetConfig)
-        assert dataset_config.name in ["MNIST", "CIFAR10"]
         dataset_fn = getattr(torchvision.datasets, dataset_config.name)
         all_data = dataset_fn(
             root=REPO_ROOT / ".data",

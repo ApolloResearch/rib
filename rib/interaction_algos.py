@@ -107,7 +107,6 @@ def calculate_interaction_rotations(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
-    integral_boundary_relative_epsilon: float = 1e-3,
     ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
@@ -141,10 +140,6 @@ def calculate_interaction_rotations(
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
-        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
-            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
-            ill-defined derivatives at 0 and 1. Defaults to 1e-3.
-            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
         ig_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
             latter is a new (November) version that should be used from now on. The latter makes
@@ -269,7 +264,6 @@ def calculate_interaction_rotations(
             hook_name=node_layer,
             M_dtype=M_dtype,
             Lambda_einsum_dtype=Lambda_einsum_dtype,
-            integral_boundary_relative_epsilon=integral_boundary_relative_epsilon,
             ig_formula=ig_formula,
         )
 

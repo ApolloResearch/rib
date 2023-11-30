@@ -109,6 +109,8 @@ def calculate_interaction_rotations(
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-alpha)^2",
+    Gamma_matrices: Optional[dict[str, Optional[Float[Tensor, "d_hidden d_hidden"]]]] = None,
+    Gamma_inv_matrices: Optional[dict[str, Optional[Float[Tensor, "d_hidden d_hidden"]]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -176,6 +178,7 @@ def calculate_interaction_rotations(
     C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = (
         U_output.detach().cpu() if U_output is not None else None
     )
+    # TODO
 
     if node_layers[-1] not in gram_matrices:
         # Technically we don't actually need the final node layer to be in gram_matrices if we're
@@ -246,6 +249,13 @@ def calculate_interaction_rotations(
         U: Float[Tensor, "d_hidden d_hidden_trunc"] = (
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
         )
+
+        if Gamma_matrices is not None and Gamma_matrices[node_layer] is not None:
+            U_inv = U.T @ Gamma_matrices[node_layer]
+            U = Gamma_inv_matrices[node_layer] @ U  # type: ignore
+        else:
+            U_inv = U.T
+
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
         if basis_formula == "svd":
             # Use U as C and then progress to the next loop
@@ -271,20 +281,22 @@ def calculate_interaction_rotations(
         )
 
         U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
+        U_D_sqrt_T: Float[Tensor, "d_hidden_trunc d_hidden"] = D.sqrt() @ U_inv
 
         # Converts M to fp64
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            U_D_sqrt.T.to(M_dtype) @ M_dash @ U_D_sqrt.to(M_dtype)
+            U_D_sqrt_T.to(M_dtype) @ M_dash @ U_D_sqrt.to(M_dtype)
         )
         V = eigendecompose(M)[1]  # V has size (d_hidden_trunc, d_hidden_trunc)
         V = V.to(dtype)
 
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
         U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
+        U_D_sqrt_V_T = V.T @ U_D_sqrt_T
         D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
         U_D_sqrt_pinv_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
         Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
-            (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_V).diag().abs()
+            (U_D_sqrt_V_T @ Lambda_dash @ U_D_sqrt_pinv_V).diag().abs()
         )
 
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
@@ -295,7 +307,7 @@ def calculate_interaction_rotations(
             (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
         )
         C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
-            (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
+            (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V_T).detach().cpu()
         )
         Cs.append(
             InteractionRotation(node_layer_name=node_layer, out_dim=C.shape[1], C=C, C_pinv=C_pinv)

@@ -52,6 +52,58 @@ def _add_to_hooked_matrix(
     hooked_data[hook_name][data_key] += hooked_matrix
 
 
+def dataset_mean_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    output: Union[
+        Float[Tensor, "batch d_hidden"],
+        Float[Tensor, "batch pos d_hidden"],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    dataset_size: int,
+) -> None:
+    """ """
+    assert isinstance(data_key, str), "data_key must be a string."
+
+    outputs = output if isinstance(output, tuple) else (output,)
+
+    # Concat over the hidden dimension
+    out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+
+    out_acts_mean_coontrib = out_acts.mean(dim=0) / dataset_size
+
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, out_acts_mean_coontrib)
+
+
+def dataset_mean_pre_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    dataset_size: int,
+) -> None:
+    """ """
+    assert isinstance(data_key, str), "data_key must be a string."
+
+    in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+
+    in_acts_mean_coontrib = in_acts.mean(dim=0) / dataset_size
+
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts_mean_coontrib)
+
+
 def gram_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
@@ -68,6 +120,7 @@ def gram_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
+    Gamma_matrix: Optional[Float[Tensor, "d_hidden d_hidden"]] = None,
 ) -> None:
     """Hook function for calculating and updating the gram matrix.
 
@@ -90,8 +143,9 @@ def gram_forward_hook_fn(
 
     # Concat over the hidden dimension
     out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+    out_acts_centered = out_acts @ Gamma_matrix if Gamma_matrix is not None else out_acts
 
-    gram_matrix = calc_gram_matrix(out_acts, dataset_size=dataset_size)
+    gram_matrix = calc_gram_matrix(out_acts_centered, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
@@ -107,6 +161,7 @@ def gram_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
+    Gamma_matrix: Optional[Float[Tensor, "d_hidden d_hidden"]] = None,
 ) -> None:
     """Calculate the gram matrix for inputs with positional indices and add it to the global.
 
@@ -124,8 +179,9 @@ def gram_pre_forward_hook_fn(
     assert isinstance(data_key, str), "data_key must be a string."
 
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+    in_acts_centered = in_acts @ Gamma_matrix if Gamma_matrix is not None else in_acts
 
-    gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
+    gram_matrix = calc_gram_matrix(in_acts_centered, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 

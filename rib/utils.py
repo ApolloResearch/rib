@@ -23,6 +23,11 @@ REPO_ROOT = (
 )
 
 
+def to_root_path(path: Union[str, Path]):
+    """Converts relative paths to absolute ones, assuming they are relative to the rib root."""
+    return Path(path) if Path(path).is_absolute() else Path(REPO_ROOT / path)
+
+
 @torch.inference_mode()
 def eval_model_accuracy(
     hooked_model: "HookedModel",

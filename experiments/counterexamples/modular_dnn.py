@@ -18,11 +18,11 @@ from rib.data_accumulator import collect_gram_matrices, collect_interaction_edge
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 
-from rib.data_accumulator_november_A import collect_gram_matrices as collect_gram_matrices_A, collect_interaction_edges as collect_interaction_edges_A
-from rib.interaction_algos_november_A import calculate_interaction_rotations as calculate_interaction_rotations_A
+# from rib.data_accumulator_november_A import collect_gram_matrices as collect_gram_matrices_A, collect_interaction_edges as collect_interaction_edges_A
+# from rib.interaction_algos_november_A import calculate_interaction_rotations as calculate_interaction_rotations_A
 
 from rib.log import logger
-from rib.models import MLP, MLP_A
+from rib.models import MLP#, MLP_A
 from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, load_config, check_outfile_overwrite, set_seed
 from dataclasses import dataclass, asdict
@@ -40,7 +40,7 @@ def random_block_diagonal_matrix(n, k, variances = None, dtype = torch.float32):
     # Zero out the blocks
     A[:k, :k] =  variances[0] * torch.randn(k,k,dtype=dtype)
     if k < n:
-        A[k:n, k:n] = variances[1] * torch.randn(k,k,dtype=dtype)
+        A[k:n, k:n] = variances[1] * torch.randn(n-k,n-k,dtype=dtype)
 
     return A
 
@@ -61,25 +61,25 @@ class BlockDiagonalDNN(MLP):
                 self.layers[i].b = nn.Parameter(bias * torch.ones(n,dtype=dtype))
         self.fold_bias()
         
-class BlockDiagonalDNN_A(MLP_A):
-    def __init__(self, layers = 4, n=4, k=2, dtype = torch.float32, bias = None, activation_fn = 'relu', variances = None):
-        super(BlockDiagonalDNN_A, self).__init__(hidden_sizes = [n] * layers, 
-                                       input_size = n, output_size = n,
-                                       dtype = dtype, fold_bias = False,
-                                       activation_fn=activation_fn)
-        # self.dtype = dtype
-        # # Define layers
-        # self.fc = nn.ModuleList([nn.Linear(n, n,dtype=self.dtype) for _ in range(layers)])
+# class BlockDiagonalDNN_A(MLP_A):
+#     def __init__(self, layers = 4, n=4, k=2, dtype = torch.float32, bias = None, activation_fn = 'relu', variances = None):
+#         super(BlockDiagonalDNN_A, self).__init__(hidden_sizes = [n] * layers, 
+#                                        input_size = n, output_size = n,
+#                                        dtype = dtype, fold_bias = False,
+#                                        activation_fn=activation_fn)
+#         # self.dtype = dtype
+#         # # Define layers
+#         # self.fc = nn.ModuleList([nn.Linear(n, n,dtype=self.dtype) for _ in range(layers)])
 
-        # Hardcode weights and biases
-        for i in range(layers+1):
-            self.layers[i].W = nn.Parameter(random_block_diagonal_matrix(n, k, variances = variances, dtype=dtype))
-            if bias is not None:
-                self.layers[i].b = nn.Parameter(bias * torch.ones(n,dtype=dtype))
-        self.fold_bias()
+#         # Hardcode weights and biases
+#         for i in range(layers+1):
+#             self.layers[i].W = nn.Parameter(random_block_diagonal_matrix(n, k, variances = variances, dtype=dtype))
+#             if bias is not None:
+#                 self.layers[i].b = nn.Parameter(bias * torch.ones(n,dtype=dtype))
+#         self.fold_bias()
 
-# print(test.layers[0].W)
-#%%
+# # print(test.layers[0].W)
+# #%%
     
 
 class RandomVectorDataset(Dataset):
@@ -141,7 +141,9 @@ def get_node_layers(n_layers: int) -> list[str]:
 def cs_to_identity(Cs: list[InteractionRotation]):
     """Set all the Cs to identity matrices."""
     for C_info in Cs:
-        print(C_info.C.shape, C_info.node_layer_name)
+        # print(C_info.C.shape, C_info.node_layer_name)
+        if C_info.C is None:
+            continue
         if C_info.C.shape[0] != C_info.C.shape[1]:
             print("Warning: C is not square.")
             new_C = torch.eye(len(C_info.C), dtype=C_info.C.dtype, device=C_info.C.device)
@@ -156,6 +158,8 @@ def cs_to_identity(Cs: list[InteractionRotation]):
 def cs_to_us(Cs: list[InteractionRotation], Us: list):
     """Replace Cs with Us, the matrices which diagonalise the gram matrix of functions in each layer."""
     for C_info, U_info in zip(Cs, Us):
+        if U_info.U is None:
+            continue
         print(C_info.C.shape, C_info.node_layer_name)
         C_info.C = U_info.U
         C_info.C_pinv = U_info.U.T
@@ -182,10 +186,10 @@ class Config:
                      seed: int = None,
                      truncation_threshold: float = 1e-30,
                      n_intervals: int = 0,
-                     dtype: type = torch.float32,
+                     dtype: type = torch.float64,
                      node_layers: list = None,
                      datatype: str = 'random',
-                     rotate_final_node_layer: bool = True,
+                     rotate_final_node_layer: bool = False,
                      force: bool = True,
                      hardcode_bias = None,
                      activation_fn = 'relu',
@@ -252,6 +256,8 @@ def main(config: Config) -> None:
         exp_name += f'_variances{config.variances[0]}_{config.variances[1]}'
     if config.data_variances is not None:
         exp_name += f'_data_variances{config.data_variances[0]}_{config.data_variances[1]}'
+    if not config.rotate_final_node_layer:
+        exp_name += '_final_layer_fixed'
     assert config.datatype in ['strongcorrelated', 'random']
     # assert config.basis in ['rib', 'pca', 'neuron']
 
@@ -294,14 +300,14 @@ def main(config: Config) -> None:
         collect_output_gram=collect_output_gram,
     )
     
-    gram_matrices_A = collect_gram_matrices_A(
-        hooked_model=hooked_mlp,
-        module_names=non_output_node_layers,
-        data_loader=dataloader,
-        dtype=dtype,
-        device=device,
-        collect_output_gram=collect_output_gram,
-    )
+    # gram_matrices_A = collect_gram_matrices_A(
+    #     hooked_model=hooked_mlp,
+    #     module_names=non_output_node_layers,
+    #     data_loader=dataloader,
+    #     dtype=dtype,
+    #     device=device,
+    #     collect_output_gram=collect_output_gram,
+    # )
 
     Cs, Us = calculate_interaction_rotations(
         gram_matrices=gram_matrices,
@@ -316,45 +322,45 @@ def main(config: Config) -> None:
         rotate_final_node_layer=config.rotate_final_node_layer,
     )
     
-    Cs_A, Us_A = calculate_interaction_rotations_A(
-        gram_matrices=gram_matrices_A,
-        section_names=non_output_node_layers,
-        node_layers=node_layers,
-        hooked_model=hooked_mlp,
-        data_loader=dataloader,
-        dtype=dtype,
-        device=device,
-        n_intervals=config.n_intervals,
-        truncation_threshold=config.truncation_threshold,
-        rotate_final_node_layer=config.rotate_final_node_layer,
-    )
+    # Cs_A, Us_A = calculate_interaction_rotations_A(
+    #     gram_matrices=gram_matrices_A,
+    #     section_names=non_output_node_layers,
+    #     node_layers=node_layers,
+    #     hooked_model=hooked_mlp,
+    #     data_loader=dataloader,
+    #     dtype=dtype,
+    #     device=device,
+    #     n_intervals=config.n_intervals,
+    #     truncation_threshold=config.truncation_threshold,
+    #     rotate_final_node_layer=config.rotate_final_node_layer,
+    # )
     
     E_hats_rib = collect_interaction_edges(
         Cs=Cs,
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
-        section_names=node_layers,
+        section_names=non_output_node_layers,
         data_loader=dataloader,
         dtype=dtype,
         device=device,
     )
     
-    E_hats_rib_A = collect_interaction_edges_A(
-        Cs=Cs_A,
-        hooked_model=hooked_mlp,
-        n_intervals=config.n_intervals,
-        section_names=node_layers,
-        data_loader=dataloader,
-        dtype=dtype,
-        device=device,
-    )
+    # E_hats_rib_A = collect_interaction_edges_A(
+    #     Cs=Cs_A,
+    #     hooked_model=hooked_mlp,
+    #     n_intervals=config.n_intervals,
+    #     section_names=node_layers,
+    #     data_loader=dataloader,
+    #     dtype=dtype,
+    #     device=device,
+    # )
     
     neuron_cs = cs_to_identity(Cs)
     E_hats_neuron = collect_interaction_edges(
         Cs=neuron_cs,
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
-        section_names=node_layers,
+        section_names=non_output_node_layers,
         data_loader=dataloader,
         dtype=dtype,
         device=device,
@@ -364,7 +370,7 @@ def main(config: Config) -> None:
         Cs=pca_cs,
         hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
-        section_names=node_layers,
+        section_names=non_output_node_layers,
         data_loader=dataloader,
         dtype=dtype,
         device=device,
@@ -382,27 +388,27 @@ def main(config: Config) -> None:
         info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
         interaction_rotations.append(info_dict)
     
-    interaction_rotations_A = []
-    for C_info in Cs_A:
-        info_dict = asdict(C_info)
-        info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
-        info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
-        interaction_rotations_A.append(info_dict)
+    # interaction_rotations_A = []
+    # for C_info in Cs_A:
+    #     info_dict = asdict(C_info)
+    #     info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
+    #     info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
+    #     interaction_rotations_A.append(info_dict)
 
     eigenvectors = [asdict(U_info) for U_info in Us]
     
-    eigenvectors_A = [asdict(U_info) for U_info in Us_A]
+    # eigenvectors_A = [asdict(U_info) for U_info in Us_A]
 
     results = {
         "exp_name": exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
-        "gram_matrices_A": {k: v.cpu() for k, v in gram_matrices_A.items()},
+        # "gram_matrices_A": {k: v.cpu() for k, v in gram_matrices_A.items()},
         "interaction_rotations": interaction_rotations,
-        "interaction_rotations_A": interaction_rotations_A,
+        # "interaction_rotations_A": interaction_rotations_A,
         "eigenvectors": eigenvectors,
-        "eigenvectors_A": eigenvectors_A,
+        # "eigenvectors_A": eigenvectors_A,
         "rib_edges": [(module, E_hats_rib[module].cpu()) for module in E_hats_rib],
-        "rib_edges_A": [(module, E_hats_rib_A[module].cpu()) for module in E_hats_rib_A],
+        # "rib_edges_A": [(module, E_hats_rib_A[module].cpu()) for module in E_hats_rib_A],
         "neuron_edges": [(module, E_hats_neuron[module].cpu()) for module in E_hats_neuron],
         "pca_edges": [(module, E_hats_pca[module].cpu()) for module in E_hats_pca],
         "model_config_dict": config.to_dict(),
@@ -444,14 +450,14 @@ def main(config: Config) -> None:
         out_file=out_file_graph,
     )
     
-    #make rib graph november norm A
-    plot_interaction_graph(
-        raw_edges=results["rib_edges_A"],
-        layer_names=layer_names,
-        exp_name=results["exp_name"],
-        nodes_per_layer=nodes_per_layer,
-        out_file=out_file_graph_A,
-    )
+    # #make rib graph november norm A
+    # plot_interaction_graph(
+    #     raw_edges=results["rib_edges_A"],
+    #     layer_names=layer_names,
+    #     exp_name=results["exp_name"],
+    #     nodes_per_layer=nodes_per_layer,
+    #     out_file=out_file_graph_A,
+    # )
 
     #make graph of model weights
     plot_interaction_graph(

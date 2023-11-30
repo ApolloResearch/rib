@@ -54,10 +54,7 @@ class MLP(nn.Module):
             but will append a 1 to intermediate activations between layers.
     """
 
-    def __init__(
-        self,
-        config: MLPConfig,
-    ):
+    def __init__(self, config: MLPConfig):
         super().__init__()
 
         self.hidden_sizes = config.hidden_sizes if config.hidden_sizes is not None else []

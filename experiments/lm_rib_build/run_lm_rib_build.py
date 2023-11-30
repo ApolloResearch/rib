@@ -137,7 +137,7 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis.",
     )
@@ -350,7 +350,7 @@ def main(
             n_intervals=config.n_intervals,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
-            ig_formula=config.ig_formula,
+            basis_formula=config.basis_formula,
         )
         # Cs used to calculate edges
         edge_Cs = Cs

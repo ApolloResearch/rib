@@ -205,7 +205,7 @@ def test_pythia_14m_build_graph():
         ("(1-0)*alpha", "squared"),
     ],
 )
-def test_mnist_build_graph_old_basis_old_attribution(basis_formula, edge_formula):
+def test_mnist_build_graph(basis_formula, edge_formula):
     dtype_str = "float32"
     # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
     atol = 1e-6

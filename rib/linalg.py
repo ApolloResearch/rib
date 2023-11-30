@@ -323,7 +323,11 @@ def integrated_gradient_trapezoidal_jacobian(
         # This term is the content of the brackets bring squared, i.e. the sum over tprime
         inner_token_sums = (
             torch.zeros(
-                batch_size, out_pos_size, out_hidden_size_comb_trunc, in_hidden_size_comb_trunc
+                batch_size,
+                out_pos_size,
+                out_hidden_size_comb_trunc,
+                in_hidden_size_comb_trunc,
+                device=f_in_hat.device,
             )
             if has_pos
             else torch.zeros(batch_size, out_hidden_size_comb_trunc, in_hidden_size_comb_trunc)
@@ -372,9 +376,7 @@ def integrated_gradient_trapezoidal_jacobian(
                             )
                             # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
                             # in equation (3.27)
-                            inner_token_sums[:, token_index, out_dim, :] -= inner_token_sum.to(
-                                inner_token_sums.device
-                            )
+                            inner_token_sums[:, token_index, out_dim, :] -= inner_token_sum
                 else:
                     grad = torch.autograd.grad(
                         f_out_alpha_hat[:, out_dim].sum(dim=0),

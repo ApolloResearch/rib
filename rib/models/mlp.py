@@ -99,6 +99,10 @@ class MLP(nn.Module):
     ):
         super().__init__()
 
+        self.hidden_sizes = hidden_sizes
+        self.input_size = input_size
+        self.output_size = output_size
+
         if hidden_sizes is None:
             hidden_sizes = []
 

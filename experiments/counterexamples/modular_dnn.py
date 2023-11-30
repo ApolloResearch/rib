@@ -188,6 +188,8 @@ def cs_to_identity(Cs: list[InteractionRotation]):
     """Set all the Cs to identity matrices."""
     for C_info in Cs:
         # print(C_info.C.shape, C_info.node_layer_name)
+        if C_info.C is None:
+            continue
         if C_info.C.shape[0] != C_info.C.shape[1]:
             print("Warning: C is not square.")
             new_C = torch.eye(len(C_info.C), dtype=C_info.C.dtype, device=C_info.C.device)
@@ -213,6 +215,8 @@ def cs_to_identity(Cs: list[InteractionRotation]):
 def cs_to_us(Cs: list[InteractionRotation], Us: list):
     """Replace Cs with Us, the matrices which diagonalise the gram matrix of functions in each layer."""
     for C_info, U_info in zip(Cs, Us):
+        if U_info.U is None:
+            continue
         # print(C_info.C.shape, C_info.node_layer_name)
         C_info.C = U_info.U
         C_info.C_pinv = U_info.U.T
@@ -243,12 +247,12 @@ class Config:
         dataset_size: int = 128,
         batch_size: int = 32,
         seed: int = None,
-        truncation_threshold: float = 1e-20,
+        truncation_threshold: float = 1e-5,
         n_intervals: int = 0,
-        dtype: str = "float32",
+        dtype: str = "float64",
         node_layers: list = None,
         datatype: str = "random",
-        rotate_final_node_layer: bool = True,
+        rotate_final_node_layer: bool = False,
         force: bool = True,
         hardcode_bias=None,
         activation_fn="relu",
@@ -380,6 +384,8 @@ def main(config: Config) -> None:
         exp_name += f"_data_variances{config.data_variances[0]}_{config.data_variances[1]}"
     if config.column_equal:
         exp_name += "_column_equal"
+    if not config.rotate_final_node_layer:
+        exp_name += "_final_layer_fixed"
     assert config.datatype in ["strongcorrelated", "random"]
     assert all([method in ["O", "A", "B"] for method in config.ribmethods]), "Invalid ribmethods"
 

@@ -394,7 +394,6 @@ def interaction_edge_pre_forward_hook_fn(
             dataset_size=dataset_size,
             n_intervals=n_intervals,
             variable_position_dimension=variable_position_dimension,
-            squared=True,
         )
     else:
         raise ValueError(

@@ -23,7 +23,8 @@ from rib.types import TORCH_DTYPES
 from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 
 # %%
-METHOD_NAMES = {"O": "functional", "A": "squared", "B": "november_b"}
+METHOD_NAMES = {"O": "functional", "A": "squared"}
+BASIS_NAMES = {'O': '(1-0)*alpha', 'A': '(1-alpha)^2'}
 
 
 def random_block_diagonal_matrix(n, k, variances=None, dtype=torch.float32):
@@ -261,7 +262,7 @@ class Config:
         variances=None,
         data_variances=None,
         binarise=False,
-        ribmethods: str = "OA",
+        ribmethods: list = ['OO', 'OA', 'AO', 'AA'],
         column_equal: bool = False,
     ):
         """
@@ -284,8 +285,8 @@ class Config:
         :param variances: The variances to use for the neural network layers.
         :param data_variances: The variances to use for the dataset.
         :param binarise: Whether to binarise the interaction edges.
-        :param ribmethods: The methods to use for calculating the interaction edges.
-            If O is included, the October method is used. If A is included, new_norm_november_A is used. If B is included, new_norm_november_B is used.
+        :param ribmethods: The methods to use for calculating the interaction bases and edges. Basis first, then edge.
+            If O is included, the October method is used. If A is included, new_norm_november_A is used.
         """
         self.exp_name = exp_name
         self.n = n
@@ -336,7 +337,7 @@ class Config:
 #     :param data_variances: The variances to use for the dataset.
 #     :param binarise: Whether to binarise the interaction edges.
 #     :param ribmethods: The methods to use for calculating the interaction edges.
-#         If O is included, the October method is used. If A is included, new_norm_november_A is used. If B is included, new_norm_november_B is used.
+#         If O is included, the October method is used. If A is included, new_norm_november_A is used.
 #     """
 #     exp_name: str = "small_modular_dnn"
 #     n: int = 4
@@ -388,7 +389,7 @@ def main(config: Config) -> None:
     if not config.rotate_final_node_layer:
         exp_name += "_final_layer_fixed"
     assert config.datatype in ["strongcorrelated", "random"]
-    assert all([method in ["O", "A", "B"] for method in config.ribmethods]), "Invalid ribmethods"
+    assert all([m in ["O", "A"] for method in config.ribmethods for m in method]), "Invalid ribmethods"
 
     out_dir = Path(__file__).parent / "results"
     out_file = out_dir / exp_name / "rib_graph.pt"
@@ -455,35 +456,23 @@ def main(config: Config) -> None:
     interaction_rotations = {}
     eigenvectors = {}
     for method in config.ribmethods:
-        method_name = METHOD_NAMES[method]
-        if method == "O":
-            Cs[method_name], Us[method_name] = calculate_interaction_rotations(
-                gram_matrices=gram_matrices,
-                section_names=non_output_node_layers,
-                node_layers=node_layers,
-                hooked_model=hooked_mlp,
-                data_loader=dataloader,
-                dtype=dtype,
-                device=device,
-                n_intervals=config.n_intervals,
-                truncation_threshold=config.truncation_threshold,
-                rotate_final_node_layer=config.rotate_final_node_layer,
-                basis_formula="(1-alpha)^2",
-            )
-        if method == "A":
-            Cs[method_name], Us[method_name] = calculate_interaction_rotations(
-                gram_matrices=gram_matrices,
-                section_names=non_output_node_layers,
-                node_layers=node_layers,
-                hooked_model=hooked_mlp,
-                data_loader=dataloader,
-                dtype=dtype,
-                device=device,
-                n_intervals=config.n_intervals,
-                truncation_threshold=config.truncation_threshold,
-                rotate_final_node_layer=config.rotate_final_node_layer,
-                basis_formula="(1-0)*alpha",
-            )
+        attr_name = METHOD_NAMES[method[0]]
+        basis = BASIS_NAMES[method[1]]
+        method_name = f"_Basis_{basis}_Attr_{attr_name}"
+        
+        Cs[method_name], Us[method_name] = calculate_interaction_rotations(
+            gram_matrices=gram_matrices,
+            section_names=non_output_node_layers,
+            node_layers=node_layers,
+            hooked_model=hooked_mlp,
+            data_loader=dataloader,
+            dtype=dtype,
+            device=device,
+            n_intervals=config.n_intervals,
+            truncation_threshold=config.truncation_threshold,
+            rotate_final_node_layer=config.rotate_final_node_layer,
+            basis_formula=basis,
+        )
 
         E_hats_rib[method_name] = collect_interaction_edges(
             Cs=Cs[method_name],
@@ -493,7 +482,7 @@ def main(config: Config) -> None:
             data_loader=dataloader,
             dtype=dtype,
             device=device,
-            edge_formula=method_name,
+            edge_formula=attr_name,
         )
 
         neuron_cs = cs_to_identity(Cs[method_name])
@@ -505,7 +494,7 @@ def main(config: Config) -> None:
             data_loader=dataloader,
             dtype=dtype,
             device=device,
-            edge_formula=method_name,
+            edge_formula=attr_name,
         )
         print(
             "neuron:", method_name, [torch.all(t >= 0) for t in E_hats_neuron[method_name].values()]
@@ -520,7 +509,7 @@ def main(config: Config) -> None:
             data_loader=dataloader,
             dtype=dtype,
             device=device,
-            edge_formula=method_name,
+            edge_formula=attr_name,
         )
         if config.binarise:
             E_hats_binary_rib[method_name] = binarise(E_hats_rib[method_name])
@@ -588,7 +577,10 @@ def main(config: Config) -> None:
     )
 
     for method in config.ribmethods:
-        method_name = METHOD_NAMES[method]
+        attr_name = METHOD_NAMES[method[0]]
+        basis = BASIS_NAMES[method[1]]
+        method_name = f"_Basis_{basis}_Attr_{attr_name}"
+        
         out_file_graph = parent_dir / f"rib_graph_{method_name}.png"
         out_file_neuron_basis = parent_dir / f"neuron_basis_graph_{method_name}.png"
         out_file_pca = parent_dir / f"pca_graph_{method_name}.png"

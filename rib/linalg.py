@@ -425,7 +425,7 @@ def integrated_gradient_trapezoidal_norm(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
-    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
 ) -> Float[Tensor, "... in_hidden_combined"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
     following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
@@ -443,7 +443,7 @@ def integrated_gradient_trapezoidal_norm(
         C_out: The truncated interaction rotation matrix for the module's outputs.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        ig_formula: The formula to use for the integrated gradient. Must be one of
+        basis_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
             latter is a new (November) version that should be used from now on. The latter makes
             sense especially in light of the new attribution (edge_formula="squared") but is
@@ -458,7 +458,7 @@ def integrated_gradient_trapezoidal_norm(
             if isinstance(output_const, torch.Tensor)
             else torch.cat(output_const, dim=-1)
         )
-        if ig_formula == "(1-0)*alpha":
+        if basis_formula == "(1-0)*alpha":
             output_zero = module(*tuple(torch.zeros_like(x) for x in inputs))
             # Concatenate the outputs over the hidden dimension
             out_acts_zero = (
@@ -486,7 +486,7 @@ def integrated_gradient_trapezoidal_norm(
             else torch.cat(output_alpha, dim=-1)
         )
 
-        if ig_formula == "(1-alpha)^2":
+        if basis_formula == "(1-alpha)^2":
             # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
             f_hat_1_alpha = (
                 (out_acts_const - out_acts_alpha) @ C_out
@@ -499,7 +499,7 @@ def integrated_gradient_trapezoidal_norm(
             # Note the minus sign here. In the paper this minus is in front of the integral, but
             # for generality we put it here.
             f_hat_norm = -(f_hat_1_alpha**2).sum()
-        elif ig_formula == "(1-0)*alpha":
+        elif basis_formula == "(1-0)*alpha":
             f_hat_alpha = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha
             f_hat_1_0 = (
                 (out_acts_const - out_acts_zero) @ C_out
@@ -509,7 +509,7 @@ def integrated_gradient_trapezoidal_norm(
             f_hat_norm = (f_hat_alpha * f_hat_1_0).sum()
         else:
             raise ValueError(
-                f"Unexpected integrated gradient formula {ig_formula} != '(1-alpha)^2' or '(1-0)*alpha'"
+                f"Unexpected integrated gradient formula {basis_formula} != '(1-alpha)^2' or '(1-0)*alpha'"
             )
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors

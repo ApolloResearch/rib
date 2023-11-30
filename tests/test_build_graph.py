@@ -129,7 +129,7 @@ def test_modular_arithmetic_build_graph_old_basis_and_old_attribution():
     dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null
-    ig_formula: "(1-alpha)^2"
+    basis_formula: "(1-alpha)^2"
     edge_formula: "functional"
     """
     config_dict = yaml.safe_load(config_str)
@@ -165,7 +165,7 @@ def test_modular_arithmetic_build_graph_new_basis_and_old_attribution():
     dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null
-    ig_formula: "(1-0)*alpha"
+    basis_formula: "(1-0)*alpha"
     edge_formula: "functional"
     """
     config_dict = yaml.safe_load(config_str)
@@ -201,7 +201,7 @@ def test_modular_arithmetic_build_graph_old_basis_and_old_attribution():
     dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null
-    ig_formula: "(1-alpha)^2"
+    basis_formula: "(1-alpha)^2"
     edge_formula: "functional"
     """
     config_dict = yaml.safe_load(config_str)
@@ -237,7 +237,7 @@ def test_modular_arithmetic_build_graph_new_basis_and_new_attribution():
     dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null
-    ig_formula: "(1-0)*alpha"
+    basis_formula: "(1-0)*alpha"
     edge_formula: "squared"
     """
     config_dict = yaml.safe_load(config_str)
@@ -273,7 +273,7 @@ def test_modular_arithmetic_build_graph_new_basis_and_new_attribution():
     dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null
-    ig_formula: "(1-0)*alpha"
+    basis_formula: "(1-0)*alpha"
     edge_formula: "squared"
     """
     config_dict = yaml.safe_load(config_str)
@@ -343,7 +343,7 @@ def test_mnist_build_graph_old_basis_old_attribution():
         - layers.2
         - output
     out_dir: null
-    ig_formula: "(1-alpha)^2"
+    basis_formula: "(1-alpha)^2"
     edge_formula: "functional"
     """
 
@@ -378,7 +378,7 @@ def test_mnist_build_graph_new_basis_old_attribution():
         - layers.2
         - output
     out_dir: null
-    ig_formula: "(1-0)*alpha"
+    basis_formula: "(1-0)*alpha"
     edge_formula: "functional"
     """
 
@@ -413,7 +413,7 @@ def test_mnist_build_graph_new_basis_and_new_attribution():
         - layers.2
         - output
     out_dir: null
-    ig_formula: "(1-0)*alpha"
+    basis_formula: "(1-0)*alpha"
     edge_formula: "squared"
     """
 
@@ -448,7 +448,7 @@ def test_mnist_build_graph_old_basis_and_new_attribution():
         - layers.2
         - output
     out_dir: null
-    ig_formula: "(1-alpha)^2"
+    basis_formula: "(1-alpha)^2"
     edge_formula: "squared"
     """
 

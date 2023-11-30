@@ -136,7 +136,7 @@ def collect_M_dash_and_Lambda_dash(
     hook_name: Optional[str] = None,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
-    ig_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -159,7 +159,7 @@ def collect_M_dash_and_Lambda_dash(
             Lambda_dash matrix. Does not affect the output, only used for the einsum within
             M_dash_and_Lambda_dash_pre_forward_hook_fn. Needs to be float64 on CPU but float32 was
             fine on GPU. Defaults to float64.
-        ig_formula: The formula to use for the integrated gradient. Must be one of
+        basis_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
             latter is a new (November) version that should be used from now on. The latter makes
             sense especially in light of the new attribution (edge_formula="squared") but is
@@ -181,7 +181,7 @@ def collect_M_dash_and_Lambda_dash(
             "dataset_size": len(data_loader.dataset),  # type: ignore
             "M_dtype": M_dtype,
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
-            "ig_formula": ig_formula,
+            "basis_formula": basis_formula,
         },
     )
 

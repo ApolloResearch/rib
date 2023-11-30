@@ -97,7 +97,7 @@ class TestPythiaFloatingPointErrors:
         if not rib_results["float32"]["config"]["batch_size"] > 1:
             pytest.skip("This test does not work with batch size 1.")
 
-        if rib_results["float32"]["config"]["ig_formula"] == "(1-0)*alpha":
+        if rib_results["float32"]["config"]["basis_formula"] == "(1-0)*alpha":
             pytest.skip('This test does not work with the new "(1-0)*alpha" basis.')
 
         for node_layer_index in range(len(rib_results["float32"]["interaction_rotations"])):

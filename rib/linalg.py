@@ -232,6 +232,8 @@ def integrated_gradient_trapezoidal_jacobian_functional(
     # Ensure inputs require grads
     f_in_hat.requires_grad_(True)
 
+    einsum_pattern = "bpj,bpj->j" if f_in_hat.ndim == 3 else "bj,bj->j"
+
     # Prepare integral
     alphas, interval_size = _calc_integration_intervals(n_intervals)
 
@@ -246,7 +248,6 @@ def integrated_gradient_trapezoidal_jacobian_functional(
         # (unless we're taking a point estimate at alpha=0.5)
         scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
 
-        einsum_pattern = "bpj,bpj->j" if f_in_hat.ndim == 3 else "bj,bj->j"
         # Normalize by the dataset size and the number of positions (if the input has a position dim)
         normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
         # Need to define alpha_f_in_hat for autograd

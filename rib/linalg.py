@@ -137,6 +137,40 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
     return res
 
 
+def module_hat(
+    f_in_hat: Float[Tensor, "... in_hidden_trunc"],
+    module: torch.nn.Module,
+    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
+    in_tuple_dims: list[int],
+):
+    """Run a module in the RIB basis, f_hat^{l} --> f_hat^{l+1}.
+
+    This converts the input f_in_hat to f_in (using C_in_pinv), splits it into a tuple (using
+    in_hidden_dims), runs the module, concatenates the outputs, and converts it back to f_out_hat
+    (using C_out).
+
+    Args:
+        module: The module to run.
+        f_in_hat: The input in the RIB basis.
+        C_in_pinv: The pseudo-inverse of input RIB rotation.
+        C_out: The output RIB rotation.
+        in_hidden_dims: The dimensions of the input tuple
+
+
+    Returns:
+        f_out_hat: The module output in the RIB basis.
+    """
+    f_in: Float[Tensor, "... in_hidden"] = f_in_hat @ C_in_pinv
+    f_in_tuple = torch.split(f_in, in_tuple_dims, dim=-1)
+    f_out_tuple = module(*f_in_tuple)
+    f_out = f_out_tuple if isinstance(f_out_tuple, torch.Tensor) else torch.cat(f_out_tuple, dim=-1)
+
+    f_out_hat: Float[Tensor, "... out_hidden_trunc"] = f_out @ C_out if C_out is not None else f_out
+
+    return f_out_hat
+
+
 def _calc_integration_intervals(
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
@@ -175,40 +209,6 @@ def _calc_integration_intervals(
             1,
         ), f"n_intervals * interval_size ({n_intervals * interval_size}) != 1"
     return alphas, interval_size
-
-
-def module_hat(
-    f_in_hat: Float[Tensor, "... in_hidden_trunc"],
-    module: torch.nn.Module,
-    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
-    in_tuple_dims: list[int],
-):
-    """Run a module in the RIB basis, f_hat^{l} --> f_hat^{l+1}.
-
-    This converts the input f_in_hat to f_in (using C_in_pinv), splits it into a tuple (using
-    in_hidden_dims), runs the module, concatenates the outputs, and converts it back to f_out_hat
-    (using C_out).
-
-    Args:
-        module: The module to run.
-        f_in_hat: The input in the RIB basis.
-        C_in_pinv: The pseudo-inverse of input RIB rotation.
-        C_out: The output RIB rotation.
-        in_hidden_dims: The dimensions of the input tuple
-
-
-    Returns:
-        f_out_hat: The module output in the RIB basis.
-    """
-    f_in: Float[Tensor, "... in_hidden"] = f_in_hat @ C_in_pinv
-    f_in_tuple = torch.split(f_in, in_tuple_dims, dim=-1)
-    f_out_tuple = module(*f_in_tuple)
-    f_out = f_out_tuple if isinstance(f_out_tuple, torch.Tensor) else torch.cat(f_out_tuple, dim=-1)
-
-    f_out_hat: Float[Tensor, "... out_hidden_trunc"] = f_out @ C_out if C_out is not None else f_out
-
-    return f_out_hat
 
 
 def integrated_gradient_trapezoidal_jacobian_functional(

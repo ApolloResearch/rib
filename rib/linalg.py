@@ -328,9 +328,6 @@ def integrated_gradient_trapezoidal_jacobian_squared(
                 f_out_hat_const = module_hat(f_in_hat)
             out_pos_size = f_out_hat_const.shape[1]
 
-    # Inner sum in Lucius' new formula is over tprime (p) only
-    einsum_pattern = "bpj,bpj->bj" if has_pos else "bj,bj->bj"
-
     # Accumulate integral results for all x (batch) and t (out position) values,
     # store values because we need to square the integral result before summing
     # This term is the content of the brackets before the square, i.e. the sum over tprime
@@ -382,7 +379,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
                     # Sum over tprime (p, input pos) as per Lucius' formula (A.18)
                     with torch.inference_mode():
                         inner_token_sum = torch.einsum(
-                            einsum_pattern, i_grad * interval_size * scaler, f_in_hat
+                            "bpj,bpj->bj", i_grad * interval_size * scaler, f_in_hat
                         )
                         # We have a minus sign in front of the IG integral
                         inner_token_sums[:, token_index, out_dim, :] -= inner_token_sum
@@ -400,7 +397,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
                 with torch.inference_mode():
                     # The einsum is actually just an elementwise multiplication here
                     inner_token_sum = torch.einsum(
-                        einsum_pattern,
+                        "bj,bj->bj",
                         i_grad,
                         f_in_hat,
                     ).to(inner_token_sums.device)

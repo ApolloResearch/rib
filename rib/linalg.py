@@ -139,23 +139,23 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
 
 def module_hat(
     f_in_hat: Float[Tensor, "... in_hidden_trunc"],
+    in_tuple_dims: list[int],
     module: torch.nn.Module,
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
-    in_tuple_dims: list[int],
-):
+) -> Float[Tensor, "... out_hidden_trunc"]:
     """Run a module in the RIB basis, f_hat^{l} --> f_hat^{l+1}.
 
     This converts the input f_in_hat to f_in (using C_in_pinv), splits it into a tuple (using
-    in_hidden_dims), runs the module, concatenates the outputs, and converts it back to f_out_hat
+    in_tuple_dims), runs the module, concatenates the outputs, and converts it back to f_out_hat
     (using C_out).
 
     Args:
         module: The module to run.
+        in_tuple_dims: The dimensions of the input tuple
         f_in_hat: The input in the RIB basis.
         C_in_pinv: The pseudo-inverse of input RIB rotation.
         C_out: The output RIB rotation.
-        in_hidden_dims: The dimensions of the input tuple
 
 
     Returns:
@@ -212,8 +212,11 @@ def _calc_integration_intervals(
 
 
 def integrated_gradient_trapezoidal_jacobian_functional(
-    module_hat: Callable,
+    module_hat: Callable[
+        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
+    ],
     f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
+    in_tuple_dims: list[int],
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
@@ -221,8 +224,10 @@ def integrated_gradient_trapezoidal_jacobian_functional(
     """Calculate the interaction attribution (edges) for module_hat with inputs f_in_hat.
 
     Args:
-        module_hat: The RIB-wrapped module to calculate edges for.
+        module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
+            in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
         f_in_hat: The inputs to the module. May or may not include a position dimension.
+        in_tuple_dims: The final dimensions of the inputs to the module.
         jac_out: The output of the jacobian calculation. This is modified in-place.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
@@ -239,7 +244,7 @@ def integrated_gradient_trapezoidal_jacobian_functional(
 
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
-        f_out_hat_const = module_hat(f_in_hat)
+        f_out_hat_const = module_hat(f_in_hat, in_tuple_dims)
 
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
@@ -252,7 +257,7 @@ def integrated_gradient_trapezoidal_jacobian_functional(
         normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
         # Need to define alpha_f_in_hat for autograd
         alpha_f_in_hat = alpha * f_in_hat
-        f_out_hat_alpha = module_hat(alpha_f_in_hat)
+        f_out_hat_alpha = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = (
             f_out_hat_const - f_out_hat_alpha
@@ -288,8 +293,11 @@ def integrated_gradient_trapezoidal_jacobian_functional(
 
 
 def integrated_gradient_trapezoidal_jacobian_squared(
-    module_hat: Callable,
+    module_hat: Callable[
+        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
+    ],
     f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
+    in_tuple_dims: list[int],
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
@@ -297,8 +305,10 @@ def integrated_gradient_trapezoidal_jacobian_squared(
     """Calculate the interaction attribution (edges) for module_hat with inputs f_in_hat.
 
     Args:
-        module_hat: The RIB-wrapped module to calculate edges for.
+        module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
+            in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
         f_in_hat: The inputs to the module. May or may not include a position dimension.
+        in_tuple_dims: The final dimensions of the inputs to the module.
         jac_out: The output of the jacobian calculation. This is modified in-place.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
@@ -317,7 +327,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
     if has_pos:
         # Just run the model to see what the output pos size is
         with torch.inference_mode():
-            f_out_hat_const = module_hat(f_in_hat)
+            f_out_hat_const = module_hat(f_in_hat, in_tuple_dims)
         out_pos_size = f_out_hat_const.shape[1]
 
     # Accumulate integral results for all x (batch) and t (out position) values,
@@ -345,7 +355,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
 
         # We have to compute inputs from f_hat to make autograd work
         alpha_f_in_hat = alpha * f_in_hat
-        f_out_alpha_hat = module_hat(alpha_f_in_hat)
+        f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 

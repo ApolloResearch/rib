@@ -300,20 +300,24 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
     in_tensor = torch.randn(batch_size, in_hidden, requires_grad=True)
 
     linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+    # Need to account for module_hat taking both inputs and an in_tuple_dims argument
+    linear_partial = lambda x, _: linear(x)
 
     result_point_estimate: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
 
     integrated_gradient_trapezoidal_jacobian(
-        module_hat=linear,
+        module_hat=linear_partial,
         f_in_hat=in_tensor,
+        in_tuple_dims=(in_hidden,),
         n_intervals=0,
         jac_out=result_point_estimate,
         dataset_size=batch_size,
     )
     result_1: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
     integrated_gradient_trapezoidal_jacobian(
-        module_hat=linear,
+        module_hat=linear_partial,
         f_in_hat=in_tensor,
+        in_tuple_dims=(in_hidden,),
         n_intervals=1,
         jac_out=result_1,
         dataset_size=batch_size,
@@ -321,8 +325,9 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
 
     result_5: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
     integrated_gradient_trapezoidal_jacobian(
-        module_hat=linear,
+        module_hat=linear_partial,
         f_in_hat=in_tensor,
+        in_tuple_dims=(in_hidden,),
         n_intervals=5,
         jac_out=result_5,
         dataset_size=batch_size,
@@ -383,11 +388,14 @@ def test_integrated_gradient_trapezoidal_jacobian_jacrev(edge_formula):
     in_tensor = torch.randn(batch_size, in_hidden, requires_grad=True)
 
     linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+    # Need to account for module_hat taking both inputs and an in_tuple_dims argument
+    linear_partial = lambda x, _: linear(x)
 
     result_ours: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
     integrated_gradient_trapezoidal_jacobian(
-        module_hat=linear,
+        module_hat=linear_partial,
         f_in_hat=in_tensor,
+        in_tuple_dims=(in_hidden,),
         n_intervals=5,
         jac_out=result_ours,
         dataset_size=batch_size,

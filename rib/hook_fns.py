@@ -10,8 +10,7 @@ each hook function. Therefore, these arguments must be included in the signature
 Otherwise, the hook function operates like a regular pytorch hook function.
 """
 
-from functools import partial
-from typing import Any, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 import einops
 import torch
@@ -322,8 +321,9 @@ def interaction_edge_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     C_in: Float[Tensor, "in_hidden in_hidden_trunc"],
-    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
+    module_hat: Callable[
+        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
+    ],
     n_intervals: int,
     dataset_size: int,
     edge_formula: Literal["functional", "squared"] = "functional",
@@ -345,8 +345,8 @@ def interaction_edge_pre_forward_hook_fn(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
         C_in: The C matrix for the current layer (C^l in the paper).
-        C_in_pinv: The pseudoinverse of the C matrix for the current layer ((C^l)^+ in the paper).
-        C_out: The C matrix for the next layer (C^{l+1} in the paper).
+        module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
+            in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
@@ -361,13 +361,6 @@ def interaction_edge_pre_forward_hook_fn(
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
     in_tuple_dims = [x.shape[-1] for x in inputs]
-    module_hat_partial = partial(
-        module_hat,
-        module=module,
-        C_in_pinv=C_in_pinv,
-        C_out=C_out,
-        in_tuple_dims=in_tuple_dims,
-    )
 
     # We first concatenate the inputs over the hidden dimension
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
@@ -377,16 +370,18 @@ def interaction_edge_pre_forward_hook_fn(
 
     if edge_formula == "functional":
         integrated_gradient_trapezoidal_jacobian_functional(
-            module_hat=module_hat_partial,
+            module_hat=module_hat,
             f_in_hat=f_hat,
+            in_tuple_dims=in_tuple_dims,
             jac_out=jac_out,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
         )
     elif edge_formula == "squared":
         integrated_gradient_trapezoidal_jacobian_squared(
-            module_hat=module_hat_partial,
+            module_hat=module_hat,
             f_in_hat=f_hat,
+            in_tuple_dims=in_tuple_dims,
             jac_out=jac_out,
             dataset_size=dataset_size,
             n_intervals=n_intervals,

@@ -1,5 +1,6 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
+from functools import partial
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import torch
@@ -15,8 +16,9 @@ from rib.hook_fns import (
     interaction_edge_pre_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
+from rib.linalg import module_hat
 from rib.log import logger
-from rib.models import SequentialTransformer
+from rib.models.utils import get_model_attr
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -250,6 +252,13 @@ def collect_interaction_edges(
         C_out = Cs[idx + 1].C
         if C_out is not None:
             C_out = C_out.to(device=device)
+
+        module_hat_partial = partial(
+            module_hat,
+            module=get_model_attr(hooked_model.model, module_name),
+            C_in_pinv=C_info.C_pinv.to(device=device),
+            C_out=C_out,
+        )
         edge_hooks.append(
             Hook(
                 name=C_info.node_layer_name,
@@ -258,8 +267,7 @@ def collect_interaction_edges(
                 module_name=module_name,
                 fn_kwargs={
                     "C_in": C_info.C.to(device=device),  # C from the current node layer
-                    "C_in_pinv": C_info.C_pinv.to(device=device),  # C_pinv from current node layer
-                    "C_out": C_out,
+                    "module_hat": module_hat_partial,
                     "n_intervals": n_intervals,
                     "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
                     "edge_formula": edge_formula,

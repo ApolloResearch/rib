@@ -389,11 +389,6 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
     )
 
 
-test_modular_arithmetic_rotate_final_layer_invariance(
-    "(1-alpha)^2", "functional", "float32", rtol=1e-3, atol=1e-3
-)
-
-
 def test_mnist_build_graph_invalid_node_layers():
     """Test that non-sequential node_layers raises an error."""
     mock_config = """

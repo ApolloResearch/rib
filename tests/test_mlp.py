@@ -1,11 +1,9 @@
 from contextlib import nullcontext
-from typing import Optional, Tuple
 
 import pytest
 import torch
-from torch import nn
 
-from rib.models import MLP, MLPLayer
+from rib.models import MLP, MLPConfig, MLPLayer
 from rib.models.utils import ACTIVATION_MAP
 from rib.utils import set_seed
 
@@ -43,14 +41,15 @@ def test_mlp_layers(
         (activation_fn in ["tanh", "sigmoid"]) and fold_bias and (len(hidden_sizes) > 0)
     )
     with pytest.raises(ValueError) if exception_expected else nullcontext():
-        model = MLP(
-            hidden_sizes,
-            input_size,
-            output_size,
+        mlp_config = MLPConfig(
+            hidden_sizes=hidden_sizes,
+            input_size=input_size,
+            output_size=output_size,
             activation_fn=activation_fn,
             bias=bias,
             fold_bias=fold_bias,
         )
+        model = MLP(mlp_config)
     if exception_expected:
         return None
 

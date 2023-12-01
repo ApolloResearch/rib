@@ -3,9 +3,11 @@ from typing import Literal
 import torch
 from transformer_lens import HookedTransformer
 
+from rib.models import SequentialTransformer
+
 
 def convert_tlens_weights(
-    seq_param_names: list[str],
+    seq_model: SequentialTransformer,
     tlens_model: HookedTransformer,
     positional_embedding_type: Literal["standard", "rotary"],
 ) -> dict[str, torch.Tensor]:
@@ -14,6 +16,8 @@ def convert_tlens_weights(
     Note that this algorithm assumes that the seq_param_names are ordered by section number, which
     will be the case if pulled from SequentialTransformer.state_dict().
     """
+    seq_param_names = list(seq_model.state_dict().keys())
+    named_buffers = dict(seq_model.named_buffers())
 
     attn_names: list[str] = [
         "W_Q",
@@ -79,6 +83,18 @@ def convert_tlens_weights(
                 raise ValueError(
                     f"Param name not an embed, unembed, attn or mlp param: {param_name}"
                 )
+
+            buffer_val = named_buffers.get(seq_param_name)
+            if buffer_val is not None:
+                assert buffer_val.dtype == tlens_param_val.dtype, (
+                    f"Buffer {seq_param_name} has dtype {buffer_val.dtype} but tlens_param_val "
+                    f"has dtype {tlens_param_val.dtype}. It is not a good idea to map parameters "
+                    f"of different dtypes."
+                )
+                if not torch.allclose(buffer_val, tlens_param_val.to(buffer_val.dtype)):
+                    raise ValueError(
+                        f"Buffer {seq_param_name} does not match between seq_model and tlens_model"
+                    )
             state_dict[seq_param_name] = tlens_param_val
 
     return state_dict

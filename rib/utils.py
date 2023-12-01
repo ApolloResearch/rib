@@ -1,3 +1,4 @@
+import os
 import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional, Type, TypeVar, Union
@@ -17,7 +18,14 @@ if TYPE_CHECKING:
 
 T = TypeVar("T", bound=BaseModel)
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = (
+    Path(os.environ["GITHUB_WORKSPACE"]) if os.environ.get("CI") else Path(__file__).parent.parent
+)
+
+
+def to_root_path(path: Union[str, Path]):
+    """Converts relative paths to absolute ones, assuming they are relative to the rib root."""
+    return Path(path) if Path(path).is_absolute() else Path(REPO_ROOT / path)
 
 
 @torch.inference_mode()
@@ -158,7 +166,7 @@ def check_outfile_overwrite(out_file: Path, force: bool = False) -> bool:
 
     if out_file.exists():
         if force:
-            logger.info(f"Overwriting {out_file} (reason: config or cmdline or multiprocessing)")
+            logger.info(f"Overwriting {out_file} (reason: config or cmdline)")
             return True
         elif _response():
             logger.info(f"Overwriting {out_file} (based on user prompt)")

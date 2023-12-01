@@ -4,6 +4,8 @@ from typing import Annotated, Any, Literal, Optional, TypedDict, Union
 import torch
 from pydantic import BeforeValidator
 
+from rib.utils import to_root_path
+
 StrDtype = Literal["float32", "float64", "bfloat16"]
 
 TORCH_DTYPES: dict[StrDtype, torch.dtype] = {
@@ -11,14 +13,6 @@ TORCH_DTYPES: dict[StrDtype, torch.dtype] = {
     "float64": torch.float64,
     "bfloat16": torch.bfloat16,
 }
-
-
-def to_root_path(path: Union[str, Path]):
-    if Path(path).is_absolute():
-        return Path(path)
-    else:
-        ROOT_DIR = Path(__file__).parent.parent
-        return Path(ROOT_DIR / path)
 
 
 # This is a type for pydantic configs that will convert all relative paths
@@ -41,3 +35,4 @@ class _RibBuildResultsTotal(TypedDict, total=True):
 class RibBuildResults(_RibBuildResultsTotal, total=False):
     calc_C_time: Optional[str]
     calc_edges_time: Optional[str]
+    dist_info: dict[str, Any]

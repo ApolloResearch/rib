@@ -69,7 +69,6 @@ class Config(BaseModel):
     ablation_node_layers: list[str]
     batch_size: int
     dtype: StrDtype
-    eps: Optional[float] = 1e-5
     seed: int
     eval_type: Literal["accuracy", "ce_loss"] = Field(
         ...,
@@ -122,14 +121,12 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         last_pos_module_type=interaction_graph_info["config"]["last_pos_module_type"],
         tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
         tlens_model_path=tlens_model_path,
-        eps=config.eps,
         fold_bias=True,
         dtype=dtype,
         device=device,
     )
 
     seq_model.eval()
-    seq_model.to(device=torch.device(device), dtype=dtype)
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need train and test sets (i.e. the "both" argument)
@@ -137,6 +134,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
     dataset = load_dataset(
         dataset_config=config.dataset,
         return_set=return_set,
+        model_n_ctx=seq_model.cfg.n_ctx,
         tlens_model_path=tlens_model_path,
     )
     data_loader = create_data_loader(

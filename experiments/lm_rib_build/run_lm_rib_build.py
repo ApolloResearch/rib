@@ -38,12 +38,12 @@ from typing import Literal, Optional, Union, cast
 import fire
 import torch
 from jaxtyping import Float
-from mpi4py import MPI
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,
@@ -57,12 +57,6 @@ from rib.loader import (
     load_sequential_transformer,
 )
 from rib.log import logger
-from rib.mpi_utils import (
-    adjust_logger_mpi,
-    check_sizes_mpi,
-    get_device_mpi,
-    get_mpi_info,
-)
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
@@ -134,10 +128,6 @@ class Config(BaseModel):
 
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
 
-    eps: float = Field(
-        1e-5,
-        description="The epsilon value to use for numerical stability in layernorm layers.",
-    )
     calculate_edges: bool = Field(
         True,
         description="Whether to calculate the edges of the interaction graph.",
@@ -194,7 +184,9 @@ def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
     if isinstance(config.dataset, HFDatasetConfig):
         assert isinstance(loaded_config.dataset, HFDatasetConfig)
         if config.dataset.return_set_frac is not None:
-            assert loaded_config.dataset.return_set_frac is not None
+            assert (
+                loaded_config.dataset.return_set_frac is not None
+            ), "Can't set return_set_frac if the loaded config didn't use it"
             assert (
                 config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
             ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
@@ -237,7 +229,9 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:
+def main(
+    config_path_or_obj: Union[str, Config], force: bool = False, n_pods: int = 1, pod_rank: int = 0
+) -> RibBuildResults:
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
@@ -250,21 +244,25 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
 
     Args:
         config: a str or Config object. If str must point at YAML config file
-        kwargs: modifications to passed config
     """
     config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
 
-    mpi_info = get_mpi_info()
-    adjust_logger_mpi(logger)
-    device = get_device_mpi(logger)
+    dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
+
+    adjust_logger_dist(dist_info)
+    device = get_device_mpi(dist_info)
 
     if config.out_dir is not None:
         config.out_dir.mkdir(parents=True, exist_ok=True)
-        f_name = f"{config.exp_name}_rib_{'graph' if config.calculate_edges else 'Cs'}.pt"
+        obj_name = "graph" if config.calculate_edges else "Cs"
+        global_rank_suffix = (
+            f"_global_rank{dist_info.global_rank}" if dist_info.global_size > 1 else ""
+        )
+        f_name = f"{config.exp_name}_rib_{obj_name}{global_rank_suffix}.pt"
         out_file = config.out_dir / f_name
         if not check_outfile_overwrite(out_file, force):
-            mpi_info.comm.Abort()  # stop this and other processes
+            dist_info.local_comm.Abort()  # stop this and other processes
 
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
@@ -277,13 +275,11 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
-        eps=config.eps,
         fold_bias=True,
         dtype=dtype,
         device=device,
     )
     seq_model.eval()
-    seq_model.to(device=torch.device(device), dtype=dtype)
     hooked_model = HookedModel(seq_model)
 
     # This script doesn't need both train and test sets
@@ -291,9 +287,11 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     dataset = load_dataset(
         dataset_config=config.dataset,
         return_set=return_set,
+        model_n_ctx=seq_model.cfg.n_ctx,
         tlens_model_path=config.tlens_model_path,
     )
 
+    logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
     logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
     if config.eval_type is not None:
         eval_loader = create_data_loader(
@@ -367,7 +365,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         full_dataset_len = len(dataset)  # type: ignore
         # no-op if only 1 process
         data_subset = get_dataset_chunk(
-            dataset, chunk_idx=mpi_info.rank, total_chunks=mpi_info.size
+            dataset, chunk_idx=dist_info.global_rank, total_chunks=dist_info.global_size
         )
 
         edge_train_loader = create_data_loader(
@@ -391,19 +389,6 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
             use_analytic_integrad=config.use_analytic_integrad,
         )
 
-        if mpi_info.is_parallelised:
-            for m_name, edge_vals in E_hats.items():
-                check_sizes_mpi(edge_vals)
-                receiver_tensor = None
-                if mpi_info.is_main_process:
-                    receiver_tensor = torch.empty_like(edge_vals).cpu()
-                # we sum across the edge_val tensors in each process, putting the result in
-                # the root process's reciever_tensor.
-                mpi_info.comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
-                if mpi_info.is_main_process:
-                    assert receiver_tensor is not None
-                    E_hats[m_name] = receiver_tensor
-
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)
 
@@ -423,13 +408,14 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
         "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
+        "dist_info": dist_info.to_dict(),
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
         "calc_C_time": calc_C_time,
         "calc_edges_time": calc_edges_time,
     }
 
-    if config.out_dir is not None and mpi_info.is_main_process:
+    if config.out_dir is not None:
         # Save the results (which include torch tensors) to file
         torch.save(results, out_file)
         logger.info("Saved results to %s", out_file)

@@ -365,6 +365,7 @@ def interaction_edge_pre_forward_hook_fn(
 
         output_const = module(*tuple(x.detach().clone() for x in input_tuples))
         outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+        outputs_const = torch.cat(outputs_const, dim=-1)
 
     has_pos = f_hat.dim() == 3
 
@@ -380,10 +381,15 @@ def interaction_edge_pre_forward_hook_fn(
 
     integrated_gradient_trapezoidal_jacobian(
         module_hat=module_hat_partial,
+        module=module,
         f_in_hat=f_hat,
         n_intervals=n_intervals,
         jac_out=jac_out,
         dataset_size=dataset_size,
+        outputs_const=outputs_const,
+        C_out=C_out,
+        C_in_pinv=C_in_pinv,
+        in_tuple_dims=in_tuple_dims,
     )
 
 

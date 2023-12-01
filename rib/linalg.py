@@ -180,10 +180,15 @@ def _calc_integration_intervals(
 
 def integrated_gradient_trapezoidal_jacobian(
     module_hat: Callable,
+    module: Callable,
     f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
     n_intervals: int,
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
+    outputs_const,
+    C_in_pinv,
+    C_out,
+    in_tuple_dims,
     edge_formula: Literal["october", "november_a"] = "october",
 ) -> None:
     """Calculate the integrated gradient of the jacobian of a function w.r.t its input.
@@ -206,7 +211,7 @@ def integrated_gradient_trapezoidal_jacobian(
         n_intervals, integral_boundary_relative_epsilon=1e-3
     )
     if edge_formula == "october":
-        f_out_hat_const = module_hat(f_in_hat)
+        # outputs_const = torch.cat(outputs_const, dim=-1)
         for alpha_index, alpha in tqdm(
             enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
         ):
@@ -221,11 +226,15 @@ def integrated_gradient_trapezoidal_jacobian(
             normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
             # Need to define alpha_f_in_hat for autograd!
             alpha_f_in_hat = alpha * f_in_hat
-            f_out_hat_alpha = module_hat(alpha_f_in_hat)
+            alpha_f_in = alpha_f_in_hat @ C_in_pinv
+            alpha_f_in = torch.split(alpha_f_in, in_tuple_dims, dim=-1)
+            f_out_alpha = module(*alpha_f_in)
+            f_out_alpha = (f_out_alpha,) if isinstance(f_out_alpha, torch.Tensor) else f_out_alpha
+            diff = outputs_const - torch.cat(f_out_alpha, dim=-1)
+            diff_hat = diff @ C_out if C_out is not None else diff
+            # f_out_hat_alpha = module_hat(alpha_f_in_hat)
 
-            f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = (
-                f_out_hat_const - f_out_hat_alpha
-            ) ** 2
+            f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = (diff_hat) ** 2
             if has_pos:
                 # Sum over the position dimension
                 f_out_hat_norm = f_out_hat_norm.sum(dim=1)

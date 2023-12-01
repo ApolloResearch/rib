@@ -90,7 +90,7 @@
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/experiments/mnist_rib_build/run_mnist_rib_build.py",
-            "args": "${workspaceFolder}/experiments/mnist_rib_build/3-node-layers.yaml",
+            "args": "${workspaceFolder}/experiments/mnist_rib_build/4-node-layers.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },

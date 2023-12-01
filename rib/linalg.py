@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Union
+from typing import Callable, Literal, Optional, Union
 
 import numpy as np
 import torch
@@ -137,64 +137,38 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
     return res
 
 
-def edge_norm(
-    alpha_f_in_hat: Float[Tensor, "... in_hidden_combined"],
-    outputs_const: tuple[Float[Tensor, "... out_hidden_combined"]],
+def module_hat(
+    f_in_hat: Float[Tensor, "... in_hidden_trunc"],
+    in_tuple_dims: list[int],
     module: torch.nn.Module,
     C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
-    in_hidden_dims: list[int],
-    has_pos: bool,
-) -> Float[Tensor, "out_hidden_combined_trunc"]:
-    """Calculates the norm (square, and sum over batch and position) of the difference
-    `module(alpha_f_in_hat @ C_in_pinv) - outputs_const`.
+) -> Float[Tensor, "... out_hidden_trunc"]:
+    """Run a module in the RIB basis, f_hat^{l} --> f_hat^{l+1}.
 
-    Since the module may take a tuple of inputs, we need to split the `x` tensor into a tuple
-    based on the `in_hidden_dims` of each input.
+    This converts the input f_in_hat to f_in (using C_in_pinv), splits it into a tuple (using
+    in_tuple_dims), runs the module, concatenates the outputs, and converts it back to f_out_hat
+    (using C_out).
 
     Args:
-        alpha_f_in_hat: The alpha-adjusted concatenated inputs to the model.
-            i.e. alpha * in_acts @ C_in (included in grad)
-        outputs_const: The non-adjusted outputs of the module, i.e.
-            module(in_acts) = module(f_in_hat @ C_in_pinv). Not in RIB basis.
-        module: The model to pass the f_in_hat through.
-        C_in_pinv: The pseudoinverse of C_in.
-        C_out: The truncated interaction rotation matrix for the output node layer.
-        in_hidden_dims: The hidden dimension of the original inputs to the module.
-        has_pos: Whether the module has a position dimension.
+        module: The module to run.
+        in_tuple_dims: The dimensions of the input tuple
+        f_in_hat: The input in the RIB basis.
+        C_in_pinv: The pseudo-inverse of input RIB rotation.
+        C_out: The output RIB rotation.
+
 
     Returns:
-        The norm (over batch and position) of the output of the module for every
-            out-(RIB)-dimension i.
+        f_out_hat: The module output in the RIB basis.
     """
+    f_in: Float[Tensor, "... in_hidden"] = f_in_hat @ C_in_pinv
+    f_in_tuple = torch.split(f_in, in_tuple_dims, dim=-1)
+    f_out_tuple = module(*f_in_tuple)
+    f_out = f_out_tuple if isinstance(f_out_tuple, torch.Tensor) else torch.cat(f_out_tuple, dim=-1)
 
-    # Compute f^{l+1}(f^l(alpha x))
-    alpha_f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = alpha_f_in_hat @ C_in_pinv
-    alpha_input_tuples = torch.split(alpha_f_in_adjusted, in_hidden_dims, dim=-1)
+    f_out_hat: Float[Tensor, "... out_hidden_trunc"] = f_out @ C_out if C_out is not None else f_out
 
-    output_alpha = module(*alpha_input_tuples)
-    outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
-
-    # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
-    outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
-
-    # Concatenate the outputs over the hidden dimension
-    out_acts = torch.cat(outputs, dim=-1)
-
-    f_out_hat: Float[Tensor, "... out_hidden_combined_trunc"] = (
-        out_acts @ C_out if C_out is not None else out_acts
-    )
-
-    f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = f_out_hat**2
-    if has_pos:
-        # f_out_hat is shape (batch, pos, hidden)
-        assert f_out_hat.dim() == 3, f"f_out_hat should have 3 dims, got {f_out_hat.dim()}"
-        f_out_hat_norm = f_out_hat_norm.sum(dim=1)
-
-    # Sum over the batch dimension
-    f_out_hat_norm = f_out_hat_norm.sum(dim=0)
-
-    return f_out_hat_norm
+    return f_out_hat
 
 
 def _calc_integration_intervals(
@@ -237,48 +211,70 @@ def _calc_integration_intervals(
     return alphas, interval_size
 
 
-def integrated_gradient_trapezoidal_jacobian(
-    fn: Callable,
-    x: Float[Tensor, "... out_hidden_combined_trunc"],
-    n_intervals: int,
+def integrated_gradient_trapezoidal_jacobian_functional(
+    module_hat: Callable[
+        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
+    ],
+    f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
+    in_tuple_dims: list[int],
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
+    n_intervals: int,
 ) -> None:
-    """Calculate the integrated gradient of the jacobian of a function w.r.t its input.
+    """Calculate the interaction attribution (edges) for module_hat with inputs f_in_hat.
 
     Args:
-        fn: The function to calculate the jacobian of.
-        x: The input to the function.
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
+            in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
+        f_in_hat: The inputs to the module. May or may not include a position dimension.
+        in_tuple_dims: The final dimensions of the inputs to the module.
         jac_out: The output of the jacobian calculation. This is modified in-place.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
-
+        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+            point estimate at alpha=0.5 instead of using the trapezoidal rule.
     """
-    einsum_pattern = "bpj,bpj->j" if x.ndim == 3 else "bj,bj->j"
+    has_pos = f_in_hat.ndim == 3
+    # Ensure inputs require grads
+    f_in_hat.requires_grad_(True)
 
-    alphas, interval_size = _calc_integration_intervals(
-        n_intervals, integral_boundary_relative_epsilon=1e-3
-    )
+    einsum_pattern = "bpj,bpj->j" if f_in_hat.ndim == 3 else "bj,bj->j"
 
-    x.requires_grad_(True)
+    # Prepare integral
+    alphas, interval_size = _calc_integration_intervals(n_intervals)
 
-    # Normalize by the dataset size and the number of positions (if the input has a position dim)
-    has_pos = x.ndim == 3
-    normalization_factor = x.shape[1] * dataset_size if has_pos else dataset_size
+    # Compute f^{l+1}(x) to which the derivative is not applied.
+    with torch.inference_mode():
+        f_out_hat_const = module_hat(f_in_hat, in_tuple_dims)
 
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
-        alpha_f_in_hat = alpha * x
-        f_out_hat_norm = fn(alpha_f_in_hat)
+        # As per the trapezoidal rule, multiply the endpoints by 1/2
+        # (unless we're taking a point estimate at alpha=0.5)
+        scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
+
+        # Normalize by the dataset size and the number of positions (if the input has a position dim)
+        normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
+        # Need to define alpha_f_in_hat for autograd
+        alpha_f_in_hat = alpha * f_in_hat
+        f_out_hat_alpha = module_hat(alpha_f_in_hat, in_tuple_dims)
+
+        f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = (
+            f_out_hat_const - f_out_hat_alpha
+        ) ** 2
+        if has_pos:
+            # Sum over the position dimension
+            f_out_hat_norm = f_out_hat_norm.sum(dim=1)
+
+        # Sum over the batch dimension
+        f_out_hat_norm = f_out_hat_norm.sum(dim=0)
 
         assert f_out_hat_norm.ndim == 1, f"f_out_hat_norm should be 1d, got {f_out_hat_norm.ndim}"
-        # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
-        # estimate at alpha=0.5)
-        scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
         for i in tqdm(
-            range(len(f_out_hat_norm)), total=len(f_out_hat_norm), desc="Output idxs", leave=False
+            range(len(f_out_hat_norm)),
+            total=len(f_out_hat_norm),
+            desc="Output idxs",
+            leave=False,
         ):
             # Get the derivative of the ith output element w.r.t alpha_f_in_hat
             i_grad = (
@@ -288,12 +284,135 @@ def integrated_gradient_trapezoidal_jacobian(
                 * scaler
             )
             with torch.inference_mode():
-                E = torch.einsum(einsum_pattern, i_grad, x)
+                E = torch.einsum(einsum_pattern, i_grad, f_in_hat)
                 # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
                 # in equation (3.27)
                 # Note that jac_out is initialised to zeros in
                 # `rib.data_accumulator.collect_interaction_edges`
                 jac_out[i] -= E
+
+
+def integrated_gradient_trapezoidal_jacobian_squared(
+    module_hat: Callable[
+        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
+    ],
+    f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
+    in_tuple_dims: list[int],
+    jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    dataset_size: int,
+    n_intervals: int,
+) -> None:
+    """Calculate the interaction attribution (edges) for module_hat with inputs f_in_hat.
+
+    Args:
+        module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
+            in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
+        f_in_hat: The inputs to the module. May or may not include a position dimension.
+        in_tuple_dims: The final dimensions of the inputs to the module.
+        jac_out: The output of the jacobian calculation. This is modified in-place.
+        dataset_size: The size of the dataset. Used for normalizing the gradients.
+        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+    """
+    has_pos = f_in_hat.ndim == 3
+    # Ensure inputs require grads
+    f_in_hat.requires_grad_(True)
+
+    # Prepare integral
+    alphas, interval_size = _calc_integration_intervals(n_intervals)
+
+    # Get sizes for intermediate resullt storage
+    batch_size = f_in_hat.shape[0]
+    out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = jac_out.shape
+    if has_pos:
+        # Just run the model to see what the output pos size is
+        with torch.inference_mode():
+            f_out_hat_const = module_hat(f_in_hat, in_tuple_dims)
+        out_pos_size = f_out_hat_const.shape[1]
+
+    # Accumulate integral results for all x (batch) and t (out position) values,
+    # store values because we need to square the integral result before summing
+    # This term is the content of the brackets before the square, i.e. the sum over tprime
+    inner_token_sums = (
+        torch.zeros(
+            batch_size,
+            out_pos_size,
+            out_hidden_size_comb_trunc,
+            in_hidden_size_comb_trunc,
+            device=f_in_hat.device,
+        )
+        if has_pos
+        else torch.zeros(batch_size, out_hidden_size_comb_trunc, in_hidden_size_comb_trunc)
+    )
+
+    # Integral
+    for alpha_index, alpha in tqdm(
+        enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
+    ):
+        # As per the trapezoidal rule, multiply the endpoints by 1/2
+        # (unless we're taking a point estimate at alpha=0.5)
+        scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
+
+        # We have to compute inputs from f_hat to make autograd work
+        alpha_f_in_hat = alpha * f_in_hat
+        f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
+
+        normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
+
+        # Take the derivative of the (i, t) element (output dim and output pos) of the output
+        # Note that t (output pos) is different from p (tprime, input pos)
+        for out_dim in range(out_hidden_size_comb_trunc):
+            if has_pos:
+                for output_pos_idx in range(out_pos_size):
+                    # autograd gives us the derivative w.r.t. j (input dim) and p (tprime, input pos).
+                    # Later (in the einsum) we sum over p (tprime) != output_pos_idx (t) according
+                    # to Lucius' formula.
+                    # The sum in the autograd is just a trick to get the grad for every batch index
+                    # vectorized.
+                    i_grad = (
+                        torch.autograd.grad(
+                            f_out_alpha_hat[:, output_pos_idx, out_dim].sum(dim=0),
+                            alpha_f_in_hat,
+                            retain_graph=True,
+                        )[0]
+                        / normalization_factor
+                        * interval_size
+                        * scaler
+                    )
+
+                    # Sum over tprime (p, input pos) as per Lucius' formula (A.18)
+                    with torch.inference_mode():
+                        inner_token_sum = torch.einsum("bpj,bpj->bj", i_grad, f_in_hat)
+                        # We have a minus sign in front of the IG integral
+                        inner_token_sums[:, output_pos_idx, out_dim, :] -= inner_token_sum
+            else:
+                i_grad = (
+                    torch.autograd.grad(
+                        f_out_alpha_hat[:, out_dim].sum(dim=0),
+                        alpha_f_in_hat,
+                        retain_graph=True,
+                    )[0]
+                    / normalization_factor
+                    * interval_size
+                    * scaler
+                )
+                with torch.inference_mode():
+                    # The einsum is actually just an elementwise multiplication here
+                    inner_token_sum = torch.einsum(
+                        "bj,bj->bj",
+                        i_grad,
+                        f_in_hat,
+                    ).to(inner_token_sums.device)
+                    # We have a minus sign in front of the IG integral
+                    inner_token_sums[:, out_dim, :] -= inner_token_sum
+
+    # Finished alpha integral, integral result present in inner_token_sums
+    # Square, and sum over batch size and t (not tprime)
+    inner_token_sums = inner_token_sums**2
+    if has_pos:
+        jac_out[:, :] = inner_token_sums.sum(dim=(0, 1))
+    else:
+        jac_out[:, :] = inner_token_sums.sum(dim=0)
 
 
 def integrated_gradient_trapezoidal_norm(
@@ -304,7 +423,7 @@ def integrated_gradient_trapezoidal_norm(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
-    integral_boundary_relative_epsilon: float = 1e-3,
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
 ) -> Float[Tensor, "... in_hidden_combined"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
     following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
@@ -322,15 +441,29 @@ def integrated_gradient_trapezoidal_norm(
         C_out: The truncated interaction rotation matrix for the module's outputs.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
-            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
-            ill-defined derivatives at 0 and 1.
-            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
+        basis_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
     """
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         output_const = module(*tuple(x.detach().clone() for x in inputs))
-        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
+        # Concatenate the outputs over the hidden dimension
+        out_acts_const = (
+            output_const
+            if isinstance(output_const, torch.Tensor)
+            else torch.cat(output_const, dim=-1)
+        )
+        if basis_formula == "(1-0)*alpha":
+            output_zero = module(*tuple(torch.zeros_like(x) for x in inputs))
+            # Concatenate the outputs over the hidden dimension
+            out_acts_zero = (
+                output_zero
+                if isinstance(output_zero, torch.Tensor)
+                else torch.cat(output_zero, dim=-1)
+            )
 
     # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:
@@ -338,28 +471,44 @@ def integrated_gradient_trapezoidal_norm(
 
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    alphas, interval_size = _calc_integration_intervals(
-        n_intervals, integral_boundary_relative_epsilon
-    )
+    alphas, interval_size = _calc_integration_intervals(n_intervals)
 
     for alpha_index, alpha in enumerate(alphas):
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
-        outputs_alpha = (output_alpha,) if isinstance(output_alpha, torch.Tensor) else output_alpha
-
-        # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
-        outputs = tuple(a - b for a, b in zip(outputs_const, outputs_alpha))
-
         # Concatenate the outputs over the hidden dimension
-        out_acts = torch.cat(outputs, dim=-1)
+        out_acts_alpha = (
+            output_alpha
+            if isinstance(output_alpha, torch.Tensor)
+            else torch.cat(output_alpha, dim=-1)
+        )
 
-        f_hat = out_acts @ C_out if C_out is not None else out_acts
-
-        # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
-        # to taking the gradient of each output element separately, but it lets us simply use
-        # backward() instead of more complex (and probably less efficient) vmap operations.
-        f_hat_norm = (f_hat**2).sum()
+        if basis_formula == "(1-alpha)^2":
+            # Subtract to get f^{l+1}(x) - f^{l+1}(f^l(alpha x))
+            f_hat_1_alpha = (
+                (out_acts_const - out_acts_alpha) @ C_out
+                if C_out is not None
+                else (out_acts_const - out_acts_alpha)
+            )
+            # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
+            # to taking the gradient of each output element separately, but it lets us simply use
+            # backward() instead of more complex (and probably less efficient) vmap operations.
+            # Note the minus sign here. In the paper this minus is in front of the integral, but
+            # for generality we put it here.
+            f_hat_norm = -(f_hat_1_alpha**2).sum()
+        elif basis_formula == "(1-0)*alpha":
+            f_hat_alpha = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha
+            f_hat_1_0 = (
+                (out_acts_const - out_acts_zero) @ C_out
+                if C_out is not None
+                else (out_acts_const - out_acts_zero)
+            )
+            f_hat_norm = (f_hat_alpha * f_hat_1_0).sum()
+        else:
+            raise ValueError(
+                f"Unexpected integrated gradient formula {basis_formula} != '(1-alpha)^2' or '(1-0)*alpha'"
+            )
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors
         f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
@@ -375,9 +524,6 @@ def integrated_gradient_trapezoidal_norm(
         for x in alpha_inputs:
             assert x.grad is not None, "Input grad should not be None."
             x.grad.zero_()
-
-    # Add the minus sign in front of the IG integral, see e.g. the definition of g_j in equation (3.27)
-    in_grads *= -1
 
     return in_grads
 

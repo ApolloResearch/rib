@@ -239,6 +239,153 @@ def test_mnist_build_graph(basis_formula, edge_formula):
     )
 
 
+def test_rotate_final_layer_invariance(
+    config: Union[LMRibConfig, MlpRibConfig],
+    build_graph_main_fn: Callable,
+    rtol: float = 1e-7,
+    atol: float = 0,
+):
+    config_not_rotated = config.model_copy()
+    config_not_rotated.rotate_final_node_layer = False
+    config_rotated = config.model_copy()
+    config_rotated.rotate_final_node_layer = True
+
+    results_not_rotated = build_graph_main_fn(config_not_rotated)
+    results_rotated = build_graph_main_fn(config_rotated)
+
+    edges_not_rotated = results_not_rotated["edges"]
+    edges_rotated = results_rotated["edges"]
+
+    # -1 has no eges, -2 is the final layer and changes
+    comparison_layers = config.node_layers[:-2]
+    for i, module_name in enumerate(comparison_layers):
+        # E_hats[i] is a tuple (name, tensor)
+        print("Comparing", module_name)
+        # Check shape
+        assert (
+            edges_not_rotated[i][1].shape == edges_rotated[i][1].shape
+        ), f"edges_not_rotated and edges_rotated not same shape for {module_name}"
+        # Check values
+        assert torch.allclose(
+            edges_not_rotated[i][1],
+            edges_rotated[i][1],
+            rtol=rtol,
+            atol=atol,
+        ), f"Shape of edges_not_rotated not equal to shape of edges_rotated for {module_name}"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula",
+    [
+        ("(1-alpha)^2", "functional"),
+        ("(1-0)*alpha", "functional"),
+        ("(1-alpha)^2", "squared"),
+        ("(1-0)*alpha", "squared"),
+    ],
+)
+def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1e-7, atol=1e-8):
+    """Test that the non-final edges are the same for MNIST whether or not we rotate the final layer."""
+    mock_config = f"""
+    exp_name: test
+    mlp_path: experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt
+    batch_size: 256
+    seed: 0
+    truncation_threshold: 1e-6
+    rotate_final_node_layer: true
+    n_intervals: 0
+    dtype: float64 # in float32 the truncation changes between both runs
+    dataset:
+        return_set_frac: 0.01  # 3 batches (with batch_size=256)
+    node_layers:
+    - layers.0
+    - layers.1
+    - layers.2
+    - output
+    out_dir: null
+    basis_formula: "{basis_formula}"
+    edge_formula: "{edge_formula}"
+    """
+
+    config_dict = yaml.safe_load(mock_config)
+    config = MlpRibConfig(**config_dict)
+
+    test_rotate_final_layer_invariance(
+        config=config,
+        build_graph_main_fn=mlp_build_graph_main,
+        rtol=rtol,
+        atol=atol,
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula, dtype_str",
+    [
+        # functional fp32 currently fails with these tolerances
+        # ("(1-alpha)^2", "functional", "float32"),
+        # ("(1-0)*alpha", "functional", "float32"),
+        ("(1-alpha)^2", "functional", "float64"),
+        ("(1-0)*alpha", "functional", "float64"),
+        ("(1-alpha)^2", "squared", "float32"),
+        ("(1-0)*alpha", "squared", "float32"),
+        ("(1-alpha)^2", "squared", "float64"),
+        ("(1-0)*alpha", "squared", "float64"),
+    ],
+)
+def test_modular_arithmetic_rotate_final_layer_invariance(
+    basis_formula,
+    edge_formula,
+    dtype_str,
+    rtol=1e-3,
+    atol=1e-3,
+):
+    """Test that the non-final edges are the same for modular arithmetic whether or not we rotate the final layer.
+
+    Note that atol is necesdsary as the less important edges do deviate. The largest edges are
+    between 1e3 and 1e5 large.
+    """
+    mock_config = f"""
+    exp_name: test
+    seed: 0
+    tlens_pretrained: null
+    tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+    dataset:
+        source: custom
+        name: modular_arithmetic
+        return_set: train
+        return_set_frac: 0.01
+    node_layers:
+        - ln1.0
+        - ln2.0
+        - mlp_out.0
+        - unembed
+        - output
+    batch_size: 2560
+    gram_batch_size: 2560
+    edge_batch_size: 2560
+    truncation_threshold: 1e-15
+    rotate_final_node_layer: false
+    last_pos_module_type: add_resid1
+    n_intervals: 2
+    dtype: {dtype_str}
+    eval_type: accuracy
+    out_dir: null
+    basis_formula: "{basis_formula}"
+    edge_formula: "{edge_formula}"
+    """
+
+    config_dict = yaml.safe_load(mock_config)
+    config = LMRibConfig(**config_dict)
+
+    test_rotate_final_layer_invariance(
+        config=config,
+        build_graph_main_fn=lm_build_graph_main,
+        rtol=rtol,
+        atol=atol,
+    )
+
+
 def test_mnist_build_graph_invalid_node_layers():
     """Test that non-sequential node_layers raises an error."""
     mock_config = """

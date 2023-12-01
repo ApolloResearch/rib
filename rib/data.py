@@ -1,24 +1,16 @@
 """Define custom datasets."""
-from typing import Literal, Optional, Union
+from typing import Literal, Optional
 
 import torch
 from jaxtyping import Int
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 from torch import Tensor
 from torch.utils.data import Dataset
 
 
-class HFDatasetConfig(BaseModel):
-    """Config for the HuggingFace datasets library."""
+class DatasetConfig(BaseModel):
+    """Base class for dataset configs."""
 
-    source: Literal["huggingface"] = "huggingface"
-    name: str = Field(
-        ..., description="The name of the dataset to load from the HuggingFace datasets library."
-    )
-    tokenizer_name: str = Field(
-        ..., description="The name of the model for fetching the tokenizer."
-    )
-    return_set: Literal["train", "test"] = Field(..., description="The dataset to return.")
     return_set_frac: Optional[float] = Field(
         None,
         description="The fraction of the returned dataset (train/test/all/both) to use. Cannot be"
@@ -29,6 +21,38 @@ class HFDatasetConfig(BaseModel):
         description="The number of raw samples to return from the dataset (train/test/all/both). "
         "Cannot be used with return_set_frac.",
     )
+
+    @model_validator(mode="after")
+    def verify_return_set_frac_and_n_samples(self) -> "DatasetConfig":
+        """Verify not both return_set_frac and return_set_n_samples are set and check values."""
+        frac = self.return_set_frac
+
+        if frac is not None:
+            if self.return_set_n_samples is not None:
+                raise ValueError(
+                    "Cannot have both return_set_frac and return_set_n_samples be non-None."
+                )
+            if isinstance(self, HFDatasetConfig) and (frac < 0.01 or frac > 1):
+                raise ValueError(
+                    f"return_set_frac must be > 0.01 and < 1 since huggingface dataset `split` "
+                    f"method does not correctly convert other values to perecentages."
+                )
+            if frac <= 0 or frac > 1:
+                raise ValueError(f"return_set_frac must be > 0 and <= 1.")
+        return self
+
+
+class HFDatasetConfig(DatasetConfig):
+    """Config for the HuggingFace datasets library."""
+
+    source: Literal["huggingface"] = "huggingface"
+    name: str = Field(
+        ..., description="The name of the dataset to load from the HuggingFace datasets library."
+    )
+    tokenizer_name: str = Field(
+        ..., description="The name of the model for fetching the tokenizer."
+    )
+    return_set: Literal["train", "test"] = Field(..., description="The dataset to return.")
     return_set_portion: Literal["first", "last"] = Field(
         "first", description="Whether to load the first or last portion of the return_set."
     )
@@ -38,18 +62,8 @@ class HFDatasetConfig(BaseModel):
         "<2048 for most other models.",
     )
 
-    @field_validator("return_set_frac")
-    def check_return_set_frac(cls, v):
-        # v must be None or >= 0.01 and <= 1
-        if v is not None and (v < 0.01 or v > 1):
-            raise ValueError(
-                f"return_set_frac must be > 0.01 and < 1 since huggingface dataset `split` "
-                f"method does not correctly convert other values to perecentages."
-            )
-        return v
 
-
-class ModularArithmeticDatasetConfig(BaseModel):
+class ModularArithmeticDatasetConfig(DatasetConfig):
     """Config for the modular arithmetic dataset.
 
     We set fields to optional so that we have the option of loading them in from a pre-saved config
@@ -102,10 +116,8 @@ class ModularArithmeticDataset(Dataset):
         return len(self.data)
 
 
-class VisionDatasetConfig(BaseModel):
+class VisionDatasetConfig(DatasetConfig):
     source: Literal["custom"] = "custom"
     name: Literal["CIFAR10", "MNIST"] = "MNIST"
-    return_set_frac: Optional[float] = None
-
-
-DatasetConfig = Union[HFDatasetConfig, ModularArithmeticDatasetConfig, VisionDatasetConfig]
+    return_set_frac: Optional[float] = None  # Needed for some reason to avoid mypy errors
+    return_set_n_samples: Optional[int] = None  # Needed for some reason to avoid mypy errors

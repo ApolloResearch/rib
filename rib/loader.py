@@ -116,6 +116,34 @@ def load_mlp(config: MLPConfig, mlp_path: Path, device: str, fold_bias: bool = T
     return mlp
 
 
+def _get_data_subset(dataset: Dataset, config: DatasetConfig) -> Dataset:
+    """Get a subset of the dataset.
+
+    If config.return_set_frac is not None, returns the first config.return_set_frac of the dataset.
+    If config.return_set_n_samples is not None, returns the first config.return_set_n_samples of
+    the dataset.
+
+    Args:
+        dataset (Dataset): The dataset to return a subset of.
+        config (DatasetConfig): The dataset config.
+
+    Returns:
+        Dataset: The subset of the dataset.
+    """
+    len_dataset = len(dataset)  # type: ignore
+    if config.return_set_frac is not None:
+        end_idx = int(len_dataset * config.return_set_frac)
+        return Subset(dataset, range(end_idx))
+    elif config.return_set_n_samples is not None:
+        assert config.return_set_n_samples <= len_dataset, (
+            f"return_set_n_samples ({config.return_set_n_samples}) must be <= "
+            f"len_dataset ({len_dataset})."
+        )
+        return Subset(dataset, range(config.return_set_n_samples))
+    else:
+        return dataset
+
+
 def create_modular_arithmetic_dataset(
     dataset_config: ModularArithmeticDatasetConfig,
     return_set: Union[Literal["train", "test", "all"], Literal["both"]],
@@ -153,12 +181,12 @@ def create_modular_arithmetic_dataset(
 
     raw_dataset = ModularArithmeticDataset(modulus=modulus, fn_name=fn_name)
 
+    dataset = _get_data_subset(raw_dataset, dataset_config)
+
     if return_set == "all":
-        return raw_dataset
+        return dataset
     else:
-        train_dataset, test_dataset = train_test_split(
-            raw_dataset, frac_train=frac_train, seed=seed
-        )
+        train_dataset, test_dataset = train_test_split(dataset, frac_train=frac_train, seed=seed)
         if return_set == "train":
             return train_dataset
         elif return_set == "test":
@@ -256,9 +284,6 @@ def create_hf_dataset(
 
     # Load dataset from huggingface
     assert return_set in ["train", "test"], "Can only load train or test sets from HF"
-    assert not (
-        dataset_config.return_set_frac and dataset_config.return_set_n_samples
-    ), "Only one of `return_set_frac` and `return_set_n_samples` can be specified."
 
     if dataset_config.return_set_frac:
         percent = int(dataset_config.return_set_frac * 100)
@@ -286,17 +311,15 @@ def create_vision_dataset(
     dataset_fn = getattr(torchvision.datasets, dataset_config.name)
     if return_set in ["all", "both"]:
         raise NotImplementedError("Haven't yet implimented 'all' or 'both' for vision datasets.")
-    all_data = dataset_fn(
+    raw_dataset = dataset_fn(
         root=REPO_ROOT / ".data",
         train=return_set == "train",
         download=True,
         transform=torchvision.transforms.ToTensor(),
     )
-    if dataset_config.return_set_frac is not None:
-        end_idx = int(len(all_data) * dataset_config.return_set_frac)
-        return Subset(all_data, range(end_idx))
-    else:
-        return all_data
+
+    dataset = _get_data_subset(raw_dataset, dataset_config)
+    return dataset
 
 
 @overload

@@ -293,7 +293,6 @@ def integrated_gradient_trapezoidal_jacobian_squared(
     jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
-    variable_position_dimension: bool = False,
 ) -> None:
     """Calculate the interaction attribution (edges) for module_hat with inputs f_in_hat.
 
@@ -304,8 +303,6 @@ def integrated_gradient_trapezoidal_jacobian_squared(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        variable_position_dimension: If True, the size of the position dimension may vary between
-            input and output of a module. Applies only to mod add currently.
     """
     has_pos = f_in_hat.ndim == 3
     # Ensure inputs require grads
@@ -318,15 +315,10 @@ def integrated_gradient_trapezoidal_jacobian_squared(
     batch_size = f_in_hat.shape[0]
     out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = jac_out.shape
     if has_pos:
-        # out_pos_size and in_pos_size are the same except in mod add where we throw
-        # away all but one position dimension at some point
-        if not variable_position_dimension:
-            out_pos_size = f_in_hat.shape[1]
-        else:
-            # Just run the model to see what the output pos size is
-            with torch.inference_mode():
-                f_out_hat_const = module_hat(f_in_hat)
-            out_pos_size = f_out_hat_const.shape[1]
+        # Just run the model to see what the output pos size is
+        with torch.inference_mode():
+            f_out_hat_const = module_hat(f_in_hat)
+        out_pos_size = f_out_hat_const.shape[1]
 
     # Accumulate integral results for all x (batch) and t (out position) values,
     # store values because we need to square the integral result before summing

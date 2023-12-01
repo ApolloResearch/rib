@@ -238,11 +238,6 @@ def collect_interaction_edges(
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
 
-    if isinstance(hooked_model.model, SequentialTransformer):
-        variable_position_dimension = hooked_model.model.last_pos_module_type == "add_resid1"
-    else:
-        variable_position_dimension = False
-
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
     assert len(edge_modules) == len(Cs) - 1, "Number of edge modules not the same as Cs - 1."
 
@@ -268,7 +263,6 @@ def collect_interaction_edges(
                     "n_intervals": n_intervals,
                     "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
                     "edge_formula": edge_formula,
-                    "variable_position_dimension": variable_position_dimension,
                 },
             )
         )

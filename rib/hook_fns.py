@@ -23,6 +23,7 @@ from rib.linalg import (
     integrated_gradient_trapezoidal_jacobian_functional,
     integrated_gradient_trapezoidal_jacobian_squared,
     integrated_gradient_trapezoidal_norm,
+    module_hat,
 )
 from rib.models.sequential_transformer.components import AttentionOut
 

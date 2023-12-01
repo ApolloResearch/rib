@@ -10,7 +10,6 @@ with an updated MLP path. This is necessary because the interaction graph is sav
 absolute path to the MLP, and a github action will not have access to the same absolute path.
 """
 
-import sys
 from pathlib import Path
 from typing import Union
 
@@ -20,10 +19,8 @@ import yaml
 
 from experiments.lm_ablations.run_lm_ablations import Config as LMAblationConfig
 from experiments.lm_ablations.run_lm_ablations import main as lm_ablations_main
-from experiments.mnist_ablations.run_mnist_ablations import (
-    Config as MNISTAblationConfig,
-)
-from experiments.mnist_ablations.run_mnist_ablations import main as mnist_ablations_main
+from experiments.mlp_ablations.run_mlp_ablations import Config as MNISTAblationConfig
+from experiments.mlp_ablations.run_mlp_ablations import main as mnist_ablations_main
 from rib.ablations import AblationAccuracies
 
 
@@ -111,13 +108,16 @@ def test_run_mnist_ablations(ablation_type):
     we need this path to be local. If that isn't the case you can manually fix this with:
     ```
     import torch
-    rib_graph = torch.load("experiments/mnist_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
-    rib_graph['config']['mlp_path'] = "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
-    torch.save(rib_graph, "experiments/mnist_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
+    from pathlib import Path
+    from rib.utils import REPO_ROOT
+    rib_graph = torch.load("experiments/mlp_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
+    mlp_path = Path(rib_graph['config']['mlp_path'])
+    rib_graph['config']['mlp_path'] = str(mlp_path.relative_to(REPO_ROOT))
+    torch.save(rib_graph, "experiments/mlp_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
     ```
     """
     rib_graph = torch.load(
-        "experiments/mnist_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt"
+        "experiments/mlp_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt"
     )
     model_path = Path(rib_graph["config"]["mlp_path"])
     assert not model_path.is_absolute(), "must be relative to run in ci, see docstring"
@@ -125,7 +125,7 @@ def test_run_mnist_ablations(ablation_type):
     config_str = f"""
     exp_name: "test_ablation_mnist"
     ablation_type: {ablation_type}
-    interaction_graph_path: experiments/mnist_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
+    interaction_graph_path: experiments/mlp_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
     schedule:
         schedule_type: exponential
         early_stopping_threshold: 0.05
@@ -135,6 +135,8 @@ def test_run_mnist_ablations(ablation_type):
     ablation_node_layers:
         - layers.1
         - layers.2
+    dataset:
+        return_set_frac: 0.1
     batch_size: 64
     seed: 0
     eval_type: accuracy
@@ -156,7 +158,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     ```
     import torch
     rib_graph = torch.load("experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
-    rib_graph['config']['tlens_model_path'] = "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt"
+    rib_graph['config']['tlens_model_path'] = "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt"
     torch.save(rib_graph, "experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
     ```
     """

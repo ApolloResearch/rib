@@ -6,7 +6,6 @@ import torch
 from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
-from torch.func import jacrev, vmap
 from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES, StrDtype

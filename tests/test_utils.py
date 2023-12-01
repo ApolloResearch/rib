@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from rib.models import MLP, MLPLayer
+from rib.models import MLP, MLPConfig, MLPLayer
 from rib.models.utils import gelu_new, get_model_attr
 from rib.utils import calc_exponential_ablation_schedule, eval_model_accuracy, find_root
 
@@ -19,7 +19,8 @@ def test_get_model_attr() -> None:
     """
 
     # Define the parent MLP model
-    model = MLP(hidden_sizes=[5], input_size=2, output_size=3, fold_bias=False)
+    mlp_config = MLPConfig(hidden_sizes=[5], input_size=2, output_size=3)
+    model = MLP(mlp_config)
 
     # Test the function
     layers = get_model_attr(model, "layers")

@@ -68,7 +68,7 @@ def random_block_diagonal_matrix_equal_columns(
 class BlockDiagonalDNN(MLP):
     def __init__(
         self,
-        layers: int = 3,
+        hidden_layers: int = 3,
         width: int = 4,
         first_block_width: Optional[int] = None,
         dtype: Literal["float32", "float64"] = "float32",
@@ -77,9 +77,22 @@ class BlockDiagonalDNN(MLP):
         block_variances: List[float] = [1.0, 1.0],
         weight_assignment_function: Callable = random_block_diagonal_matrix,
     ):
+        """Generate a block diagonal DNN
+
+        Args:
+            hidden_layers: number of layers. Total number of layers is layers + 2 (input and output).
+                node_layers will be layer.0, [hidden layers i.e. layer.1 to layer.hidden_layers], output
+            width: width of each layer
+            first_block_width: width of the first block
+            dtype: data type
+            bias: bias of each layer
+            activation_fn: activation function
+            block_variances: variances of the two blocks
+            weight_assignment_function: function to assign weights to each layer
+        """
         # Initialize MLP
         self.mlp_config = MLPConfig(
-            hidden_sizes=[width] * layers,
+            hidden_sizes=[width] * hidden_layers,
             input_size=width,
             output_size=width,
             bias=True,
@@ -96,7 +109,7 @@ class BlockDiagonalDNN(MLP):
         self.first_block_width = first_block_width if first_block_width is not None else width // 2
         self.block_variances = block_variances
         self.bias = bias
-        assert len(self.layers) == layers + 1
+        assert len(self.layers) == hidden_layers + 1
         for layer in self.layers:
             layer.W = nn.Parameter(
                 weight_assignment_function(

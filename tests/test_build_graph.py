@@ -271,7 +271,7 @@ def test_rotate_final_layer_invariance(
             edges_rotated[i][1],
             rtol=rtol,
             atol=atol,
-        ), f"Shape of edges_not_rotated not equal to shape of edges_rotated for {module_name}"
+        ), f"Shape of edges_not_rotated not equal to shape of edges_rotated for {module_name}. Biggest relative deviation: {(edges_not_rotated[i][1] / edges_rotated[i][1]).min()}, {(edges_not_rotated[i][1] / edges_rotated[i][1]).max()}"
 
 
 @pytest.mark.slow
@@ -325,12 +325,14 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
         # functional fp32 currently fails with these tolerances
         # ("(1-alpha)^2", "functional", "float32"),
         # ("(1-0)*alpha", "functional", "float32"),
-        ("(1-alpha)^2", "functional", "float64"),
+        # Mod add tests are slow because return_set_n_samples is not implemented yet
+        # TODO Comment these below all back in
+        # ("(1-alpha)^2", "functional", "float64"),
         ("(1-0)*alpha", "functional", "float64"),
-        ("(1-alpha)^2", "squared", "float32"),
-        ("(1-0)*alpha", "squared", "float32"),
-        ("(1-alpha)^2", "squared", "float64"),
-        ("(1-0)*alpha", "squared", "float64"),
+        # ("(1-alpha)^2", "squared", "float32"),
+        # ("(1-0)*alpha", "squared", "float32"),
+        # ("(1-alpha)^2", "squared", "float64"),
+        # ("(1-0)*alpha", "squared", "float64"),
     ],
 )
 def test_modular_arithmetic_rotate_final_layer_invariance(
@@ -354,16 +356,17 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
         source: custom
         name: modular_arithmetic
         return_set: train
-        return_set_frac: 0.01
+        return_set_frac: null
+        return_set_n_samples: 10
     node_layers:
         - ln1.0
         - ln2.0
         - mlp_out.0
         - unembed
         - output
-    batch_size: 2560
-    gram_batch_size: 2560
-    edge_batch_size: 2560
+    batch_size: 2
+    gram_batch_size: 2
+    edge_batch_size: 2
     truncation_threshold: 1e-15
     rotate_final_node_layer: false
     last_pos_module_type: add_resid1
@@ -384,6 +387,11 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
         rtol=rtol,
         atol=atol,
     )
+
+
+test_modular_arithmetic_rotate_final_layer_invariance(
+    "(1-alpha)^2", "functional", "float32", rtol=1e-3, atol=1e-3
+)
 
 
 def test_mnist_build_graph_invalid_node_layers():

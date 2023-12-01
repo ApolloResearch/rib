@@ -197,19 +197,16 @@ def tokenize_dataset(
     chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
 
     # Convert chunks to input_ids and labels
+    # we ignore the final chunk, as it contains a token we don't have a label for
+    # and is also probably too short and we don't want to pad.
     input_ids_list = []
     labels_list = []
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks[:-1]):
         input_id = chunk
-        label = input_id[1:] + [tokenizer.pad_token_id]
+        label = input_id[1:] + [chunks[i + 1][0]]  # with first token from next chunk
 
         input_ids_list.append(input_id)
         labels_list.append(label)
-
-    # Ignore the last chunk if it's shorter than the context length
-    if len(input_ids_list[-1]) < n_ctx:
-        input_ids_list = input_ids_list[:-1]
-        labels_list = labels_list[:-1]
 
     input_ids = torch.tensor(input_ids_list, dtype=torch.long)
     labels = torch.tensor(labels_list, dtype=torch.long)

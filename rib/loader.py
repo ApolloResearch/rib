@@ -63,6 +63,10 @@ def load_sequential_transformer(
         )
         # Create a SequentialTransformerConfig from the HookedTransformerConfig
         tlens_cfg_dict = tlens_model.cfg.to_dict()
+        # tlens cfg seems to be wrong here, looking at loss by position
+        # the model was never trained at 512 position or after.
+        if tlens_pretrained.startswith("tiny-stories"):
+            tlens_cfg_dict["n_ctx"] = 511
 
     elif tlens_model_path is not None:
         tlens_model_path = (

@@ -31,8 +31,9 @@ class TestDistributed:
             source: custom
             name: modular_arithmetic
             return_set: train
-        batch_size: 512
-        truncation_threshold: 1e-6
+            return_set_n_samples: 10
+        batch_size: 6
+        truncation_threshold: 1e-15
         rotate_final_node_layer: false
         last_pos_module_type: add_resid1
         n_intervals: 0

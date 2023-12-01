@@ -136,7 +136,8 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
         source: custom
         name: modular_arithmetic
         return_set: train
-    batch_size: 128
+        return_set_n_samples: 10
+    batch_size: 6
     truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
     last_pos_module_type: add_resid1
@@ -169,7 +170,7 @@ def test_pythia_14m_build_graph():
       tokenizer_name: EleutherAI/pythia-14m
       return_set: train
       return_set_frac: null
-      return_set_n_samples: 50
+      return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
       return_set_portion: first
     node_layers:
         - ln2.1
@@ -256,7 +257,7 @@ def rotate_final_layer_invariance(
     edges_not_rotated = results_not_rotated["edges"]
     edges_rotated = results_rotated["edges"]
 
-    # -1 has no eges, -2 is the final layer and changes
+    # -1 has no edges, -2 is the final layer and changes
     comparison_layers = config.node_layers[:-2]
     for i, module_name in enumerate(comparison_layers):
         # E_hats[i] is a tuple (name, tensor)
@@ -271,7 +272,7 @@ def rotate_final_layer_invariance(
             edges_rotated[i][1],
             rtol=rtol,
             atol=atol,
-        ), f"Shape of edges_not_rotated not equal to shape of edges_rotated for {module_name}. Biggest relative deviation: {(edges_not_rotated[i][1] / edges_rotated[i][1]).min()}, {(edges_not_rotated[i][1] / edges_rotated[i][1]).max()}"
+        ), f"edges_not_rotated not equal to shape of edges_rotated for {module_name}. Biggest relative deviation: {(edges_not_rotated[i][1] / edges_rotated[i][1]).min()}, {(edges_not_rotated[i][1] / edges_rotated[i][1]).max()}"
 
 
 @pytest.mark.slow
@@ -292,13 +293,12 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     batch_size: 256
     seed: 0
     truncation_threshold: 1e-6
-    rotate_final_node_layer: true
+    rotate_final_node_layer: true  # Gets overridden by rotate_final_layer_invariance
     n_intervals: 0
     dtype: float64 # in float32 the truncation changes between both runs
     dataset:
         return_set_frac: 0.01  # 3 batches (with batch_size=256)
     node_layers:
-    - layers.0
     - layers.1
     - layers.2
     - output
@@ -342,9 +342,9 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
 #     rtol=1e-3,
 #     atol=1e-3,
 # ):
-#     """Test that the non-final edges are the same for modular arithmetic whether or not we rotate the final layer.
+#     """Test that the non-final edges are independent of final layer rotation for modadd.
 
-#     Note that atol is necesdsary as the less important edges do deviate. The largest edges are
+#     Note that atol is necessary as the less important edges do deviate. The largest edges are
 #     between 1e3 and 1e5 large.
 #     """
 #     mock_config = f"""
@@ -359,16 +359,14 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
 #         return_set_frac: null
 #         return_set_n_samples: 10
 #     node_layers:
-#         - ln1.0
-#         - ln2.0
 #         - mlp_out.0
 #         - unembed
 #         - output
-#     batch_size: 2
-#     gram_batch_size: 2
-#     edge_batch_size: 2
+#     batch_size: 6
+#     gram_batch_size: 6
+#     edge_batch_size: 6
 #     truncation_threshold: 1e-15
-#     rotate_final_node_layer: false
+#     rotate_final_node_layer: true  # Gets overridden by rotate_final_layer_invariance
 #     last_pos_module_type: add_resid1
 #     n_intervals: 2
 #     dtype: {dtype_str}

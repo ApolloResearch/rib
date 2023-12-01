@@ -95,6 +95,15 @@
             "justMyCode": true
         },
         {
+            "name": "modular dnn rib build",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/modular_dnn_build/run_modular_dnn_rib_build.py",
+            "args": "${workspaceFolder}/experiments/modular_dnn_build/4-layers.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "train modadd",
             "type": "python",
             "request": "launch",

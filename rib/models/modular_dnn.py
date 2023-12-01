@@ -1,26 +1,12 @@
-import json
-from dataclasses import asdict, dataclass
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Callable, List, Literal, Optional, Tuple, Union
 
-import fire
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import yaml
-from pydantic import BaseModel, field_validator
-from torch.utils.data import DataLoader, Dataset
-from torchvision import datasets, transforms
+from torch.utils.data import Dataset
 
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
-from rib.hook_manager import HookedModel
-from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
-from rib.log import logger
-from rib.models import MLP, MLPConfig, modular_dnn
-from rib.plotting import plot_interaction_graph
+from rib.models import MLP, MLPConfig
 from rib.types import TORCH_DTYPES
-from rib.utils import REPO_ROOT, check_outfile_overwrite, load_config, set_seed
 
 
 def random_block_diagonal_matrix(
@@ -105,6 +91,7 @@ class BlockDiagonalDNN(MLP):
         super(BlockDiagonalDNN, self).__init__(config=self.mlp_config)
 
         # Hardcode weights and biases
+        self.dtype = TORCH_DTYPES[dtype]
         self.width = width
         self.first_block_width = first_block_width if first_block_width is not None else width // 2
         self.block_variances = block_variances

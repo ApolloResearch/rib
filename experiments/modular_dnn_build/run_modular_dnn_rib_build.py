@@ -63,9 +63,13 @@ class Config(BaseModel):
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
+    dataset_size: int = Field(
+        1000,
+        description="Number of samples in the dataset.",
+    )
     layers: int
     width: int
-    bias: bool
+    bias: float
     block_variances: list[float] = Field(
         [1.0, 1.0],
         description="Variance of the two blocks of the block diagonal matrix.",
@@ -77,10 +81,6 @@ class Config(BaseModel):
     perfect_data_correlation: bool = Field(
         False,
         description="Whether to make the data within each block perfectly correlated.",
-    )
-    dataset_size: int = Field(
-        1000,
-        description="Number of samples in the dataset.",
     )
 
 

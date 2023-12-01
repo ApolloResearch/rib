@@ -372,7 +372,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
 
                     # Sum over tprime (p, input pos) as per Lucius' formula (A.18)
                     with torch.inference_mode():
-                        inner_token_sum = torch.einsum("bpj,bpj->bj", f_in_hat)
+                        inner_token_sum = torch.einsum("bpj,bpj->bj", i_grad, f_in_hat)
                         # We have a minus sign in front of the IG integral
                         inner_token_sums[:, output_pos_idx, out_dim, :] -= inner_token_sum
             else:

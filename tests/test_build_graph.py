@@ -239,7 +239,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
     )
 
 
-def test_rotate_final_layer_invariance(
+def rotate_final_layer_invariance(
     config: Union[LMRibConfig, MlpRibConfig],
     build_graph_main_fn: Callable,
     rtol: float = 1e-7,
@@ -310,7 +310,7 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     config_dict = yaml.safe_load(mock_config)
     config = MlpRibConfig(**config_dict)
 
-    test_rotate_final_layer_invariance(
+    rotate_final_layer_invariance(
         config=config,
         build_graph_main_fn=mlp_build_graph_main,
         rtol=rtol,
@@ -381,7 +381,7 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
     config_dict = yaml.safe_load(mock_config)
     config = LMRibConfig(**config_dict)
 
-    test_rotate_final_layer_invariance(
+    rotate_final_layer_invariance(
         config=config,
         build_graph_main_fn=lm_build_graph_main,
         rtol=rtol,

@@ -13,8 +13,8 @@ that have a small set of large numbers and a large set of small numbers.
 
 import sys
 from pathlib import Path
-from typing import Callable, Union
-from unittest.mock import patch
+from typing import Callable, Literal, Union
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -29,6 +29,7 @@ from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_mai
 from experiments.mlp_rib_build.run_mlp_rib_build import Config as MlpRibConfig
 from experiments.mlp_rib_build.run_mlp_rib_build import main as mlp_build_graph_main
 from rib.interaction_algos import build_sorted_lambda_matrices
+from rib.linalg import calc_linear_edge_analytic
 
 
 def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main_fn: Callable):
@@ -196,17 +197,18 @@ def test_pythia_14m_build_graph():
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "basis_formula, edge_formula, use_analytic_integrad",
+    "basis_formula, edge_formula",
     [
-        ("(1-alpha)^2", "functional", True),
-        ("(1-0)*alpha", "functional", True),
-        ("(1-0)*alpha", "functional", False),
-        ("(1-alpha)^2", "squared", True),
-        ("(1-0)*alpha", "squared", True),
-        ("(1-0)*alpha", "squared", False),
+        ("(1-alpha)^2", "functional"),
+        ("(1-0)*alpha", "functional"),
+        ("(1-alpha)^2", "squared"),
+        ("(1-0)*alpha", "squared"),
     ],
 )
-def test_mnist_build_graph(basis_formula, edge_formula, use_analytic_integrad):
+def test_mnist_build_graph(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"],
+    edge_formula: Literal["functional", "squared"],
+):
     dtype_str = "float32"
     # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
     atol = 1e-6
@@ -225,7 +227,7 @@ def test_mnist_build_graph(basis_formula, edge_formula, use_analytic_integrad):
         - layers.1
         - layers.2
         - output
-    use_analytic_integrad: {use_analytic_integrad}
+    use_analytic_integrad: False
     dataset:
         return_set_frac: 0.01  # 3 batches (with batch_size=256)
     out_dir: null
@@ -241,6 +243,57 @@ def test_mnist_build_graph(basis_formula, edge_formula, use_analytic_integrad):
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
+
+
+@patch("rib.data_accumulator.calc_linear_edge_analytic")
+def test_analytic_vs_numeric_integrad_mnist(mock_calc_linear_edge_analytic: MagicMock):
+    # Ensure that the function still returns the same thing
+    mock_calc_linear_edge_analytic.side_effect = calc_linear_edge_analytic
+
+    dtype_str = "float32"
+    # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
+    atol = 1e-6
+
+    edges = {"analytic": [], "numeric": []}
+    for use_analytic_integrad in [False, True]:
+        config_str = f"""
+        exp_name: test
+        mlp_path: "experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
+        batch_size: 256
+        seed: 0
+        truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
+        rotate_final_node_layer: true
+        n_intervals: 0
+        dtype: {dtype_str}
+        node_layers:
+            - layers.0
+            - layers.1
+            - layers.2  # layer without relu function (so we can test calc_linear_edge_analytic)
+            - output
+        use_analytic_integrad: {use_analytic_integrad}
+        dataset:
+            return_set_frac: 0.01  # 3 batches (with batch_size=256)
+        out_dir: null
+        basis_formula: "(1-alpha)^2"
+        edge_formula: "functional"
+        """
+        config_dict = yaml.safe_load(config_str)
+        config = MlpRibConfig(**config_dict)
+        results = mlp_build_graph_main(config)
+        edges["analytic" if use_analytic_integrad else "numeric"] = results["edges"]
+
+    # Ensure linear analytic function called once (just for layers.2 which has no ReLU)
+    assert mock_calc_linear_edge_analytic.called_once()
+
+    # Assert that all edges are the same within atol. Only layers.2
+    for i in range(len(edges["analytic"])):
+        # Edges are lists of (name, tensor) tuples
+        assert edges["analytic"][i][0] == edges["numeric"][i][0]
+        assert torch.allclose(
+            edges["analytic"][i][1] / edges["analytic"][i][1].abs().max(),
+            edges["numeric"][i][1] / edges["numeric"][i][1].abs().max(),
+            atol=atol,
+        ), f"Edges not equal for {edges['analytic'][i][0]}"
 
 
 def rotate_final_layer_invariance(

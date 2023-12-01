@@ -148,7 +148,7 @@ class Config(BaseModel):
     use_analytic_integrad: bool = Field(
         True,
         description="Whether to use the analytic method for calculating the integrated gradient"
-        " if available for that section. If False, use the numerical method. Currently only"
+        " if available for that section. If False, use the numeric method. Currently only"
         " implemented for the edge calculation.",
     )
 

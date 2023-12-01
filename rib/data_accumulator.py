@@ -253,7 +253,7 @@ def collect_interaction_edges(
 
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
 
-    integrated_gradient_types: dict[str, Literal["linear", "numerical"]] = {}
+    integrated_gradient_types: dict[str, Literal["linear", "numeric"]] = {}
     edge_hooks: list[Hook] = []
     for idx, (C_info, section_id) in enumerate(zip(Cs[:-1], section_ids)):
         C_in = C_info.C
@@ -295,7 +295,7 @@ def collect_interaction_edges(
                     }
                     integrated_gradient_types[C_info.node_layer_name] = "linear"
         if C_info.node_layer_name not in integrated_gradient_types:
-            # Haven't added an analytic integrated gradient hook, so add a numerical one
+            # Haven't added an analytic integrated gradient hook, so add a numeric one
             module_hat_partial = partial(
                 module_hat,
                 module=get_model_attr(hooked_model.model, section_id),
@@ -323,7 +323,7 @@ def collect_interaction_edges(
             hooked_model.hooked_data[C_info.node_layer_name] = {
                 "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.out_dim, dtype=dtype, device=device)
             }
-            integrated_gradient_types[C_info.node_layer_name] = "numerical"
+            integrated_gradient_types[C_info.node_layer_name] = "numeric"
 
     run_dataset_through_model(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
@@ -364,7 +364,7 @@ def collect_interaction_edges(
                 dtype=dtype,
                 device=device,
             )
-        elif integrated_gradient_types[module_id] == "numerical":
+        elif integrated_gradient_types[module_id] == "numeric":
             edges[module_id] = hooked_model.hooked_data[module_id]["edge"]
         else:
             raise ValueError(

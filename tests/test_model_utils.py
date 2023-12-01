@@ -2,7 +2,6 @@ from typing import TypeVar
 
 import pytest
 import torch
-from transformers import AutoTokenizer
 
 from rib.hook_fns import attn_scores_pre_forward_hook
 from rib.hook_manager import Hook, HookedModel
@@ -110,7 +109,7 @@ class TestCreateSectionIdToModuleIdMapping:
             "d_vocab": 50257,
             "n_ctx": 1024,
             "act_fn": "gelu_new",
-            "normalization_type": "LNPre",  # GPT2 actually uses LN but we currently don't support it
+            "normalization_type": "LNPre",  # GPT2 actually uses LN but tlens converts it to LNPre
             "eps": 1e-05,
             "dtype": torch.float32,
             "use_attn_scale": True,
@@ -152,7 +151,7 @@ class TestCreateSectionIdToModuleIdMapping:
             "d_vocab": 50304,
             "n_ctx": 2048,
             "act_fn": "gelu",
-            "normalization_type": "LNPre",  # pythia actually uses LN but we currently don't support it
+            "normalization_type": "LNPre",  # pythia actually uses LN but tlens converts it to LNPre
             "eps": 1e-05,
             "dtype": torch.float32,
             "use_attn_scale": True,
@@ -195,7 +194,7 @@ class TestCreateSectionIdToModuleIdMapping:
             "d_vocab": 50257,
             "n_ctx": 2048,
             "act_fn": "gelu_new",
-            "normalization_type": "LNPre",  # tinystories actually uses LN but we currently don't support it
+            "normalization_type": "LNPre",  # tinystories actually uses LN but tlens converts it to LNPre
             "eps": 1e-05,
             "dtype": torch.float32,
             "use_attn_scale": False,

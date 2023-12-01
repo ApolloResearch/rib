@@ -1,0 +1,17 @@
+seed: 0
+model:
+  hidden_sizes:
+    - 100
+  activation_fn: relu
+  bias: true
+  input_size: 784
+  output_size: 10
+train:
+  learning_rate: 0.001
+  batch_size: 64
+  epochs: 12
+  save_dir: /mnt/ssd-apollo/models/MNIST/checkpoints
+  save_every_n_epochs: null
+wandb:
+  project: mlp-mnist
+  entity: null

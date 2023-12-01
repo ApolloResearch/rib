@@ -13,6 +13,8 @@ from tqdm import tqdm
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
 from rib.linalg import eigendecompose, pinv_diag
+from rib.models.mlp import MLP
+from rib.models.sequential_transformer.transformer import SequentialTransformer
 from rib.types import TORCH_DTYPES
 
 
@@ -182,18 +184,13 @@ def calculate_interaction_rotations(
         assert (
             node_layers[-1] == "output"
         ), f"Final node layer {node_layers[-1]} not in gram matrices."
-        with torch.inference_mode():
-            # Get the out_dim of logits by hackily passing a datapoint through it
-            input_sample = data_loader.dataset[0][0].to(device=device)
-            assert isinstance(input_sample, Tensor)
-            if input_sample.dtype in tuple(TORCH_DTYPES.values()):
-                input_sample = input_sample.to(dtype=dtype)
 
-            out_samples = hooked_model(input_sample)
-            out_sample: Float[Tensor, "... out_dim"] = (
-                out_samples[0] if isinstance(out_samples, tuple) else out_samples
-            )
-            final_node_dim = out_sample.shape[-1]
+        inner_model = hooked_model.model
+        if isinstance(inner_model, MLP):
+            final_node_dim = inner_model.output_size
+        else:
+            assert isinstance(inner_model, SequentialTransformer)
+            final_node_dim = inner_model.cfg.d_vocab
     else:
         final_node_dim = gram_matrices[node_layers[-1]].shape[0]
 

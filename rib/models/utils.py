@@ -48,7 +48,8 @@ def get_model_attr(model: torch.nn.Module, attr_path: str) -> torch.nn.Module:
         torch.nn.Module: The attribute of the model.
 
     Example:
-        >>> mlp = MLP([5], input_size=2, output_size=3)
+        >>> mlp_config = MLPConfig(hidden_sizes=[5], input_size=2, output_size=3)
+        >>> mlp = MLP(mlp_config)
         >>> mlp
         MLP(
             (layers): ModuleList(

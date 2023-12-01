@@ -26,14 +26,12 @@ sys.path.append(str(ROOT_DIR))
 
 from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
-from experiments.mnist_rib_build.run_mnist_rib_build import Config as MnistRibConfig
-from experiments.mnist_rib_build.run_mnist_rib_build import (
-    main as mnist_build_graph_main,
-)
+from experiments.mlp_rib_build.run_mlp_rib_build import Config as MlpRibConfig
+from experiments.mlp_rib_build.run_mlp_rib_build import main as mlp_build_graph_main
 from rib.interaction_algos import build_sorted_lambda_matrices
 
 
-def build_get_lambdas(config: Union[LMRibConfig, MnistRibConfig], build_graph_main_fn: Callable):
+def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main_fn: Callable):
     """Build the graph but extracting the lambdas"""
     Lambda_abs: list[torch.Tensor] = []
 
@@ -55,7 +53,7 @@ def build_get_lambdas(config: Union[LMRibConfig, MnistRibConfig], build_graph_ma
 
 
 def graph_build_test(
-    config: Union[LMRibConfig, MnistRibConfig],
+    config: Union[LMRibConfig, MlpRibConfig],
     build_graph_main_fn: Callable,
     atol: float,
 ):
@@ -212,7 +210,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
 
     config_str = f"""
     exp_name: test
-    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
+    mlp_path: "experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
     batch_size: 256
     seed: 0
     truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
@@ -224,17 +222,19 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         - layers.1
         - layers.2
         - output
+    dataset:
+        return_set_frac: 0.2
     out_dir: null
     basis_formula: "{basis_formula}"
     edge_formula: "{edge_formula}"
     """
 
     config_dict = yaml.safe_load(config_str)
-    config = MnistRibConfig(**config_dict)
+    config = MlpRibConfig(**config_dict)
 
     graph_build_test(
         config=config,
-        build_graph_main_fn=mnist_build_graph_main,
+        build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
 
@@ -243,7 +243,7 @@ def test_mnist_build_graph_invalid_node_layers():
     """Test that non-sequential node_layers raises an error."""
     mock_config = """
     exp_name: test
-    mlp_path: "experiments/train_mnist/sample_checkpoints/lr-0.001_bs-64_2023-11-22_13-05-08/model_epoch_3.pt"
+    mlp_path: "experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
     batch_size: 256
     seed: 0
     truncation_threshold: 1e-15
@@ -257,11 +257,11 @@ def test_mnist_build_graph_invalid_node_layers():
     """
 
     config_dict = yaml.safe_load(mock_config)
-    config = MnistRibConfig(**config_dict)
+    config = MlpRibConfig(**config_dict)
 
     with pytest.raises(AssertionError):
         graph_build_test(
             config=config,
-            build_graph_main_fn=mnist_build_graph_main,
+            build_graph_main_fn=mlp_build_graph_main,
             atol=0,
         )

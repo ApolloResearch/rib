@@ -3,7 +3,7 @@ from typing import Literal, Optional, Union
 
 import torch
 from jaxtyping import Int
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -11,6 +11,7 @@ from torch.utils.data import Dataset
 class HFDatasetConfig(BaseModel):
     """Config for the HuggingFace datasets library."""
 
+    model_config = ConfigDict(extra="forbid")
     source: Literal["huggingface"] = "huggingface"
     name: str = Field(
         ..., description="The name of the dataset to load from the HuggingFace datasets library."
@@ -56,6 +57,7 @@ class ModularArithmeticDatasetConfig(BaseModel):
     file (see `rib/loader.create_modular_arithmetic_dataset`)
     """
 
+    model_config = ConfigDict(extra="forbid")
     source: Literal["custom"] = "custom"
     name: Literal["modular_arithmetic"] = "modular_arithmetic"
     return_set: Literal["train", "test", "all", "both"] = Field(
@@ -103,6 +105,7 @@ class ModularArithmeticDataset(Dataset):
 
 
 class VisionDatasetConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     source: Literal["custom"] = "custom"
     name: Literal["CIFAR10", "MNIST"] = "MNIST"
     return_set_frac: Optional[float] = None

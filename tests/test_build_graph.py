@@ -223,7 +223,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         - layers.2
         - output
     dataset:
-        return_set_frac: 0.2
+        return_set_frac: 0.01  # 3 batches (with batch_size=256)
     out_dir: null
     basis_formula: "{basis_formula}"
     edge_formula: "{edge_formula}"

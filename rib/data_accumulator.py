@@ -1,5 +1,6 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
+from functools import partial
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import torch
@@ -16,7 +17,7 @@ from rib.hook_fns import (
     linear_integrated_gradient_pre_forward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
-from rib.linalg import calc_linear_edge_analytic
+from rib.linalg import calc_linear_edge_analytic, module_hat
 from rib.log import logger
 from rib.models.mlp import MLPLayer
 from rib.models.sequential_transformer.components import MLPIn, MLPOut
@@ -140,6 +141,7 @@ def collect_M_dash_and_Lambda_dash(
     hook_name: Optional[str] = None,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -162,7 +164,11 @@ def collect_M_dash_and_Lambda_dash(
             Lambda_dash matrix. Does not affect the output, only used for the einsum within
             M_dash_and_Lambda_dash_pre_forward_hook_fn. Needs to be float64 on CPU but float32 was
             fine on GPU. Defaults to float64.
-
+        basis_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
     Returns:
         A tuple containing M' and Lambda'.
     """
@@ -180,6 +186,7 @@ def collect_M_dash_and_Lambda_dash(
             "dataset_size": len(data_loader.dataset),  # type: ignore
             "M_dtype": M_dtype,
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
+            "basis_formula": basis_formula,
         },
     )
 
@@ -209,6 +216,7 @@ def collect_interaction_edges(
     device: str,
     dataset_size: Optional[int] = None,
     use_analytic_integrad: bool = True,
+    edge_formula: Literal["functional", "squared"] = "functional",
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -228,6 +236,9 @@ def collect_interaction_edges(
             `len(data_loader)`. Important to set when parallelizing over the dataset.
         use_analytic_integrad: Whether to use the analytic edge calculation if the section supports
             it. Defaults to True.
+        edge_formula: The formula to use for the attribution. Must be one of "functional" or
+            "squared". The former is the old (October) functional version, the latter is a new
+            (November) version.
 
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes
@@ -251,6 +262,8 @@ def collect_interaction_edges(
 
         assert C_in is not None, "C matrix is None."
         assert C_in_pinv is not None, "C_pinv matrix is None."
+        if C_out is not None:
+            C_out = C_out.to(device=device)
 
         # Get the list of modules in the section
         section = get_model_attr(hooked_model.model, section_id)
@@ -283,6 +296,12 @@ def collect_interaction_edges(
                     integrated_gradient_types[C_info.node_layer_name] = "linear"
         if C_info.node_layer_name not in integrated_gradient_types:
             # Haven't added an analytic integrated gradient hook, so add a numerical one
+            module_hat_partial = partial(
+                module_hat,
+                module=get_model_attr(hooked_model.model, section_id),
+                C_in_pinv=C_in_pinv.to(device=device),
+                C_out=C_out,
+            )
             edge_hooks.append(
                 Hook(
                     name=C_info.node_layer_name,
@@ -290,14 +309,15 @@ def collect_interaction_edges(
                     fn=interaction_edge_pre_forward_hook_fn,
                     module_name=section_id,
                     fn_kwargs={
-                        "C_in": C_in.to(device),  # C from the current node layer
-                        "C_in_pinv": C_in_pinv.to(device),  # C_pinv from current node layer
-                        "C_out": C_out.to(device) if C_out is not None else None,
+                        "C_in": C_in.to(device=device),  # C from the current node layer
+                        "module_hat": module_hat_partial,
                         "n_intervals": n_intervals,
-                        "dataset_size": dataset_size,
+                        "dataset_size": dataset_size if dataset_size is not None else len(data_loader.dataset),  # type: ignore
+                        "edge_formula": edge_formula,
                     },
                 )
             )
+
             # Initialise the edge matrices to zeros to (out_dim, in_dim). These get accumulated in
             # the forward hook.
             hooked_model.hooked_data[C_info.node_layer_name] = {

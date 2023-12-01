@@ -17,7 +17,7 @@ Usage:
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import fire
 import torch
@@ -47,6 +47,14 @@ class Config(BaseModel):
     node_layers: list[str]
     use_analytic_integrad: bool = Field(
         False, description="Whether to use the analytic version of integrated gradients."
+    )
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
+        "(1-0)*alpha",
+        description="The integrated gradient formula to use to calculate the basis.",
+    )
+    edge_formula: Literal["functional", "squared"] = Field(
+        "functional",
+        description="The attribution method to use to calculate the edges.",
     )
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
@@ -116,6 +124,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         n_intervals=config.n_intervals,
         truncation_threshold=config.truncation_threshold,
         rotate_final_node_layer=config.rotate_final_node_layer,
+        basis_formula=config.basis_formula,
     )
 
     E_hats = collect_interaction_edges(
@@ -127,6 +136,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         dtype=dtype,
         device=device,
         use_analytic_integrad=config.use_analytic_integrad,
+        edge_formula=config.edge_formula,
     )
 
     # Move interaction matrices to the cpu and store in dict

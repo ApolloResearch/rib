@@ -137,6 +137,14 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
+        "(1-0)*alpha",
+        description="The integrated gradient formula to use to calculate the basis.",
+    )
+    edge_formula: Literal["functional", "squared"] = Field(
+        "functional",
+        description="The attribution method to use to calculate the edges.",
+    )
     use_analytic_integrad: bool = Field(
         True,
         description="Whether to use the analytic method for calculating the integrated gradient"
@@ -348,6 +356,7 @@ def main(
             n_intervals=config.n_intervals,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
+            basis_formula=config.basis_formula,
         )
         # Cs used to calculate edges
         edge_Cs = Cs
@@ -387,6 +396,7 @@ def main(
             device=device,
             dataset_size=full_dataset_len,  # includes data for other processes
             use_analytic_integrad=config.use_analytic_integrad,
+            edge_formula=config.edge_formula,
         )
 
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"

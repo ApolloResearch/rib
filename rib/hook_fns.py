@@ -10,8 +10,7 @@ each hook function. Therefore, these arguments must be included in the signature
 Otherwise, the hook function operates like a regular pytorch hook function.
 """
 
-from functools import partial
-from typing import Any, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 import einops
 import torch
@@ -21,8 +20,8 @@ from torch import Tensor
 
 from rib.linalg import (
     calc_gram_matrix,
-    edge_norm,
-    integrated_gradient_trapezoidal_jacobian,
+    integrated_gradient_trapezoidal_jacobian_functional,
+    integrated_gradient_trapezoidal_jacobian_squared,
     integrated_gradient_trapezoidal_norm,
 )
 from rib.models.sequential_transformer.components import AttentionOut
@@ -242,6 +241,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -261,6 +261,11 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
             Lambda_dash matrix. Does not affect the output, only used for the einsum itself.
             Needs to be float64 on CPU but float32 was fine on GPU. Defaults to float64.
+        basis_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -273,6 +278,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         inputs=inputs,
         C_out=C_out,
         n_intervals=n_intervals,
+        basis_formula=basis_formula,
     )
     in_dtype = in_grads.dtype
 
@@ -340,10 +346,12 @@ def interaction_edge_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     C_in: Float[Tensor, "in_hidden in_hidden_trunc"],
-    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
+    module_hat: Callable[
+        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
+    ],
     n_intervals: int,
     dataset_size: int,
+    edge_formula: Literal["functional", "squared"] = "functional",
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -362,11 +370,14 @@ def interaction_edge_pre_forward_hook_fn(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
         C_in: The C matrix for the current layer (C^l in the paper).
-        C_in_pinv: The pseudoinverse of the C matrix for the current layer ((C^l)^+ in the paper).
-        C_out: The C matrix for the next layer (C^{l+1} in the paper).
+        module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
+            in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
+        edge_formula: The formula to use for the attribution. Must be one of "functional" or
+            "squared". The former is the old (October) functional version, the latter is a new
+            (November) version.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -374,46 +385,36 @@ def interaction_edge_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    jac_out = hooked_data[hook_name][data_key]
-
-    # Calculate the integrated gradient numerically
-    has_pos = inputs[0].dim() == 3
+    in_tuple_dims = [x.shape[-1] for x in inputs]
 
     # We first concatenate the inputs over the hidden dimension
-    in_acts = torch.cat(inputs, dim=-1)
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
+    in_acts = torch.cat(inputs, dim=-1)
     f_hat = in_acts @ C_in
+    jac_out = hooked_data[hook_name][data_key]
 
-    in_hidden_dims = [x.shape[-1] for x in inputs]
-
-    # Compute f^{l+1}(x) to which the derivative is not applied.
-    with torch.inference_mode():
-        # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
-        f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_hat @ C_in_pinv
-        input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
-
-        output_const = module(*tuple(x.detach().clone() for x in input_tuples))
-        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
-
-    has_pos = f_hat.dim() == 3
-
-    edge_norm_partial = partial(
-        edge_norm,
-        outputs_const=outputs_const,
-        module=module,
-        C_in_pinv=C_in_pinv,
-        C_out=C_out,
-        in_hidden_dims=in_hidden_dims,
-        has_pos=has_pos,
-    )
-
-    integrated_gradient_trapezoidal_jacobian(
-        fn=edge_norm_partial,
-        x=f_hat,
-        n_intervals=n_intervals,
-        jac_out=jac_out,
-        dataset_size=dataset_size,
-    )
+    if edge_formula == "functional":
+        integrated_gradient_trapezoidal_jacobian_functional(
+            module_hat=module_hat,
+            f_in_hat=f_hat,
+            in_tuple_dims=in_tuple_dims,
+            jac_out=jac_out,
+            dataset_size=dataset_size,
+            n_intervals=n_intervals,
+        )
+    elif edge_formula == "squared":
+        integrated_gradient_trapezoidal_jacobian_squared(
+            module_hat=module_hat,
+            f_in_hat=f_hat,
+            in_tuple_dims=in_tuple_dims,
+            jac_out=jac_out,
+            dataset_size=dataset_size,
+            n_intervals=n_intervals,
+        )
+    else:
+        raise ValueError(
+            f"edge_formula must be one of 'functional' or 'squared', got {edge_formula}"
+        )
 
 
 def acts_forward_hook_fn(

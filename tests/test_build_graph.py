@@ -73,16 +73,29 @@ def graph_build_test(
     comparison_layers = config.node_layers[:-1]
     for i, module_name in enumerate(comparison_layers):
         # Get the module names from the grams
-        # Check that the size of the sum of activations in the interaction basis is equal
-        # to the outgoing edges of a node
         act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
         if E_hats:
-            edge_size = E_hats[i][1].sum(0).abs()
-            assert torch.allclose(
-                act_size / act_size.abs().max(),
-                edge_size / edge_size.abs().max(),
-                atol=atol,
-            ), f"act_size not equal to edge_size for {module_name}"
+            # E_hats[i] is a tuple (name, tensor)
+            if config.edge_formula == "squared":
+                # edges must be positive >= 0
+                assert (E_hats[i][1] >= 0).all()
+            # edges should not all be zero
+            assert (E_hats[i][1] != 0).any()
+            if config.edge_formula == "functional" and config.basis_formula == "(1-alpha)^2":
+                # Check that the size of the sum of activations in the interaction basis is equal
+                # to the outgoing edges of a node. The relation should hold only in this one config
+                # case.
+                edge_size = E_hats[i][1].sum(0).abs()
+                # Test shapes
+                assert (
+                    act_size.shape == edge_size.shape
+                ), f"act_size and edge_size not same shape for {module_name}"
+                # Test sum of edges == function size
+                assert torch.allclose(
+                    act_size / act_size.abs().max(),
+                    edge_size / edge_size.abs().max(),
+                    atol=atol,
+                ), f"act_size not equal to edge_size for {module_name}"
 
         # Check that the Lambdas are also the same as the act_size and edge_size
         # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
@@ -96,7 +109,16 @@ def graph_build_test(
 
 
 @pytest.mark.slow
-def test_modular_arithmetic_build_graph():
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula",
+    [
+        ("(1-alpha)^2", "functional"),
+        ("(1-0)*alpha", "functional"),
+        ("(1-alpha)^2", "squared"),
+        ("(1-0)*alpha", "squared"),
+    ],
+)
+def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     dtype_str = "float32"
     atol = 1e-5  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
 
@@ -123,6 +145,8 @@ def test_modular_arithmetic_build_graph():
     eval_type: accuracy
     use_analytic_integrad: false
     out_dir: null
+    basis_formula: "{basis_formula}"
+    edge_formula: "{edge_formula}"
     """
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
@@ -171,8 +195,18 @@ def test_pythia_14m_build_graph():
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("use_analytic_integrad", [True, False])
-def test_mnist_build_graph_numeric_analytic(use_analytic_integrad):
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula, use_analytic_integrad",
+    [
+        ("(1-alpha)^2", "functional", True),
+        ("(1-0)*alpha", "functional", True),
+        ("(1-0)*alpha", "functional", False),
+        ("(1-alpha)^2", "squared", True),
+        ("(1-0)*alpha", "squared", True),
+        ("(1-0)*alpha", "squared", False),
+    ],
+)
+def test_mnist_build_graph(basis_formula, edge_formula, use_analytic_integrad):
     dtype_str = "float32"
     # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
     atol = 1e-6
@@ -193,8 +227,10 @@ def test_mnist_build_graph_numeric_analytic(use_analytic_integrad):
         - output
     use_analytic_integrad: {use_analytic_integrad}
     dataset:
-        return_set_frac: 0.2
+        return_set_frac: 0.01  # 3 batches (with batch_size=256)
     out_dir: null
+    basis_formula: "{basis_formula}"
+    edge_formula: "{edge_formula}"
     """
 
     config_dict = yaml.safe_load(config_str)

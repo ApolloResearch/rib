@@ -318,75 +318,75 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     )
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    "basis_formula, edge_formula, dtype_str",
-    [
-        # functional fp32 currently fails with these tolerances
-        # ("(1-alpha)^2", "functional", "float32"),
-        # ("(1-0)*alpha", "functional", "float32"),
-        # Mod add tests are slow because return_set_n_samples is not implemented yet
-        # TODO Comment these below all back in
-        # ("(1-alpha)^2", "functional", "float64"),
-        ("(1-0)*alpha", "functional", "float64"),
-        # ("(1-alpha)^2", "squared", "float32"),
-        # ("(1-0)*alpha", "squared", "float32"),
-        # ("(1-alpha)^2", "squared", "float64"),
-        # ("(1-0)*alpha", "squared", "float64"),
-    ],
-)
-def test_modular_arithmetic_rotate_final_layer_invariance(
-    basis_formula,
-    edge_formula,
-    dtype_str,
-    rtol=1e-3,
-    atol=1e-3,
-):
-    """Test that the non-final edges are the same for modular arithmetic whether or not we rotate the final layer.
+# Mod add tests are slow because return_set_n_samples is not implemented yet
+# TODO: Comment this back in when return_set_n_samples is implemented
+# @pytest.mark.slow
+# @pytest.mark.parametrize(
+#     "basis_formula, edge_formula, dtype_str",
+#     [
+#         # functional fp32 currently fails with these tolerances
+#         # ("(1-alpha)^2", "functional", "float32"),
+#         # ("(1-0)*alpha", "functional", "float32"),
+#         ("(1-alpha)^2", "functional", "float64"),
+#         ("(1-0)*alpha", "functional", "float64"),
+#         ("(1-alpha)^2", "squared", "float32"),
+#         ("(1-0)*alpha", "squared", "float32"),
+#         ("(1-alpha)^2", "squared", "float64"),
+#         ("(1-0)*alpha", "squared", "float64"),
+#     ],
+# )
+# def test_modular_arithmetic_rotate_final_layer_invariance(
+#     basis_formula,
+#     edge_formula,
+#     dtype_str,
+#     rtol=1e-3,
+#     atol=1e-3,
+# ):
+#     """Test that the non-final edges are the same for modular arithmetic whether or not we rotate the final layer.
 
-    Note that atol is necesdsary as the less important edges do deviate. The largest edges are
-    between 1e3 and 1e5 large.
-    """
-    mock_config = f"""
-    exp_name: test
-    seed: 0
-    tlens_pretrained: null
-    tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-    dataset:
-        source: custom
-        name: modular_arithmetic
-        return_set: train
-        return_set_frac: null
-        return_set_n_samples: 10
-    node_layers:
-        - ln1.0
-        - ln2.0
-        - mlp_out.0
-        - unembed
-        - output
-    batch_size: 2
-    gram_batch_size: 2
-    edge_batch_size: 2
-    truncation_threshold: 1e-15
-    rotate_final_node_layer: false
-    last_pos_module_type: add_resid1
-    n_intervals: 2
-    dtype: {dtype_str}
-    eval_type: accuracy
-    out_dir: null
-    basis_formula: "{basis_formula}"
-    edge_formula: "{edge_formula}"
-    """
+#     Note that atol is necesdsary as the less important edges do deviate. The largest edges are
+#     between 1e3 and 1e5 large.
+#     """
+#     mock_config = f"""
+#     exp_name: test
+#     seed: 0
+#     tlens_pretrained: null
+#     tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+#     dataset:
+#         source: custom
+#         name: modular_arithmetic
+#         return_set: train
+#         return_set_frac: null
+#         return_set_n_samples: 10
+#     node_layers:
+#         - ln1.0
+#         - ln2.0
+#         - mlp_out.0
+#         - unembed
+#         - output
+#     batch_size: 2
+#     gram_batch_size: 2
+#     edge_batch_size: 2
+#     truncation_threshold: 1e-15
+#     rotate_final_node_layer: false
+#     last_pos_module_type: add_resid1
+#     n_intervals: 2
+#     dtype: {dtype_str}
+#     eval_type: accuracy
+#     out_dir: null
+#     basis_formula: "{basis_formula}"
+#     edge_formula: "{edge_formula}"
+#     """
 
-    config_dict = yaml.safe_load(mock_config)
-    config = LMRibConfig(**config_dict)
+#     config_dict = yaml.safe_load(mock_config)
+#     config = LMRibConfig(**config_dict)
 
-    rotate_final_layer_invariance(
-        config=config,
-        build_graph_main_fn=lm_build_graph_main,
-        rtol=rtol,
-        atol=atol,
-    )
+#     rotate_final_layer_invariance(
+#         config=config,
+#         build_graph_main_fn=lm_build_graph_main,
+#         rtol=rtol,
+#         atol=atol,
+#     )
 
 
 def test_mnist_build_graph_invalid_node_layers():

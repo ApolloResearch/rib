@@ -389,8 +389,10 @@ class AttentionOut(nn.Module):
             torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool()
         )
         if use_local_attn:
+            assert self.cfg.original_architecture == "GPTNeoForCausalLM"
             # Only attend to the previous window_size positions
             # so mask true iff query - window_size < key <= query
+            # we fix window_size to 256 (the default for GPTNeo) instead of putting into config
             window_size = 256
             causal_mask = torch.triu(causal_mask, 1 - window_size)
         self.register_buffer("mask", causal_mask)

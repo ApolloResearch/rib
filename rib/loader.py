@@ -1,5 +1,6 @@
 """Utilities for loading models and data."""
 
+import random
 from pathlib import Path
 from typing import Literal, Optional, Union, cast, overload
 
@@ -116,8 +117,10 @@ def load_mlp(config: MLPConfig, mlp_path: Path, device: str, fold_bias: bool = T
     return mlp
 
 
-def _get_data_subset(dataset: Dataset, frac: Optional[float], n_samples: Optional[int]) -> Dataset:
-    """Get a subset of the dataset.
+def _get_data_subset(
+    dataset: Dataset, frac: Optional[float], n_samples: Optional[int], seed: Optional[int] = None
+) -> Dataset:
+    """Get a random subset of the dataset.
 
     If frac is not None, returns the first frac of the dataset. If n_samples is not None, returns
     the first config.n_samples of the dataset.
@@ -126,20 +129,28 @@ def _get_data_subset(dataset: Dataset, frac: Optional[float], n_samples: Optiona
         dataset (Dataset): The dataset to return a subset of.
         frac (Optional[float]): The fraction of the dataset to return.
         n_samples (Optional[int]): The number of samples to return.
+        seed (Optional[int]): The seed to use for the random number generator.
 
     Returns:
         Dataset: The subset of the dataset.
     """
     assert frac is None or n_samples is None, "Only one of `frac` and `n_samples` can be specified."
     len_dataset = len(dataset)  # type: ignore
+    indices = list(range(len_dataset))
+
+    if seed is not None:
+        random.seed(seed)
+
     if frac is not None:
         end_idx = int(len_dataset * frac)
-        return Subset(dataset, range(end_idx))
+        selected_indices = sorted(random.sample(indices, end_idx))
+        return Subset(dataset, selected_indices)
     elif n_samples is not None:
-        assert n_samples <= len_dataset, (
-            f"n_samples ({n_samples}) must be <= " f"len_dataset ({len_dataset})."
-        )
-        return Subset(dataset, range(n_samples))
+        assert (
+            n_samples <= len_dataset
+        ), f"n_samples ({n_samples}) must be <= len_dataset ({len_dataset})."
+        selected_indices = sorted(random.sample(indices, n_samples))
+        return Subset(dataset, selected_indices)
     else:
         return dataset
 
@@ -200,6 +211,7 @@ def create_modular_arithmetic_dataset(
             dataset,
             frac=dataset_config.return_set_frac,
             n_samples=dataset_config.return_set_n_samples,
+            seed=seed,
         )
         for dataset in dataset_tup
     )
@@ -337,6 +349,7 @@ def create_vision_dataset(
         raw_dataset,
         frac=dataset_config.return_set_frac,
         n_samples=dataset_config.return_set_n_samples,
+        seed=dataset_config.seed,
     )
     return dataset
 

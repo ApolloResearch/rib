@@ -15,7 +15,6 @@ from rib.hook_manager import HookedModel
 from rib.linalg import eigendecompose, pinv_diag
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.transformer import SequentialTransformer
-from rib.types import TORCH_DTYPES
 
 
 @dataclass

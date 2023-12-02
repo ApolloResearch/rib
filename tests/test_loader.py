@@ -16,7 +16,7 @@ from rib.utils import get_data_subset
         (10, 0.5, None, None, 5, None),  # No seed, results will be random
     ],
 )
-def testget_data_subset(dataset_size, frac, n_samples, seed, expected_length, expected_exception):
+def test_get_data_subset(dataset_size, frac, n_samples, seed, expected_length, expected_exception):
     # Create a dummy dataset
     dataset = TensorDataset(torch.arange(start=0, end=dataset_size))
 

@@ -326,8 +326,7 @@ def get_data_subset(
         random.seed(seed)
 
     if frac is not None:
-        end_idx = int(len_dataset * frac)
-        selected_indices = sorted(random.sample(indices, end_idx))
+        selected_indices = sorted(random.sample(indices, int(len_dataset * frac)))
         return Subset(dataset, selected_indices)
     elif n_samples is not None:
         assert (

@@ -17,12 +17,12 @@ Usage:
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import fire
 import torch
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from rib.data import VisionDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
@@ -36,6 +36,7 @@ from rib.utils import check_outfile_overwrite, load_config, set_seed
 
 
 class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     exp_name: str
     mlp_path: RootPath
     batch_size: int
@@ -45,6 +46,14 @@ class Config(BaseModel):
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: StrDtype  # Data type of all tensors (except those overriden in certain functions).
     node_layers: list[str]
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
+        "(1-0)*alpha",
+        description="The integrated gradient formula to use to calculate the basis.",
+    )
+    edge_formula: Literal["functional", "squared"] = Field(
+        "functional",
+        description="The attribution method to use to calculate the edges.",
+    )
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
@@ -113,6 +122,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         n_intervals=config.n_intervals,
         truncation_threshold=config.truncation_threshold,
         rotate_final_node_layer=config.rotate_final_node_layer,
+        basis_formula=config.basis_formula,
     )
 
     E_hats = collect_interaction_edges(
@@ -123,6 +133,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         data_loader=train_loader,
         dtype=dtype,
         device=device,
+        edge_formula=config.edge_formula,
     )
 
     # Move interaction matrices to the cpu and store in dict

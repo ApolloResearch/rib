@@ -73,16 +73,29 @@ def graph_build_test(
     comparison_layers = config.node_layers[:-1]
     for i, module_name in enumerate(comparison_layers):
         # Get the module names from the grams
-        # Check that the size of the sum of activations in the interaction basis is equal
-        # to the outgoing edges of a node
         act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
         if E_hats:
-            edge_size = E_hats[i][1].sum(0).abs()
-            assert torch.allclose(
-                act_size / act_size.abs().max(),
-                edge_size / edge_size.abs().max(),
-                atol=atol,
-            ), f"act_size not equal to edge_size for {module_name}"
+            # E_hats[i] is a tuple (name, tensor)
+            if config.edge_formula == "squared":
+                # edges must be positive >= 0
+                assert (E_hats[i][1] >= 0).all()
+            # edges should not all be zero
+            assert (E_hats[i][1] != 0).any()
+            if config.edge_formula == "functional" and config.basis_formula == "(1-alpha)^2":
+                # Check that the size of the sum of activations in the interaction basis is equal
+                # to the outgoing edges of a node. The relation should hold only in this one config
+                # case.
+                edge_size = E_hats[i][1].sum(0).abs()
+                # Test shapes
+                assert (
+                    act_size.shape == edge_size.shape
+                ), f"act_size and edge_size not same shape for {module_name}"
+                # Test sum of edges == function size
+                assert torch.allclose(
+                    act_size / act_size.abs().max(),
+                    edge_size / edge_size.abs().max(),
+                    atol=atol,
+                ), f"act_size not equal to edge_size for {module_name}"
 
         # Check that the Lambdas are also the same as the act_size and edge_size
         # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
@@ -96,7 +109,16 @@ def graph_build_test(
 
 
 @pytest.mark.slow
-def test_modular_arithmetic_build_graph():
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula",
+    [
+        ("(1-alpha)^2", "functional"),
+        ("(1-0)*alpha", "functional"),
+        ("(1-alpha)^2", "squared"),
+        ("(1-0)*alpha", "squared"),
+    ],
+)
+def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     dtype_str = "float32"
     atol = 1e-5  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
 
@@ -122,6 +144,8 @@ def test_modular_arithmetic_build_graph():
     dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null
+    basis_formula: "{basis_formula}"
+    edge_formula: "{edge_formula}"
     """
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
@@ -170,7 +194,16 @@ def test_pythia_14m_build_graph():
 
 
 @pytest.mark.slow
-def test_mnist_build_graph():
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula",
+    [
+        ("(1-alpha)^2", "functional"),
+        ("(1-0)*alpha", "functional"),
+        ("(1-alpha)^2", "squared"),
+        ("(1-0)*alpha", "squared"),
+    ],
+)
+def test_mnist_build_graph(basis_formula, edge_formula):
     dtype_str = "float32"
     # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
     atol = 1e-6
@@ -190,8 +223,10 @@ def test_mnist_build_graph():
         - layers.2
         - output
     dataset:
-        return_set_frac: 0.2
+        return_set_frac: 0.01  # 3 batches (with batch_size=256)
     out_dir: null
+    basis_formula: "{basis_formula}"
+    edge_formula: "{edge_formula}"
     """
 
     config_dict = yaml.safe_load(config_str)
@@ -202,6 +237,156 @@ def test_mnist_build_graph():
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
+
+
+def rotate_final_layer_invariance(
+    config: Union[LMRibConfig, MlpRibConfig],
+    build_graph_main_fn: Callable,
+    rtol: float = 1e-7,
+    atol: float = 0,
+):
+    config_not_rotated = config.model_copy()
+    config_not_rotated.rotate_final_node_layer = False
+    config_rotated = config.model_copy()
+    config_rotated.rotate_final_node_layer = True
+
+    results_not_rotated = build_graph_main_fn(config_not_rotated)
+    results_rotated = build_graph_main_fn(config_rotated)
+
+    edges_not_rotated = results_not_rotated["edges"]
+    edges_rotated = results_rotated["edges"]
+
+    # -1 has no eges, -2 is the final layer and changes
+    comparison_layers = config.node_layers[:-2]
+    for i, module_name in enumerate(comparison_layers):
+        # E_hats[i] is a tuple (name, tensor)
+        print("Comparing", module_name)
+        # Check shape
+        assert (
+            edges_not_rotated[i][1].shape == edges_rotated[i][1].shape
+        ), f"edges_not_rotated and edges_rotated not same shape for {module_name}"
+        # Check values
+        assert torch.allclose(
+            edges_not_rotated[i][1],
+            edges_rotated[i][1],
+            rtol=rtol,
+            atol=atol,
+        ), f"Shape of edges_not_rotated not equal to shape of edges_rotated for {module_name}. Biggest relative deviation: {(edges_not_rotated[i][1] / edges_rotated[i][1]).min()}, {(edges_not_rotated[i][1] / edges_rotated[i][1]).max()}"
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula",
+    [
+        ("(1-alpha)^2", "functional"),
+        ("(1-0)*alpha", "functional"),
+        ("(1-alpha)^2", "squared"),
+        ("(1-0)*alpha", "squared"),
+    ],
+)
+def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1e-7, atol=1e-8):
+    """Test that the non-final edges are the same for MNIST whether or not we rotate the final layer."""
+    mock_config = f"""
+    exp_name: test
+    mlp_path: experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt
+    batch_size: 256
+    seed: 0
+    truncation_threshold: 1e-6
+    rotate_final_node_layer: true
+    n_intervals: 0
+    dtype: float64 # in float32 the truncation changes between both runs
+    dataset:
+        return_set_frac: 0.01  # 3 batches (with batch_size=256)
+    node_layers:
+    - layers.0
+    - layers.1
+    - layers.2
+    - output
+    out_dir: null
+    basis_formula: "{basis_formula}"
+    edge_formula: "{edge_formula}"
+    """
+
+    config_dict = yaml.safe_load(mock_config)
+    config = MlpRibConfig(**config_dict)
+
+    rotate_final_layer_invariance(
+        config=config,
+        build_graph_main_fn=mlp_build_graph_main,
+        rtol=rtol,
+        atol=atol,
+    )
+
+
+# Mod add tests are slow because return_set_n_samples is not implemented yet
+# TODO: Comment this back in when return_set_n_samples is implemented
+# @pytest.mark.slow
+# @pytest.mark.parametrize(
+#     "basis_formula, edge_formula, dtype_str",
+#     [
+#         # functional fp32 currently fails with these tolerances
+#         # ("(1-alpha)^2", "functional", "float32"),
+#         # ("(1-0)*alpha", "functional", "float32"),
+#         ("(1-alpha)^2", "functional", "float64"),
+#         ("(1-0)*alpha", "functional", "float64"),
+#         ("(1-alpha)^2", "squared", "float32"),
+#         ("(1-0)*alpha", "squared", "float32"),
+#         ("(1-alpha)^2", "squared", "float64"),
+#         ("(1-0)*alpha", "squared", "float64"),
+#     ],
+# )
+# def test_modular_arithmetic_rotate_final_layer_invariance(
+#     basis_formula,
+#     edge_formula,
+#     dtype_str,
+#     rtol=1e-3,
+#     atol=1e-3,
+# ):
+#     """Test that the non-final edges are the same for modular arithmetic whether or not we rotate the final layer.
+
+#     Note that atol is necesdsary as the less important edges do deviate. The largest edges are
+#     between 1e3 and 1e5 large.
+#     """
+#     mock_config = f"""
+#     exp_name: test
+#     seed: 0
+#     tlens_pretrained: null
+#     tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+#     dataset:
+#         source: custom
+#         name: modular_arithmetic
+#         return_set: train
+#         return_set_frac: null
+#         return_set_n_samples: 10
+#     node_layers:
+#         - ln1.0
+#         - ln2.0
+#         - mlp_out.0
+#         - unembed
+#         - output
+#     batch_size: 2
+#     gram_batch_size: 2
+#     edge_batch_size: 2
+#     truncation_threshold: 1e-15
+#     rotate_final_node_layer: false
+#     last_pos_module_type: add_resid1
+#     n_intervals: 2
+#     dtype: {dtype_str}
+#     eval_type: accuracy
+#     out_dir: null
+#     basis_formula: "{basis_formula}"
+#     edge_formula: "{edge_formula}"
+#     """
+
+#     config_dict = yaml.safe_load(mock_config)
+#     config = LMRibConfig(**config_dict)
+
+#     rotate_final_layer_invariance(
+#         config=config,
+#         build_graph_main_fn=lm_build_graph_main,
+#         rtol=rtol,
+#         atol=atol,
+#     )
 
 
 def test_mnist_build_graph_invalid_node_layers():

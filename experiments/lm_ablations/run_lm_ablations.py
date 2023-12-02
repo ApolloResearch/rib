@@ -24,7 +24,7 @@ from typing import Callable, Literal, Optional, Union, cast
 
 import fire
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from rib.ablations import (
     AblationAccuracies,
@@ -48,6 +48,7 @@ from rib.utils import (
 
 
 class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     exp_name: str
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",

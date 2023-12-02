@@ -6,7 +6,7 @@ from typing import Optional, Tuple
 import torch
 from fancy_einsum import einsum
 from jaxtyping import Float
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor, nn
 
 from rib.models.utils import ACTIVATION_MAP, fold_mlp_in
@@ -14,6 +14,7 @@ from rib.types import TORCH_DTYPES, StrDtype
 
 
 class MLPConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     hidden_sizes: Optional[list[int]] = Field(
         None,
         description="A list of integers specifying the sizes of the hidden layers. If None, "

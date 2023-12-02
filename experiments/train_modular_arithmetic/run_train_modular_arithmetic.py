@@ -14,7 +14,7 @@ import fire
 import torch
 import torch.optim as optim
 import wandb
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -30,6 +30,7 @@ from rib.utils import load_config, set_seed
 
 
 class ModelConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     n_layers: int
     d_model: int
     d_head: int
@@ -42,6 +43,7 @@ class ModelConfig(BaseModel):
 
 
 class TrainConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     learning_rate: float
     batch_size: int  # Set to max(batch_size, <number of samples in dataset>)
     epochs: int
@@ -55,11 +57,13 @@ class TrainConfig(BaseModel):
 
 
 class WandbConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     project: str
     entity: Optional[str]
 
 
 class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     seed: int
     model: ModelConfig
     train: TrainConfig

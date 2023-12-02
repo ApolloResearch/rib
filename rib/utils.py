@@ -306,8 +306,8 @@ def get_data_subset(
 ) -> Dataset:
     """Get a random subset of the dataset.
 
-    If frac is not None, returns the first frac of the dataset. If n_samples is not None, returns
-    the first config.n_samples of the dataset.
+    If frac is not None, returns a random sample of the dataset of size frac * len(dataset).
+    If n_samples is not None, returns a random sample of the dataset of size n_samples.
 
     Args:
         dataset (Dataset): The dataset to return a subset of.

@@ -48,6 +48,7 @@ class SequentialTransformerConfig(BaseModel):
     dtype: torch.dtype
     use_attn_scale: bool
     use_split_qkv_input: bool
+    use_local_attn: bool
     positional_embedding_type: Literal["rotary", "standard"]
     rotary_dim: Optional[int]
     parallel_attn_mlp: bool

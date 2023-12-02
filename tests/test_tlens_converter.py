@@ -183,9 +183,10 @@ def pretrained_lm_comparison(hf_model_str: str, mappings: dict[str, dict[str, st
 
 @pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
 @pytest.mark.slow()
-def test_gpt2_conversion():
-    """Test that gpt2 in tlens and SequentialTransformer give the same outputs and internal
-    activations.
+@pytest.mark.parametrize("model_str", ["gpt2", "tiny-stories-1M"])
+def test_gpt_conversion(model_str):
+    """Test that gpt2 and tiny-stories have the same ouputs and inernal actiavtions in tlens as SequentialTransformer. The architecture of gpt2 and tiny-stories is close enough for the
+    mapping to be the same.
 
     The SequentialTransformer with node layer node_layers = ["ln2.1", "unembed"] has the
     following architecture:
@@ -240,12 +241,12 @@ def test_gpt2_conversion():
             "section_id": "sections.section_0.17",
             "tuple_idx": 0,
         },
-        "blocks.8.hook_resid_post": {
-            "section_id": "sections.section_0.67",
+        "blocks.6.hook_resid_post": {
+            "section_id": "sections.section_0.49",
             "tuple_idx": 0,
         },
     }
-    pretrained_lm_comparison("gpt2", mappings)
+    pretrained_lm_comparison(model_str, mappings)
 
 
 @pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI

@@ -2,7 +2,6 @@ from typing import TypeVar
 
 import pytest
 import torch
-from transformers import AutoTokenizer
 
 from rib.hook_fns import attn_scores_pre_forward_hook
 from rib.hook_manager import Hook, HookedModel
@@ -81,6 +80,7 @@ class TestCreateSectionIdToModuleIdMapping:
             "rotary_dim": None,
             "parallel_attn_mlp": False,
             "original_architecture": None,
+            "use_local_attn": False,
         }
         cfg = SequentialTransformerConfig(**cfg)
         seq_model = SequentialTransformer(cfg, node_layers)
@@ -109,7 +109,7 @@ class TestCreateSectionIdToModuleIdMapping:
             "d_vocab": 50257,
             "n_ctx": 1024,
             "act_fn": "gelu_new",
-            "normalization_type": "LNPre",  # GPT2 actually uses LN but we currently don't support it
+            "normalization_type": "LNPre",  # GPT2 actually uses LN but tlens converts it to LNPre
             "eps": 1e-05,
             "dtype": torch.float32,
             "use_attn_scale": True,
@@ -118,6 +118,7 @@ class TestCreateSectionIdToModuleIdMapping:
             "rotary_dim": None,
             "parallel_attn_mlp": False,
             "original_architecture": "GPT2LMHeadModel",
+            "use_local_attn": False,
         }
 
         cfg = SequentialTransformerConfig(**cfg_dict)
@@ -150,7 +151,7 @@ class TestCreateSectionIdToModuleIdMapping:
             "d_vocab": 50304,
             "n_ctx": 2048,
             "act_fn": "gelu",
-            "normalization_type": "LNPre",  # pythia actually uses LN but we currently don't support it
+            "normalization_type": "LNPre",  # pythia actually uses LN but tlens converts it to LNPre
             "eps": 1e-05,
             "dtype": torch.float32,
             "use_attn_scale": True,
@@ -159,6 +160,7 @@ class TestCreateSectionIdToModuleIdMapping:
             "rotary_dim": 8,
             "parallel_attn_mlp": True,
             "original_architecture": "GPTNeoXForCausalLM",
+            "use_local_attn": False,
         }
 
         cfg = SequentialTransformerConfig(**cfg_dict)
@@ -172,6 +174,47 @@ class TestCreateSectionIdToModuleIdMapping:
             ("sections.section_0.17", "add_resid1.4"),
             ("sections.section_1.9", "mlp_out.5"),
             ("sections.section_1.11", "ln_final"),
+        ]
+
+        TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)
+
+    def test_create_section_id_to_module_id_mapping_tinystories(self):
+        # Copying the tiny-stories-1m config that can be obtained by running the slow code below
+        # from transformer_lens.loading_from_pretrained import get_pretrained_model_config
+        # from dataclasses import asdict
+        # tlens_cfg = get_pretrained_model_config("tiny-stories-1m")
+        # print(SequentialTransformerConfig(**asdict(tlens_cfg)).dict())
+
+        cfg_dict = {
+            "n_layers": 8,
+            "d_model": 64,
+            "d_head": 4,
+            "n_heads": 16,
+            "d_mlp": 256,
+            "d_vocab": 50257,
+            "n_ctx": 2048,
+            "act_fn": "gelu_new",
+            "normalization_type": "LNPre",  # tinystories actually uses LN but tlens converts it to LNPre
+            "eps": 1e-05,
+            "dtype": torch.float32,
+            "use_attn_scale": False,
+            "use_split_qkv_input": False,
+            "use_local_attn": True,
+            "positional_embedding_type": "standard",
+            "rotary_dim": None,
+            "parallel_attn_mlp": False,
+            "original_architecture": "GPTNeoForCausalLM",
+        }
+
+        cfg = SequentialTransformerConfig(**cfg_dict)
+        node_layers = ["ln1.3", "mlp_out.6"]
+        seq_model = SequentialTransformer(cfg, node_layers)
+
+        # TODO
+        expected_mappings = [
+            ("sections.pre.3", "ln1.0"),
+            ("sections.section_0.1", "attn_in.3"),
+            ("sections.section_0.2", "attn_out.3"),
         ]
 
         TestCreateSectionIdToModuleIdMapping.compare_mappings(seq_model, expected_mappings)

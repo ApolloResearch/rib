@@ -1,7 +1,7 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union, overload
+from typing import Literal, Optional, Union, cast, overload
 
 import torch
 import torchvision
@@ -116,30 +116,30 @@ def load_mlp(config: MLPConfig, mlp_path: Path, device: str, fold_bias: bool = T
     return mlp
 
 
-def _get_data_subset(dataset: Dataset, config: DatasetConfig) -> Dataset:
+def _get_data_subset(dataset: Dataset, frac: Optional[float], n_samples: Optional[int]) -> Dataset:
     """Get a subset of the dataset.
 
-    If config.return_set_frac is not None, returns the first config.return_set_frac of the dataset.
-    If config.return_set_n_samples is not None, returns the first config.return_set_n_samples of
-    the dataset.
+    If frac is not None, returns the first frac of the dataset. If n_samples is not None, returns
+    the first config.n_samples of the dataset.
 
     Args:
         dataset (Dataset): The dataset to return a subset of.
-        config (DatasetConfig): The dataset config.
+        frac (Optional[float]): The fraction of the dataset to return.
+        n_samples (Optional[int]): The number of samples to return.
 
     Returns:
         Dataset: The subset of the dataset.
     """
+    assert frac is None or n_samples is None, "Only one of `frac` and `n_samples` can be specified."
     len_dataset = len(dataset)  # type: ignore
-    if config.return_set_frac is not None:
-        end_idx = int(len_dataset * config.return_set_frac)
+    if frac is not None:
+        end_idx = int(len_dataset * frac)
         return Subset(dataset, range(end_idx))
-    elif config.return_set_n_samples is not None:
-        assert config.return_set_n_samples <= len_dataset, (
-            f"return_set_n_samples ({config.return_set_n_samples}) must be <= "
-            f"len_dataset ({len_dataset})."
+    elif n_samples is not None:
+        assert n_samples <= len_dataset, (
+            f"n_samples ({n_samples}) must be <= " f"len_dataset ({len_dataset})."
         )
-        return Subset(dataset, range(config.return_set_n_samples))
+        return Subset(dataset, range(n_samples))
     else:
         return dataset
 
@@ -167,7 +167,7 @@ def create_modular_arithmetic_dataset(
         modulus = cfg["dataset"]["modulus"]
         fn_name = cfg["dataset"]["fn_name"]
         frac_train = cfg["dataset"]["frac_train"]
-        seed = cfg["seed"]
+        seed = cfg["dataset"]["seed"] if cfg["dataset"]["seed"] is not None else None
 
     modulus = dataset_config.modulus or modulus
     fn_name = dataset_config.fn_name or fn_name
@@ -177,23 +177,38 @@ def create_modular_arithmetic_dataset(
     assert modulus is not None, "Modulus not provided and not found in tlens model config."
     assert fn_name is not None, "Function name not provided and not found in tlens model config."
     assert frac_train is not None, "frac_train not provided and not found in tlens model config."
-    assert seed is not None, "Seed not provided and not found in tlens model config."
 
     raw_dataset = ModularArithmeticDataset(modulus=modulus, fn_name=fn_name)
 
-    dataset = _get_data_subset(raw_dataset, dataset_config)
-
+    dataset_tup: Union[tuple[Dataset], tuple[Dataset, Dataset]]
     if return_set == "all":
-        return dataset
+        dataset_tup = (raw_dataset,)
     else:
-        train_dataset, test_dataset = train_test_split(dataset, frac_train=frac_train, seed=seed)
+        train_dataset, test_dataset = train_test_split(
+            raw_dataset, frac_train=frac_train, seed=seed
+        )
         if return_set == "train":
-            return train_dataset
+            dataset_tup = (train_dataset,)
         elif return_set == "test":
-            return test_dataset
+            dataset_tup = (test_dataset,)
         else:
             assert return_set == "both"
-            return train_dataset, test_dataset
+            dataset_tup = (train_dataset, test_dataset)
+
+    dataset_subsets = tuple(
+        _get_data_subset(
+            dataset,
+            frac=dataset_config.return_set_frac,
+            n_samples=dataset_config.return_set_n_samples,
+        )
+        for dataset in dataset_tup
+    )
+    final_set: Union[Dataset, tuple[Dataset, Dataset]] = (
+        dataset_subsets[0]
+        if len(dataset_subsets) == 1
+        else cast(tuple[Dataset, Dataset], dataset_subsets)  # Needed to prevent silly mypy error
+    )
+    return final_set
 
 
 def tokenize_dataset(
@@ -318,7 +333,11 @@ def create_vision_dataset(
         transform=torchvision.transforms.ToTensor(),
     )
 
-    dataset = _get_data_subset(raw_dataset, dataset_config)
+    dataset = _get_data_subset(
+        raw_dataset,
+        frac=dataset_config.return_set_frac,
+        n_samples=dataset_config.return_set_n_samples,
+    )
     return dataset
 
 

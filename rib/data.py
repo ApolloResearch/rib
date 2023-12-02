@@ -3,7 +3,7 @@ from typing import Literal, Optional
 
 import torch
 from jaxtyping import Int
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -11,6 +11,7 @@ from torch.utils.data import Dataset
 class DatasetConfig(BaseModel):
     """Base class for dataset configs."""
 
+    model_config = ConfigDict(extra="forbid")
     return_set_frac: Optional[float] = Field(
         None,
         description="The fraction of the returned dataset (train/test/all/both) to use. Cannot be"

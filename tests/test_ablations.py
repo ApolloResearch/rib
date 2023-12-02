@@ -139,7 +139,6 @@ def test_run_mnist_ablations(ablation_type):
         return_set_n_samples: 200
     batch_size: 64
     seed: 0
-    eval_type: accuracy
     out_dir: null
     """
     config_dict = yaml.safe_load(config_str)

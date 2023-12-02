@@ -11,10 +11,9 @@ from typing import Optional, Union
 import fire
 import torch
 import wandb
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from torch import nn
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -25,10 +24,11 @@ from rib.models import MLP
 from rib.models.mlp import MLPConfig
 from rib.models.utils import save_model
 from rib.types import RootPath
-from rib.utils import REPO_ROOT, load_config, set_seed
+from rib.utils import load_config, set_seed
 
 
 class TrainConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     learning_rate: float
     batch_size: int
     epochs: int
@@ -41,11 +41,13 @@ class TrainConfig(BaseModel):
 
 
 class WandbConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     project: str
     entity: Optional[str]
 
 
 class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     seed: int
     model: MLPConfig
     train: TrainConfig

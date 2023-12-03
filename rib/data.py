@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 class DatasetConfig(BaseModel):
     """Base class for dataset configs."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     return_set_frac: Optional[float] = Field(
         None,
         description="The fraction of the returned dataset (train/test/all) to use. Cannot be"

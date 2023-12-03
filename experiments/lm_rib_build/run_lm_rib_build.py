@@ -64,7 +64,7 @@ from rib.utils import (
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str = Field(..., description="The name of the experiment")
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",

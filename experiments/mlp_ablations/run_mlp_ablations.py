@@ -48,7 +48,7 @@ from rib.utils import (
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: RootPath

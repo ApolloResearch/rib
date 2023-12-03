@@ -37,7 +37,7 @@ from rib.utils import check_outfile_overwrite, load_config, set_seed
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str
     mlp_path: RootPath
     batch_size: int

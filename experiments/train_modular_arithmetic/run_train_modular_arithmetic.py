@@ -30,7 +30,7 @@ from rib.utils import load_config, set_seed
 
 
 class ModelConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     n_layers: int
     d_model: int
     d_head: int
@@ -43,7 +43,7 @@ class ModelConfig(BaseModel):
 
 
 class TrainConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     learning_rate: float
     batch_size: int  # Set to max(batch_size, <number of samples in dataset>)
     epochs: int
@@ -57,13 +57,13 @@ class TrainConfig(BaseModel):
 
 
 class WandbConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     project: str
     entity: Optional[str]
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     seed: int
     model: ModelConfig
     train: TrainConfig

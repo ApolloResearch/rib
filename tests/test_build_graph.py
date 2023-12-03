@@ -241,24 +241,24 @@ def test_mnist_build_graph(basis_formula, edge_formula):
 
 
 def rotate_final_layer_invariance(
-    config: Union[LMRibConfig, MlpRibConfig],
+    config_str_rotated: str,
+    config_cls: Union["LMRibConfig", "MlpRibConfig"],
     build_graph_main_fn: Callable,
     rtol: float = 1e-7,
     atol: float = 0,
 ):
-    config_not_rotated = config.model_copy()
-    config_not_rotated.rotate_final_node_layer = False
-    config_rotated = config.model_copy()
-    config_rotated.rotate_final_node_layer = True
+    config_str_not_rotated = config_str_rotated.replace(
+        "rotate_final_node_layer: true", "rotate_final_node_layer: false"
+    )
 
-    results_not_rotated = build_graph_main_fn(config_not_rotated)
-    results_rotated = build_graph_main_fn(config_rotated)
+    config_rotated = config_cls(**yaml.safe_load(config_str_rotated))
+    config_not_rotated = config_cls(**yaml.safe_load(config_str_not_rotated))
 
-    edges_not_rotated = results_not_rotated["edges"]
-    edges_rotated = results_rotated["edges"]
+    edges_rotated = build_graph_main_fn(config_rotated)["edges"]
+    edges_not_rotated = build_graph_main_fn(config_not_rotated)["edges"]
 
     # -1 has no edges, -2 is the final layer and changes
-    comparison_layers = config.node_layers[:-2]
+    comparison_layers = config_rotated.node_layers[:-2]
     for i, module_name in enumerate(comparison_layers):
         # E_hats[i] is a tuple (name, tensor)
         print("Comparing", module_name)
@@ -287,7 +287,7 @@ def rotate_final_layer_invariance(
 )
 def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1e-7, atol=1e-8):
     """Test that the non-final edges are the same for MNIST whether or not we rotate the final layer."""
-    mock_config = f"""
+    config_str_rotated = f"""
     exp_name: test
     mlp_path: experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt
     batch_size: 256
@@ -307,11 +307,9 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     edge_formula: "{edge_formula}"
     """
 
-    config_dict = yaml.safe_load(mock_config)
-    config = MlpRibConfig(**config_dict)
-
     rotate_final_layer_invariance(
-        config=config,
+        config_str_rotated=config_str_rotated,
+        config_cls=MlpRibConfig,
         build_graph_main_fn=mlp_build_graph_main,
         rtol=rtol,
         atol=atol,
@@ -347,7 +345,7 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
 #     Note that atol is necessary as the less important edges do deviate. The largest edges are
 #     between 1e3 and 1e5 large.
 #     """
-#     mock_config = f"""
+#     config_str_rotated = f"""
 #     exp_name: test
 #     seed: 0
 #     tlens_pretrained: null
@@ -375,12 +373,9 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
 #     basis_formula: "{basis_formula}"
 #     edge_formula: "{edge_formula}"
 #     """
-
-#     config_dict = yaml.safe_load(mock_config)
-#     config = LMRibConfig(**config_dict)
-
 #     rotate_final_layer_invariance(
-#         config=config,
+#         config_str_rotated=config_str_rotated,
+#         config_cls=LMRibConfig,
 #         build_graph_main_fn=lm_build_graph_main,
 #         rtol=rtol,
 #         atol=atol,

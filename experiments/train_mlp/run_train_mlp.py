@@ -28,7 +28,7 @@ from rib.utils import load_config, set_seed
 
 
 class TrainConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     learning_rate: float
     batch_size: int
     epochs: int
@@ -41,13 +41,13 @@ class TrainConfig(BaseModel):
 
 
 class WandbConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     project: str
     entity: Optional[str]
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     seed: int
     model: MLPConfig
     train: TrainConfig

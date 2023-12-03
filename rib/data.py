@@ -51,9 +51,13 @@ class HFDatasetConfig(DatasetConfig):
         ..., description="The name of the dataset to load from the HuggingFace datasets library."
     )
     tokenizer_name: str = Field(
-        ..., description="The name of the model for fetching the tokenizer."
+        ...,
+        description="The HuggingFace name for the tokenizer. Please check whether the tokenizer is "
+        "compatible with the model you are using.",
     )
-    return_set: Literal["train", "test"] = Field(..., description="The dataset to return.")
+    return_set: Literal["train", "test"] = Field(
+        ..., description="The dataset split to return from HuggingFace."
+    )
     return_set_portion: Literal["first", "last"] = Field(
         "first", description="Whether to load the first or last portion of the return_set."
     )

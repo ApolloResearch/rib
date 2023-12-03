@@ -1,13 +1,13 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union, cast, overload
+from typing import Literal, Optional
 
 import torch
 import torchvision
 import yaml
 from datasets import load_dataset as hf_load_dataset
-from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
+from torch.utils.data import Dataset, Subset, TensorDataset
 from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
 
@@ -21,13 +21,7 @@ from rib.data import (
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.mlp import MLP, MLPConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
-from rib.utils import (
-    REPO_ROOT,
-    get_data_subset,
-    set_seed,
-    to_root_path,
-    train_test_split,
-)
+from rib.utils import REPO_ROOT, get_data_subset, to_root_path, train_test_split
 
 
 def load_sequential_transformer(
@@ -124,9 +118,9 @@ def load_mlp(config: MLPConfig, mlp_path: Path, device: str, fold_bias: bool = T
 
 def create_modular_arithmetic_dataset(
     dataset_config: ModularArithmeticDatasetConfig,
-    return_set: Union[Literal["train", "test", "all"], Literal["both"]],
+    return_set: Literal["train", "test", "all"],
     tlens_model_path: Optional[Path] = None,
-) -> Union[Dataset, tuple[Dataset, Dataset]]:
+) -> Dataset:
     """Create a ModularArithmeticDataset from the provided arguments.
 
     Either collects the arguments from the provided tlens model path or uses the provided arguments,
@@ -136,58 +130,47 @@ def create_modular_arithmetic_dataset(
         dataset_config(ModularArithmeticDatasetConfig): The dataset config (overrides the config
             loaded from the tlens model).
         tlens_model_path (Optional[Path]): The path to the tlens model (if applicable).
+
+    Returns:
+        The dataset.
     """
-    modulus, fn_name, frac_train, seed = None, None, None, None
+    modulus, fn_name, frac_train, seed = (
+        dataset_config.modulus,
+        dataset_config.fn_name,
+        dataset_config.frac_train,
+        dataset_config.seed,
+    )
     if tlens_model_path:
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
             cfg = yaml.safe_load(f)
 
-        modulus = cfg["dataset"]["modulus"]
-        fn_name = cfg["dataset"]["fn_name"]
-        frac_train = cfg["dataset"]["frac_train"]
-        seed = cfg["dataset"]["seed"] if cfg["dataset"]["seed"] is not None else None
-
-    modulus = dataset_config.modulus or modulus
-    fn_name = dataset_config.fn_name or fn_name
-    frac_train = dataset_config.frac_train if dataset_config.frac_train is not None else frac_train
-    seed = dataset_config.seed if dataset_config.seed is not None else seed
+        modulus = modulus or cfg["dataset"]["modulus"]
+        fn_name = fn_name or cfg["dataset"]["fn_name"]
+        frac_train = frac_train if frac_train is not None else cfg["dataset"]["frac_train"]
+        seed = seed if seed is not None else cfg["dataset"]["seed"]
 
     assert modulus is not None, "Modulus not provided and not found in tlens model config."
     assert fn_name is not None, "Function name not provided and not found in tlens model config."
     assert frac_train is not None, "frac_train not provided and not found in tlens model config."
 
-    raw_dataset = ModularArithmeticDataset(modulus=modulus, fn_name=fn_name)
+    raw_dataset: Dataset = ModularArithmeticDataset(modulus=modulus, fn_name=fn_name)
 
-    dataset_tup: Union[tuple[Dataset], tuple[Dataset, Dataset]]
     if return_set == "all":
-        dataset_tup = (raw_dataset,)
+        dataset = raw_dataset
     else:
+        assert return_set in ["train", "test"], f"Unsuppored return_set value: {return_set}"
         train_dataset, test_dataset = train_test_split(
             raw_dataset, frac_train=frac_train, seed=seed
         )
-        if return_set == "train":
-            dataset_tup = (train_dataset,)
-        elif return_set == "test":
-            dataset_tup = (test_dataset,)
-        else:
-            assert return_set == "both"
-            dataset_tup = (train_dataset, test_dataset)
+        dataset = train_dataset if return_set == "train" else test_dataset
 
-    dataset_subsets = tuple(
-        get_data_subset(
-            dataset,
-            frac=dataset_config.return_set_frac,
-            n_samples=dataset_config.return_set_n_samples,
-            seed=seed,
-        )
-        for dataset in dataset_tup
+    dataset_subset = get_data_subset(
+        dataset,
+        frac=dataset_config.return_set_frac,
+        n_samples=dataset_config.return_set_n_samples,
+        seed=seed,
     )
-    final_set: Union[Dataset, tuple[Dataset, Dataset]] = (
-        dataset_subsets[0]
-        if len(dataset_subsets) == 1
-        else cast(tuple[Dataset, Dataset], dataset_subsets)  # Needed to prevent silly mypy error
-    )
-    return final_set
+    return dataset_subset
 
 
 def tokenize_dataset(
@@ -241,9 +224,9 @@ def tokenize_dataset(
 
 def create_hf_dataset(
     dataset_config: HFDatasetConfig,
-    return_set: Union[Literal["train", "test", "all"], Literal["both"]],
+    return_set: Literal["train", "test", "all"],
     model_n_ctx: Optional[int] = None,
-) -> Union[Dataset, tuple[Dataset, Dataset]]:
+) -> Dataset:
     """Create a HuggingFace dataset from the provided arguments.
 
     Useful hugginface datasets (credit to TransformerLens authors for creating/collecting these):
@@ -264,10 +247,13 @@ def create_hf_dataset(
 
     Args:
         dataset_config (HFDatasetConfig): The dataset config.
-        return_set (Union[Literal["train", "test", "all"], Literal["both"]]): The dataset to return.
+        return_set (Literal["train", "test", "all"]): The dataset to return.
         model_n_ctx (int): The max context length of the model. Used for HFDatasetConfigs. Data
             sequences are packed to dataset_config.n_ctx if it is not None and is <= model_n_ctx,
             otherwise to model_n_ctx.
+
+    Returns:
+        The dataset.
     """
     assert model_n_ctx is not None
     n_ctx = dataset_config.n_ctx or model_n_ctx
@@ -276,7 +262,6 @@ def create_hf_dataset(
         f"({model_n_ctx})."
     )
 
-    # Load dataset from huggingface
     assert return_set in ["train", "test"], "Can only load train or test sets from HF"
 
     if dataset_config.return_set_frac:
@@ -300,11 +285,10 @@ def create_hf_dataset(
 
 def create_vision_dataset(
     dataset_config: VisionDatasetConfig,
-    return_set: Union[Literal["train", "test", "all"], Literal["both"]],
+    return_set: Literal["train", "test", "all"],
 ):
     dataset_fn = getattr(torchvision.datasets, dataset_config.name)
-    if return_set in ["all", "both"]:
-        raise NotImplementedError("Haven't yet implimented 'all' or 'both' for vision datasets.")
+    assert return_set != "all", "Cannot return 'all' for vision datasets."
     raw_dataset = dataset_fn(
         root=REPO_ROOT / ".data",
         train=return_set == "train",
@@ -321,38 +305,18 @@ def create_vision_dataset(
     return dataset
 
 
-@overload
 def load_dataset(
     dataset_config: DatasetConfig,
     return_set: Literal["train", "test", "all"],
     model_n_ctx: Optional[int] = None,
     tlens_model_path: Optional[Path] = None,
 ) -> Dataset:
-    ...
-
-
-@overload
-def load_dataset(
-    dataset_config: DatasetConfig,
-    return_set: Literal["both"],
-    model_n_ctx: Optional[int] = None,
-    tlens_model_path: Optional[Path] = None,
-) -> tuple[Dataset, Dataset]:
-    ...
-
-
-def load_dataset(
-    dataset_config: DatasetConfig,
-    return_set: Union[Literal["train", "test", "all"], Literal["both"]],
-    model_n_ctx: Optional[int] = None,
-    tlens_model_path: Optional[Path] = None,
-) -> Union[Dataset, tuple[Dataset, Dataset]]:
     """
     Load a dataset based on the provided type and arguments.
 
     Args:
         dataset_config (DatasetConfig): The dataset config.
-        return_set (Union[Literal["train", "test", "all"], Literal["both"]]): The dataset to return.
+        return_set (Literal["train", "test", "all"]): The dataset to return.
         model_n_ctx (int): The max context length of the model, used for HFDatasetConfigs. Data
             sequences are packed to dataset_config.n_ctx if it is not None and is <= model_n_ctx,
             otherwise to model_n_ctx.
@@ -360,8 +324,7 @@ def load_dataset(
             to collect config info used to train the model.
 
     Returns:
-        The loaded dataset or a tuple of datasets (train and test).
-
+        The dataset.
     """
 
     if isinstance(dataset_config, ModularArithmeticDatasetConfig):
@@ -375,48 +338,6 @@ def load_dataset(
     else:
         assert isinstance(dataset_config, VisionDatasetConfig)
         return create_vision_dataset(dataset_config=dataset_config, return_set=return_set)
-
-
-@overload
-def create_data_loader(dataset: Dataset, shuffle: bool, batch_size: int, seed: int) -> DataLoader:
-    ...
-
-
-@overload
-def create_data_loader(
-    dataset: tuple[Dataset, Dataset], shuffle: bool, batch_size: int, seed: int
-) -> tuple[DataLoader, DataLoader]:
-    ...
-
-
-def create_data_loader(
-    dataset: Union[Dataset, tuple[Dataset, Dataset]],
-    shuffle: bool,
-    batch_size: int,
-    seed: Optional[int] = None,
-) -> Union[DataLoader, tuple[DataLoader, DataLoader]]:
-    """
-    Create a DataLoader from the provided dataset.
-
-    Args:
-        dataset (Dataset or tuple[Dataset, Dataset]): The dataset(s) to create a DataLoader for. If
-            a tuple is provided, the first element is used as the training dataset and the second
-            element is used as the test dataset.
-        shuffle (bool): Whether to shuffle the dataset(s) each epoch.
-        batch_size (int): The batch size to use.
-        seed (Optional[int]): The seed to use for the DataLoader.
-
-    Returns:
-        The DataLoader or a tuple of DataLoaders.
-    """
-    if seed is not None:
-        set_seed(seed)
-    if isinstance(dataset, tuple):
-        train_loader = DataLoader(dataset[0], batch_size=batch_size, shuffle=shuffle)
-        test_loader = DataLoader(dataset[1], batch_size=batch_size, shuffle=shuffle)
-        return train_loader, test_loader
-    else:
-        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
 
 def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Dataset:

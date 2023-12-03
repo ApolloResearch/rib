@@ -23,12 +23,13 @@ import fire
 import torch
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
+from torch.utils.data import DataLoader
 
 from rib.data import VisionDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
-from rib.loader import create_data_loader, load_dataset, load_mlp
+from rib.loader import load_dataset, load_mlp
 from rib.log import logger
 from rib.models.mlp import MLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
@@ -94,9 +95,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     hooked_mlp = HookedModel(mlp)
 
     dataset = load_dataset(config.dataset, "train")
-    train_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.batch_size, seed=config.seed
-    )
+    train_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
 
     non_output_node_layers = [layer for layer in config.node_layers if layer != "output"]
     # Only need gram matrix for logits if we're rotating the final node layer

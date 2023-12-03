@@ -33,13 +33,14 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, Optional, Union, cast
+from typing import Literal, Optional, Union
 
 import fire
 import torch
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
+from torch.utils.data import DataLoader
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
@@ -50,12 +51,7 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
-from rib.loader import (
-    create_data_loader,
-    get_dataset_chunk,
-    load_dataset,
-    load_sequential_transformer,
-)
+from rib.loader import get_dataset_chunk, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import (
@@ -284,11 +280,9 @@ def main(
     seq_model.eval()
     hooked_model = HookedModel(seq_model)
 
-    # This script doesn't need both train and test sets
-    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
-        return_set=return_set,
+        return_set=config.dataset.return_set,
         model_n_ctx=seq_model.cfg.n_ctx,
         tlens_model_path=config.tlens_model_path,
     )
@@ -296,9 +290,7 @@ def main(
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
     logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
     if config.eval_type is not None:
-        eval_loader = create_data_loader(
-            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
-        )
+        eval_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
         # Test model accuracy/loss before graph building, ta be sure
         if config.eval_type == "accuracy":
             accuracy = eval_model_accuracy(hooked_model, eval_loader, dtype=dtype, device=device)
@@ -313,13 +305,8 @@ def main(
     if config.interaction_matrices_path is None:
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
+        gram_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
 
-        gram_train_loader = create_data_loader(
-            dataset,
-            shuffle=False,
-            batch_size=config.gram_batch_size or config.batch_size,
-            seed=config.seed,
-        )
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
         gram_matrices = collect_gram_matrices(
@@ -331,12 +318,12 @@ def main(
             collect_output_gram=collect_output_gram,
             hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
         )
-
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
-        graph_train_loader = create_data_loader(
-            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
+        graph_train_loader = DataLoader(
+            dataset=dataset, batch_size=config.batch_size, shuffle=False
         )
+
         c_start_time = time.time()
         logger.info("Calculating interaction rotations (Cs).")
         Cs, Us = calculate_interaction_rotations(
@@ -371,12 +358,7 @@ def main(
             dataset, chunk_idx=dist_info.global_rank, total_chunks=dist_info.global_size
         )
 
-        edge_train_loader = create_data_loader(
-            data_subset,
-            shuffle=False,
-            batch_size=config.edge_batch_size or config.batch_size,
-            seed=config.seed,
-        )
+        edge_train_loader = DataLoader(data_subset, batch_size=config.batch_size, shuffle=False)
 
         logger.info("Calculating edges.")
         edges_start_time = time.time()

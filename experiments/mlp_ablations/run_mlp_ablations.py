@@ -24,6 +24,7 @@ from typing import Literal, Optional, Union
 import fire
 import torch
 from pydantic import BaseModel, ConfigDict, Field
+from torch.utils.data import DataLoader
 
 from rib.ablations import (
     AblationAccuracies,
@@ -34,7 +35,7 @@ from rib.ablations import (
 )
 from rib.data import VisionDatasetConfig
 from rib.hook_manager import HookedModel
-from rib.loader import create_data_loader, load_dataset, load_mlp
+from rib.loader import load_dataset, load_mlp
 from rib.log import logger
 from rib.models.mlp import MLPConfig
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
@@ -110,9 +111,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
     hooked_mlp = HookedModel(mlp)
 
     dataset = load_dataset(config.dataset, "train")
-    data_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.batch_size, seed=config.seed
-    )
+    data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
     # Test model accuracy before ablation
     accuracy = eval_model_accuracy(hooked_mlp, data_loader, dtype=dtype, device=device)

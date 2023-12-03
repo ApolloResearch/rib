@@ -16,15 +16,15 @@ Usage:
     python run_lm_ablations.py <path/to/yaml_config_file>
 
 """
-
 import json
 import time
 from pathlib import Path
-from typing import Callable, Literal, Optional, Union, cast
+from typing import Callable, Literal, Optional, Union
 
 import fire
 import torch
 from pydantic import BaseModel, ConfigDict, Field
+from torch.utils.data import DataLoader
 
 from rib.ablations import (
     AblationAccuracies,
@@ -35,7 +35,7 @@ from rib.ablations import (
 )
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.hook_manager import HookedModel
-from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
+from rib.loader import load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
@@ -130,17 +130,13 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
     seq_model.eval()
     hooked_model = HookedModel(seq_model)
 
-    # This script doesn't need train and test sets (i.e. the "both" argument)
-    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
-        return_set=return_set,
+        return_set=config.dataset.return_set,
         model_n_ctx=seq_model.cfg.n_ctx,
         tlens_model_path=tlens_model_path,
     )
-    data_loader = create_data_loader(
-        dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
-    )
+    data_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
 
     # Test model accuracy/loss before graph building, ta be sure
     eval_fn: Callable = (

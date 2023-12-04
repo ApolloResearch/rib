@@ -11,6 +11,7 @@ various scales. This is because combining atol and rtol does not work particular
 that have a small set of large numbers and a large set of small numbers.
 """
 
+import itertools
 import sys
 from pathlib import Path
 from typing import Callable, Union
@@ -28,6 +29,12 @@ from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
 from experiments.mlp_rib_build.run_mlp_rib_build import Config as MlpRibConfig
 from experiments.mlp_rib_build.run_mlp_rib_build import main as mlp_build_graph_main
+from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
+    Config as ModularDNNRibConfig,
+)
+from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
+    main as modular_dnn_build_main,
+)
 from rib.interaction_algos import build_sorted_lambda_matrices
 
 
@@ -242,7 +249,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
 
 def rotate_final_layer_invariance(
     config_str_rotated: str,
-    config_cls: Union["LMRibConfig", "MlpRibConfig"],
+    config_cls: Union["LMRibConfig", "MlpRibConfig", "ModularDNNRibConfig"],
     build_graph_main_fn: Callable,
     rtol: float = 1e-7,
     atol: float = 0,
@@ -316,7 +323,60 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     )
 
 
-# Mod add tests are slow because return_set_n_samples is not implemented yet
+@pytest.mark.slow
+@pytest.mark.xfail
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula",
+    [
+        ("(1-alpha)^2", "functional"),
+        ("(1-0)*alpha", "functional"),
+        ("(1-alpha)^2", "squared"),
+        ("(1-0)*alpha", "squared"),
+    ],
+)
+def test_modular_dnn_rotate_final_layer_invariance(
+    basis_formula, edge_formula, rtol=1e-7, atol=1e-8
+):
+    """Test that the non-final edges are the same for ModularDNN whether or not we rotate the final layer."""
+    config_str_rotated = f"""
+        exp_name: test
+        out_dir: null
+        node_layers:
+            - layers.0
+            - layers.1
+            - layers.2
+            - output
+        model:
+            n_hidden_layers: 2
+            width: 10
+            weight_variances: [1,1]
+            weight_equal_columns: false
+            bias: 0
+            activation_fn: relu
+        dataset:
+            size: 1000
+            length: 10
+            data_variances: [1,1]
+            data_perfect_correlation: false
+        seed: 123
+        batch_size: 256
+        n_intervals: 0
+        truncation_threshold: 1e-6
+        dtype: float64
+        rotate_final_node_layer: true  # Gets overridden by rotate_final_layer_invariance
+        basis_formula: {basis_formula}
+        edge_formula: {edge_formula}
+    """
+
+    rotate_final_layer_invariance(
+        config_str_rotated=config_str_rotated,
+        config_cls=ModularDNNRibConfig,
+        build_graph_main_fn=modular_dnn_build_main,
+        rtol=rtol,
+        atol=atol,
+    )
+
+
 @pytest.mark.xfail
 @pytest.mark.slow
 @pytest.mark.parametrize(
@@ -449,3 +509,124 @@ def test_svd_basis():
         assert (C is None) == (U is None)
         if C is not None:
             assert torch.allclose(C, U, atol=0)
+
+
+def diagonal_edges_when_linear(
+    config_str: str,
+    config_cls: Union["LMRibConfig", "MlpRibConfig", "ModularDNNRibConfig"],
+    build_graph_main_fn: Callable,
+    rtol: float,
+    atol: float,
+    gtol: float,
+):
+    config = config_cls(**yaml.safe_load(config_str))
+    edges = build_graph_main_fn(config)["edges"]
+
+    rotated_node_layers = config.node_layers[:-1]
+    if (not config.rotate_final_node_layer) and config.node_layers[-1] == "output":
+        rotated_node_layers = rotated_node_layers[:-1]
+
+    for i, module_name in enumerate(rotated_node_layers):
+        # assert that all off diagonal entries agree within rtol of 0. Deal appropriately with the
+        # case that matrices are not square
+        diag_target = torch.zeros_like(edges[i][1])
+        min_dim = min(edges[i][1].shape)
+        diag_target[:min_dim, :min_dim] = torch.diag(torch.diag(edges[i][1]))
+        difference = edges[i][1] - diag_target
+
+        # For each element of difference, find the maximum entry in its row,
+        # and the maximum entry in its column. then divide by the maximum of both.
+        max_entry_in_row = torch.max(torch.abs(edges[i][1]), dim=1).values.unsqueeze(1)
+        max_entry_in_column = torch.max(torch.abs(edges[i][1]), dim=0).values.unsqueeze(0)
+        max_entry = torch.max(max_entry_in_row, max_entry_in_column)
+        max_entry = torch.max(max_entry, torch.diag(edges[i][1]).abs().log().mean().exp())
+
+        # Check that off-diagonal entries are small relative to the maximum of 1) the largest entry
+        # in that entry's row or column (which should be on the diagonal) and 2) the geometric mean
+        # of diagonal entries. The geometric mean is used because some of the diagonal entries may
+        # be zero (or very close to it) and it is not neccessary that the off diagonal entries are
+        # much smaller than even these small diagonal entries.
+        assert torch.allclose(
+            difference / max_entry, torch.zeros_like(difference), rtol=0, atol=gtol
+        ), (
+            f"edges[{i}][1] not diagonal for {module_name},"
+            f" biggest relative deviation: {(difference / max_entry).abs().max()}"
+        )
+
+        # Check off-diagonal edges are much smaller than the largest edge in that layer
+        assert torch.allclose(
+            difference / edges[i][1].abs().max(), torch.zeros_like(difference), rtol=0, atol=rtol
+        ), (
+            f"edges[{i}][1] not diagonal for {module_name}, biggest relative deviation:"
+            f" {difference.abs().max() / edges[i][1].abs().max()}"
+        )
+        # Check off-diagonal edges are somewhat close to zero (absolute)
+        assert torch.allclose(difference, torch.zeros_like(difference), rtol=0, atol=atol), (
+            f"edges[{i}][1] not diagonal for {module_name}, "
+            f"biggest absolute deviation: {difference.abs().max()}"
+        )
+
+
+basis_formulas = ["(1-alpha)^2", "(1-0)*alpha"]
+edge_formulas = ["functional", "squared"]
+dtypes = ["float32", "float64"]
+rotate_final_node_layer = [True, False]
+all_combinations = list(
+    itertools.product(basis_formulas, edge_formulas, dtypes, rotate_final_node_layer)
+)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("basis_formula, edge_formula, dtype_str, rotate_final", all_combinations)
+def test_modular_dnn_diagonal_edges_when_linear(
+    basis_formula, edge_formula, dtype_str, rotate_final, rtol=1e-7, atol=1e-5, gtol=1e-4
+):
+    """Test that RIB rotates to a diagonal basis when the ModularDNN is linear.
+
+    Args:
+        basis_formula: The basis formula to use.
+        edge_formula: The edge formula to use.
+        dtype_str: The dtype to use.
+        rotate_final: Whether to rotate the final node layer.
+        rtol: The relative tolerance to use.
+        atol: The absolute tolerance to use.
+        gtol: The geometric mean and max column/row value scaling tolerance to use.
+    """
+    config_str = f"""
+        exp_name: test
+        out_dir: null
+        node_layers:
+            - layers.0
+            - layers.1
+            - layers.2
+            - output
+        model:
+            n_hidden_layers: 2
+            width: 10
+            weight_variances: [1,1]
+            weight_equal_columns: false
+            bias: 0
+            activation_fn: identity
+        dataset:
+            size: 1000
+            length: 10
+            data_variances: [1,1]
+            data_perfect_correlation: false
+        seed: 123
+        batch_size: 256
+        n_intervals: 0
+        truncation_threshold: 1e-6
+        dtype: {dtype_str}
+        rotate_final_node_layer: {rotate_final}
+        basis_formula: {basis_formula}
+        edge_formula: {edge_formula}
+    """
+
+    diagonal_edges_when_linear(
+        config_str=config_str,
+        config_cls=ModularDNNRibConfig,
+        build_graph_main_fn=modular_dnn_build_main,
+        rtol=rtol,
+        atol=atol,
+        gtol=gtol,
+    )

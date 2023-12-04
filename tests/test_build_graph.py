@@ -316,6 +316,72 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     )
 
 
+# Mod add tests are slow because return_set_n_samples is not implemented yet
+@pytest.mark.xfail
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula, dtype_str",
+    [
+        # functional fp32 currently fails with these tolerances
+        # ("(1-alpha)^2", "functional", "float32"),
+        # ("(1-0)*alpha", "functional", "float32"),
+        ("(1-alpha)^2", "functional", "float64"),
+        ("(1-0)*alpha", "functional", "float64"),
+        ("(1-alpha)^2", "squared", "float32"),
+        ("(1-0)*alpha", "squared", "float32"),
+        ("(1-alpha)^2", "squared", "float64"),
+        ("(1-0)*alpha", "squared", "float64"),
+    ],
+)
+def test_modular_arithmetic_rotate_final_layer_invariance(
+    basis_formula,
+    edge_formula,
+    dtype_str,
+    rtol=1e-3,
+    atol=1e-3,
+):
+    """Test that the non-final edges are independent of final layer rotation for modadd.
+
+    Note that atol is necessary as the less important edges do deviate. The largest edges are
+    between 1e3 and 1e5 large.
+    """
+    config_str_rotated = f"""
+    exp_name: test
+    seed: 0
+    tlens_pretrained: null
+    tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+    dataset:
+        source: custom
+        name: modular_arithmetic
+        return_set: train
+        return_set_frac: null
+        return_set_n_samples: 10
+    node_layers:
+        - mlp_out.0
+        - unembed
+        - output
+    batch_size: 6
+    gram_batch_size: 6
+    edge_batch_size: 6
+    truncation_threshold: 1e-15
+    rotate_final_node_layer: true  # Gets overridden by rotate_final_layer_invariance
+    last_pos_module_type: add_resid1
+    n_intervals: 2
+    dtype: {dtype_str}
+    eval_type: accuracy
+    out_dir: null
+    basis_formula: "{basis_formula}"
+    edge_formula: "{edge_formula}"
+    """
+    rotate_final_layer_invariance(
+        config_str_rotated=config_str_rotated,
+        config_cls=LMRibConfig,
+        build_graph_main_fn=lm_build_graph_main,
+        rtol=rtol,
+        atol=atol,
+    )
+
+
 def test_mnist_build_graph_invalid_node_layers():
     """Test that non-sequential node_layers raises an error."""
     mock_config = """

@@ -305,7 +305,9 @@ def main(
     if config.interaction_matrices_path is None:
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
-        gram_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
+        gram_train_loader = DataLoader(
+            dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
+        )
 
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
@@ -358,7 +360,9 @@ def main(
             dataset, chunk_idx=dist_info.global_rank, total_chunks=dist_info.global_size
         )
 
-        edge_train_loader = DataLoader(data_subset, batch_size=config.batch_size, shuffle=False)
+        edge_train_loader = DataLoader(
+            data_subset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
+        )
 
         logger.info("Calculating edges.")
         edges_start_time = time.time()

@@ -408,3 +408,44 @@ def test_mnist_build_graph_invalid_node_layers():
             build_graph_main_fn=mlp_build_graph_main,
             atol=0,
         )
+
+
+@pytest.mark.slow
+def test_svd_basis():
+    dtype_str = "float64"
+
+    config_str = f"""
+    exp_name: test
+    seed: 0
+    tlens_pretrained: pythia-14m
+    tlens_model_path: null
+    dataset:
+      source: huggingface
+      name: NeelNanda/pile-10k
+      tokenizer_name: EleutherAI/pythia-14m
+      return_set: train
+      return_set_frac: null
+      return_set_n_samples: 50
+      return_set_portion: first
+    node_layers:
+        - ln2.1
+        - unembed
+    batch_size: 2
+    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
+    rotate_final_node_layer: false
+    n_intervals: 0
+    dtype: {dtype_str}
+    calculate_edges: false
+    eval_type: ce_loss
+    out_dir: null
+    basis_formula: svd
+    """
+    config_dict = yaml.safe_load(config_str)
+    config = LMRibConfig(**config_dict)
+    results = lm_build_graph_main(config)
+    for c_info, u_info in zip(results["interaction_rotations"], results["eigenvectors"]):
+        C = c_info["C"]
+        U = u_info["U"]
+        assert (C is None) == (U is None)
+        if C is not None:
+            assert torch.allclose(C, U, atol=0)

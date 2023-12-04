@@ -270,6 +270,10 @@ class SequentialTransformer(nn.Module):
                     kwargs["return_tokens"] = False
                 if module_type == "add_resid1" and self.cfg.parallel_attn_mlp:
                     kwargs["return_residual"] = True
+                if module_type == "attn_out" and self.cfg.use_local_attn:
+                    assert self.cfg.original_architecture == "GPTNeoForCausalLM"
+                    layer_idx = module_name.split(".")[-1]
+                    kwargs["use_local_attn"] = (int(layer_idx) % 2) != 0  # odd layers use local
                 if module_type in ["ln1", "ln2", "ln_final"]:
                     if self.cfg.normalization_type == "LNPre":
                         if self.cfg.parallel_attn_mlp and module_type == "ln2":

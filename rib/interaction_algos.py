@@ -108,7 +108,7 @@ def calculate_interaction_rotations(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-alpha)^2",
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -146,6 +146,7 @@ def calculate_interaction_rotations(
             latter is a new (November) version that should be used from now on. The latter makes
             sense especially in light of the new attribution (edge_formula="squared") but is
             generally good and does not change results much. Defaults to "(1-0)*alpha".
+        svd_basis: Returns Us as Cs, so basis is just the eigenvectors of the gram matrix.
 
     Returns:
         - A list of objects containing the interaction rotation matrices and their pseudoinverses,
@@ -246,6 +247,12 @@ def calculate_interaction_rotations(
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
         )
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
+        if basis_formula == "svd":
+            # Use U as C and then progress to the next loop
+            Cs.append(
+                InteractionRotation(node_layer_name=node_layer, out_dim=U.shape[1], C=U, C_pinv=U.T)
+            )
+            continue
 
         # Most recently stored interaction matrix
         C_out = Cs[-1].C.to(device=device) if Cs[-1].C is not None else None

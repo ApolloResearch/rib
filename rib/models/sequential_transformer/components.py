@@ -362,10 +362,7 @@ class AttentionIn(nn.Module):
 
 
 class AttentionOut(nn.Module):
-    def __init__(
-        self,
-        cfg: SequentialTransformerConfig,
-    ):
+    def __init__(self, cfg: SequentialTransformerConfig, use_local_attn: bool = False):
         """Attention Block - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
         Convention: All attention pattern-style matrices have shape [..., head_index, query_pos,
@@ -391,6 +388,13 @@ class AttentionOut(nn.Module):
         causal_mask: Bool[Tensor, "pos pos"] = torch.tril(
             torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool()
         )
+        if use_local_attn:
+            assert self.cfg.original_architecture == "GPTNeoForCausalLM"
+            # Only attend to the previous window_size positions
+            # so mask true iff query - window_size < key <= query
+            # we fix window_size to 256 (the default for GPTNeo) instead of putting into config
+            window_size = 256
+            causal_mask = torch.triu(causal_mask, 1 - window_size)
         self.register_buffer("mask", causal_mask)
 
         self.register_buffer("IGNORE", torch.tensor(-torch.inf))

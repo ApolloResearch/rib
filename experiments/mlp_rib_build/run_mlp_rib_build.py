@@ -22,7 +22,7 @@ from typing import Literal, Optional, Union
 import fire
 import torch
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from rib.data import VisionDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
@@ -36,6 +36,7 @@ from rib.utils import check_outfile_overwrite, load_config, set_seed
 
 
 class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     exp_name: str
     mlp_path: RootPath
     batch_size: int

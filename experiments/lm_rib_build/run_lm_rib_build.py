@@ -76,7 +76,7 @@ class Config(BaseModel):
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     seed: int = Field(..., description="The random seed value for reproducibility")
-    tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
+    tlens_pretrained: Optional[Literal["gpt2", "pythia-14m", "tiny-stories-1M"]] = Field(
         None, description="Pretrained transformer lens model."
     )
     tlens_model_path: Optional[RootPath] = Field(
@@ -137,9 +137,10 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
         "(1-0)*alpha",
-        description="The integrated gradient formula to use to calculate the basis.",
+        description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
+        "use Us as Cs, giving the eigendecomposition of the gram matrix.",
     )
     edge_formula: Literal["functional", "squared"] = Field(
         "functional",

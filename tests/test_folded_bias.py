@@ -143,8 +143,9 @@ def pretrained_lm_folded_bias_comparison(
 
 
 @pytest.mark.slow()
-def test_gpt2_folded_bias() -> None:
-    """Test that the folded bias trick works for GPT2."""
+@pytest.mark.parametrize("model_str", ["gpt2", "tiny-stories-1M"])
+def test_gpt_folded_bias(model_str) -> None:
+    """Test that the folded bias trick works for GPT2 and tiny-stories."""
     set_seed(42)
     dtype = torch.float32
     # float64 can do 1e-10, float32 can do 1e-3. We use float32 in this test because it's faster and
@@ -152,7 +153,7 @@ def test_gpt2_folded_bias() -> None:
     atol = 1e-3
     node_layers = ["attn_in.0", "mlp_act.0"]
     pretrained_lm_folded_bias_comparison(
-        hf_model_str="gpt2",
+        hf_model_str=model_str,
         node_layers=node_layers,
         positional_embedding_type="standard",
         atol=atol,

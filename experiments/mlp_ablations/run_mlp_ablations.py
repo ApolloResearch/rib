@@ -23,7 +23,7 @@ from typing import Literal, Optional, Union
 
 import fire
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from rib.ablations import (
     AblationAccuracies,
@@ -47,6 +47,7 @@ from rib.utils import (
 
 
 class Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     exp_name: str
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: RootPath

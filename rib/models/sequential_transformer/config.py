@@ -33,7 +33,7 @@ class SequentialTransformerConfig(BaseModel):
             pythia).
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     n_layers: int
     d_model: int

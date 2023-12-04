@@ -235,6 +235,7 @@ def calculate_interaction_rotations(
     ):
         if basis_formula == "neuron":
             # Use identity matrix as C and then progress to the next loop
+            # TODO assert not rotate final
             width = gram_matrices[node_layer].shape[0]
             Id = torch.eye(width)
             Cs.append(

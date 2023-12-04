@@ -19,6 +19,7 @@ ACTIVATION_MAP = {
     "gelu": torch.nn.GELU,
     "tanh": torch.nn.Tanh,
     "sigmoid": torch.nn.Sigmoid,
+    "linear": torch.nn.Identity,
 }
 
 

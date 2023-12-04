@@ -51,7 +51,7 @@ def main(
     weight_variances: list[float] = [1.0, 1.0],
     weight_equal_columns: bool = False,
     bias: float = 0,
-    dataset_size: int = 128,
+    dataset_size: int = 2048,
     data_variances: list[float] = [1.0, 1.0],
     perfect_data_correlation: bool = False,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-0)*alpha",
@@ -89,6 +89,7 @@ def main(
         rotate_final_node_layer: {rotate_final_node_layer}
         basis_formula: {basis_formula}
         edge_formula: {edge_formula}
+        activation_fn: linear
     """
 
     config_dict = yaml.safe_load(config_str)
@@ -96,7 +97,7 @@ def main(
 
     for type in ["rib", "svd", "neuron"]:
         if type == "rib":
-            config.basis_formula = config_dict["basis_formula"]
+            config.basis_formula = basis_formula
             results = modular_dnn_build_main(config, force=force)
         elif type == "svd":
             config.basis_formula = "svd"

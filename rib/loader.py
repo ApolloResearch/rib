@@ -146,7 +146,13 @@ def create_modular_arithmetic_dataset(
 
         modulus = modulus or cfg["dataset"]["modulus"]
         fn_name = fn_name or cfg["dataset"]["fn_name"]
-        frac_train = frac_train if frac_train is not None else cfg["dataset"]["frac_train"]
+        if frac_train is not None:
+            assert frac_train == cfg["dataset"]["frac_train"], (
+                f"frac_train provided ({frac_train}) does not match frac_train in tlens model "
+                f"config ({cfg['dataset']['frac_train']})"
+            )
+        else:
+            frac_train = cfg["dataset"]["frac_train"]
         seed = seed if seed is not None else cfg["dataset"]["seed"]
 
     assert modulus is not None, "Modulus not provided and not found in tlens model config."

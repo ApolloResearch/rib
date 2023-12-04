@@ -35,7 +35,7 @@ from rib.utils import check_outfile_overwrite
 # rotate_final_node_layer --> rotate_final_node_layer
 # force --> force
 # hardcode_bias -> bias
-# activation_fn --> N/A
+# activation_fn --> activation_fn
 # variances --> weight_variances
 # data_variances --> data_variances
 # binarise --> What??
@@ -60,6 +60,7 @@ def main(
     seed: int = 0,
     force: bool = True,
     edge_formula: Literal["functional", "squared"] = "functional",
+    activation_fn: Literal["relu", "identity"] = "relu",
 ):
     node_layers_str = "\n            - ".join(
         [f"layers.{i}" for i in range(n_hidden_layers + 1)] + ["output"]
@@ -76,6 +77,7 @@ def main(
             weight_variances: {weight_variances}
             weight_equal_columns: {weight_equal_columns}
             bias: {bias}
+            activation_fn: {activation_fn}
         dataset:
             size: {dataset_size}
             length: {width}
@@ -89,8 +91,10 @@ def main(
         rotate_final_node_layer: {rotate_final_node_layer}
         basis_formula: {basis_formula}
         edge_formula: {edge_formula}
-        activation_fn: linear
     """
+
+    # # Out file that combines all args
+    # out_dir = f"nhl={n_hidden_layers}_w={width}_wv={weight_variances}_wec={weight_equal_columns}_b={bias}_ds={dataset_size}_dv={data_variances}_pdc={perfect_data_correlation}_bf={basis_formula}_r={rotate_final_node_layer}_dt={dtype}_s={seed}_ef={edge_formula}"
 
     config_dict = yaml.safe_load(config_str)
     config = modular_dnn_build_Config(**config_dict)

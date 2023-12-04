@@ -37,7 +37,7 @@ def main(
     data_variances: list[float] = [1.0, 1.0],
     perfect_data_correlation: bool = False,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-0)*alpha",
-    rotate_final_node_layer: bool = True,
+    rotate_final_node_layer: bool = False,
     dtype: Literal["float32", "float64"] = "float32",
     seed: int = 0,
     force: bool = True,
@@ -71,8 +71,6 @@ def main(
         basis_formula: {basis_formula}
         edge_formula: {edge_formula}
     """
-
-    print(config_str)
 
     config_dict = yaml.safe_load(config_str)
     config = modular_dnn_build_Config(**config_dict)

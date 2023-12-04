@@ -20,12 +20,13 @@ def get_rib_acts(
     hooks = [
         Hook(
             name="rotated_acts",
-            data_key=c_info.module_id,
+            data_key=c_info.node_layer_name,
             fn=rotated_acts_forward_hook_fn,
-            module_name=hooked_model.model.module_id_to_section_id[c_info.module_id],
+            module_name=hooked_model.model.module_id_to_section_id[c_info.node_layer_name],
             fn_kwargs={"rotation_matrix": c_info.C.to("cuda"), "output_rotated": False},
         )
         for c_info in c_infos
+        if c_info.C is not None
     ]
     with torch.inference_mode():
         run_dataset_through_model(
@@ -33,8 +34,8 @@ def get_rib_acts(
         )
 
     return {
-        c_info.module_id: torch.concatenate(
-            hooked_model.hooked_data["rotated_acts"][c_infos.module_id], dim=0
+        c_info.node_layer_name: torch.concatenate(
+            hooked_model.hooked_data["rotated_acts"][c_info.node_layer_name], dim=0
         )
         for c_info in c_infos
     }

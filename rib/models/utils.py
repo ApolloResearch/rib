@@ -19,7 +19,7 @@ ACTIVATION_MAP = {
     "gelu": torch.nn.GELU,
     "tanh": torch.nn.Tanh,
     "sigmoid": torch.nn.Sigmoid,
-    "linear": torch.nn.Identity,
+    "identity": torch.nn.Identity,
 }
 
 
@@ -240,7 +240,7 @@ def fold_mlp_in(
     1. This will result in act_fn(x @ W_in_folded) giving the same result as act_fn(x @ W_in + b_in), except with an extra 1 concatenated at the end.
     """
 
-    if act_fn == "relu" or act_fn is None:
+    if act_fn in ["relu", "identity"] or act_fn is None:
         # relu(1) = 1
         root_one = 1.0
     elif act_fn in ["gelu", "gelu_new"]:

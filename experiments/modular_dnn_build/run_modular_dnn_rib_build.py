@@ -50,9 +50,10 @@ class Config(BaseModel):
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: Literal["float32", "float64"]
     node_layers: list[str]
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
         "(1-0)*alpha",
-        description="The integrated gradient formula to use to calculate the basis.",
+        description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
+        "use Us as Cs, giving the eigendecomposition of the gram matrix.",
     )
     edge_formula: Literal["functional", "squared"] = Field(
         "functional",

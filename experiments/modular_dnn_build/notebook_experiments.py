@@ -20,20 +20,38 @@ from rib.utils import check_outfile_overwrite
 
 # %%
 
+# Mapping from Jake's old script:
+# exp_name --> exp_name
+# n --> width
+# k --> N/A
+# layers --> n_hidden_layers
+# batch_size --> N/A
+# seed --> seed
+# truncation_threshold --> N/A
+# n_intervals --> N/A
+# dtype --> dtype
+# node_layers --> N/A
+# datatype -> perfect_data_correlation
+# rotate_final_node_layer --> rotate_final_node_layer
+# force --> force
+# hardcode_bias -> bias
+# activation_fn --> N/A
+# variances --> weight_variances
+# data_variances --> data_variances
+# binarise --> What??
+# ribmethods --> basis_formula + edge_formula
+# column_equal --> weight_equal_columns
+# N/A --> dataset_size
+
 
 def main(
-    # datatype -> perfect_data_correlation
-    # hardcode_bias -> bias
-    # variances / data_variances
-    # ribmethods --> basis_formula + edge_formula
-    # Removed binarise
     exp_name: str = "small_modular_dnn",
     n_hidden_layers: int = 3,
     width: int = 4,
     weight_variances: list[float] = [1.0, 1.0],
     weight_equal_columns: bool = False,
     bias: float = 0,
-    dataset_size: int = 10000,
+    dataset_size: int = 128,
     data_variances: list[float] = [1.0, 1.0],
     perfect_data_correlation: bool = False,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-0)*alpha",

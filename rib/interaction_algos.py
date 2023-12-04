@@ -233,6 +233,14 @@ def calculate_interaction_rotations(
         total=len(section_names_to_calculate),
         desc="Interaction rotations",
     ):
+        if basis_formula == "neuron":
+            # Use identity matrix as C and then progress to the next loop
+            width = gram_matrices[node_layer].shape[0]
+            Id = torch.eye(width)
+            Cs.append(
+                InteractionRotation(node_layer_name=node_layer, out_dim=width, C=Id, C_pinv=Id)
+            )
+            continue
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())

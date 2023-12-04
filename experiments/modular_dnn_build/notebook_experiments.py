@@ -67,6 +67,7 @@ def main(
 
     config_str = f"""
         exp_name: {exp_name}
+        out_dir: null
         node_layers:
             - {node_layers_str}
         model:
@@ -92,26 +93,30 @@ def main(
 
     config_dict = yaml.safe_load(config_str)
     config = modular_dnn_build_Config(**config_dict)
-    results = modular_dnn_build_main(config, force=force)
 
-    nodes_per_layer = 10
-    layer_names = results["config"]["node_layers"] + ["output"]
+    for type in ["rib", "svd", "neuron"]:
+        if type == "rib":
+            config.basis_formula = config_dict["basis_formula"]
+            results = modular_dnn_build_main(config, force=force)
+        elif type == "svd":
+            config.basis_formula = "svd"
+            results = modular_dnn_build_main(config, force=force)
+        elif type == "neuron":
+            config.basis_formula = "neuron"
+            results = modular_dnn_build_main(config, force=force)
 
-    out_dir = Path(__file__).parent / "out"
-    out_file = out_dir / f"{results['exp_name']}_rib_graph.png"
+        out_dir = Path(__file__).parent / "out"
+        out_file = out_dir / f"{results['exp_name']}_graph_{type}.png"
 
-    if not check_outfile_overwrite(out_file, force):
-        return
+        plot_interaction_graph(
+            raw_edges=results["edges"],
+            layer_names=results["config"]["node_layers"] + ["output"],
+            exp_name=results["exp_name"],
+            nodes_per_layer=10,
+            out_file=out_file,
+        )
 
-    plot_interaction_graph(
-        raw_edges=results["edges"],
-        layer_names=layer_names,
-        exp_name=results["exp_name"],
-        nodes_per_layer=nodes_per_layer,
-        out_file=out_file,
-    )
-
-    print("Saved plot to", out_file)
+        print("Saved plot to", out_file)
 
 
 if __name__ == "__main__":

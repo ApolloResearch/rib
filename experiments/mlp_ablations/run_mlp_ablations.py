@@ -60,7 +60,7 @@ class Config(BaseModel):
     dtype: StrDtype
     ablation_node_layers: list[str]
     batch_size: int
-    seed: int
+    seed: Optional[int] = 0
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output "

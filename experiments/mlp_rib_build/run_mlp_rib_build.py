@@ -41,7 +41,7 @@ class Config(BaseModel):
     exp_name: str
     mlp_path: RootPath
     batch_size: int
-    seed: int
+    seed: Optional[int] = 0
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
     rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.

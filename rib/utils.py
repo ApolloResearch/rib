@@ -237,11 +237,12 @@ def calc_exponential_ablation_schedule(
     return schedule
 
 
-def set_seed(seed: int = 0) -> None:
+def set_seed(seed: Optional[int]) -> None:
     """Set the random seed for random, PyTorch and NumPy"""
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
 
 
 def find_root(

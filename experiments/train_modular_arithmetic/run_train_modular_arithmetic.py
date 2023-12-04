@@ -64,7 +64,7 @@ class WandbConfig(BaseModel):
 
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    seed: int
+    seed: Optional[int] = 0
     model: ModelConfig
     train: TrainConfig
     dataset: ModularArithmeticDatasetConfig

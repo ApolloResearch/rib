@@ -89,7 +89,7 @@ class ModularArithmeticDatasetConfig(DatasetConfig):
     frac_train: Optional[float] = Field(
         None, description="Fraction of the dataset to use for training."
     )
-    seed: Optional[int] = Field(None, description="The random seed value for reproducibility.")
+    seed: Optional[int] = Field(0, description="The random seed value for reproducibility.")
 
 
 class ModularArithmeticDataset(Dataset):
@@ -123,6 +123,6 @@ class ModularArithmeticDataset(Dataset):
 class VisionDatasetConfig(DatasetConfig):
     source: Literal["custom"] = "custom"
     name: Literal["CIFAR10", "MNIST"] = "MNIST"
-    seed: Optional[int] = None
+    seed: Optional[int] = 0
     return_set_frac: Optional[float] = None  # Needed for some reason to avoid mypy errors
     return_set_n_samples: Optional[int] = None  # Needed for some reason to avoid mypy errors

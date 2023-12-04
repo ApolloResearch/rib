@@ -58,29 +58,6 @@ class Config(BaseModel):
         ModularDNNConfig(),
         description="The model to use.",
     )
-    # dataset_size: int = Field(
-    #     1000,
-    #     description="Number of samples in the dataset.",
-    # )
-    # layers: int
-    # width: int
-    # bias: float
-    # block_variances: list[float] = Field(
-    #     [1.0, 1.0],
-    #     description="Variance of the two blocks of the block diagonal matrix.",
-    # )
-    # dataset_variances: list[float] = Field(
-    #     [1.0, 1.0],
-    #     description="Variance of the two blocks of the dataset.",
-    # )
-    # equal_rows: bool = Field(
-    #     False,
-    #     description="Whether to make the rows of each block equal.",
-    # )
-    # perfect_data_correlation: bool = Field(
-    #     False,
-    #     description="Whether to make the data within each block perfectly correlated.",
-    # )
 
 
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:

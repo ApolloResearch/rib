@@ -1,10 +1,3 @@
-"""Plot an interaction graph given a results file contain the graph edges.
-
-Usage:
-    python plot_mlp_graph.py <path/to/results_pt_file>
-
-    The results_pt_file should be the output of the run_mlp_rib_build.py script.
-"""
 from pathlib import Path
 
 import fire

@@ -24,6 +24,7 @@ from typing import Literal, Optional, Union
 import fire
 import torch
 from pydantic import BaseModel, ConfigDict, Field
+from torch.utils.data import DataLoader
 
 from rib.ablations import (
     AblationAccuracies,
@@ -34,7 +35,7 @@ from rib.ablations import (
 )
 from rib.data import VisionDatasetConfig
 from rib.hook_manager import HookedModel
-from rib.loader import create_data_loader, load_dataset, load_mlp
+from rib.loader import load_dataset, load_mlp
 from rib.log import logger
 from rib.models.mlp import MLPConfig
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
@@ -47,7 +48,7 @@ from rib.utils import (
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: RootPath
@@ -59,7 +60,7 @@ class Config(BaseModel):
     dtype: StrDtype
     ablation_node_layers: list[str]
     batch_size: int
-    seed: int
+    seed: Optional[int] = 0
     out_dir: Optional[RootPath] = Field(
         Path(__file__).parent / "out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
@@ -110,9 +111,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
     hooked_mlp = HookedModel(mlp)
 
     dataset = load_dataset(config.dataset, "train")
-    data_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.batch_size, seed=config.seed
-    )
+    data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
 
     # Test model accuracy before ablation
     accuracy = eval_model_accuracy(hooked_mlp, data_loader, dtype=dtype, device=device)

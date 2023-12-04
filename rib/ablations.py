@@ -19,7 +19,7 @@ AblationAccuracies = dict[str, dict[int, float]]
 
 
 class ScheduleConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     schedule_type: Literal["exponential", "linear"]
     early_stopping_threshold: Optional[float] = Field(
         None,

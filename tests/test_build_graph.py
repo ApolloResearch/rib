@@ -258,6 +258,7 @@ def rotate_final_layer_invariance(
     edges_not_rotated = build_graph_main_fn(config_not_rotated)["edges"]
 
     # -1 has no edges, -2 is the final layer and changes
+    print("Node layers", config_rotated.node_layers)
     comparison_layers = config_rotated.node_layers[:-2]
     for i, module_name in enumerate(comparison_layers):
         # E_hats[i] is a tuple (name, tensor)
@@ -265,7 +266,7 @@ def rotate_final_layer_invariance(
         # Check shape
         assert (
             edges_not_rotated[i][1].shape == edges_rotated[i][1].shape
-        ), f"edges_not_rotated and edges_rotated not same shape for {module_name}"
+        ), f"edges_not_rotated and edges_rotated not same shape for {module_name}, got shapes {edges_not_rotated[i][1].shape} and {edges_rotated[i][1].shape}"
         # Check values
         assert torch.allclose(
             edges_not_rotated[i][1],
@@ -273,19 +274,39 @@ def rotate_final_layer_invariance(
             rtol=rtol,
             atol=atol,
         ), f"edges_not_rotated not equal to shape of edges_rotated for {module_name}. Biggest relative deviation: {(edges_not_rotated[i][1] / edges_rotated[i][1]).min()}, {(edges_not_rotated[i][1] / edges_rotated[i][1]).max()}"
+        # except AssertionError as e:
+        #     import matplotlib.pyplot as plt
+
+        # plt.scatter(edges_not_rotated[i][1], edges_rotated[i][1])
+        # plt.axhline(atol, color="red")
+        # plt.axvline(atol, color="red")
+        # # straight line rtol
+        # edge_min = min(edges_not_rotated[i][1].min(), edges_rotated[i][1].min())
+        # edge_max = max(edges_not_rotated[i][1].max(), edges_rotated[i][1].max())
+        # plt.plot([edge_min, edge_max], [edge_min, edge_max], color="red")
+        # # rtol
+        # plt.plot([edge_min, edge_max], [edge_min * rtol, edge_max * rtol], color="green")
+        # plt.plot([edge_min, edge_max], [edge_min / rtol, edge_max / rtol], color="green")
+        # plt.savefig(f"tests/rotate_final_layer_invariance_{module_name}.png")
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "basis_formula, edge_formula",
+    "basis_formula, edge_formula, dtype_str",
     [
-        ("(1-alpha)^2", "functional"),
-        ("(1-0)*alpha", "functional"),
-        ("(1-alpha)^2", "squared"),
-        ("(1-0)*alpha", "squared"),
+        ("(1-alpha)^2", "functional", "float32"),
+        ("(1-0)*alpha", "functional", "float32"),
+        ("(1-alpha)^2", "functional", "float64"),
+        ("(1-0)*alpha", "functional", "float64"),
+        ("(1-alpha)^2", "squared", "float32"),
+        ("(1-0)*alpha", "squared", "float32"),
+        ("(1-alpha)^2", "squared", "float64"),
+        ("(1-0)*alpha", "squared", "float64"),
     ],
 )
-def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1e-7, atol=1e-8):
+def test_mnist_rotate_final_layer_invariance(
+    basis_formula, edge_formula, dtype_str, rtol=1e-7, atol=1e-8
+):
     """Test that the non-final edges are the same for MNIST whether or not we rotate the final layer."""
     config_str_rotated = f"""
     exp_name: test
@@ -303,6 +324,7 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     - layers.2
     - output
     out_dir: null
+    dtype: {dtype_str}
     basis_formula: "{basis_formula}"
     edge_formula: "{edge_formula}"
     """
@@ -316,70 +338,68 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     )
 
 
-# Mod add tests are slow because return_set_n_samples is not implemented yet
-# TODO: Comment this back in when return_set_n_samples is implemented
-# @pytest.mark.slow
-# @pytest.mark.parametrize(
-#     "basis_formula, edge_formula, dtype_str",
-#     [
-#         # functional fp32 currently fails with these tolerances
-#         # ("(1-alpha)^2", "functional", "float32"),
-#         # ("(1-0)*alpha", "functional", "float32"),
-#         ("(1-alpha)^2", "functional", "float64"),
-#         ("(1-0)*alpha", "functional", "float64"),
-#         ("(1-alpha)^2", "squared", "float32"),
-#         ("(1-0)*alpha", "squared", "float32"),
-#         ("(1-alpha)^2", "squared", "float64"),
-#         ("(1-0)*alpha", "squared", "float64"),
-#     ],
-# )
-# def test_modular_arithmetic_rotate_final_layer_invariance(
-#     basis_formula,
-#     edge_formula,
-#     dtype_str,
-#     rtol=1e-3,
-#     atol=1e-3,
-# ):
-#     """Test that the non-final edges are independent of final layer rotation for modadd.
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula, dtype_str",
+    [
+        # functional fp32 currently fails with these tolerances
+        ("(1-alpha)^2", "functional", "float32"),
+        ("(1-0)*alpha", "functional", "float32"),
+        ("(1-alpha)^2", "functional", "float64"),
+        ("(1-0)*alpha", "functional", "float64"),
+        ("(1-alpha)^2", "squared", "float32"),
+        ("(1-0)*alpha", "squared", "float32"),
+        ("(1-alpha)^2", "squared", "float64"),
+        ("(1-0)*alpha", "squared", "float64"),
+    ],
+)
+def test_modular_arithmetic_rotate_final_layer_invariance(
+    basis_formula,
+    edge_formula,
+    dtype_str,
+    rtol=1e-3,
+    atol=1e-3,
+):
+    """Test that the non-final edges are independent of final layer rotation for modadd.
 
-#     Note that atol is necessary as the less important edges do deviate. The largest edges are
-#     between 1e3 and 1e5 large.
-#     """
-#     config_str_rotated = f"""
-#     exp_name: test
-#     seed: 0
-#     tlens_pretrained: null
-#     tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-#     dataset:
-#         source: custom
-#         name: modular_arithmetic
-#         return_set: train
-#         return_set_frac: null
-#         return_set_n_samples: 10
-#     node_layers:
-#         - mlp_out.0
-#         - unembed
-#         - output
-#     batch_size: 6
-#     gram_batch_size: 6
-#     edge_batch_size: 6
-#     truncation_threshold: 1e-15
-#     rotate_final_node_layer: true  # Gets overridden by rotate_final_layer_invariance
-#     last_pos_module_type: add_resid1
-#     n_intervals: 2
-#     dtype: {dtype_str}
-#     eval_type: accuracy
-#     out_dir: null
-#     basis_formula: "{basis_formula}"
-#     edge_formula: "{edge_formula}"
-#     """
-#     rotate_final_layer_invariance(
-#         config_str_rotated=config_str_rotated,
-#         config_cls=LMRibConfig,
-#         build_graph_main_fn=lm_build_graph_main,
-#         rtol=rtol,
-#         atol=atol,
-#     )
+    Note that atol is necessary as the less important edges do deviate. The largest edges are
+    between 1e3 and 1e5 large.
+    """
+    config_str_rotated = f"""
+    exp_name: test
+    seed: 0
+    tlens_pretrained: null
+    tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+    dataset:
+        source: custom
+        name: modular_arithmetic
+        return_set: train
+        return_set_frac: null
+        return_set_n_samples: 10
+    node_layers:
+        - mlp_out.0
+        - unembed
+        - output
+    batch_size: 6
+    gram_batch_size: 6
+    edge_batch_size: 6
+    truncation_threshold: 1e-15
+    rotate_final_node_layer: true  # Gets overridden by rotate_final_layer_invariance
+    last_pos_module_type: add_resid1
+    n_intervals: 2
+    dtype: {dtype_str}
+    eval_type: accuracy
+    out_dir: null
+    basis_formula: "{basis_formula}"
+    edge_formula: "{edge_formula}"
+    """
+    rotate_final_layer_invariance(
+        config_str_rotated=config_str_rotated,
+        config_cls=LMRibConfig,
+        build_graph_main_fn=lm_build_graph_main,
+        rtol=rtol,
+        atol=atol,
+    )
 
 
 def test_mnist_build_graph_invalid_node_layers():

@@ -1,18 +1,4 @@
-"""Calculate the interaction graph of an MLP trained on MNIST or CIFAR.
-
-The full algorithm is Algorithm 1 of https://www.overleaf.com/project/6437d0bde0eaf2e8c8ac3649
-The process is as follows:
-    1. Load an MLP trained on MNIST and a test set of MNIST images.
-    2. Collect gram matrices at each node layer.
-    3. Calculate the interaction rotation matrices (labelled C in the paper) for each node layer. A
-        node layer is positioned at the input of each module_name specified in the config, as well
-        as at the output of the final module.
-    4. Calculate the edges of the interaction graph between each node layer.
-
-Usage:
-    python run_mlp_rib_build.py <path/to/yaml_config_file>
-
-"""
+"""Calculate the interaction graph of an hand-coded modular DNN."""
 
 import json
 from dataclasses import asdict
@@ -32,10 +18,10 @@ from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
 from rib.models.mlp import MLPConfig
 from rib.models.modular_dnn import (
-    BlockDiagonalDNN,
     BlockVectorDataset,
-    random_block_diagonal_matrix,
-    random_block_diagonal_matrix_equal_columns,
+    BlockVectorDatasetConfig,
+    ModularDNN,
+    ModularDNNConfig,
 )
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import check_outfile_overwrite, load_config, set_seed
@@ -48,7 +34,7 @@ class Config(BaseModel):
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
     rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.
-    dtype: Literal["float32", "float64"]
+    dtype: StrDtype = "float64"
     node_layers: list[str]
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
         "(1-0)*alpha",
@@ -64,49 +50,60 @@ class Config(BaseModel):
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
-    dataset_size: int = Field(
-        1000,
-        description="Number of samples in the dataset.",
+    dataset: BlockVectorDatasetConfig = Field(
+        BlockVectorDatasetConfig(),
+        description="The dataset to use.",
     )
-    layers: int
-    width: int
-    bias: float
-    block_variances: list[float] = Field(
-        [1.0, 1.0],
-        description="Variance of the two blocks of the block diagonal matrix.",
+    model: ModularDNNConfig = Field(
+        ModularDNNConfig(),
+        description="The model to use.",
     )
-    equal_rows: bool = Field(
-        False,
-        description="Whether to make the rows of each block equal.",
-    )
-    perfect_data_correlation: bool = Field(
-        False,
-        description="Whether to make the data within each block perfectly correlated.",
-    )
+    # dataset_size: int = Field(
+    #     1000,
+    #     description="Number of samples in the dataset.",
+    # )
+    # layers: int
+    # width: int
+    # bias: float
+    # block_variances: list[float] = Field(
+    #     [1.0, 1.0],
+    #     description="Variance of the two blocks of the block diagonal matrix.",
+    # )
+    # dataset_variances: list[float] = Field(
+    #     [1.0, 1.0],
+    #     description="Variance of the two blocks of the dataset.",
+    # )
+    # equal_rows: bool = Field(
+    #     False,
+    #     description="Whether to make the rows of each block equal.",
+    # )
+    # perfect_data_correlation: bool = Field(
+    #     False,
+    #     description="Whether to make the data within each block perfectly correlated.",
+    # )
 
 
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:
     """Implement the main algorithm and store the graph to disk."""
     config = load_config(config_path_or_obj, config_model=Config)
+    model_config = config.model
+    dataset_config = config.dataset
+
+    dnn = ModularDNN(
+        dnn_config=model_config,
+        dtype=config.dtype,
+        seed=config.seed,
+    )
+
+    dataset = BlockVectorDataset(
+        data_config=dataset_config,
+        dtype=config.dtype,
+        seed=config.seed,
+    )
+
     set_seed(config.seed)
-
-    if config.out_dir is not None:
-        config.out_dir.mkdir(parents=True, exist_ok=True)
-        out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
-        if not check_outfile_overwrite(out_file, force):
-            raise FileExistsError("Not overwriting output file")
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
-    dnn = BlockDiagonalDNN(
-        hidden_layers=config.layers,
-        width=config.width,
-        bias=config.bias,
-        block_variances=config.block_variances,
-        weight_assignment_function=random_block_diagonal_matrix_equal_columns
-        if config.equal_rows
-        else random_block_diagonal_matrix,
-    )
 
     assert dnn.has_folded_bias, "MLP must have folded bias to run RIB"
 
@@ -115,19 +112,17 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         f"config.node_layers must be a subsequence of {all_possible_node_layers} for a plain MLP, "
         f"otherwise our algorithm will be invalid because we require that the output of a "
         f"node layer is the input to the next node layer."
-    )
-    # TODO Is this related to why things to wrong when we try to rotate the final node layer?
+    )  # TODO Is this related to why things to wrong when we try to rotate the final node layer?
+
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
+        if not check_outfile_overwrite(out_file, force):
+            raise FileExistsError("Not overwriting output file")
 
     dnn.eval()
     dnn.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
     hooked_dnn = HookedModel(dnn)
-
-    dataset = BlockVectorDataset(
-        length=config.width,
-        perfect_correlation=config.perfect_data_correlation,
-        size=config.dataset_size,
-        dtype=config.dtype,
-    )
 
     train_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
     non_output_node_layers = [layer for layer in config.node_layers if layer != "output"]

@@ -23,12 +23,12 @@ import fire
 import torch
 import yaml
 from pydantic import BaseModel, Field
+from torch.utils.data import DataLoader
 
 from rib.data import VisionDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
-from rib.loader import create_data_loader, load_dataset, load_mlp
 from rib.log import logger
 from rib.models.mlp import MLPConfig
 from rib.models.modular_dnn import (
@@ -44,7 +44,7 @@ from rib.utils import check_outfile_overwrite, load_config, set_seed
 class Config(BaseModel):
     exp_name: str
     batch_size: int
-    seed: int
+    seed: Optional[int] = 0
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
     rotate_final_node_layer: bool  # Whether to rotate the output layer to its eigenbasis.
     n_intervals: int  # The number of intervals to use for integrated gradients.
@@ -129,10 +129,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         dtype=config.dtype,
     )
 
-    train_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.batch_size, seed=config.seed
-    )
-
+    train_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
     non_output_node_layers = [layer for layer in config.node_layers if layer != "output"]
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer

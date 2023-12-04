@@ -14,7 +14,6 @@ dataset:
   modulus: 113  # 'p' in the paper and code
   frac_train: .30
   fn_name: add
-  return_set: both
   seed: 0
 train:
   modulus: 113  # 'p' in the paper and code

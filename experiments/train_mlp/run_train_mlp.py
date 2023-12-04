@@ -18,7 +18,7 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from rib.data import VisionDatasetConfig
-from rib.loader import create_data_loader, load_dataset
+from rib.loader import load_dataset
 from rib.log import logger
 from rib.models import MLP
 from rib.models.mlp import MLPConfig
@@ -28,7 +28,7 @@ from rib.utils import load_config, set_seed
 
 
 class TrainConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     learning_rate: float
     batch_size: int
     epochs: int
@@ -41,14 +41,14 @@ class TrainConfig(BaseModel):
 
 
 class WandbConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     project: str
     entity: Optional[str]
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    seed: int
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    seed: Optional[int] = 0
     model: MLPConfig
     train: TrainConfig
     wandb: Optional[WandbConfig]
@@ -159,9 +159,7 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
     logger.info("Using device: %s", device)
 
     dataset = load_dataset(config.data, "train")
-    train_loader = create_data_loader(
-        dataset, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
-    )
+    train_loader = DataLoader(dataset, batch_size=config.train.batch_size, shuffle=True)
 
     #  Get the input size from the flattened first input
     data_in_dim = len(dataset[0][0].flatten())
@@ -185,9 +183,7 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
 
     # Evaluate the model on the test set
     test_dataset = load_dataset(config.data, "test")
-    test_loader = create_data_loader(
-        test_dataset, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
-    )
+    test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size, shuffle=True)
     accuracy = evaluate_model(trained_model, test_loader, device)
     logger.info(f"Accuracy of the network on the {len(test_dataset)} test images: %d %%", accuracy)  # type: ignore
     if config.wandb:

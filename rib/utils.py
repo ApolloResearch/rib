@@ -9,7 +9,7 @@ import yaml
 from jaxtyping import Float, Int
 from pydantic import BaseModel
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
 from rib.log import logger
 
@@ -237,11 +237,12 @@ def calc_exponential_ablation_schedule(
     return schedule
 
 
-def set_seed(seed: int = 0) -> None:
+def set_seed(seed: Optional[int]) -> None:
     """Set the random seed for random, PyTorch and NumPy"""
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
 
 
 def find_root(
@@ -271,13 +272,18 @@ def find_root(
     raise ValueError(f"Finding the root of {func} via bisection failed to converge")
 
 
-def train_test_split(dataset: Dataset, frac_train: float, seed: int) -> tuple[Dataset, Dataset]:
+def train_test_split(
+    dataset: Dataset, frac_train: float, seed: Optional[int]
+) -> tuple[Dataset, Dataset]:
     """Split a dataset into a training and test set.
+
+    Use a fixed seed for the split so that we can reproduce the results. If seed is None, use a
+    random seed.
 
     Args:
         dataset: The dataset to split.
         frac_train: The fraction of the dataset to use for training.
-        seed: The random seed to use for the split.
+        seed: The random seed to use for the split. If None, a random seed is used.
 
     Returns:
         The training and test sets.
@@ -285,8 +291,49 @@ def train_test_split(dataset: Dataset, frac_train: float, seed: int) -> tuple[Da
     assert 0 <= frac_train <= 1, "frac_train must be between 0 and 1."
     train_size = int(len(dataset) * frac_train)  # type: ignore
     test_size = len(dataset) - train_size  # type: ignore
-    generator = torch.Generator().manual_seed(seed)
-    train_dataset, test_dataset = random_split(
-        dataset, [train_size, test_size], generator=generator
-    )
+
+    if seed is None:
+        train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+    else:
+        generator = torch.Generator().manual_seed(seed)
+        train_dataset, test_dataset = random_split(
+            dataset, [train_size, test_size], generator=generator
+        )
     return train_dataset, test_dataset
+
+
+def get_data_subset(
+    dataset: Dataset, frac: Optional[float], n_samples: Optional[int], seed: Optional[int] = None
+) -> Dataset:
+    """Get a random subset of the dataset.
+
+    If frac is not None, returns a random sample of the dataset of size frac * len(dataset).
+    If n_samples is not None, returns a random sample of the dataset of size n_samples.
+
+    Args:
+        dataset (Dataset): The dataset to return a subset of.
+        frac (Optional[float]): The fraction of the dataset to return.
+        n_samples (Optional[int]): The number of samples to return.
+        seed (Optional[int]): The seed to use for the random number generator.
+
+    Returns:
+        Dataset: The subset of the dataset.
+    """
+    assert frac is None or n_samples is None, "Only one of `frac` and `n_samples` can be specified."
+    len_dataset = len(dataset)  # type: ignore
+    indices = list(range(len_dataset))
+
+    if seed is not None:
+        random.seed(seed)
+
+    if frac is not None:
+        selected_indices = sorted(random.sample(indices, int(len_dataset * frac)))
+        return Subset(dataset, selected_indices)
+    elif n_samples is not None:
+        assert (
+            n_samples <= len_dataset
+        ), f"n_samples ({n_samples}) must be <= len_dataset ({len_dataset})."
+        selected_indices = sorted(random.sample(indices, n_samples))
+        return Subset(dataset, selected_indices)
+    else:
+        return dataset

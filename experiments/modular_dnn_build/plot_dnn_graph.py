@@ -23,8 +23,7 @@ def main(results_file: str, force: bool = False) -> None:
     if not check_outfile_overwrite(out_file, force):
         return
 
-    # Input layer is much larger so include more nodes in it
-    nodes_per_layer = [10, 10, 10, 10, 10, 10, 10]
+    nodes_per_layer = [10]
 
     layer_names = results["config"]["node_layers"] + ["output"]
 

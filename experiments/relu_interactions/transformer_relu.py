@@ -5,6 +5,7 @@ from typing import Any, Iterable, Literal, Optional, Union, cast
 import fire
 import matplotlib.pyplot as plt
 import torch
+import gc
 import torch.nn as nn
 from jaxtyping import Float, Int
 from torch import Tensor
@@ -29,7 +30,7 @@ from rib.data_accumulator import (
     collect_relu_interactions,
     collect_test_edges,
     collect_cluster_fns,
-    collect_acts_and_get_jacobian,
+    collect_hessian,
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
@@ -37,7 +38,7 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
-from rib.linalg import eigendecompose, get_local_jacobian
+from rib.linalg import eigendecompose, lanczos
 from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.models.utils import get_model_attr, get_model_weight
@@ -367,7 +368,6 @@ def transformer_relu_main(config_path_str: str):
     )
     graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
-    # dict of InteractionRotation objects or Tensors
     Cs_and_Lambdas: dict[str, list[Union[InteractionRotation, Float[Tensor, ...]]]] = check_and_open_file(
         file_path=Cs_save_file,
         get_var_fn=get_Cs,
@@ -378,7 +378,7 @@ def transformer_relu_main(config_path_str: str):
         hooked_model=hooked_model,
     )
 
-    C_list, C_pinv_list, Lambda_abs_sqrts_list, Lambda_abs_sqrt_pinvs_list, U_D_sqrt_pinv_Vs_list, U_D_sqrt_Vs_list, Cs, Us, gram_matrices = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"], Cs_and_Lambdas["Lambda_abs_sqrts"], Cs_and_Lambdas["Lambda_abs_sqrt_pinvs"], Cs_and_Lambdas["U_D_sqrt_pinv_Vs"], Cs_and_Lambdas["U_D_sqrt_Vs"], Cs_and_Lambdas["Cs raw"], Cs_and_Lambdas["Us raw"], Cs_and_Lambdas["gram matrices"]
+    C_list, C_pinv_list = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"]
 
     relu_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = check_and_open_file(
         get_var_fn=get_relu_similarities,
@@ -473,6 +473,7 @@ def hessian_main(config_path_str: str):
     config = load_config(config_path, config_model=LMConfig)
     set_seed(config.seed)
 
+    Cs_save_file = Path(__file__).parent / "Cs_for_hessian"
     out_dir = Path(__file__).parent / f"out_transformer_relu"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -512,39 +513,71 @@ def hessian_main(config_path_str: str):
     )
     graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
 
-    # Has to be in order of passing through model
+    Cs_and_Lambdas: dict[str, list[Union[InteractionRotation, Float[Tensor, ...]]]] = check_and_open_file(
+        file_path=Cs_save_file,
+        get_var_fn=get_Cs,
+        model=seq_model,
+        config=config,
+        dataset=dataset,
+        device=device,
+        hooked_model=hooked_model,
+    )
+
+    C_list, C_pinv_list = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"]
+
+    # Has to be in order of passing through model AND has to match C_list order
     weight_module_names = ["sections.section_0.0", "sections.section_1.0"]
-    module_dict = {name: get_model_attr(copy_seq_model, name) for name in weight_module_names}
 
-    jacobians = {}
-    for name in weight_module_names:
-        # inputs need to be given by hook function return
-        jacobians[f"derivative wrt {name}"] = collect_acts_and_get_jacobian(
-            hooked_model=hooked_model,
-            module_names=["sections.section_0.0"],
-            data_loader=graph_train_loader,
-            dtype=dtype,
-            device=device,
-            jac_modules=module_dict.values(),
-            weight_module=module_dict[name],
-            is_lm=True,
-        )
+    H = collect_hessian(
+        hooked_model=hooked_model,
+        input_module_name="sections.section_0",
+        data_loader=graph_train_loader,
+        dtype=dtype,
+        device=device,
+        weight_module_names=weight_module_names,
+        copy_seq_model=copy_seq_model,
+        C_list=C_list,
+        use_residual_stream=config.use_residual_stream,
+    )
 
-    ## Now make Hessian
-    J1 = jacobians["derivative wrt sections.section_0.0"]["input sections.section_0.0"].to(device)
-    J2 = J1 = jacobians["derivative wrt sections.section_1.0"]["input sections.section_0.0"].to(device)
-    H1 = torch.matmul(J1.T, J1)
-    H2 = torch.matmul(J2.T, J2)
-    # Compute the mixed terms
-    M12 = torch.matmul(J1.T, J2)
-    M21 = torch.matmul(J2.T, J1)
-    # Form the top and bottom rows of the final Hessian
-    top_row = torch.cat((H1, M12), dim=1)
-    bottom_row = torch.cat((M21, H2), dim=1)
-    # Concatenate to form the final Hessian
-    H = torch.cat((top_row, bottom_row), dim=0)
+    ## For debugging purposes
+    # name = "sections.section_1.0"
+    # # inputs need to be given by hook function return
+    # jacobians[f"derivative wrt {name}"] = collect_acts_and_get_jacobian(
+    #     hooked_model=hooked_model,
+    #     module_names=["sections.section_0.0"],
+    #     data_loader=graph_train_loader,
+    #     dtype=dtype,
+    #     device=device,
+    #     jac_modules=module_dict.values(),
+    #     weight_module=module_dict[name],
+    #     C=C_list[1],
+    # )
 
-    sorted_eigenvalues, sorted_eigenvectors = eigendecompose(H.detach().cpu())
+    # X = len(graph_train_loader.dataset)
+    # ## Now make Hessian
+    # J1 = jacobians["derivative wrt sections.section_0.0"]
+    # J2 = jacobians["derivative wrt sections.section_1.0"]
+    # H1 = torch.div(torch.matmul(J1.T, J1), X)
+    # H2 = torch.div(torch.matmul(J2.T, J2), X)
+    # # Compute the mixed terms
+    # M12 = torch.div(torch.matmul(J1.T, J2), X)
+    # M21 = torch.div(torch.matmul(J2.T, J1), X)
+    # # Form the top and bottom rows of the final Hessian
+    # top_row = torch.cat((H1, M12), dim=1)
+    # bottom_row = torch.cat((M21, H2), dim=1)
+    # # Concatenate to form the final Hessian
+    # H = torch.cat((top_row, bottom_row), dim=0)
+
+    # del H1, H2, M12, M21, top_row, bottom_row
+    # torch.cuda.empty_cache()
+    # gc.collect()
+
+    # sorted_eigenvalues, sorted_eigenvectors = eigendecompose(H)
+    Hk, Lv = lanczos(H)
+    print("finish lanczos")
+    sorted_eigenvalues, sorted_eigenvectors = eigendecompose(Hk)
+    print("got eigenvalues")
     plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"Hessian MLP")
 
 

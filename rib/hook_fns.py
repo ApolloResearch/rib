@@ -18,7 +18,7 @@ import torch.nn as nn
 from einops import rearrange, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
-import io
+import gc
 
 from rib.linalg import (
     calc_gram_matrix,
@@ -28,6 +28,7 @@ from rib.linalg import (
     get_local_jacobian,
 )
 from rib.models.utils import get_model_attr
+from itertools import combinations
 
 
 def _add_to_hooked_matrix(
@@ -671,12 +672,14 @@ def test_edges_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+
+    TODO: needs refactor
     """
     module = _remove_hooks(module)
 
     is_lm: bool = True if inputs[0].dim() == 3 else False
     if is_lm:
-        next_layer_preactivations = module.forward(inputs[0], inputs[1])
+        next_layer_preactivations = module.forward(*inputs)
         next_layer_preactivations = torch.cat([x for x in next_layer_preactivations], dim=-1)
 
     outputs = output if isinstance(output, tuple) else (output,)
@@ -858,7 +861,7 @@ def cluster_fn_pre_forward_hook_fn(
         _add_to_hooked_matrix(hooked_data, hook_name, cluster_num, cluster_outputs.detach())
 
 
-def collect_jacobian_pre_forward_hook_fn(
+def collect_hessian_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
@@ -869,10 +872,14 @@ def collect_jacobian_pre_forward_hook_fn(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    jac_modules: list[torch.nn.Module],
-    weight_module: torch.nn.Module,
+    weight_module_names: list[str],
+    copy_seq_model: nn.Module,
+    C_list: list[Float[Tensor, "out_hidden_trunc in_hidden"]],
+    use_residual_stream: bool,
+    output_dim: int = 129,
 ) -> None:
     """Hook function for collecting output activations and passing into Jacobian.
+    This hook function finds the Jacobian for all weight_modules and forms the Hessian from that.
 
     Args:
         module: Module that the hook is attached to (not used).
@@ -882,16 +889,42 @@ def collect_jacobian_pre_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        weight_module_names: Names of sections to form Hessian from i.e. these are the weight
+            parameters the derivatives will be taken with respect to.
     """
-    jac_modules = list(map(_remove_hooks, jac_modules))
+    module_dict = {name: get_model_attr(copy_seq_model, name) for name in weight_module_names}
+    # If the model is chosen to be separate to the one with hooks, no issues should arise, but
+    # remove hooks just in case to prevent recursive hook calling in forward passes in Jacobian
+    # function
+    jac_modules = list(map(_remove_hooks, module_dict.values()))
 
-    jac = get_local_jacobian(
-        modules=jac_modules,
-        weight_module=weight_module,
-        inputs=inputs,
-    )
+    jacobians = {}
+    for i, name in enumerate(weight_module_names):
+        jac = get_local_jacobian(
+            modules=jac_modules,
+            weight_module=module_dict[name],
+            inputs=inputs,
+            C=C_list[i],
+            use_residual_stream=use_residual_stream,
+        )
+        jacobians[f"derivative wrt {name}"] = jac
 
-    _add_to_hooked_matrix(hooked_data, hook_name, "jac", jac.detach())
+    J1 = jacobians["derivative wrt sections.section_0.0"]
+    J2 = jacobians["derivative wrt sections.section_1.0"]
+    H1 = torch.div(torch.matmul(J1.T, J1), 60000)
+    H2 = torch.div(torch.matmul(J2.T, J2), 60000)
+    M12 = torch.div(torch.matmul(J1.T, J2), 60000)
+    M21 = torch.div(torch.matmul(J2.T, J1), 60000)
+
+    top_row = torch.cat((H1, M12), dim=1)
+    bottom_row = torch.cat((M21, H2), dim=1)
+    H = torch.cat((top_row, bottom_row), dim=0)
+
+    del H1, H2, M12, M21, top_row, bottom_row
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    _add_to_hooked_matrix(hooked_data, hook_name, f"hessian {hook_name}", H.detach().cpu())
 
 
 def _remove_hooks(module: torch.nn.Module) -> torch.nn.Module:
@@ -905,3 +938,152 @@ def _remove_hooks(module: torch.nn.Module) -> torch.nn.Module:
     assert not module._forward_pre_hooks, "Module has multiple pre-forward hooks."
     return module
 
+
+def collect_hessian_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    output: Union[
+        Float[Tensor, "batch d_hidden"],
+        Float[Tensor, "batch pos d_hidden"],
+        tuple[Float[Tensor, "batch pos d_hidden1"],
+              Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    weight_module_names: list[str],
+    copy_seq_model: nn.Module,
+    C_list: list[Float[Tensor, "out_hidden_trunc in_hidden"]],
+    use_residual_stream: bool,
+    output_dim: int = 129,
+) -> None:
+    """Hook function for collecting output activations and passing into Jacobian.
+    This hook function finds the Jacobian for all weight_modules and forms the Hessian from that.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module (not used).
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        weight_module_names: Names of sections to form Hessian from i.e. these are the weight
+            parameters the derivatives will be taken with respect to.
+    """
+    module_dict = {name: get_model_attr(copy_seq_model, name) for name in weight_module_names}
+    module = _remove_hooks(module)
+    DATASET_SIZE = 60000
+
+    is_lm = True if inputs[0].dim() == 3 else False
+    outputs = output if isinstance(output, tuple) else (output,)
+    resid_stream_size = inputs[0].shape[-1]
+    mlp_layer_size = outputs[1].shape[-1]
+    # Calculate pre-activations
+    for child in module.named_children():
+        if child[0] == '0':
+            preactivations = child[1].forward(*inputs)
+
+    lm_einops_pattern = "b p d_hidden_combined -> (b p) d_hidden_combined"
+    if is_lm and not use_residual_stream:
+        inputs = rearrange(inputs[1], lm_einops_pattern)
+        outputs = rearrange(outputs[1], lm_einops_pattern)
+        preactivations = rearrange(preactivations[1], lm_einops_pattern)
+        C_0, C_1 = C_list[0][resid_stream_size:,:], C_list[1][mlp_layer_size:,:]
+    elif is_lm and use_residual_stream:
+        inputs = rearrange(torch.cat([x for x in inputs], dim=-1), lm_einops_pattern)
+        outputs = rearrange(torch.cat([x for x in outputs], dim=-1), lm_einops_pattern)
+    else:  # Inputs always tuple, and in this case we don't have LM
+        inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+        outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
+
+    operator: Float[Tensor, "batch d_hidden"] = torch.div(outputs, preactivations)
+
+    for name, param in module_dict["sections.section_1.0"].named_parameters():
+        if "W" in name: w_out = param
+
+    ## Calculate H1
+    h1_unit = calc_gram_matrix(inputs, DATASET_SIZE)
+    H1 = torch.block_diag(*([h1_unit]*output_dim))
+
+    ## Calculate H2
+    rotated_fn_1 = inputs @ C_0
+    C_0_trunc_size = rotated_fn_1.shape[-1]
+    h2_dim = C_0_trunc_size * mlp_layer_size
+    mlp_layer_size = operator.shape[-1]
+    C_0_trunc_size = rotated_fn_1.shape[-1]
+
+    # w_out_mul_itself = (w_out.T @ w_out)
+    # w_factor = repeat(w_out_mul_itself, 'h w -> (h d1) (w d2)', d1=h2_dim, d2=h2_dim)
+
+    ## ====== Takes up a lot of space =======
+    # indices = torch.arange(h2_dim) % C_0_trunc_size
+    # operator_repeated = operator[:, indices % mlp_layer_size]
+    # rotated_fn_repeated = rotated_fn_1[:, indices]
+    # bit_in_sum = operator_repeated.unsqueeze(2) * operator_repeated.unsqueeze(1) * bit_in_sum * rotated_fn_repeated.unsqueeze(2) * rotated_fn_repeated.unsqueeze(1)
+    # H2 = torch.einsum('bhw->hw', bit_in_sum)
+
+    ## Middling ground: block for loop allows space-time tradeoff
+    ## Apparently this still uses too much memory
+    # H2 = torch.zeros((h2_dim, h2_dim))
+    # for i in range(C_0_trunc_size):
+    #     for j in range(C_0_trunc_size):
+    #         indices_operator = torch.arange(mlp_layer_size)
+    #         operator_i = repeat(operator[:, indices_operator], 'b d_hidden -> b d_hidden d', d=mlp_layer_size)
+    #         operator_j = repeat(operator[:, indices_operator], 'b d_hidden -> b d d_hidden', d=mlp_layer_size)
+    #         rotated_fn_i = repeat(rotated_fn_1[:, i], 'b -> b d', d=mlp_layer_size)
+    #         rotated_fn_j = repeat(rotated_fn_1[:, j], 'b -> b d', d=mlp_layer_size)
+
+    #         # Vectorized operation within the block
+    #         bit_in_sum = operator_i * operator_j * rotated_fn_i.unsqueeze(2) * rotated_fn_j.unsqueeze(1)
+
+    #         # Reduction for the block
+    #         H2_block = torch.einsum('bhw->hw', bit_in_sum)
+
+    #         # Place the computed block in the appropriate position of H2
+    #         H2[i * mlp_layer_size:(i + 1) * mlp_layer_size, j * mlp_layer_size:(j + 1) * mlp_layer_size] = H2_block
+
+    ## Middling ground: block for loop allows space-time tradeoff - take 2, using longer for loops
+    H2 = torch.zeros((h2_dim, h2_dim))
+    for i in range(mlp_layer_size):
+        for j in range(mlp_layer_size):
+            operator_i = repeat(operator[:, i], 'b -> b d', d=C_0_trunc_size)
+            operator_j = repeat(operator[:, j], 'b -> b d', d=C_0_trunc_size)
+            rotated_fn_i = repeat(rotated_fn_1, 'b d_C_0 -> b d_C_0 d', d=C_0_trunc_size)
+            rotated_fn_j = repeat(rotated_fn_1, 'b d_C_0 -> b d d_C_0', d=C_0_trunc_size)
+
+            # Vectorized operation within the block
+            bit_in_sum = rotated_fn_i * rotated_fn_j * operator_i.unsqueeze(2) * operator_j.unsqueeze(1)
+
+            # Reduction for the block
+            H2_block = torch.einsum('bhw->hw', bit_in_sum)
+
+            # Place the computed block in the appropriate position of H2
+            H2[i * C_0_trunc_size:(i + 1) * C_0_trunc_size, j * C_0_trunc_size:(j + 1) * C_0_trunc_size] = H2_block
+
+            # Debug check
+            if i == 13 and j == 16:
+                assert all(bit_in_sum[:, 13, 16] == operator[:, 13] * operator[:, 16] * rotated_fn_1[:, 13] * rotated_fn_1[:, 16])
+
+    ## ====== Takes up a lot of time =======
+    # H2 = torch.zeros((h2_dim, h2_dim))
+    # for i in range(h2_dim):
+    #     for j in range(h2_dim):
+    #         w_factor = w_out_mul_itself[i % C_0_trunc_size, j % C_0_trunc_size]
+    #         bit_in_sum = operator[:,i % mlp_layer_size] * operator[:,j % mlp_layer_size] * rotated_fn_1[:,i % C_0_trunc_size] * rotated_fn_1[:,j % C_0_trunc_size]
+    #         H2[i, j] = torch.einsum('b -> ', bit_in_sum * w_factor)
+
+    ## Calculate mixed off-diagonal block
+
+    del H1, H2, M12
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    _add_to_hooked_matrix(hooked_data, hook_name, f"H1 {hook_name}", H1.detach().cpu())
+    _add_to_hooked_matrix(hooked_data, hook_name, f"H2 {hook_name}", H2.detach().cpu())
+    _add_to_hooked_matrix(hooked_data, hook_name, f"M12 {hook_name}", M12.detach().cpu())

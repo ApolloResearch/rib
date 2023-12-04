@@ -178,8 +178,9 @@ def calculate_interaction_rotations(
 
     # The C matrix for the final layer is either the eigenvectors U if rotate_final_node_layer is
     # True, and None otherwise
+    sorted_eigenvalues, sorted_eigenvectors = eigendecompose(gram_matrices[node_layers[-1]])
     U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = (
-        eigendecompose(gram_matrices[node_layers[-1]])[1].detach().cpu()
+        sorted_eigenvectors.detach().cpu()
         if rotate_final_node_layer
         else None
     )

@@ -3,7 +3,6 @@ from typing import Callable, Optional, Union
 
 import numpy as np
 import torch
-import copy
 from einops import rearrange, repeat
 from jaxtyping import Float
 from torch import Tensor
@@ -11,6 +10,36 @@ from torch.func import jacrev, vmap
 from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES
+
+
+def lanczos(H: Float[Tensor, "d d"]):
+    vg = torch.rand((H.shape[1]))
+
+    Lv = torch.zeros((len(vg), len(vg)), dtype=torch.float32)  # Lanczos vectors
+    Hk = torch.zeros((len(vg), len(vg)), dtype=torch.float32)  # Hamiltonian in Krylov subspace
+    Lv[0] = vg / torch.norm(vg)  # First Lanczos vector as the normalized guess vector vg
+
+    # First iteration step of the Lanczos algorithm
+    w = torch.matmul(H, Lv[0])
+    a = torch.dot(torch.conj(w), Lv[0])
+    w = w - a * Lv[0]
+    Hk[0, 0] = a
+
+    # Iterative steps of the Lanczos algorithm
+    for j in tqdm(range(1, len(vg))):
+        b = (torch.dot(torch.conj(w), w))**0.5
+        Lv[j] = w / b
+
+        w = torch.matmul(H, Lv[j])
+        a = torch.dot(torch.conj(w), Lv[j])
+        w = w - a * Lv[j] - b * Lv[j - 1]
+
+        # Tridiagonal matrix Hk using a and b values
+        Hk[j, j] = a
+        Hk[j - 1, j] = b
+        Hk[j, j - 1] = torch.conj(b)
+
+    return Hk, Lv
 
 
 def eigendecompose(
@@ -429,6 +458,7 @@ def get_local_jacobian(
         tuple[Float[Tensor, "batch in_hidden"]],
         tuple[Float[Tensor, "batch pos _"], ...],
     ],
+    C: Float[Tensor, "out_hidden_trunc in_hidden"],
     use_residual_stream: bool = False
 ) -> Float[Tensor, "d_to_do"]:
     """Used to find derivative of some subspace of model's activations wrt some subset of its
@@ -443,22 +473,27 @@ def get_local_jacobian(
         for module in modules:
             outputs = module(*outputs)
 
+    if isinstance(outputs, tuple):
+        resid_stream_size = outputs[0].shape[-1]
+        mlp_layer_size = outputs[1].shape[-1]
+
     if use_residual_stream:
-        outputs = torch.cat(outputs, dim=-1) if isinstance(outputs, tuple) else outputs
+        outputs = torch.cat(outputs, dim=-1) if isinstance(outputs, tuple) else (outputs,)
         outputs = rearrange(outputs, "b p d_hidden -> (b p) d_hidden")
     else:
         outputs = rearrange(outputs[1], "b p d_hidden -> (b p) d_hidden")
+        C = C[resid_stream_size:,:]
 
     batch_size, output_dim = outputs.shape
-    jac = torch.zeros((output_dim, weights.numel()))
 
     with torch.set_grad_enabled(True):
         for i in range(output_dim):
-
             outputs[:, i].sum().backward(retain_graph=True) # It's fine to sum over batch dim due to linearity of derivative
             for name, param in weight_module.named_parameters():
                 if "W" in name:
                     grads = param.grad
+            grads = C.T.to(grads.device) @ grads
+            if i == 0: jac = torch.zeros((output_dim, grads.numel()))
             jac[i, :] = rearrange(grads, 'i j -> (j i)')
 
             for module in modules:

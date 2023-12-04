@@ -20,6 +20,7 @@ from torch import Tensor
 
 from rib.linalg import (
     calc_gram_matrix,
+    integrated_gradient_trapezoidal_basis_jacobian,
     integrated_gradient_trapezoidal_jacobian_functional,
     integrated_gradient_trapezoidal_jacobian_squared,
     integrated_gradient_trapezoidal_norm,
@@ -274,41 +275,66 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    in_grads = integrated_gradient_trapezoidal_norm(
-        module=module,
-        inputs=inputs,
-        C_out=C_out,
-        n_intervals=n_intervals,
-        basis_formula=basis_formula,
-    )
-    in_dtype = in_grads.dtype
-
-    has_pos = inputs[0].dim() == 3
-
-    einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
-    normalization_factor = in_grads.shape[1] * dataset_size if has_pos else dataset_size
-
-    with torch.inference_mode():
-        M_dash = torch.einsum(
-            einsum_pattern,
-            in_grads.to(M_dtype) / normalization_factor,
-            in_grads.to(M_dtype),
+    if basis_formula in ["(1-alpha)^2", "(1-0)*alpha"]:
+        in_grads = integrated_gradient_trapezoidal_norm(
+            module=module,
+            inputs=inputs,
+            C_out=C_out,
+            n_intervals=n_intervals,
+            basis_formula=basis_formula,
         )
+        in_dtype = in_grads.dtype
+
+        has_pos = inputs[0].dim() == 3
+
+        einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
+        normalization_factor = in_grads.shape[1] * dataset_size if has_pos else dataset_size
+
+        with torch.inference_mode():
+            M_dash = torch.einsum(
+                einsum_pattern,
+                in_grads.to(M_dtype) / normalization_factor,
+                in_grads.to(M_dtype),
+            )
+            # Concatenate the inputs over the hidden dimension
+            in_acts = torch.cat(inputs, dim=-1)
+            Lambda_dash = torch.einsum(
+                einsum_pattern,
+                in_grads.to(Lambda_einsum_dtype) / normalization_factor,
+                in_acts.to(Lambda_einsum_dtype),
+            )
+            Lambda_dash = Lambda_dash.to(in_dtype)
+
+            assert (
+                Lambda_dash.std() > 0
+            ), "Lambda_dash cannot be all zeros otherwise everything will be truncated"
+
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
+
+    elif basis_formula == "jacobian":
+        in_grads = integrated_gradient_trapezoidal_basis_jacobian(
+            module=module,
+            inputs=inputs,
+            C_out=C_out,
+            n_intervals=n_intervals,
+        )
+        einsum_pattern = (
+            "batch i t tprime j, batch i t tprime jprime -> j jprime"
+            if has_pos
+            else "batch i j, batch i jprime -> j jprime"
+        )
+        pos_size = in_grads.shape[2] if has_pos else 1
+        normalization_factor = pos_size * dataset_size
+        # Old in_grads shape: batch pos j, batch pos jprime
+        # New in_grads shape: batch i t tprime j, batch i t tprime jprime
+        # extra i and tprime index.
+        # Old sum after product: batch pos
+        # New sum after product: batch, i, t, tprime
+        M_dash = einops.einsum(in_grads / normalization_factor, in_grads, einsum_pattern)
         # Concatenate the inputs over the hidden dimension
         in_acts = torch.cat(inputs, dim=-1)
-        Lambda_dash = torch.einsum(
-            einsum_pattern,
-            in_grads.to(Lambda_einsum_dtype) / normalization_factor,
-            in_acts.to(Lambda_einsum_dtype),
-        )
-        Lambda_dash = Lambda_dash.to(in_dtype)
-
-        _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
-        _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
-
-    assert (
-        Lambda_dash.std() > 0
-    ), "Lambda_dash cannot be all zeros otherwise everything will be truncated"
+        Lambda_dash = torch.einsum(einsum_pattern, in_grads / normalization_factor, in_acts)
 
 
 def interaction_edge_pre_forward_hook_fn(

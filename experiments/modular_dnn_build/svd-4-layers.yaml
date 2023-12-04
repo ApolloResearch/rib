@@ -1,4 +1,4 @@
-exp_name: 4-layers
+exp_name: 4-layers-svd
 batch_size: 256
 seed: 0
 truncation_threshold: 1e-6
@@ -19,4 +19,4 @@ bias: 3.141
 block_variances: [2, 2]
 equal_rows: false
 perfect_data_correlation: false
-basis_formula: (1-0)*alpha
+basis_formula: svd

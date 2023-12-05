@@ -3,7 +3,6 @@ from typing import TypeVar
 import pytest
 import torch
 
-from rib.hook_fns import attn_scores_pre_forward_hook
 from rib.hook_manager import Hook, HookedModel
 from rib.loader import load_sequential_transformer
 from rib.models import SequentialTransformer, SequentialTransformerConfig
@@ -319,35 +318,30 @@ def test_n_ctx_pythia():
         dim=1,
     )
 
-    # Add a pre-forward hook to attn_out.0 and save the attention scores
-    hook = Hook(
-        name="pre_forward_attn_out.0",
-        data_key="attn_scores",
-        fn=attn_scores_pre_forward_hook,
-        module_name=seq_model.module_id_to_section_id[module_id],
-    )
     with torch.inference_mode():
         # Ran short_ctx example through model
-        out_short = hooked_model(input_ids_short, hooks=[hook])
+        out_short, cache_short = hooked_model.run_with_cache(input_ids_short)
 
-    attn_scores = hooked_model.hooked_data["pre_forward_attn_out.0"]["attn_scores"].detach().clone()
+    attn_scores_short = (
+        cache_short["sections.section_0.0.attention_scores"]["acts"][0].detach().clone()
+    )
 
     with torch.inference_mode():
         # Ran long_ctx example through model
-        out_long = hooked_model(input_ids_long, hooks=[hook])
+        out_long, cache_long = hooked_model.run_with_cache(input_ids_long)
 
     # Collect the attention scores for the first short_n_ctx positions
     attn_scores_long = (
-        hooked_model.hooked_data["pre_forward_attn_out.0"]["attn_scores"][
+        cache_long["sections.section_0.0.attention_scores"]["acts"][0][
             ..., :short_n_ctx, :short_n_ctx
         ]
         .detach()
         .clone()
     )
 
-    assert torch.allclose(attn_scores, attn_scores_long, atol=atol), (
+    assert torch.allclose(attn_scores_short, attn_scores_long, atol=atol), (
         f"Attention scores for short_n_ctx={short_n_ctx} and long_n_ctx={long_n_ctx} are not equal."
-        f"Max difference: {torch.max(torch.abs(attn_scores - attn_scores_long))}"
+        f"Max difference: {torch.max(torch.abs(attn_scores_short - attn_scores_long))}"
     )
 
     # Check that the outputs for the first short_n_ctx positions are the same

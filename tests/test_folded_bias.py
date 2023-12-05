@@ -187,7 +187,7 @@ def test_pythia_folded_bias() -> None:
     )
 
 
-@pytest.mark.xfail(reason="Pythia attention scores do not match as closely.")
+@pytest.mark.xfail(reason="Pythia attention scores affected more by folded biases, issue #245")
 @pytest.mark.slow()
 def test_pythia_folded_bias_strict_incl_attn_scores() -> None:
     """Test that the folded bias trick works for Pythia."""

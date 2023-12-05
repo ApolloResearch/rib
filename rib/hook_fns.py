@@ -228,7 +228,7 @@ def rotate_pre_forward_hook_fn(
     return adjusted_inputs
 
 
-def rotated_acts_forward_hook_fn(
+def rotated_acts_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: tuple[Float[Tensor, "batch d_hidden"]],
     rotation_matrix: Float[Tensor, "d_hidden d_hidden"],

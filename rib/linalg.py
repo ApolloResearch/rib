@@ -217,18 +217,18 @@ def integrated_gradient_trapezoidal_jacobian_functional(
     ],
     f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
     in_tuple_dims: list[int],
-    jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
 ) -> None:
-    """Calculate the interaction attribution (edges) for module_hat with inputs f_in_hat.
+    """Calculate the interaction attribution (edge) for module_hat with inputs f_in_hat.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
             in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
         f_in_hat: The inputs to the module. May or may not include a position dimension.
         in_tuple_dims: The final dimensions of the inputs to the module.
-        jac_out: The output of the jacobian calculation. This is modified in-place.
+        edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
@@ -287,9 +287,9 @@ def integrated_gradient_trapezoidal_jacobian_functional(
                 E = torch.einsum(einsum_pattern, i_grad, f_in_hat)
                 # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
                 # in equation (3.27)
-                # Note that jac_out is initialised to zeros in
+                # Note that edge is initialised to zeros in
                 # `rib.data_accumulator.collect_interaction_edges`
-                jac_out[i] -= E
+                edge[i] -= E
 
 
 def integrated_gradient_trapezoidal_jacobian_squared(
@@ -298,18 +298,18 @@ def integrated_gradient_trapezoidal_jacobian_squared(
     ],
     f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
     in_tuple_dims: list[int],
-    jac_out: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
 ) -> None:
-    """Calculate the interaction attribution (edges) for module_hat with inputs f_in_hat.
+    """Calculate the interaction attribution (edge) for module_hat with inputs f_in_hat.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
             in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
         f_in_hat: The inputs to the module. May or may not include a position dimension.
         in_tuple_dims: The final dimensions of the inputs to the module.
-        jac_out: The output of the jacobian calculation. This is modified in-place.
+        edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
@@ -323,7 +323,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
 
     # Get sizes for intermediate resullt storage
     batch_size = f_in_hat.shape[0]
-    out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = jac_out.shape
+    out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = edge.shape
     if has_pos:
         # Just run the model to see what the output pos size is
         with torch.inference_mode():
@@ -342,7 +342,12 @@ def integrated_gradient_trapezoidal_jacobian_squared(
             device=f_in_hat.device,
         )
         if has_pos
-        else torch.zeros(batch_size, out_hidden_size_comb_trunc, in_hidden_size_comb_trunc)
+        else torch.zeros(
+            batch_size,
+            out_hidden_size_comb_trunc,
+            in_hidden_size_comb_trunc,
+            device=f_in_hat.device,
+        )
     )
 
     # Integral
@@ -410,9 +415,9 @@ def integrated_gradient_trapezoidal_jacobian_squared(
     # Square, and sum over batch size and t (not tprime)
     inner_token_sums = inner_token_sums**2
     if has_pos:
-        jac_out[:, :] = inner_token_sums.sum(dim=(0, 1))
+        edge += inner_token_sums.sum(dim=(0, 1))
     else:
-        jac_out[:, :] = inner_token_sums.sum(dim=0)
+        edge += inner_token_sums.sum(dim=0)
 
 
 def integrated_gradient_trapezoidal_norm(

@@ -366,14 +366,14 @@ def interaction_edge_pre_forward_hook_fn(
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
     in_acts = torch.cat(inputs, dim=-1)
     f_hat = in_acts @ C_in
-    jac_out = hooked_data[hook_name][data_key]
+    edge = hooked_data[hook_name][data_key]
 
     if edge_formula == "functional":
         integrated_gradient_trapezoidal_jacobian_functional(
             module_hat=module_hat,
             f_in_hat=f_hat,
             in_tuple_dims=in_tuple_dims,
-            jac_out=jac_out,
+            edge=edge,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
         )
@@ -382,7 +382,7 @@ def interaction_edge_pre_forward_hook_fn(
             module_hat=module_hat,
             f_in_hat=f_hat,
             in_tuple_dims=in_tuple_dims,
-            jac_out=jac_out,
+            edge=edge,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
         )

@@ -3,15 +3,14 @@ from typing import Any, Optional, TypeVar
 
 import numpy as np
 import torch
-import torch.nn as nn
 import yaml
 from fancy_einsum import einsum
 from jaxtyping import Float
 from torch import Tensor, nn
-from einops import repeat, rearrange, reduce
 
 from rib.log import logger
 from rib.utils import find_root
+
 T = TypeVar("T")
 
 
@@ -49,7 +48,8 @@ def get_model_attr(model: torch.nn.Module, attr_path: str) -> torch.nn.Module:
         torch.nn.Module: The attribute of the model.
 
     Example:
-        >>> mlp = MLP([5], input_size=2, output_size=3)
+        >>> mlp_config = MLPConfig(hidden_sizes=[5], input_size=2, output_size=3)
+        >>> mlp = MLP(mlp_config)
         >>> mlp
         MLP(
             (layers): ModuleList(
@@ -80,33 +80,6 @@ def get_model_attr(model: torch.nn.Module, attr_path: str) -> torch.nn.Module:
             logger.error(f"Attribute '{name}' not found in the path '{attr_path}'.")
             raise
     return attr
-
-
-def get_model_weight(model: torch.nn.Module, attr_path: str) -> list[torch.Tensor]:
-    """Retrieve the weight matrix of a specific layer in a PyTorch model. Call on get_model_attr to
-    do so.
-
-    Quick explanation:
-    - Obtain the higher level Sequential objects then iterates over.
-    their members to check if the module class matches the assigned module class.
-    - Then check if this thing has a "W" in the name, suggesting it contains a valid weight
-    vector.
-    - If one of the above conditions is not True, then return None and set weights to None.
-
-    Args:
-        model (torch.nn.Module): The PyTorch model.
-        attr_path (str): A string representing the path to the layer.
-
-    Returns:
-        torch.Tensor: The weight matrix of the layer.
-    """
-    weights = None
-    modules: list[nn.Module] = [module for module in get_model_attr(model, attr_path)]
-    for module in modules:
-        for name, param in module.named_parameters():
-            if "W" in name: weights = param
-
-    return weights
 
 
 def create_list_partitions(in_list: list[T], sub_list: list[T]) -> list[list[T]]:

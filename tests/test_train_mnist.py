@@ -1,21 +1,16 @@
-"""Run the mnist train script with a mock config and check that accuracy is > 95%.
+"""Run the mnist train script and checks that accuracy is > 95%.
 """
-
-import sys
-import tempfile
-from pathlib import Path
-
 import pytest
+import yaml
 
-# Append the root directory to sys.path
-ROOT_DIR = Path(__file__).parent.parent.resolve()
-sys.path.append(str(ROOT_DIR))
+from experiments.train_mlp.run_train_mlp import Config
+from experiments.train_mlp.run_train_mlp import main as train_main
 
-from experiments.train_mnist.run_train_mnist import main as train_main
-
-MOCK_CONFIG = """
+CONFIG_STR = """
 seed: 0
 model:
+  input_size: 784
+  output_size: 10
   hidden_sizes: [30, 30]
   activation_fn: relu
   bias: true
@@ -31,16 +26,9 @@ wandb: null
 
 @pytest.mark.slow
 def test_main_accuracy():
-    """Test that the accuracy of the model is > 95%.
+    """Test that the accuracy of the model is > 95%."""
 
-    We don't use a context manager here because windows doesn't support opening temp files more than once.
-    """
-    # Create a temporary file and write the mock config to it
-    temp_config = tempfile.NamedTemporaryFile(mode="w+", suffix=".yaml", delete=False)
-    temp_config.write(MOCK_CONFIG)
-    temp_config.close()
-
-    accuracy = train_main(temp_config.name)
+    config_dict = yaml.safe_load(CONFIG_STR)
+    config = Config(**config_dict)
+    accuracy = train_main(config)
     assert accuracy > 90.0
-
-    Path(temp_config.name).unlink()

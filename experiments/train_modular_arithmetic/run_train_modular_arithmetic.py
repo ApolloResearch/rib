@@ -14,7 +14,11 @@ import fire
 import torch
 import torch.optim as optim
 import wandb
+<<<<<<< HEAD
 from pydantic import BaseModel
+=======
+from pydantic import BaseModel, ConfigDict, Field
+>>>>>>> main
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -22,13 +26,24 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.data import ModularArithmeticDatasetConfig
+<<<<<<< HEAD
 from rib.loader import create_data_loader, load_dataset
 from rib.log import logger
 from rib.models.utils import save_model
+=======
+from rib.loader import load_dataset
+from rib.log import logger
+from rib.models.utils import save_model
+from rib.types import RootPath
+>>>>>>> main
 from rib.utils import load_config, set_seed
 
 
 class ModelConfig(BaseModel):
+<<<<<<< HEAD
+=======
+    model_config = ConfigDict(extra="forbid", frozen=True)
+>>>>>>> main
     n_layers: int
     d_model: int
     d_head: int
@@ -41,21 +56,42 @@ class ModelConfig(BaseModel):
 
 
 class TrainConfig(BaseModel):
+<<<<<<< HEAD
+=======
+    model_config = ConfigDict(extra="forbid", frozen=True)
+>>>>>>> main
     learning_rate: float
     batch_size: int  # Set to max(batch_size, <number of samples in dataset>)
     epochs: int
     eval_every_n_epochs: int
+<<<<<<< HEAD
     save_dir: Optional[Path] = None
+=======
+    save_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / ".checkpoints" / "modular_arithmetic",
+        description="Directory for the output files. Defaults to `./.checkpoints/modular_arithmetic`."
+        "If None, no output is written. If a relative path, it is relative to the root of the rib repo.",
+    )
+>>>>>>> main
     save_every_n_epochs: Optional[int] = None
 
 
 class WandbConfig(BaseModel):
+<<<<<<< HEAD
+=======
+    model_config = ConfigDict(extra="forbid", frozen=True)
+>>>>>>> main
     project: str
     entity: Optional[str]
 
 
 class Config(BaseModel):
+<<<<<<< HEAD
     seed: int
+=======
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    seed: Optional[int] = 0
+>>>>>>> main
     model: ModelConfig
     train: TrainConfig
     dataset: ModularArithmeticDatasetConfig
@@ -185,10 +221,16 @@ def evaluate_model(model, test_loader: DataLoader, device: str) -> float:
 def main(config_path_or_obj: Union[str, Config]) -> tuple[float, float]:
     config = load_config(config_path_or_obj, config_model=Config)
 
+<<<<<<< HEAD
+=======
+    assert config.dataset.return_set == "train", "Must use the train set for training."
+
+>>>>>>> main
     set_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
 
+<<<<<<< HEAD
     if not config.train.save_dir:
         config.train.save_dir = Path(__file__).parent / ".checkpoints" / "modular_arithmetic"
 
@@ -197,11 +239,30 @@ def main(config_path_or_obj: Union[str, Config]) -> tuple[float, float]:
         datasets, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
     )
 
+=======
+>>>>>>> main
     # Initialize the Transformer model
     transformer_lens_config = HookedTransformerConfig(**config.model.model_dump())
     model = HookedTransformer(transformer_lens_config)
     model = model.to(device)
 
+<<<<<<< HEAD
+=======
+    train_dataset = load_dataset(
+        dataset_config=config.dataset,
+        return_set="train",
+        model_n_ctx=transformer_lens_config.n_ctx,
+    )
+    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True)
+
+    test_dataset = load_dataset(
+        dataset_config=config.dataset,
+        return_set="test",
+        model_n_ctx=transformer_lens_config.n_ctx,
+    )
+    test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size, shuffle=True)
+
+>>>>>>> main
     run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}_norm-{config.model.normalization_type}"
     if config.wandb:
         wandb.init(

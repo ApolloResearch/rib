@@ -3,8 +3,8 @@
 This file will tend to call on functions from rib.hook_fns and should act as an interface between
 main code and these lower-level functions.
 """
-
-from typing import TYPE_CHECKING, Optional, Union
+from functools import partial
+from typing import TYPE_CHECKING, Optional, Union, Literal
 
 import torch
 import torch.nn as nn
@@ -33,7 +33,8 @@ from rib.hook_fns_non_static import (
 )
 from rib.hook_manager import Hook, HookedModel
 from rib.log import logger
-from rib.utils import eval_model_accuracy, eval_model_metrics
+from rib.linalg import module_hat
+from rib.utils import eval_model_accuracy, eval_model_metrics, get_model_attr
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -94,8 +95,7 @@ def collect_gram_matrices(
     """
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
-        assert len(hook_names) == len(
-            module_names), "Must specify a hook name for each module."
+        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
     else:
         hook_names = module_names
 
@@ -154,6 +154,7 @@ def collect_M_dash_and_Lambda_dash(
     hook_name: Optional[str] = None,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -176,9 +177,13 @@ def collect_M_dash_and_Lambda_dash(
             Lambda_dash matrix. Does not affect the output, only used for the einsum within
             M_dash_and_Lambda_dash_pre_forward_hook_fn. Needs to be float64 on CPU but float32 was
             fine on GPU. Defaults to float64.
-
+        basis_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
     Returns:
-        A tuple containing M' and Lambda', as well as the integrated gradient term g_j.
+        A tuple containing M' and Lambda'.
     """
     if hook_name is None:
         hook_name = module_name
@@ -194,6 +199,7 @@ def collect_M_dash_and_Lambda_dash(
             "dataset_size": len(data_loader.dataset),  # type: ignore
             "M_dtype": M_dtype,
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
+            "basis_formula": basis_formula,
         },
     )
 
@@ -222,6 +228,7 @@ def collect_interaction_edges(
     dtype: torch.dtype,
     device: str,
     data_set_size: Optional[int] = None,
+    edge_formula: Literal["functional", "squared"] = "functional",
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -239,13 +246,19 @@ def collect_interaction_edges(
         device: The device to run the model on.
         data_set_size: the total size of the dataset, used to normalize. Defaults to
         `len(data_loader)`. Important to set when parallelizing over the dataset.
+        edge_formula: The formula to use for the attribution. Must be one of "functional" or
+            "squared". The former is the old (October) functional version, the latter is a new
+            (November) version.
 
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes
         through.
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
+
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
+    assert len(edge_modules) == len(Cs) - 1, "Number of edge modules not the same as Cs - 1."
+
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
     edge_hooks: list[Hook] = []
     for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
@@ -255,6 +268,13 @@ def collect_interaction_edges(
         C_out = Cs[idx + 1].C
         if C_out is not None:
             C_out = C_out.to(device=device)
+
+        module_hat_partial = partial(
+            module_hat,
+            module=get_model_attr(hooked_model.model, module_name),
+            C_in_pinv=C_info.C_pinv.to(device=device),
+            C_out=C_out,
+        )
         edge_hooks.append(
             Hook(
                 name=C_info.node_layer_name,
@@ -263,10 +283,10 @@ def collect_interaction_edges(
                 module_name=module_name,
                 fn_kwargs={
                     "C_in": C_info.C.to(device=device),  # C from the current node layer
-                    "C_in_pinv": C_info.C_pinv.to(device=device),  # C_pinv from current node layer
-                    "C_out": C_out,
+                    "module_hat": module_hat_partial,
                     "n_intervals": n_intervals,
                     "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
+                    "edge_formula": edge_formula,
                 },
             )
         )

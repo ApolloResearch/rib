@@ -1,7 +1,11 @@
 exp_name: modular_arithmetic
 seed: 0
 tlens_pretrained: null
+<<<<<<< HEAD
 tlens_model_path: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-09-27_18-19-33/model_epoch_60000.pt
+=======
+tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+>>>>>>> main
 interaction_matrices_path: null
 dataset:
   source: custom
@@ -15,9 +19,16 @@ node_layers:
   - output
 rotate_final_node_layer: false
 batch_size: 256
+<<<<<<< HEAD
 truncation_threshold: 1e-6
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
 n_intervals: 50
 dtype: float32
+=======
+truncation_threshold: 1e-15
+last_pos_module_type: add_resid1  # module type in which to only output the last position index
+n_intervals: 50
+dtype: float64
+>>>>>>> main
 calculate_edges: true
 eval_type: accuracy

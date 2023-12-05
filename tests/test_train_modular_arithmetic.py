@@ -1,21 +1,13 @@
-"""Run the modular arithmetic train script with a mock config and check that train accuracy is 100%.
-"""
-
-import sys
-import tempfile
-from pathlib import Path
-
+"""Run the modular arithmetic train script and check that train accuracy is >5%."""
 import pytest
+import yaml
 
-# Append the root directory to sys.path
-ROOT_DIR = Path(__file__).parent.parent.resolve()
-sys.path.append(str(ROOT_DIR))
-
+from experiments.train_modular_arithmetic.run_train_modular_arithmetic import Config
 from experiments.train_modular_arithmetic.run_train_modular_arithmetic import (
     main as train_main,
 )
 
-MOCK_CONFIG = """
+CONFIG_STR = """
 seed: 0
 model:
   n_layers: 1
@@ -30,7 +22,6 @@ model:
 dataset:
   source: custom
   name: modular_arithmetic
-  return_set: both
   modulus: 113
   frac_train: .30
   fn_name: add
@@ -51,16 +42,8 @@ def test_main_accuracy():
     """Test that the accuracy of the model is above 5% after 50 epochs.
 
     We should reach >99% after 200 epochs, but this takes too long to run in CI.
-
-    We don't use a context manager here because windows doesn't support opening temp files more than
-    once.
     """
-    # Create a temporary file and write the mock config to it
-    temp_config = tempfile.NamedTemporaryFile(mode="w+", suffix=".yaml", delete=False)
-    temp_config.write(MOCK_CONFIG)
-    temp_config.close()
-
-    train_accuracy, _ = train_main(temp_config.name)
+    config_dict = yaml.safe_load(CONFIG_STR)
+    config = Config(**config_dict)
+    train_accuracy, _ = train_main(config)
     assert train_accuracy > 5
-
-    Path(temp_config.name).unlink()

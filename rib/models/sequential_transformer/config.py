@@ -3,7 +3,7 @@ from typing import Literal, Optional, Union
 import torch
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, StrDtype
 
 
 class SequentialTransformerConfig(BaseModel):
@@ -33,7 +33,7 @@ class SequentialTransformerConfig(BaseModel):
             pythia).
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     n_layers: int
     d_model: int
@@ -48,6 +48,7 @@ class SequentialTransformerConfig(BaseModel):
     dtype: torch.dtype
     use_attn_scale: bool
     use_split_qkv_input: bool
+    use_local_attn: bool
     positional_embedding_type: Literal["rotary", "standard"]
     rotary_dim: Optional[int]
     parallel_attn_mlp: bool
@@ -55,7 +56,7 @@ class SequentialTransformerConfig(BaseModel):
 
     @field_validator("dtype")
     @classmethod
-    def set_dtype(cls, v: Union[str, torch.dtype]) -> torch.dtype:
+    def set_dtype(cls, v: Union[StrDtype, torch.dtype]) -> torch.dtype:
         """Verify torch dtype or convert str to torch.dtype."""
         if isinstance(v, torch.dtype):
             if v not in TORCH_DTYPES.values():

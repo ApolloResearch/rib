@@ -13,4 +13,3 @@ seaborn~=0.13.0
 # if you have trouble try `conda install mpi4py`
 # You will also need to have a proper mpi installation (should be in the docker)
 mpi4py~=3.1.4
-x

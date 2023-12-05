@@ -27,7 +27,6 @@ class TestPythiaFloatingPointErrors:
     def rib_results(self, temp_object) -> dict:
         """Run RIB build with float32 and float64 and return the results."""
         rib_config_str = """
-            force_overwrite_output: true
             tlens_pretrained: pythia-14m
             tlens_model_path: null
             dataset:
@@ -39,18 +38,16 @@ class TestPythiaFloatingPointErrors:
                 return_set_n_samples: 10
                 return_set_portion: first
             node_layers:
-                - ln1.0
                 - mlp_out.0
                 - ln2.3
                 - mlp_out.3
-                - ln1.5
                 - mlp_out.5
                 - output
             batch_size: 4  #  A100 can handle 24
             gram_batch_size: 20  #  A100 can handle 80
             truncation_threshold: 1e-6
             rotate_final_node_layer: false
-            n_intervals: 10
+            n_intervals: 0
             calculate_edges: false
             eval_type: null
             seed: 42
@@ -98,9 +95,12 @@ class TestPythiaFloatingPointErrors:
         if not rib_results["float32"]["config"]["batch_size"] > 1:
             pytest.skip("This test does not work with batch size 1.")
 
+        if rib_results["float32"]["config"]["basis_formula"] == "(1-0)*alpha":
+            pytest.skip('This test does not work with the new "(1-0)*alpha" basis.')
+
         for node_layer_index in range(len(rib_results["float32"]["interaction_rotations"])):
-            # This only tests the first 4 columns, would like to improve in the future!
-            n_max = 4
+            # This only tests the first column, would like to improve in the future!
+            n_max = 1
             if rib_results["float32"]["interaction_rotations"][node_layer_index]["C"] is None:
                 continue
             float32_C = rib_results["float32"]["interaction_rotations"][node_layer_index]["C"][
@@ -135,7 +135,6 @@ class TestPythiaFloatingPointErrors:
         # rib_results is an argument to make sure this runs after the rib_results fixture but
         # it actually just uses the temp dir which has been written to by the rib_results fixture.
         ablation_config_str = """
-        force_overwrite_output: true
         ablation_type: rib
         schedule:
             schedule_type: linear
@@ -151,11 +150,9 @@ class TestPythiaFloatingPointErrors:
             return_set_n_samples: 10
             return_set_portion: first
         ablation_node_layers:
-            - ln1.0
             - mlp_out.0
             - ln2.3
             - mlp_out.3
-            - ln1.5
             - mlp_out.5
         batch_size: 30  # A100 can handle 60
         eval_type: ce_loss

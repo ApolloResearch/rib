@@ -1,0 +1,15 @@
+exp_name: rib_4-node-layers
+ablation_type: rib
+interaction_graph_path: experiments/mlp_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
+schedule:
+  schedule_type: exponential
+  early_stopping_threshold: null
+  ablate_every_vec_cutoff: 10
+  exp_base: 2.0
+dtype: float32
+ablation_node_layers:  # Rotate input to these modules
+  - layers.0
+  - layers.1
+  - layers.2
+batch_size: 512
+seed: 0

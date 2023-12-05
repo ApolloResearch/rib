@@ -11,10 +11,12 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 """
 from copy import deepcopy
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 import torch
 import torch.nn as nn
+from fancy_einsum import einsum
+import einops
 from einops import rearrange, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
@@ -22,12 +24,14 @@ import gc
 
 from rib.linalg import (
     calc_gram_matrix,
-    edge_norm,
-    integrated_gradient_trapezoidal_jacobian,
-    integrated_gradient_trapezoidal_norm,
     get_local_jacobian,
+    integrated_gradient_trapezoidal_jacobian_functional,
+    integrated_gradient_trapezoidal_jacobian_squared,
+    integrated_gradient_trapezoidal_norm,
+    module_hat,
 )
 from rib.models.utils import get_model_attr
+from rib.models.sequential_transformer.components import AttentionOut
 
 
 def _add_to_hooked_matrix(
@@ -50,33 +54,7 @@ def _add_to_hooked_matrix(
 
     """
     # If no data exists, initialize with zeros
-    hooked_data.setdefault(hook_name, {}).setdefault(
-        data_key, torch.zeros_like(hooked_matrix))
-    hooked_data[hook_name][data_key] += hooked_matrix
-
-
-def _add_to_hooked_matrix(
-    hooked_data: dict[str, Any],
-    hook_name: str,
-    data_key: str,
-    hooked_matrix: Float[Tensor, "d_hidden d_hidden"],
-) -> None:
-    """Update the hooked data matrix with the given matrix.
-
-    We add the hooked matrix to previously stored data matrix for this hook point.
-
-    Note that the data matrix will be stored on the same device as the output.
-
-    Args:
-        hooked_data: Dictionary of hook data that will be updated.
-        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
-        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
-        hooked_matrix: Matrix to add to the hooked data.
-
-    """
-    # If no data exists, initialize with zeros
-    hooked_data.setdefault(hook_name, {}).setdefault(
-        data_key, torch.zeros_like(hooked_matrix))
+    hooked_data.setdefault(hook_name, {}).setdefault(data_key, torch.zeros_like(hooked_matrix))
     hooked_data[hook_name][data_key] += hooked_matrix
 
 
@@ -85,14 +63,12 @@ def gram_forward_hook_fn(
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
         tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"],
-              Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
     ],
     output: Union[
         Float[Tensor, "batch d_hidden"],
         Float[Tensor, "batch pos d_hidden"],
-        tuple[Float[Tensor, "batch pos d_hidden1"],
-              Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -131,8 +107,7 @@ def gram_pre_forward_hook_fn(
     inputs: Union[
         tuple[Float[Tensor, "batch d_hidden"]],
         tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"],
-              Float[Tensor, "batch pos d_hidden2"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -159,6 +134,70 @@ def gram_pre_forward_hook_fn(
     gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
+
+
+def attn_scores_pre_forward_hook(
+    module: torch.nn.Module,
+    inputs: tuple[Float[Tensor, "batch pos head_index_d_head"], ...],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+) -> None:
+    """Calculate and store the attention scores.
+
+    This should only be applied to the AttentionOut module.
+
+    Note that this function overwrites hooked_data[hook_name] each time it is called since it is
+    expected to only be used on a single batch.
+
+    Args:
+        module: Module that the hook is attached to.
+        inputs: Inputs to the module. The first input is the residual, and the remaining inputs
+            are the q, k, and v tensors.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+    """
+
+    assert isinstance(module, AttentionOut), "This hook can only be applied to AttentionOut."
+    _, q, k, v = inputs
+    # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)
+    q = einops.rearrange(
+        q,
+        "... pos (head_index d_head) -> ... pos head_index d_head",
+        head_index=module.cfg.n_heads,
+    )
+    k = einops.rearrange(
+        k,
+        "... pos (head_index d_head) -> ... pos head_index d_head",
+        head_index=module.cfg.n_heads,
+    )
+    v = einops.rearrange(
+        v,
+        "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
+        head_index=module.cfg.n_heads,
+    )
+
+    in_dtype = v.dtype
+
+    if in_dtype not in [torch.float32, torch.float64]:
+        # If using 16 bits, increase the precision to avoid numerical instabilities
+        q = q.to(torch.float32)
+        k = k.to(torch.float32)
+    attn_scores = (
+        einsum(
+            "... query_pos head_index d_head, \
+                    ... key_pos head_index d_head \
+                    -> ... head_index query_pos key_pos",
+            q,
+            k,
+        )
+        / module.attn_scale
+    )  # [..., head_index, query_pos, key_pos]
+
+    attn_scores = module.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
+
+    hooked_data[hook_name] = {data_key: attn_scores}
 
 
 def rotate_pre_forward_hook_fn(
@@ -209,6 +248,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -228,6 +268,11 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
             Lambda_dash matrix. Does not affect the output, only used for the einsum itself.
             Needs to be float64 on CPU but float32 was fine on GPU. Defaults to float64.
+        basis_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -240,6 +285,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         inputs=inputs,
         C_out=C_out,
         n_intervals=n_intervals,
+        basis_formula=basis_formula,
     )
     in_dtype = in_grads.dtype
 
@@ -281,10 +327,12 @@ def interaction_edge_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     C_in: Float[Tensor, "in_hidden in_hidden_trunc"],
-    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
+    module_hat: Callable[
+        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
+    ],
     n_intervals: int,
     dataset_size: int,
+    edge_formula: Literal["functional", "squared"] = "functional",
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -295,8 +343,6 @@ def interaction_edge_pre_forward_hook_fn(
     The trapezoidal rule is used to approximate the integrated gradient. If n_intervals == 0, the
     integrated gradient effectively takes a point estimate for the integral at alpha == 0.5.
 
-    So far, only metrics 1 and 4 are edited to use transformers.
-
     Args:
         module: Module that the hook is attached to.
         inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
@@ -305,11 +351,14 @@ def interaction_edge_pre_forward_hook_fn(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of 2nd-level keys to store in `hooked_data`.
         C_in: The C matrix for the current layer (C^l in the paper).
-        C_in_pinv: The pseudoinverse of the C matrix for the current layer ((C^l)^+ in the paper).
-        C_out: The C matrix for the next layer (C^{l+1} in the paper).
+        module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
+            in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
+        edge_formula: The formula to use for the attribution. Must be one of "functional" or
+            "squared". The former is the old (October) functional version, the latter is a new
+            (November) version.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -317,44 +366,36 @@ def interaction_edge_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    has_pos = inputs[0].dim() == 3
+    in_tuple_dims = [x.shape[-1] for x in inputs]
 
     # We first concatenate the inputs over the hidden dimension
-    in_acts = torch.cat(inputs, dim=-1)
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
+    in_acts = torch.cat(inputs, dim=-1)
     f_hat = in_acts @ C_in
+    edge = hooked_data[hook_name][data_key]
 
-    in_hidden_dims = [x.shape[-1] for x in inputs]
-
-    # Compute f^{l+1}(x) to which the derivative is not applied.
-    with torch.inference_mode():
-        # f_in_hat @ C_in_pinv does not give exactly f due to C and C_in_pinv being truncated
-        f_in_adjusted: Float[Tensor, "... in_hidden_combined_trunc"] = f_hat @ C_in_pinv
-        input_tuples = torch.split(f_in_adjusted, in_hidden_dims, dim=-1)
-
-        output_const = module(*tuple(x.detach().clone() for x in input_tuples))
-        outputs_const = (output_const,) if isinstance(output_const, torch.Tensor) else output_const
-
-    has_pos = f_hat.dim() == 3
-
-    jac_out = hooked_data[hook_name][data_key]
-    edge_norm_partial = partial(
-        edge_norm,
-        outputs_const=outputs_const,
-        module=module,
-        C_in_pinv=C_in_pinv,
-        C_out=C_out,
-        in_hidden_dims=in_hidden_dims,
-        has_pos=has_pos,
-    )
-
-    integrated_gradient_trapezoidal_jacobian(
-        fn=edge_norm_partial,
-        x=f_hat,
-        n_intervals=n_intervals,
-        jac_out=jac_out,
-        dataset_size=dataset_size,
-    )
+    if edge_formula == "functional":
+        integrated_gradient_trapezoidal_jacobian_functional(
+            module_hat=module_hat,
+            f_in_hat=f_hat,
+            in_tuple_dims=in_tuple_dims,
+            edge=edge,
+            dataset_size=dataset_size,
+            n_intervals=n_intervals,
+        )
+    elif edge_formula == "squared":
+        integrated_gradient_trapezoidal_jacobian_squared(
+            module_hat=module_hat,
+            f_in_hat=f_hat,
+            in_tuple_dims=in_tuple_dims,
+            edge=edge,
+            dataset_size=dataset_size,
+            n_intervals=n_intervals,
+        )
+    else:
+        raise ValueError(
+            f"edge_formula must be one of 'functional' or 'squared', got {edge_formula}"
+        )
 
 
 def acts_forward_hook_fn(

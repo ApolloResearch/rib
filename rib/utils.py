@@ -1,22 +1,31 @@
+import os
 import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional, Type, TypeVar, Union
 
 import numpy as np
 import torch
-from torch.nn import CrossEntropyLoss
 import yaml
 from jaxtyping import Float, Int
 from pydantic import BaseModel
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, Subset, random_split
+
+from rib.log import logger
 
 if TYPE_CHECKING:
     from rib.hook_manager import Hook, HookedModel
 
 T = TypeVar("T", bound=BaseModel)
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = (
+    Path(os.environ["GITHUB_WORKSPACE"]) if os.environ.get("CI") else Path(__file__).parent.parent
+)
+
+
+def to_root_path(path: Union[str, Path]):
+    """Converts relative paths to absolute ones, assuming they are relative to the rib root."""
+    return Path(path) if Path(path).is_absolute() else Path(REPO_ROOT / path)
 
 
 @torch.inference_mode()
@@ -122,67 +131,6 @@ def eval_cross_entropy_loss(
     return loss / n_batches
 
 
-@torch.inference_mode()
-def eval_model_metrics(
-    hooked_model: "HookedModel",
-    dataloader: DataLoader,
-    hooks: Optional[list["Hook"]] = None,
-    dtype: Optional[torch.dtype] = None,
-    device: str = "cuda",
-) -> tuple[float, float]:
-    """
-    Run the model on the dataset and return both accuracy and cross-entropy loss.
-
-    Args:
-        hooked_model: The model to evaluate.
-        dataloader: The dataloader for the dataset.
-        hooks: The hooks to use.
-        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
-        device: The device to run the model on.
-
-    Returns:
-        A tuple containing (accuracy, cross-entropy loss) of the model on the dataset.
-    """
-
-    correct_predictions: int = 0
-    total_predictions: int = 0
-    total_loss: float = 0.0
-    total_samples: int = 0
-
-    loss_criterion = CrossEntropyLoss().to(device)
-
-    for batch in dataloader:
-        data, labels = batch
-        data, labels = data.to(device=device), labels.to(device)
-        if data.dtype not in [torch.int64, torch.int32] and dtype is not None:
-            data = data.to(dtype=dtype)
-        raw_output: Union[
-            Float[Tensor, "batch d_vocab"], tuple[Float[Tensor, "batch pos d_vocab"]]
-        ] = hooked_model(data, hooks=hooks)
-        if isinstance(raw_output, tuple):
-            assert len(raw_output) == 1, "Only one output is supported."
-            output: Float[Tensor, "... d_vocab"] = raw_output[0]
-            if output.ndim == 3:
-                output = output[:, -1, :]
-        else:
-            output = raw_output
-
-        # Compute Loss
-        loss = loss_criterion(output, labels)
-        total_loss += loss.item() * labels.shape[0]
-        total_samples += labels.shape[0]
-
-        # Compute Accuracy
-        predicted_labels: Int[Tensor, "batch"] = output.argmax(dim=-1)
-        correct_predictions += (predicted_labels == labels).sum().item()
-        total_predictions += labels.shape[0]
-
-    accuracy: float = correct_predictions / total_predictions
-    average_loss: float = total_loss / total_samples
-
-    return accuracy, average_loss
-
-
 def load_config(config_path_or_obj: Union[Path, str, T], config_model: Type[T]) -> T:
     """Load the config of class `config_model`, either from YAML file or existing config object.
 
@@ -209,14 +157,8 @@ def load_config(config_path_or_obj: Union[Path, str, T], config_model: Type[T]) 
     return config_model(**config_dict)
 
 
-def check_outfile_overwrite(out_file: Path, force: bool = False, logger=None) -> bool:
+def check_outfile_overwrite(out_file: Path, force: bool = False) -> bool:
     """Check if out_file exists and whether it should be overwritten."""
-
-    def _log(message):
-        if logger is not None:
-            logger.info(message)
-        else:
-            print(message)
 
     def _response():
         response = input(f"Output file {out_file} already exists. Overwrite? (y/n) ")
@@ -224,13 +166,13 @@ def check_outfile_overwrite(out_file: Path, force: bool = False, logger=None) ->
 
     if out_file.exists():
         if force:
-            _log(f"Overwriting {out_file} (reason: config or cmdline)")
+            logger.info(f"Overwriting {out_file} (reason: config or cmdline)")
             return True
         elif _response():
-            _log(f"Overwriting {out_file} (based on user prompt)")
+            logger.info(f"Overwriting {out_file} (based on user prompt)")
             return True
         else:
-            _log("Exiting.")
+            logger.info("Exiting.")
             return False
     else:
         return True
@@ -295,11 +237,12 @@ def calc_exponential_ablation_schedule(
     return schedule
 
 
-def set_seed(seed: int = 0) -> None:
+def set_seed(seed: Optional[int]) -> None:
     """Set the random seed for random, PyTorch and NumPy"""
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        random.seed(seed)
 
 
 def find_root(
@@ -329,13 +272,18 @@ def find_root(
     raise ValueError(f"Finding the root of {func} via bisection failed to converge")
 
 
-def train_test_split(dataset: Dataset, frac_train: float, seed: int) -> tuple[Dataset, Dataset]:
+def train_test_split(
+    dataset: Dataset, frac_train: float, seed: Optional[int]
+) -> tuple[Dataset, Dataset]:
     """Split a dataset into a training and test set.
+
+    Use a fixed seed for the split so that we can reproduce the results. If seed is None, use a
+    random seed.
 
     Args:
         dataset: The dataset to split.
         frac_train: The fraction of the dataset to use for training.
-        seed: The random seed to use for the split.
+        seed: The random seed to use for the split. If None, a random seed is used.
 
     Returns:
         The training and test sets.
@@ -343,8 +291,49 @@ def train_test_split(dataset: Dataset, frac_train: float, seed: int) -> tuple[Da
     assert 0 <= frac_train <= 1, "frac_train must be between 0 and 1."
     train_size = int(len(dataset) * frac_train)  # type: ignore
     test_size = len(dataset) - train_size  # type: ignore
-    generator = torch.Generator().manual_seed(seed)
-    train_dataset, test_dataset = random_split(
-        dataset, [train_size, test_size], generator=generator
-    )
+
+    if seed is None:
+        train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
+    else:
+        generator = torch.Generator().manual_seed(seed)
+        train_dataset, test_dataset = random_split(
+            dataset, [train_size, test_size], generator=generator
+        )
     return train_dataset, test_dataset
+
+
+def get_data_subset(
+    dataset: Dataset, frac: Optional[float], n_samples: Optional[int], seed: Optional[int] = None
+) -> Dataset:
+    """Get a random subset of the dataset.
+
+    If frac is not None, returns a random sample of the dataset of size frac * len(dataset).
+    If n_samples is not None, returns a random sample of the dataset of size n_samples.
+
+    Args:
+        dataset (Dataset): The dataset to return a subset of.
+        frac (Optional[float]): The fraction of the dataset to return.
+        n_samples (Optional[int]): The number of samples to return.
+        seed (Optional[int]): The seed to use for the random number generator.
+
+    Returns:
+        Dataset: The subset of the dataset.
+    """
+    assert frac is None or n_samples is None, "Only one of `frac` and `n_samples` can be specified."
+    len_dataset = len(dataset)  # type: ignore
+    indices = list(range(len_dataset))
+
+    if seed is not None:
+        random.seed(seed)
+
+    if frac is not None:
+        selected_indices = sorted(random.sample(indices, int(len_dataset * frac)))
+        return Subset(dataset, selected_indices)
+    elif n_samples is not None:
+        assert (
+            n_samples <= len_dataset
+        ), f"n_samples ({n_samples}) must be <= len_dataset ({len_dataset})."
+        selected_indices = sorted(random.sample(indices, n_samples))
+        return Subset(dataset, selected_indices)
+    else:
+        return dataset

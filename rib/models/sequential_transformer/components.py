@@ -1,5 +1,5 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import Callable, Optional, Union, cast
+from typing import Callable, Union, cast
 
 import einops
 import numpy as np
@@ -362,10 +362,7 @@ class AttentionIn(nn.Module):
 
 
 class AttentionOut(nn.Module):
-    def __init__(
-        self,
-        cfg: SequentialTransformerConfig,
-    ):
+    def __init__(self, cfg: SequentialTransformerConfig, use_local_attn: bool = False):
         """Attention Block - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
         Convention: All attention pattern-style matrices have shape [..., head_index, query_pos,
@@ -391,9 +388,16 @@ class AttentionOut(nn.Module):
         causal_mask: Bool[Tensor, "pos pos"] = torch.tril(
             torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool()
         )
+        if use_local_attn:
+            assert self.cfg.original_architecture == "GPTNeoForCausalLM"
+            # Only attend to the previous window_size positions
+            # so mask true iff query - window_size < key <= query
+            # we fix window_size to 256 (the default for GPTNeo) instead of putting into config
+            window_size = 256
+            causal_mask = torch.triu(causal_mask, 1 - window_size)
         self.register_buffer("mask", causal_mask)
 
-        self.register_buffer("IGNORE", torch.tensor(-1e5))
+        self.register_buffer("IGNORE", torch.tensor(-torch.inf))
 
         # attn_scale is a constant that we divide the attention scores by pre-softmax.
         # I'm not entirely sure why it matters, but it's probably a mix of softmax not being
@@ -489,10 +493,11 @@ class AttentionOut(nn.Module):
         # The key context length is the number of positions in the past - this includes all positions in the cache
         # If not caching, query_ctx_length == key_ctx_length
         key_ctx_length = attn_scores.size(-1)
+        query_ctx_length = attn_scores.size(-2)
 
         mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
         return torch.where(
-            mask[:key_ctx_length],
+            mask[:query_ctx_length, :key_ctx_length],
             attn_scores,
             cast(Tensor, self.IGNORE),
         )

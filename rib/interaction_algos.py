@@ -12,7 +12,7 @@ NOTE CINDY: MAIN FN NOW ALSO RETURNS LAMBDA AND PRE-MULTIPLY BY LAMBDA CS - not 
 """
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 from jaxtyping import Float, Int
@@ -23,6 +23,8 @@ from tqdm import tqdm
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
 from rib.linalg import eigendecompose, pinv_diag
+from rib.models.mlp import MLP
+from rib.models.sequential_transformer.transformer import SequentialTransformer
 
 
 @dataclass
@@ -73,12 +75,10 @@ def build_sorted_lambda_matrices(
 
     """
     # Get the sort indices in descending order
-    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(
-        Lambda_abs, descending=True)
+    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(Lambda_abs, descending=True)
 
     # Get the number of values we will truncate
-    n_small_lambdas: int = int(
-        torch.sum(Lambda_abs < truncation_threshold).item())
+    n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
 
     truncated_idxs: Int[Tensor, "d_hidden_extra_trunc"] = (
         idxs[:-n_small_lambdas] if n_small_lambdas > 0 else idxs
@@ -94,14 +94,12 @@ def build_sorted_lambda_matrices(
         Lambda_abs_sqrt.reciprocal()
     )[truncated_idxs, :]
 
-    assert not torch.any(torch.isnan(lambda_matrix_pinv)
-                         ), "NaNs in the pseudoinverse."
+    assert not torch.any(torch.isnan(lambda_matrix_pinv)), "NaNs in the pseudoinverse."
     # (lambda_matrix @ lambda_matrix_pinv).diag() should contain d_hidden_extra_trunc 1s and
     # d_hidden_trunc - d_hidden_extra_trunc 0s
     assert torch.allclose(
         (lambda_matrix @ lambda_matrix_pinv).diag().sum(),
-        torch.tensor(
-            lambda_matrix.shape[0] - n_small_lambdas, dtype=lambda_matrix.dtype),
+        torch.tensor(lambda_matrix.shape[0] - n_small_lambdas, dtype=lambda_matrix.dtype),
     )
 
     return lambda_matrix, lambda_matrix_pinv
@@ -120,6 +118,7 @@ def calculate_interaction_rotations(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-alpha)^2",
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -152,6 +151,12 @@ def calculate_interaction_rotations(
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
+        basis_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
+            latter is a new (November) version that should be used from now on. The latter makes
+            sense especially in light of the new attribution (edge_formula="squared") but is
+            generally good and does not change results much. Defaults to "(1-0)*alpha".
+        svd_basis: Returns Us as Cs, so basis is just the eigenvectors of the gram matrix.
 
     Returns:
         - A list of objects containing the interaction rotation matrices and their pseudoinverses,
@@ -163,7 +168,8 @@ def calculate_interaction_rotations(
     assert len(section_names) > 0, "No sections specified."
 
     non_output_node_layers = [node_layer for node_layer in node_layers if node_layer != "output"]
-    assert len(non_output_node_layers) == len(section_names
+    assert len(non_output_node_layers) == len(
+        section_names
     ), "Must specify a hook name for each section (except the output section)."
 
     # We start appending Us and Cs from the output layer and work our way backwards
@@ -195,13 +201,13 @@ def calculate_interaction_rotations(
         assert (
             node_layers[-1] == "output"
         ), f"Final node layer {node_layers[-1]} not in gram matrices."
-        with torch.inference_mode():
-            # Get the out_dim of logits by hackily passing a datapoint through it
-            out_samples = hooked_model(data_loader.dataset[0][0].to(device))
-            out_sample: Float[Tensor, "... out_dim"] = (
-                out_samples[0] if isinstance(out_samples, tuple) else out_samples
-            )
-            final_node_dim = out_sample.shape[-1]
+
+        inner_model = hooked_model.model
+        if isinstance(inner_model, MLP):
+            final_node_dim = inner_model.output_size
+        else:
+            assert isinstance(inner_model, SequentialTransformer)
+            final_node_dim = inner_model.cfg.d_vocab
     else:
         final_node_dim = gram_matrices[node_layers[-1]].shape[0]
 
@@ -247,7 +253,6 @@ def calculate_interaction_rotations(
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
-
         # Truncate the D matrix to remove small eigenvalues
         D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
             torch.diag(D_dash)[:-n_small_eigenvals, :-n_small_eigenvals]
@@ -259,6 +264,12 @@ def calculate_interaction_rotations(
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
         )
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
+        if basis_formula == "svd":
+            # Use U as C and then progress to the next loop
+            Cs.append(
+                InteractionRotation(node_layer_name=node_layer, out_dim=U.shape[1], C=U, C_pinv=U.T)
+            )
+            continue
 
         # Most recently stored interaction matrix
         C_out = Cs[-1].C.to(device=device) if Cs[-1].C is not None else None
@@ -273,6 +284,7 @@ def calculate_interaction_rotations(
             hook_name=node_layer,
             M_dtype=M_dtype,
             Lambda_einsum_dtype=Lambda_einsum_dtype,
+            basis_formula=basis_formula,
         )
         Lambda_dashes.append(Lambda_dash)
 
@@ -309,7 +321,6 @@ def calculate_interaction_rotations(
         C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
             (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
         )
-
         Cs.append(
             InteractionRotation(node_layer_name=node_layer, out_dim=C.shape[1], C=C, C_pinv=C_pinv)
         )

@@ -263,7 +263,7 @@ def test_validate_node_layers_invalid(node_layers: list[str], module_ids: list[s
         SequentialTransformer.validate_node_layers(node_layers, module_ids)
 
 
-# @pytest.mark.slow()
+@pytest.mark.slow()
 def test_n_ctx_pythia():
     """Test that varying n_ctx produces the same attention scores and outputs for pythia-14m.
 
@@ -333,7 +333,7 @@ def test_n_ctx_pythia():
     # Collect the attention scores for the first short_n_ctx positions
     attn_scores_long = (
         cache_long["sections.section_0.0.attention_scores"]["acts"][0][
-            :, :, :short_n_ctx, :short_n_ctx
+            ..., :short_n_ctx, :short_n_ctx
         ]
         .detach()
         .clone()

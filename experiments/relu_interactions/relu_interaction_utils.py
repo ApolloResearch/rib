@@ -493,7 +493,7 @@ def plot_matrix_list(matrix_list: list[Float[Tensor, "d_hidden d_hidden"]], var_
 
 def plot_eigenvalues(eigenvalues: Float[Tensor, "d_hidden"], out_dir: Path, title: str) -> None:
     plt.figure(figsize=(8, 6))
-    plt.scatter(range(len(eigenvalues)), eigenvalues, color='blue')
+    plt.scatter(range(len(eigenvalues)), eigenvalues, color='blue', s=2)
     plt.title('Eigenvalues in Descending Order')
     plt.xlabel('Index')
     plt.ylabel('Eigenvalue')
@@ -507,8 +507,6 @@ def plot_eigenvectors(eigenvectors: np.ndarray, out_dir: Path, title: str, num_v
     x = np.arange(num_components)  # the label locations
 
     plt.figure(figsize=(10, 6))
-
-    # Width of a bar
     width = 0.8 / num_vectors
 
     for i in range(num_vectors):

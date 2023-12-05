@@ -12,6 +12,7 @@ from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from einops import rearrange
 
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
@@ -24,7 +25,6 @@ from rib.hook_fns import (
     test_edges_forward_hook_fn,
     cluster_gram_forward_hook_fn,
     cluster_fn_pre_forward_hook_fn,
-    collect_hessian_pre_forward_hook_fn,
     collect_hessian_forward_hook_fn,
 )
 from rib.hook_fns_non_static import (
@@ -896,7 +896,15 @@ def collect_hessian(
     )
 
     run_dataset_through_model(hooked_model, data_loader, hooks=[input_act_hook], dtype=dtype, device=device)
-    hessian = hooked_model.hooked_data[input_module_name][f"hessian {input_module_name}"]
+    H1 = hooked_model.hooked_data[input_module_name][f"H1 {input_module_name}"]
+    H2 = hooked_model.hooked_data[input_module_name][f"H2 {input_module_name}"]
+    M12 = hooked_model.hooked_data[input_module_name][f"M12 {input_module_name}"]
     hooked_model.clear_hooked_data()
 
-    return hessian
+    H2_flat = rearrange(H2, 'a b c d -> (a c) (b d)')
+    M12_flat = rearrange(M12, 'a b c d -> (a d) (b c)')
+    top_row = torch.cat((H1, M12_flat), dim=1)
+    bottom_row = torch.cat((M12_flat.T, H2_flat), dim=1)
+    H = torch.cat((top_row, bottom_row), dim=0)
+
+    return H

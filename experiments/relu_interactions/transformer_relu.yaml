@@ -16,7 +16,7 @@ activation_layers: # For activation layer hooking - ssection num depends on stru
 rotate_final_node_layer: true # Whether unembed is rotated. If you want output node layer C, need to
 # manually add to node_layers
 batch_size: 256
-truncation_threshold: 1e-2
+truncation_threshold: 1e-4
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
 n_intervals: 50
 dtype: float32

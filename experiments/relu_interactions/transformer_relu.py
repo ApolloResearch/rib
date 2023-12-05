@@ -161,8 +161,15 @@ def get_Cs(
     C_pinv_list = [C_info.C_pinv for C_info in Cs if C_info is not None]
 
     with open(file_path, "wb") as f:
-        torch.save({"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs,
-                   "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices, }, f)
+        torch.save({
+            "C": C_list, "C_pinv": C_pinv_list,
+            "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs,
+            "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs,
+            "Lambda_dashes": Lambda_dashes,
+            "Cs raw": Cs, "Us raw": Us,
+            "gram matrices": gram_matrices,
+            },
+        f)
 
     return {"C": C_list, "C_pinv": C_pinv_list, "Lambda_abs_sqrts": Lambda_abs_sqrts, "Lambda_abs_sqrt_pinvs": Lambda_abs_sqrt_pinvs, "U_D_sqrt_pinv_Vs": U_D_sqrt_pinv_Vs, "U_D_sqrt_Vs": U_D_sqrt_Vs, "Lambda_dashes": Lambda_dashes, "Cs raw": Cs, "Us raw": Us, "gram matrices": gram_matrices}
 
@@ -474,6 +481,8 @@ def hessian_main(config_path_str: str):
     set_seed(config.seed)
 
     Cs_save_file = Path(__file__).parent / "Cs_for_hessian"
+    Lanczos_save_file = Path(__file__).parent / "hessian_krylov"
+    hessian_eig_save_file = Path(__file__).parent / "hessian_eig"
     out_dir = Path(__file__).parent / f"out_transformer_relu"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -522,62 +531,40 @@ def hessian_main(config_path_str: str):
         device=device,
         hooked_model=hooked_model,
     )
+    C_list = Cs_and_Lambdas["C"]
 
-    C_list, C_pinv_list = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"]
+    if Lanczos_save_file.exists():
+        with Lanczos_save_file.open("rb") as f:
+            Hk = torch.load(f, map_location="cpu")
+    else:
+        # Has to be in order of passing through model AND has to match C_list order
+        weight_module_names = ["sections.section_0.0", "sections.section_1.0"]
+        H = collect_hessian(
+            hooked_model=hooked_model,
+            input_module_name="sections.section_0",
+            data_loader=graph_train_loader,
+            dtype=dtype,
+            device=device,
+            weight_module_names=weight_module_names,
+            copy_seq_model=copy_seq_model,
+            C_list=C_list,
+            use_residual_stream=config.use_residual_stream,
+        )
+        Hk, Lv = lanczos(H)
+        with open(Lanczos_save_file, "wb") as f:
+            torch.save(Hk, f)
 
-    # Has to be in order of passing through model AND has to match C_list order
-    weight_module_names = ["sections.section_0.0", "sections.section_1.0"]
+    if hessian_eig_save_file.exists():
+        with hessian_eig_save_file.open("rb") as f:
+            eigs = torch.load(f, map_location="cpu")
+            sorted_eigenvalues = eigs["vals"]
+            sorted_eigenvectors = eigs["vecs"]
+    else:
+        sorted_eigenvalues, sorted_eigenvectors = eigendecompose(Hk)
+        with open(hessian_eig_save_file, "wb") as f:
+            torch.save({"vals": sorted_eigenvalues, "vecs": sorted_eigenvectors}, f)
 
-    H = collect_hessian(
-        hooked_model=hooked_model,
-        input_module_name="sections.section_0",
-        data_loader=graph_train_loader,
-        dtype=dtype,
-        device=device,
-        weight_module_names=weight_module_names,
-        copy_seq_model=copy_seq_model,
-        C_list=C_list,
-        use_residual_stream=config.use_residual_stream,
-    )
-
-    ## For debugging purposes
-    # name = "sections.section_1.0"
-    # # inputs need to be given by hook function return
-    # jacobians[f"derivative wrt {name}"] = collect_acts_and_get_jacobian(
-    #     hooked_model=hooked_model,
-    #     module_names=["sections.section_0.0"],
-    #     data_loader=graph_train_loader,
-    #     dtype=dtype,
-    #     device=device,
-    #     jac_modules=module_dict.values(),
-    #     weight_module=module_dict[name],
-    #     C=C_list[1],
-    # )
-
-    # X = len(graph_train_loader.dataset)
-    # ## Now make Hessian
-    # J1 = jacobians["derivative wrt sections.section_0.0"]
-    # J2 = jacobians["derivative wrt sections.section_1.0"]
-    # H1 = torch.div(torch.matmul(J1.T, J1), X)
-    # H2 = torch.div(torch.matmul(J2.T, J2), X)
-    # # Compute the mixed terms
-    # M12 = torch.div(torch.matmul(J1.T, J2), X)
-    # M21 = torch.div(torch.matmul(J2.T, J1), X)
-    # # Form the top and bottom rows of the final Hessian
-    # top_row = torch.cat((H1, M12), dim=1)
-    # bottom_row = torch.cat((M21, H2), dim=1)
-    # # Concatenate to form the final Hessian
-    # H = torch.cat((top_row, bottom_row), dim=0)
-
-    # del H1, H2, M12, M21, top_row, bottom_row
-    # torch.cuda.empty_cache()
-    # gc.collect()
-
-    # sorted_eigenvalues, sorted_eigenvectors = eigendecompose(H)
-    Hk, Lv = lanczos(H)
-    print("finish lanczos")
-    sorted_eigenvalues, sorted_eigenvectors = eigendecompose(Hk)
-    print("got eigenvalues")
+    print(len(sorted_eigenvalues[sorted_eigenvalues < 5]))
     plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"Hessian MLP")
 
 

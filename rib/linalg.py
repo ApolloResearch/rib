@@ -326,6 +326,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
     out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = edge.shape
     if has_pos:
         # Just run the model to see what the output pos size is
+        # FIXME When we implement #231 use it here instead of running the model
         with torch.inference_mode():
             f_out_hat_const = module_hat(f_in_hat, in_tuple_dims)
         out_pos_size = f_out_hat_const.shape[1]
@@ -360,6 +361,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
 
         # We have to compute inputs from f_hat to make autograd work
         alpha_f_in_hat = alpha * f_in_hat
+        # FIXME When we implement #231 modify module_hat to no longer need in_tuple_dims
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
@@ -418,6 +420,101 @@ def integrated_gradient_trapezoidal_jacobian_squared(
         edge += inner_token_sums.sum(dim=(0, 1))
     else:
         edge += inner_token_sums.sum(dim=0)
+
+
+def integrated_gradient_trapezoidal_basis_jacobian(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
+    n_intervals: int,
+    integral_boundary_relative_epsilon: float = 1e-3,
+) -> Float[Tensor, "... in_hidden_combined"]:
+    # Ensure that the inputs have requires_grad=True from now on
+    for x in inputs:
+        x.requires_grad_(True)
+
+    alphas, interval_size = _calc_integration_intervals(
+        n_intervals, integral_boundary_relative_epsilon
+    )
+
+    has_pos = inputs[0].ndim == 3
+    batch_size = inputs[0].shape[0]
+    in_pos_size = inputs[0].shape[1] if has_pos else None
+    in_hidden_size = sum(x.shape[-1] for x in inputs)
+    if has_pos or C_out is None:
+        print("Has pos")
+        with torch.inference_mode():
+            f_out_dummy = module(*inputs)
+            if isinstance(f_out_dummy, torch.Tensor):
+                print("Got f_out_dummy tensor")
+            else:
+                print("Got f_out_dummy tuple")
+            f_out_dummy = (f_out_dummy,) if isinstance(f_out_dummy, torch.Tensor) else f_out_dummy
+
+        out_hidden_size = sum(x.shape[-1] for x in f_out_dummy)
+        out_hat_hidden_size = out_hidden_size if C_out is None else C_out.shape[1]
+        out_pos_size = f_out_dummy[0].shape[1] if has_pos else None
+        # Asserts
+        if C_out is not None:
+            assert out_hidden_size == C_out.shape[0], "C_out has wrong shape"
+        assert batch_size == f_out_dummy[0].shape[0], "batch size mismatch"
+
+    grads = torch.zeros(
+        # batch, i, t (out), tprime (in), j/jprime
+        batch_size,
+        out_hat_hidden_size,
+        out_pos_size,
+        in_pos_size,
+        in_hidden_size,
+        dtype=inputs[0].dtype,
+        device=inputs[0].device,
+    )
+
+    # Old in_grads shape: batch pos j
+    # New in_grads shape: batch i t tprime j
+    for alpha_index, alpha in enumerate(alphas):
+        # Compute f^{l+1}(f^l(alpha x))
+        alpha_inputs = tuple(alpha * x for x in inputs)
+        outputs_alpha = module(*alpha_inputs)
+        out_acts_alpha = (
+            outputs_alpha
+            if isinstance(outputs_alpha, torch.Tensor)
+            else torch.cat(outputs_alpha, dim=-1)
+        )
+        out_acts_alpha_hat = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha
+        # out_acts_alpha_hat.shape: batch (pos) i
+        # input shape:n batch, (in-pos), j/jprime
+
+        # Calculate the grads
+        for i in range(out_hat_hidden_size):
+            for t in range(out_pos_size):
+                # Sum over batch only, trick to get the grad for every batch index vectorized.
+                out_acts_alpha_hat[:, t, i].sum(dim=0).backward(
+                    inputs=alpha_inputs, retain_graph=True
+                )
+                alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
+                # alpha_in_grads.shape: batch in_pos (tprime) in_hidden_comb (j)
+
+                # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
+                # estimate at alpha=1)
+                if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+                    alpha_in_grads = 0.5 * alpha_in_grads
+
+                # TODO: Minus sign correct?
+                # batch.shape: batch, i, t (out), tprime (in), j/jprime
+                # -= for alpha integral
+                grads[:, i, t, :, :] -= alpha_in_grads * interval_size
+                # Contraction over batch, i, t and tprime happens after the integral,
+                # but we cannot contract earlier because we have to finish the integral
+
+                for x in alpha_inputs:
+                    assert x.grad is not None, "Input grad should not be None."
+                    x.grad.zero_()
+
+    return grads
 
 
 def integrated_gradient_trapezoidal_norm(

@@ -319,6 +319,17 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             C_out=C_out,
             n_intervals=n_intervals,
         )
+        # FIXME temporarily using old basis to compute Lambdas
+        # TODO Will there be weird grads somewhere lying around?
+        in_grads_old = integrated_gradient_trapezoidal_norm(
+            module=module,
+            inputs=inputs,
+            C_out=C_out,
+            n_intervals=n_intervals,
+            basis_formula="(1-0)*alpha",
+        )
+
+        has_pos = inputs[0].dim() == 3
         einsum_pattern = (
             "batch i t tprime j, batch i t tprime jprime -> j jprime"
             if has_pos
@@ -331,10 +342,22 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         # extra i and tprime index.
         # Old sum after product: batch pos
         # New sum after product: batch, i, t, tprime
-        M_dash = einops.einsum(in_grads / normalization_factor, in_grads, einsum_pattern)
-        # Concatenate the inputs over the hidden dimension
-        in_acts = torch.cat(inputs, dim=-1)
-        Lambda_dash = torch.einsum(einsum_pattern, in_grads / normalization_factor, in_acts)
+        with torch.inference_mode():
+            M_dash = einops.einsum(in_grads / normalization_factor, in_grads, einsum_pattern)
+            # Concatenate the inputs over the hidden dimension
+            in_acts = torch.cat(inputs, dim=-1)
+
+            einsum_pattern_old = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
+            Lambda_dash = torch.einsum(
+                einsum_pattern_old, in_grads_old / normalization_factor, in_acts
+            )
+
+            assert (
+                Lambda_dash.std() > 0
+            ), "Lambda_dash cannot be all zeros otherwise everything will be truncated"
+
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
 
 
 def interaction_edge_pre_forward_hook_fn(

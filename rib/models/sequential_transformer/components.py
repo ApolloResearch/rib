@@ -159,7 +159,7 @@ class AttentionIn(nn.Module):
         self,
         cfg: SequentialTransformerConfig,
     ):
-        """Attention Block - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
+        """Attention Block part 1 (computes q, k, v) - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
         Convention: All attention pattern-style matrices have shape [..., head_index, query_pos,
         key_pos]
@@ -361,28 +361,11 @@ class AttentionIn(nn.Module):
         return torch.cat([x_rotated, x_pass], dim=-1)
 
 
-class AttentionOut(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig, use_local_attn: bool = False):
-        """Attention Block - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
-
-        Convention: All attention pattern-style matrices have shape [..., head_index, query_pos,
-        key_pos]
-
-        Supports rotary attention.
-
-        This code was taken mostly verbatim from:
-        https://github.com/neelnanda-io/TransformerLens/blob/main/transformer_lens/components.py
-
-        Args:
-            cfg (SequentialTransformerConfig): Config
-        """
+class AttentionScores(nn.Module):
+    def __init__(self, cfg, use_local_attn: bool) -> None:
+        """Compute the attention scores. This module exists purely so that we can hook the attention scores (and pattern). Note that unlike the other modules, does not return a tuple but just a single tensor."""
         super().__init__()
         self.cfg = cfg
-        self.W_O = nn.Parameter(
-            torch.empty(self.cfg.n_heads, self.cfg.d_head, self.cfg.d_model, dtype=cfg.dtype)
-        )
-        self.b_O = nn.Parameter(torch.zeros(self.cfg.d_model, dtype=cfg.dtype))
-
         # Create a max_ctx x max_ctx mask, with True iff that query position
         # can attend to that key position (query is first axis, key is second axis)
         causal_mask: Bool[Tensor, "pos pos"] = torch.tril(
@@ -406,6 +389,73 @@ class AttentionOut(nn.Module):
             self.attn_scale = np.sqrt(self.cfg.d_head)
         else:
             self.attn_scale = 1.0
+
+    def forward(
+        self,
+        q: Float[Tensor, "... query_pos head_index d_head"],
+        k: Float[Tensor, "... key_pos head_index d_head"],
+    ) -> Float[Tensor, "... head_index query_pos key_pos"]:
+        """Calculate the attention scores.
+        Args:
+            q: The query tensor.
+            k: The key tensor.
+            attn_scale: The scale to divide the attention scores by.
+        """
+        attn_scores = (
+            einsum(
+                "... query_pos head_index d_head, \
+                        ... key_pos head_index d_head \
+                        -> ... head_index query_pos key_pos",
+                q,
+                k,
+            )
+            / self.attn_scale
+        )  # [..., head_index, query_pos, key_pos]
+
+        # Only supports causal attention (not bidirectional)
+        # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
+        attn_scores = self.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
+        return attn_scores
+
+    def apply_causal_mask(
+        self,
+        attn_scores: Float[Tensor, "... head_index pos pos_plus_past_kv_pos_offset"],
+    ):
+        # The key context length is the number of positions in the past - this includes all positions in the cache
+        # If not caching, query_ctx_length == key_ctx_length
+        key_ctx_length = attn_scores.size(-1)
+        query_ctx_length = attn_scores.size(-2)
+
+        mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
+        return torch.where(
+            mask[:query_ctx_length, :key_ctx_length],
+            attn_scores,
+            cast(Tensor, self.IGNORE),
+        )
+
+
+class AttentionOut(nn.Module):
+    def __init__(self, cfg: SequentialTransformerConfig, use_local_attn: bool = False):
+        """Attention Block part 2 (takes q, k, v; computes out) - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
+
+        Convention: All attention pattern-style matrices have shape [..., head_index, query_pos,
+        key_pos]
+
+        Supports rotary attention.
+
+        This code was taken mostly verbatim from:
+        https://github.com/neelnanda-io/TransformerLens/blob/main/transformer_lens/components.py
+
+        Args:
+            cfg (SequentialTransformerConfig): Config
+        """
+        super().__init__()
+        self.cfg = cfg
+        self.attention_scores = AttentionScores(cfg, use_local_attn=use_local_attn)
+        self.W_O = nn.Parameter(
+            torch.empty(self.cfg.n_heads, self.cfg.d_head, self.cfg.d_model, dtype=cfg.dtype)
+        )
+        self.b_O = nn.Parameter(torch.zeros(self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(
         self,
@@ -446,20 +496,7 @@ class AttentionOut(nn.Module):
             # If using 16 bits, increase the precision to avoid numerical instabilities
             q = q.to(torch.float32)
             k = k.to(torch.float32)
-        attn_scores = (
-            einsum(
-                "... query_pos head_index d_head, \
-                        ... key_pos head_index d_head \
-                        -> ... head_index query_pos key_pos",
-                q,
-                k,
-            )
-            / self.attn_scale
-        )  # [..., head_index, query_pos, key_pos]
-
-        # Only supports causal attention (not bidirectional)
-        # If causal attention, we mask it to only attend backwards. If bidirectional, we don't mask.
-        attn_scores = self.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
+        attn_scores = self.attention_scores(q, k)  # [..., head_index, query_pos, key_pos]
 
         pattern = F.softmax(attn_scores, dim=-1)  # [..., head_index, query_pos, key_pos]
         pattern = pattern.to(in_dtype)
@@ -485,22 +522,6 @@ class AttentionOut(nn.Module):
         )  # [..., pos, d_model]
 
         return residual, out
-
-    def apply_causal_mask(
-        self,
-        attn_scores: Float[Tensor, "... head_index pos pos_plus_past_kv_pos_offset"],
-    ):
-        # The key context length is the number of positions in the past - this includes all positions in the cache
-        # If not caching, query_ctx_length == key_ctx_length
-        key_ctx_length = attn_scores.size(-1)
-        query_ctx_length = attn_scores.size(-2)
-
-        mask: Bool[Tensor, "pos pos"] = cast(Tensor, self.mask)
-        return torch.where(
-            mask[:query_ctx_length, :key_ctx_length],
-            attn_scores,
-            cast(Tensor, self.IGNORE),
-        )
 
 
 class MLPIn(nn.Module):

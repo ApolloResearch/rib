@@ -325,7 +325,7 @@ class SequentialTransformer(nn.Module):
         # Get the parameter keys of the model
         seq_param_names = list(self.state_dict().keys())
         for seq_param_name in seq_param_names:
-            sections, section_name, module_idx, param_name = seq_param_name.split(".")
+            sections, section_name, module_idx, param_name = seq_param_name.split(".", 3)
             if param_name[:2] == "W_":
                 if param_name not in fold_fns:
                     # No folding needed for this weight parameter

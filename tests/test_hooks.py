@@ -124,7 +124,7 @@ def test_gram_forward_hook_fn_accumulates_over_forward_passes(model):
     assert torch.allclose(hooked_model.hooked_data["test_forward"]["gram"], expected_gram)
 
 
-# @pytest.mark.slow()
+@pytest.mark.slow()
 def test_pythia_attn_causal_mask():
     """Test that the causal mask is applied to the attention scores in the Pythia model
 

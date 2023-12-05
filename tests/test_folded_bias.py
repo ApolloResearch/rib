@@ -190,10 +190,9 @@ def test_pythia_folded_bias() -> None:
 @pytest.mark.xfail(reason="Pythia attention scores affected more by folded biases, issue #245")
 @pytest.mark.slow()
 def test_pythia_folded_bias_strict_incl_attn_scores() -> None:
-    """Test that the folded bias trick works for Pythia."""
+    """Test folded_bias for Pythia without adjusting tolerance for attention scores."""
     set_seed(42)
     dtype = torch.float64
-    # float64 can do atol=1e-11, float32 can do atol=1e2.
     atol = 1e-11
     node_layers = ["mlp_in.1", "add_resid2.3"]
     pretrained_lm_folded_bias_comparison(

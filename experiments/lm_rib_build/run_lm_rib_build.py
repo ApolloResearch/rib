@@ -33,23 +33,11 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-<<<<<<< HEAD
-from typing import Literal, Optional, Union, cast
-=======
 from typing import Literal, Optional, Union
->>>>>>> main
 
 import fire
 import torch
 from jaxtyping import Float
-<<<<<<< HEAD
-from mpi4py import MPI
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from torch import Tensor
-
-from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
-=======
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -57,33 +45,15 @@ from torch.utils.data import DataLoader
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
->>>>>>> main
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,
     InteractionRotation,
     calculate_interaction_rotations,
 )
-<<<<<<< HEAD
-from rib.loader import (
-    create_data_loader,
-    get_dataset_chunk,
-    load_dataset,
-    load_sequential_transformer,
-)
-from rib.log import logger
-from rib.mpi_utils import (
-    adjust_logger_mpi,
-    check_sizes_mpi,
-    get_device_mpi,
-    get_mpi_info,
-)
-from rib.types import TORCH_DTYPES
-=======
 from rib.loader import get_dataset_chunk, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
->>>>>>> main
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
@@ -94,21 +64,6 @@ from rib.utils import (
 
 
 class Config(BaseModel):
-<<<<<<< HEAD
-    model_config = ConfigDict(extra="forbid")
-    exp_name: str = Field(..., description="The name of the experiment")
-    force_overwrite_output: Optional[bool] = Field(
-        False, description="Don't ask before overwriting the output file."
-    )
-    seed: int = Field(..., description="The random seed value for reproducibility")
-    tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
-        None, description="Pretrained transformer lens model."
-    )
-    tlens_model_path: Optional[Path] = Field(
-        None, description="Path to saved transformer lens model."
-    )
-    interaction_matrices_path: Optional[Path] = Field(
-=======
     model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str = Field(..., description="The name of the experiment")
     out_dir: Optional[RootPath] = Field(
@@ -124,7 +79,6 @@ class Config(BaseModel):
         None, description="Path to saved transformer lens model."
     )
     interaction_matrices_path: Optional[RootPath] = Field(
->>>>>>> main
         None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
     node_layers: list[str] = Field(
@@ -161,23 +115,6 @@ class Config(BaseModel):
         description="Module type in which to only output the last position index. For modular"
         "arithmetic only.",
     )
-<<<<<<< HEAD
-    n_intervals: int = Field(
-        ...,
-        description="The number of intervals to use for the integrated gradient approximation."
-        "If 0, we take a point estimate (i.e. just alpha=1).",
-    )
-    out_dim_chunk_size: Optional[int] = Field(
-        None,
-        description="The size of the chunks to use for calculating the jacobian. If none, calculate"
-        "the jacobian on all output dimensions at once.",
-    )
-    dtype: str = Field(..., description="The dtype to use when building the graph.")
-    eps: float = Field(
-        1e-5,
-        description="The epsilon value to use for numerical stability in layernorm layers.",
-    )
-=======
 
     n_intervals: int = Field(
         ...,
@@ -187,7 +124,6 @@ class Config(BaseModel):
 
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
 
->>>>>>> main
     calculate_edges: bool = Field(
         True,
         description="Whether to calculate the edges of the interaction graph.",
@@ -197,18 +133,6 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-<<<<<<< HEAD
-
-    out_dir: Optional[Path] = Field(
-        None,
-        description="Directory for the output files. If not provided it is `./out/` relative to this file.",
-    )
-
-    @field_validator("dtype")
-    def dtype_validator(cls, v):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
-=======
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
@@ -218,7 +142,6 @@ class Config(BaseModel):
         "functional",
         description="The attribution method to use to calculate the edges.",
     )
->>>>>>> main
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "Config":
@@ -260,13 +183,9 @@ def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
     if isinstance(config.dataset, HFDatasetConfig):
         assert isinstance(loaded_config.dataset, HFDatasetConfig)
         if config.dataset.return_set_frac is not None:
-<<<<<<< HEAD
-            assert loaded_config.dataset.return_set_frac is not None
-=======
             assert (
                 loaded_config.dataset.return_set_frac is not None
             ), "Can't set return_set_frac if the loaded config didn't use it"
->>>>>>> main
             assert (
                 config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
             ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
@@ -309,13 +228,9 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], Cs, Us
 
 
-<<<<<<< HEAD
-def main(config_path_or_obj: Union[str, Config], force: bool = False):
-=======
 def main(
     config_path_or_obj: Union[str, Config], force: bool = False, n_pods: int = 1, pod_rank: int = 0
 ) -> RibBuildResults:
->>>>>>> main
     """Build the interaction graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
@@ -328,31 +243,10 @@ def main(
 
     Args:
         config: a str or Config object. If str must point at YAML config file
-<<<<<<< HEAD
-        kwargs: modifications to passed config
-=======
->>>>>>> main
     """
     config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
 
-<<<<<<< HEAD
-    mpi_info = get_mpi_info()
-    adjust_logger_mpi(logger)
-    device = get_device_mpi(logger)
-
-    out_dir = Path(__file__).parent / "out" if config.out_dir is None else config.out_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-    if config.calculate_edges:
-        out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
-    else:
-        out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if mpi_info.is_main_process and not check_outfile_overwrite(
-        out_file, config.force_overwrite_output or force, logger=logger
-    ):
-        mpi_info.comm.Abort()  # stop this and other processes
-        return None  # this is unreachable as Abort will terminate
-=======
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
 
     adjust_logger_dist(dist_info)
@@ -368,7 +262,6 @@ def main(
         out_file = config.out_dir / f_name
         if not check_outfile_overwrite(out_file, force):
             dist_info.local_comm.Abort()  # stop this and other processes
->>>>>>> main
 
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None
@@ -381,33 +274,11 @@ def main(
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
-<<<<<<< HEAD
-        eps=config.eps,
-=======
->>>>>>> main
         fold_bias=True,
         dtype=dtype,
         device=device,
     )
     seq_model.eval()
-<<<<<<< HEAD
-    seq_model.to(device=torch.device(device), dtype=dtype)
-    hooked_model = HookedModel(seq_model)
-
-    # This script doesn't need both train and test sets
-    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
-    dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set=return_set,
-        tlens_model_path=config.tlens_model_path,
-    )
-
-    logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
-    if config.eval_type is not None:
-        eval_loader = create_data_loader(
-            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
-        )
-=======
     hooked_model = HookedModel(seq_model)
 
     dataset = load_dataset(
@@ -421,7 +292,6 @@ def main(
     logger.info("Time to load model and dataset: %.2f", time.time() - load_model_data_start_time)
     if config.eval_type is not None:
         eval_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
->>>>>>> main
         # Test model accuracy/loss before graph building, ta be sure
         if config.eval_type == "accuracy":
             accuracy = eval_model_accuracy(hooked_model, eval_loader, dtype=dtype, device=device)
@@ -436,20 +306,10 @@ def main(
     if config.interaction_matrices_path is None:
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
-<<<<<<< HEAD
-
-        gram_train_loader = create_data_loader(
-            dataset,
-            shuffle=False,
-            batch_size=config.gram_batch_size or config.batch_size,
-            seed=config.seed,
-        )
-=======
         gram_train_loader = DataLoader(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
 
->>>>>>> main
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
         gram_matrices = collect_gram_matrices(
@@ -461,21 +321,12 @@ def main(
             collect_output_gram=collect_output_gram,
             hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
         )
-<<<<<<< HEAD
-
-        logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
-
-        graph_train_loader = create_data_loader(
-            dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed
-        )
-=======
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
         graph_train_loader = DataLoader(
             dataset=dataset, batch_size=config.batch_size, shuffle=False
         )
 
->>>>>>> main
         c_start_time = time.time()
         logger.info("Calculating interaction rotations (Cs).")
         Cs, Us = calculate_interaction_rotations(
@@ -489,10 +340,7 @@ def main(
             n_intervals=config.n_intervals,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
-<<<<<<< HEAD
-=======
             basis_formula=config.basis_formula,
->>>>>>> main
         )
         # Cs used to calculate edges
         edge_Cs = Cs
@@ -510,22 +358,11 @@ def main(
         full_dataset_len = len(dataset)  # type: ignore
         # no-op if only 1 process
         data_subset = get_dataset_chunk(
-<<<<<<< HEAD
-            dataset, chunk_idx=mpi_info.rank, total_chunks=mpi_info.size
-        )
-
-        edge_train_loader = create_data_loader(
-            data_subset,
-            shuffle=False,
-            batch_size=config.edge_batch_size or config.batch_size,
-            seed=config.seed,
-=======
             dataset, chunk_idx=dist_info.global_rank, total_chunks=dist_info.global_size
         )
 
         edge_train_loader = DataLoader(
             data_subset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
->>>>>>> main
         )
 
         logger.info("Calculating edges.")
@@ -539,27 +376,9 @@ def main(
             dtype=dtype,
             device=device,
             data_set_size=full_dataset_len,  # includes data for other processes
-<<<<<<< HEAD
-        )
-
-        if mpi_info.is_parallelised:
-            for m_name, edge_vals in E_hats.items():
-                check_sizes_mpi(edge_vals)
-                receiver_tensor = None
-                if mpi_info.is_main_process:
-                    receiver_tensor = torch.empty_like(edge_vals).cpu()
-                # we sum across the edge_val tensors in each process, putting the result in
-                # the root process's reciever_tensor.
-                mpi_info.comm.Reduce(edge_vals.cpu(), receiver_tensor, op=MPI.SUM, root=0)
-                if mpi_info.is_main_process:
-                    assert receiver_tensor is not None
-                    E_hats[m_name] = receiver_tensor
-
-=======
             edge_formula=config.edge_formula,
         )
 
->>>>>>> main
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)
 
@@ -573,43 +392,26 @@ def main(
 
     eigenvectors = [asdict(U_info) for U_info in Us]
 
-<<<<<<< HEAD
-    results = {
-=======
     results: RibBuildResults = {
->>>>>>> main
         "exp_name": config.exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
         "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
-<<<<<<< HEAD
-=======
         "dist_info": dist_info.to_dict(),
->>>>>>> main
         "config": json.loads(config.model_dump_json()),
         "model_config_dict": tlens_cfg_dict,
         "calc_C_time": calc_C_time,
         "calc_edges_time": calc_edges_time,
     }
 
-<<<<<<< HEAD
-    if mpi_info.is_main_process:
-=======
     if config.out_dir is not None:
->>>>>>> main
         # Save the results (which include torch tensors) to file
         torch.save(results, out_file)
         logger.info("Saved results to %s", out_file)
 
-<<<<<<< HEAD
-
-if __name__ == "__main__":
-    fire.Fire(main)
-=======
     return results
 
 
 if __name__ == "__main__":
     fire.Fire(main, serialize=lambda _: "")
->>>>>>> main

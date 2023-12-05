@@ -5,7 +5,7 @@ from typing import Any, Iterable, Literal, Optional, Union, cast
 import fire
 import matplotlib.pyplot as plt
 import torch
-import gc
+from torch.utils.data import DataLoader
 import torch.nn as nn
 from jaxtyping import Float, Int
 from torch import Tensor
@@ -32,6 +32,7 @@ from rib.data_accumulator import (
     collect_cluster_fns,
     collect_hessian,
 )
+from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,
@@ -39,13 +40,17 @@ from rib.interaction_algos import (
     calculate_interaction_rotations,
 )
 from rib.linalg import eigendecompose, lanczos
-from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
+from rib.loader import get_dataset_chunk, load_dataset, load_sequential_transformer
 from rib.log import logger
 from rib.models.utils import get_model_attr, get_model_weight
 from rib.types import TORCH_DTYPES
-from rib.utils import load_config, set_seed
-
-torch.set_printoptions(threshold=50)
+from rib.utils import (
+    check_outfile_overwrite,
+    eval_cross_entropy_loss,
+    eval_model_accuracy,
+    load_config,
+    set_seed,
+)
 
 
 def load_interaction_rotations(
@@ -333,11 +338,27 @@ def check_and_open_file(
 
 # ============================================================================
 
-def transformer_relu_main(config_path_str: str):
+def main(
+    config_path_or_obj: Union[str, LMConfig], force: bool = False, n_pods: int = 1, pod_rank: int = 0
+):
     """Build the interaction graph and store it on disk."""
-    config_path = Path(config_path_str)
-    config = load_config(config_path, config_model=LMConfig)
+    config = load_config(config_path_or_obj, config_model=LMConfig)
     set_seed(config.seed)
+
+    dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
+    adjust_logger_dist(dist_info)
+    device = get_device_mpi(dist_info)
+
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        obj_name = "graph" if config.calculate_edges else "Cs"
+        global_rank_suffix = (
+            f"_global_rank{dist_info.global_rank}" if dist_info.global_size > 1 else ""
+        )
+        f_name = f"{config.exp_name}_rib_{obj_name}{global_rank_suffix}.pt"
+        out_file = config.out_dir / f_name
+        if not check_outfile_overwrite(out_file, force):
+            dist_info.local_comm.Abort()  # stop this and other processes
 
     relu_matrices_save_file = Path(__file__).parent / f"similarity_metric_{config.relu_metric_type}_transformer"
     Cs_save_file = Path(__file__).parent / "Cs_transformer"
@@ -358,22 +379,23 @@ def transformer_relu_main(config_path_str: str):
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
-        eps=config.eps,
+        fold_bias=True,
         dtype=dtype,
         device=device,
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    print_all_modules(seq_model)
     hooked_model = HookedModel(seq_model)
 
-    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
-        return_set=return_set,
+        return_set=config.dataset.return_set,
+        model_n_ctx=seq_model.cfg.n_ctx,
         tlens_model_path=config.tlens_model_path,
     )
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = DataLoader(
+        dataset=dataset, batch_size=config.batch_size, shuffle=False
+    )
 
     Cs_and_Lambdas: dict[str, list[Union[InteractionRotation, Float[Tensor, ...]]]] = check_and_open_file(
         file_path=Cs_save_file,
@@ -427,7 +449,6 @@ def transformer_relu_main(config_path_str: str):
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    print_all_modules(seq_model)
     hooked_model = HookedModel(seq_model)
 
     # Keys: module name for layer; values: list of gram matrices
@@ -494,7 +515,7 @@ def hessian_main(config_path_str: str):
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
-        eps=config.eps,
+        fold_bias=True,
         dtype=dtype,
         device=device,
     )
@@ -514,13 +535,15 @@ def hessian_main(config_path_str: str):
     )
     copy_seq_model.to(device=torch.device(device), dtype=dtype)
 
-    return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
     dataset = load_dataset(
         dataset_config=config.dataset,
-        return_set=return_set,
+        return_set=config.dataset.return_set,
+        model_n_ctx=seq_model.cfg.n_ctx,
         tlens_model_path=config.tlens_model_path,
     )
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = DataLoader(
+        dataset=dataset, batch_size=config.batch_size, shuffle=False
+    )
 
     Cs_and_Lambdas: dict[str, list[Union[InteractionRotation, Float[Tensor, ...]]]] = check_and_open_file(
         file_path=Cs_save_file,

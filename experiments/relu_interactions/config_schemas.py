@@ -4,7 +4,7 @@ from typing import List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 
 
 class SGLDKwargs(BaseModel):
@@ -222,19 +222,21 @@ def _verify_compatible_configs(config: Union[MLPConfig, LMConfig], loaded_config
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str = Field(..., description="The name of the experiment")
-    force_overwrite_output: Optional[bool] = Field(
-        False, description="Don't ask before overwriting the output file."
+    out_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
     )
-    seed: int = Field(..., description="The random seed value for reproducibility")
+    seed: Optional[int] = Field(0, description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(
         None, description="Pretrained transformer lens model."
     )
-    tlens_model_path: Optional[Path] = Field(
+    tlens_model_path: Optional[RootPath] = Field(
         None, description="Path to saved transformer lens model."
     )
-    interaction_matrices_path: Optional[Path] = Field(
+    interaction_matrices_path: Optional[RootPath] = Field(
         None, description="Path to pre-saved interaction matrices. If provided, we don't recompute."
     )
     node_layers: list[str] = Field(
@@ -271,21 +273,15 @@ class Config(BaseModel):
         description="Module type in which to only output the last position index. For modular"
         "arithmetic only.",
     )
+
     n_intervals: int = Field(
         ...,
         description="The number of intervals to use for the integrated gradient approximation."
-        "If 0, we take a point estimate (i.e. just alpha=1).",
+        "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
-    out_dim_chunk_size: Optional[int] = Field(
-        None,
-        description="The size of the chunks to use for calculating the jacobian. If none, calculate"
-        "the jacobian on all output dimensions at once.",
-    )
-    dtype: str = Field(..., description="The dtype to use when building the graph.")
-    eps: float = Field(
-        1e-5,
-        description="The epsilon value to use for numerical stability in layernorm layers.",
-    )
+
+    dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
+
     calculate_edges: bool = Field(
         True,
         description="Whether to calculate the edges of the interaction graph.",
@@ -295,16 +291,15 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-
-    out_dir: Optional[Path] = Field(
-        None,
-        description="Directory for the output files. If not provided it is `./out/` relative to this file.",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
+        "(1-0)*alpha",
+        description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
+        "use Us as Cs, giving the eigendecomposition of the gram matrix.",
     )
-
-    @field_validator("dtype")
-    def dtype_validator(cls, v):
-        assert v in TORCH_DTYPES, f"dtype must be one of {TORCH_DTYPES}"
-        return v
+    edge_formula: Literal["functional", "squared"] = Field(
+        "functional",
+        description="The attribution method to use to calculate the edges.",
+    )
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "Config":

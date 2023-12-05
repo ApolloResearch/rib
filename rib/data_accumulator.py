@@ -34,7 +34,8 @@ from rib.hook_fns_non_static import (
 from rib.hook_manager import Hook, HookedModel
 from rib.log import logger
 from rib.linalg import module_hat
-from rib.utils import eval_model_accuracy, eval_model_metrics, get_model_attr
+from rib.utils import eval_model_accuracy, eval_model_metrics
+from rib.models.utils import get_model_attr
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation

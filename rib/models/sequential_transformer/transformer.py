@@ -326,6 +326,7 @@ class SequentialTransformer(nn.Module):
         seq_param_names = list(self.state_dict().keys())
         for seq_param_name in seq_param_names:
             # E.g. sections.section_0.0.W_E or sections.section_1.14.attention_scores.mask
+            # Number of "." in the param_name can vary, thus split at most 3 times.
             sections, section_name, module_idx, param_name = seq_param_name.split(".", 3)
             if param_name[:2] == "W_":
                 if param_name not in fold_fns:

@@ -37,7 +37,7 @@ class Embed(nn.Module):
             tokens: The input tokens, typically (batch, pos)
 
         Returns:
-            - The input tokens (if return_tokens is True)
+            - The input tokens (if self.return_tokens is True)
             - The token embeddings
         """
         # If A has shape [a, b] and B has shape [c, d], then A[:, B] has shape [a, c, d]
@@ -212,7 +212,14 @@ class AttentionIn(nn.Module):
 
         Args:
             residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
-            x (Float[Tensor, "... pos d_model]): The normed residual stream (the input to the attention block)
+            x (Float[Tensor, "... pos d_model]): The normed residual stream (the input to the
+                attention block)
+
+        Returns:
+            - The residual stream
+            - The query tensor
+            - The key tensor
+            - The value tensor
         """
 
         def add_head_dimension(tensor):
@@ -396,10 +403,14 @@ class AttentionScores(nn.Module):
         k: Float[Tensor, "... key_pos head_index d_head"],
     ) -> Float[Tensor, "... head_index query_pos key_pos"]:
         """Calculate the attention scores.
+
         Args:
             q: The query tensor.
             k: The key tensor.
             attn_scale: The scale to divide the attention scores by.
+
+        Returns:
+            The attention scores.
         """
         attn_scores = (
             einsum(
@@ -471,6 +482,10 @@ class AttentionOut(nn.Module):
             q (Float[Tensor, "... pos n_head_times_d_head]): The query tensor
             k (Float[Tensor, "... pos n_head_times_d_head]): The key tensor
             v (Float[Tensor, "... pos n_head_times_d_head]): The value tensor
+
+        Returns:
+            - The residual stream
+            - The attention output
         """
 
         # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)

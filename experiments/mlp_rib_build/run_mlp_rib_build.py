@@ -26,7 +26,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from torch.utils.data import DataLoader
 
 from rib.data import VisionDatasetConfig
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.data_accumulator import (
+    collect_dataset_means,
+    collect_gram_matrices,
+    collect_interaction_edges,
+)
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import load_dataset, load_mlp
@@ -47,7 +51,7 @@ class Config(BaseModel):
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: StrDtype  # Data type of all tensors (except those overriden in certain functions).
     node_layers: list[str]
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis.",
     )
@@ -101,6 +105,19 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
+    if config.basis_formula == "pca":
+        logger.info("Collecting dataset means")
+        means = collect_dataset_means(
+            hooked_model=hooked_mlp,
+            module_names=non_output_node_layers,
+            data_loader=train_loader,
+            dtype=dtype,
+            device=device,
+            collect_output_dataset_means=collect_output_gram,
+        )
+    else:
+        means = None
+
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
         module_names=non_output_node_layers,
@@ -108,6 +125,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         dtype=dtype,
         device=device,
         collect_output_gram=collect_output_gram,
+        means=means,
     )
 
     Cs, Us = calculate_interaction_rotations(
@@ -122,6 +140,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         truncation_threshold=config.truncation_threshold,
         rotate_final_node_layer=config.rotate_final_node_layer,
         basis_formula=config.basis_formula,
+        means=means,
     )
 
     E_hats = collect_interaction_edges(

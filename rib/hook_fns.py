@@ -120,7 +120,7 @@ def gram_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
-    Gamma_matrix: Optional[Float[Tensor, "d_hidden d_hidden"]] = None,
+    mean: Optional[Float[Tensor, "d_hidden"]] = None,
 ) -> None:
     """Hook function for calculating and updating the gram matrix.
 
@@ -143,9 +143,11 @@ def gram_forward_hook_fn(
 
     # Concat over the hidden dimension
     out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
-    out_acts_centered = out_acts @ Gamma_matrix if Gamma_matrix is not None else out_acts
+    if mean is not None:
+        # center activations
+        out_acts -= mean
 
-    gram_matrix = calc_gram_matrix(out_acts_centered, dataset_size=dataset_size)
+    gram_matrix = calc_gram_matrix(out_acts, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
@@ -161,7 +163,7 @@ def gram_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
-    Gamma_matrix: Optional[Float[Tensor, "d_hidden d_hidden"]] = None,
+    mean: Optional[Float[Tensor, "d_hidden"]] = None,
 ) -> None:
     """Calculate the gram matrix for inputs with positional indices and add it to the global.
 
@@ -179,9 +181,11 @@ def gram_pre_forward_hook_fn(
     assert isinstance(data_key, str), "data_key must be a string."
 
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
-    in_acts_centered = in_acts @ Gamma_matrix if Gamma_matrix is not None else in_acts
+    if mean is not None:
+        # center activations
+        in_acts -= mean
 
-    gram_matrix = calc_gram_matrix(in_acts_centered, dataset_size=dataset_size)
+    gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 

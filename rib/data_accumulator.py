@@ -126,7 +126,7 @@ def collect_gram_matrices(
     dtype: torch.dtype,
     collect_output_gram: bool = True,
     hook_names: Optional[list[str]] = None,
-    Gamma_matrices: Optional[dict[str, Float[Tensor, "d_hidden d_hidden"]]] = None,
+    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
     """Collect gram matrices for the module inputs and optionally the output of the final module.
 
@@ -163,7 +163,7 @@ def collect_gram_matrices(
                 module_name=module_name,
                 fn_kwargs={
                     "dataset_size": dataset_size,
-                    "Gamma_matrix": Gamma_matrices[hook_name] if Gamma_matrices else None,
+                    "mean": means[hook_name] if means is not None else None,
                 },
             )
         )
@@ -177,7 +177,7 @@ def collect_gram_matrices(
                 module_name=module_names[-1],
                 fn_kwargs={
                     "dataset_size": dataset_size,
-                    "Gamma_matrix": Gamma_matrices["output"] if Gamma_matrices else None,
+                    "mean": means[hook_name] if means is not None else None,
                 },
             )
         )

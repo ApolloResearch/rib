@@ -405,7 +405,7 @@ def calc_edge_squared(
 
     # Square, and sum over batch size and output pos (if applicable)
     J_hat = J_hat**2 / normalization_factor
-    J_hat = J_hat.sum(dim=(0, 1) if has_pos else 0)
+    edge += J_hat.sum(dim=(0, 1) if has_pos else 0)
 
 
 def integrated_gradient_trapezoidal_norm(

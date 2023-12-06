@@ -310,7 +310,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
         f_in_hat=in_tensor,
         in_tuple_dims=(in_hidden,),
         n_intervals=0,
-        jac_out=result_point_estimate,
+        edge=result_point_estimate,
         dataset_size=batch_size,
     )
     result_1: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
@@ -319,7 +319,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
         f_in_hat=in_tensor,
         in_tuple_dims=(in_hidden,),
         n_intervals=1,
-        jac_out=result_1,
+        edge=result_1,
         dataset_size=batch_size,
     )
 
@@ -329,7 +329,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
         f_in_hat=in_tensor,
         in_tuple_dims=(in_hidden,),
         n_intervals=5,
-        jac_out=result_5,
+        edge=result_5,
         dataset_size=batch_size,
     )
 
@@ -349,23 +349,23 @@ def _integrated_gradient_jacobian_with_jacrev(
     alphas, interval_size = _calc_integration_intervals(
         n_intervals, integral_boundary_relative_epsilon=1e-3
     )
-    jac_out = None
+    edge = None
     for alpha_index, alpha in enumerate(alphas):
         alpha_x = alpha * x
         fn_norm = lambda f: ((module_hat(x) - module_hat(f)) ** 2).sum(
             dim=0
         )  # Sum over batch dimension
-        alpha_jac_out = jacrev(fn_norm)(alpha_x)  # [out_dim, batch_size, in_dim]
+        alpha_edge = jacrev(fn_norm)(alpha_x)  # [out_dim, batch_size, in_dim]
 
         scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
         # No pos dim for this test
-        E = torch.einsum("ibj,bj->ij", alpha_jac_out * interval_size * scaler / dataset_size, x)
-        if jac_out is None:
-            jac_out = -E
+        E = torch.einsum("ibj,bj->ij", alpha_edge * interval_size * scaler / dataset_size, x)
+        if edge is None:
+            edge = -E
         else:
-            jac_out -= E
+            edge -= E
 
-    return jac_out
+    return edge
 
 
 @pytest.mark.parametrize("edge_formula", ["functional", "squared"])
@@ -397,7 +397,7 @@ def test_integrated_gradient_trapezoidal_jacobian_jacrev(edge_formula):
         f_in_hat=in_tensor,
         in_tuple_dims=(in_hidden,),
         n_intervals=5,
-        jac_out=result_ours,
+        edge=result_ours,
         dataset_size=batch_size,
     )
     result_jacrev: Float[Tensor, "out_dim in_dim"] = _integrated_gradient_jacobian_with_jacrev(

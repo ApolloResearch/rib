@@ -203,6 +203,12 @@ def main(config_path_or_obj: Union[str, Config]) -> tuple[float, float]:
     # Initialize the Transformer model
     transformer_lens_config = HookedTransformerConfig(**config.model.model_dump())
     model = HookedTransformer(transformer_lens_config)
+
+    # Convert all Attention.IGNORE buffer values to -1e5
+    for name, buffer in model.named_buffers():
+        if "IGNORE" in name:
+            buffer.data.fill_(-1e5)
+
     model = model.to(device)
 
     train_dataset = load_dataset(
@@ -219,7 +225,7 @@ def main(config_path_or_obj: Union[str, Config]) -> tuple[float, float]:
     )
     test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size, shuffle=True)
 
-    run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}_norm-{config.model.normalization_type}"
+    run_name = f"IGNORE_1e5-lr-{config.train.learning_rate}_bs-{config.train.batch_size}_norm-{config.model.normalization_type}"
     if config.wandb:
         wandb.init(
             name=run_name,

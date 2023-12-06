@@ -77,7 +77,7 @@ def dataset_mean_forward_hook_fn(
     # Concat over the hidden dimension
     out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
-    out_acts_mean_coontrib = out_acts.mean(dim=0) / dataset_size
+    out_acts_mean_coontrib = out_acts.sum(dim=0) / dataset_size
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, out_acts_mean_coontrib)
 
@@ -99,7 +99,7 @@ def dataset_mean_pre_forward_hook_fn(
 
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
 
-    in_acts_mean_coontrib = in_acts.mean(dim=0) / dataset_size
+    in_acts_mean_coontrib = in_acts.sum(dim=0) / dataset_size
 
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts_mean_coontrib)
 

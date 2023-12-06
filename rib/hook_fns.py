@@ -145,7 +145,9 @@ def gram_forward_hook_fn(
     out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
     if mean is not None:
         # center activations
-        out_acts -= mean
+        # TODO: should do section by section instead of for catted tensor
+        # since there might be multiple bias terms
+        out_acts[..., :-1] -= mean[..., :-1]
 
     gram_matrix = calc_gram_matrix(out_acts, dataset_size=dataset_size)
 
@@ -183,7 +185,9 @@ def gram_pre_forward_hook_fn(
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
     if mean is not None:
         # center activations
-        in_acts -= mean
+        # TODO: should do section by section instead of for catted tensor
+        # since there might be multiple bias terms
+        in_acts[..., :-1] -= mean[..., :-1]
 
     gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
 

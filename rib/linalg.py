@@ -564,3 +564,7 @@ def calc_gram_matrix(
         raise ValueError("Unexpected tensor rank")
 
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
+
+
+def shift_matrix(shift: Float[torch.Tensor, "n"]) -> Float[torch.Tensor, "n n"]:
+    raise NotImplementedError

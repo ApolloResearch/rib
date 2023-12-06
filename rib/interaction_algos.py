@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import eigendecompose, pinv_diag
+from rib.linalg import eigendecompose, pinv_diag, shift_matrix
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.transformer import SequentialTransformer
 
@@ -109,6 +109,7 @@ def calculate_interaction_rotations(
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-alpha)^2",
+    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -251,6 +252,20 @@ def calculate_interaction_rotations(
             # Use U as C and then progress to the next loop
             Cs.append(
                 InteractionRotation(node_layer_name=node_layer, out_dim=U.shape[1], C=U, C_pinv=U.T)
+            )
+            continue
+        if basis_formula == "pca":
+            assert means is not None
+            assert node_layer in means
+            gamma = shift_matrix(-means[node_layer])
+            gamma_inv = shift_matrix(means[node_layer])
+            Cs.append(
+                InteractionRotation(
+                    node_layer_name=node_layer,
+                    out_dim=U.shape[1],
+                    C=gamma @ U,
+                    C_pinv=U.T @ gamma_inv,
+                )
             )
             continue
 

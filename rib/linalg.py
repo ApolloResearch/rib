@@ -350,19 +350,22 @@ def integrated_gradient_trapezoidal_jacobian_squared(
         )
     )
 
+    normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
+
     # Integral
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
-        # As per the trapezoidal rule, multiply the endpoints by 1/2
-        # (unless we're taking a point estimate at alpha=0.5)
-        scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
+        # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
+        # alpha=0.5) and multiply by the interval size
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+            trapezoidal_scaler = 0.5 * interval_size
+        else:
+            trapezoidal_scaler = interval_size
 
         # We have to compute inputs from f_hat to make autograd work
         alpha_f_in_hat = alpha * f_in_hat
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
-
-        normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output
         # Note that t (output pos) is different from p (tprime, input pos)
@@ -380,9 +383,7 @@ def integrated_gradient_trapezoidal_jacobian_squared(
                             alpha_f_in_hat,
                             retain_graph=True,
                         )[0]
-                        / normalization_factor
-                        * interval_size
-                        * scaler
+                        * trapezoidal_scaler
                     )
 
                     # Sum over tprime (p, input pos) as per Lucius' formula (A.18)
@@ -397,23 +398,17 @@ def integrated_gradient_trapezoidal_jacobian_squared(
                         alpha_f_in_hat,
                         retain_graph=True,
                     )[0]
-                    / normalization_factor
-                    * interval_size
-                    * scaler
+                    * trapezoidal_scaler
                 )
                 with torch.inference_mode():
                     # The einsum is actually just an elementwise multiplication here
-                    inner_token_sum = torch.einsum(
-                        "bj,bj->bj",
-                        i_grad,
-                        f_in_hat,
-                    ).to(inner_token_sums.device)
+                    inner_token_sum = torch.einsum("bj,bj->bj", i_grad, f_in_hat)
                     # We have a minus sign in front of the IG integral
                     inner_token_sums[:, out_dim, :] -= inner_token_sum
 
-    # Finished alpha integral, integral result present in inner_token_sums
+    # Finished alpha integral with stored results in inner_token_sums
     # Square, and sum over batch size and t (not tprime)
-    inner_token_sums = inner_token_sums**2
+    inner_token_sums = inner_token_sums**2 / normalization_factor
     if has_pos:
         edge += inner_token_sums.sum(dim=(0, 1))
     else:

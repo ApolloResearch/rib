@@ -11,6 +11,8 @@ from tqdm import tqdm
 
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
+    dataset_mean_forward_hook_fn,
+    dataset_mean_pre_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
@@ -51,6 +53,71 @@ def run_dataset_through_model(
 
 
 @torch.inference_mode()
+def collect_dataset_means(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    device: str,
+    dtype: torch.dtype,
+    collect_output_dataset_means: bool = True,
+    hook_names: Optional[list[str]] = None,
+) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
+    """ """
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    dataset_size = len(data_loader.dataset)  # type: ignore
+    dataset_mean_hooks: list[Hook] = []
+    # Add input hooks
+    for module_name, hook_name in zip(module_names, hook_names):
+        dataset_mean_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="dataset_mean",
+                fn=dataset_mean_pre_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"dataset_size": dataset_size},
+            )
+        )
+        print("collecting dataset_mean (pre) for", module_name)
+    if collect_output_dataset_means:
+        # Add hook to collect model output
+        dataset_mean_hooks.append(
+            Hook(
+                name="output",
+                data_key="dataset_mean",
+                fn=dataset_mean_forward_hook_fn,
+                module_name=module_names[-1],
+                fn_kwargs={"dataset_size": dataset_size},
+            )
+        )
+        print("collecting dataset_mean for", module_name)
+
+    run_dataset_through_model(
+        hooked_model, data_loader, dataset_mean_hooks, dtype=dtype, device=device, use_tqdm=True
+    )
+
+    dataset_mean: dict[str, Float[Tensor, "d_hidden"]] = {
+        hook_name: hooked_model.hooked_data[hook_name]["dataset_mean"]
+        for hook_name in hooked_model.hooked_data
+    }
+    hooked_model.clear_hooked_data()
+
+    expected_keys = (
+        set(hook_names + ["output"]) if collect_output_dataset_means else set(hook_names)
+    )
+    assert set(dataset_mean.keys()) == expected_keys, (
+        f"Gram matrix keys not the same as the module names that were hooked. "
+        f"Expected: {expected_keys}, got: {set(dataset_mean.keys())}"
+    )
+
+    return dataset_mean
+
+
+@torch.inference_mode()
 def collect_gram_matrices(
     hooked_model: HookedModel,
     module_names: list[str],
@@ -59,6 +126,7 @@ def collect_gram_matrices(
     dtype: torch.dtype,
     collect_output_gram: bool = True,
     hook_names: Optional[list[str]] = None,
+    Gamma_matrices: Optional[dict[str, Float[Tensor, "d_hidden d_hidden"]]] = None,
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
     """Collect gram matrices for the module inputs and optionally the output of the final module.
 
@@ -93,7 +161,10 @@ def collect_gram_matrices(
                 data_key="gram",
                 fn=gram_pre_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"dataset_size": dataset_size},
+                fn_kwargs={
+                    "dataset_size": dataset_size,
+                    "Gamma_matrix": Gamma_matrices[hook_name] if Gamma_matrices else None,
+                },
             )
         )
     if collect_output_gram:
@@ -104,7 +175,10 @@ def collect_gram_matrices(
                 data_key="gram",
                 fn=gram_forward_hook_fn,
                 module_name=module_names[-1],
-                fn_kwargs={"dataset_size": dataset_size},
+                fn_kwargs={
+                    "dataset_size": dataset_size,
+                    "Gamma_matrix": Gamma_matrices["output"] if Gamma_matrices else None,
+                },
             )
         )
 

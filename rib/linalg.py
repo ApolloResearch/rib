@@ -568,4 +568,8 @@ def calc_gram_matrix(
 
 
 def shift_matrix(shift: Float[torch.Tensor, "n"]) -> Float[torch.Tensor, "n n"]:
-    raise NotImplementedError
+    assert shift.ndim == 1, "shift must be 1d"
+
+    S = torch.eye(shift.shape[0], dtype=shift.dtype, device=shift.device)
+    S[-1, :-1] = shift[:-1]
+    return S

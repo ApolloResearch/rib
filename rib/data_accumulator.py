@@ -244,8 +244,6 @@ def collect_interaction_edges(
         variable_position_dimension = False
 
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
-    print("edge_modules", edge_modules)
-    print("Cs", [C.node_layer_name for C in Cs])
     assert (
         len(edge_modules) == len(Cs) - 1
     ), f"Number of edge modules not the same as Cs - 1. Num edge modules: {len(edge_modules)}, Cs - 1: {len(Cs) - 1}"

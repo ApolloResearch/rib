@@ -17,7 +17,7 @@ from rib.types import TORCH_DTYPES
 
 
 @dataclass
-class InteractionRotation:
+class gitInteractionRotation:
     """Dataclass storing the interaction rotation matrix and its inverse for a node layer."""
 
     node_layer_name: str

@@ -35,7 +35,7 @@ def get_rib_acts(
             data_key=c_info.node_layer_name,
             fn=rotated_acts_pre_forward_hook_fn,
             module_name=get_module_name(c_info.node_layer_name),
-            fn_kwargs={"rotation_matrix": c_info.C.to("cuda")},
+            fn_kwargs={"rotation_matrix": c_info.C.to(device)},
         )
         for c_info in c_infos
         if c_info.C is not None

@@ -99,7 +99,7 @@ def plot_interaction_graph(
     exp_name: str,
     nodes_per_layer: Union[int, list[int]],
     out_file: Path,
-    node_labels: list[list[str]] = None,
+    node_labels: Optional[list[list[str]]] = None,
 ) -> None:
     """Plot the interaction graph for the given edges.
 
@@ -158,7 +158,7 @@ def plot_interaction_graph(
         # Add layer label above the nodes
         plt.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
 
-    # Label nodes
+    # Label nodes if node_labels is provided
     if node_labels is not None:
         node_label_dict = {}
         for i, layer in enumerate(layers):

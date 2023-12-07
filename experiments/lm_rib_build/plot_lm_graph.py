@@ -7,6 +7,7 @@ Usage:
 """
 import csv
 from pathlib import Path
+from typing import Optional, Union
 
 import fire
 import torch
@@ -18,15 +19,17 @@ from rib.utils import check_outfile_overwrite
 def main(
     results_file: str,
     nodes_per_layer: int = 40,
-    labels_file: str = None,
-    out_file: str = None,
+    labels_file: Optional[str] = None,
+    out_file: Optional[Union[str, Path]] = None,
     force: bool = False,
 ) -> None:
     """Plot an interaction graph given a results file contain the graph edges."""
     results = torch.load(results_file)
     out_dir = Path(__file__).parent / "out"
-    out_file = out_file or out_dir / f"{results['exp_name']}_rib_graph.png"
-    out_file = Path(out_file)
+    if out_file is None:
+        out_file = out_dir / f"{results['exp_name']}_rib_graph.png"
+    else:
+        out_file = Path(out_file)
 
     if not check_outfile_overwrite(out_file, force):
         return
@@ -42,9 +45,8 @@ def main(
     else:
         node_labels = None
 
-    layer_names = results["config"]["node_layers"]
-
     # plot_interaction_graph() demands that layer_names includes "output"
+    layer_names = results["config"]["node_layers"]
     if layer_names[-1] != "output":
         layer_names.append("output")
 

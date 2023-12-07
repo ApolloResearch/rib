@@ -52,6 +52,24 @@ def _add_to_hooked_matrix(
     hooked_data[hook_name][data_key] += hooked_matrix
 
 
+def _append_to_hooked_list(
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: str,
+    element_to_append: Any,
+) -> None:
+    """Append the given element to a hooked list. Creates the list if it doesn't exist.
+
+    Args:
+        hooked_data: Dictionary of hook data that will be updated.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        element_to_append: Appended to hooked data.
+    """
+    hooked_data.setdefault(hook_name, {}).setdefault(data_key, [])
+    hooked_data[hook_name][data_key].append(element_to_append)
+
+
 def gram_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
@@ -170,7 +188,7 @@ def rotated_acts_pre_forward_hook_fn(
     rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
     hooked_data: dict[str, Any],
     hook_name: str,
-    data_key: Union[str, list[str]],
+    data_key: str,
 ) -> None:
     """Hook function for rotating the input tensor to a module and saving it.
 
@@ -188,8 +206,7 @@ def rotated_acts_pre_forward_hook_fn(
     """
     in_acts = torch.cat(inputs, dim=-1)
     rotated = in_acts @ rotation_matrix
-    hooked_data.setdefault(hook_name, {}).setdefault(data_key, [])
-    hooked_data[hook_name][data_key].append(rotated.detach().cpu())
+    _append_to_hooked_list(hooked_data, hook_name, data_key, rotated)
 
 
 def M_dash_and_Lambda_dash_pre_forward_hook_fn(

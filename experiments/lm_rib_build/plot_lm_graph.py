@@ -45,14 +45,9 @@ def main(
     else:
         node_labels = None
 
-    # plot_interaction_graph() demands that layer_names includes "output"
-    layer_names = results["config"]["node_layers"]
-    if layer_names[-1] != "output":
-        layer_names.append("output")
-
     plot_interaction_graph(
         raw_edges=results["edges"],
-        layer_names=layer_names,
+        layer_names=results["config"]["node_layers"],
         exp_name=results["exp_name"],
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,

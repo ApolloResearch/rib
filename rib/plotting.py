@@ -163,10 +163,10 @@ def plot_interaction_graph(
         node_label_dict = {}
         for i, layer in enumerate(layers):
             for j, node in enumerate(layer):
-                if i != len(layers) - 1:
+                if layer_names[i] != "output":
                     node_label_dict[node] = node_labels[i][j].replace("|", "\n")
                 else:
-                    node_label_dict[node] = "out_j"
+                    node_label_dict[node] = f"output_{j}"
         nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8)
 
     # Draw edges

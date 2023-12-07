@@ -9,7 +9,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
-from torchvision import datasets, transforms
 
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
@@ -22,7 +21,7 @@ from rib.utils import REPO_ROOT, check_outfile_overwrite, set_seed
 
 # %%
 METHOD_NAMES = {"O": "functional", "A": "squared"}
-BASIS_NAMES = {'A': '(1-0)*alpha', 'O': '(1-alpha)^2'}
+BASIS_NAMES = {"A": "(1-0)*alpha", "O": "(1-alpha)^2"}
 
 
 def random_block_diagonal_matrix(n, k, variances=None, dtype=torch.float32):
@@ -30,7 +29,6 @@ def random_block_diagonal_matrix(n, k, variances=None, dtype=torch.float32):
     x n - k."""
     # Generate random matrix
     A = torch.zeros((n, n), dtype=dtype)
-
     if variances is None:
         variances = [1, 1]
 
@@ -59,7 +57,6 @@ def random_block_diagonal_matrix_column_equal(n, k, variances=None, dtype=torch.
     return A
 
 
-
 class IdentityWideHidden(MLP):
     def __init__(
         self,
@@ -67,42 +64,50 @@ class IdentityWideHidden(MLP):
         dtype=torch.float32,
     ):
         super(IdentityWideHidden, self).__init__(
-            hidden_sizes = [2*input_size],
+            hidden_sizes=[2 * input_size],
             input_size=input_size,
             output_size=input_size,
             dtype=dtype,
             fold_bias=False,
-            activation_fn='relu'
+            activation_fn="relu",
         )
-        W_embed = torch.zeros(4*input_size-2, dtype=dtype)
-        W_embed[2*input_size-2:2*input_size] = torch.tensor([-1,1])
-        W_embed = W_embed.as_strided((input_size, 2*input_size), (2,1)).flip(dims = (1,))
-        self.layers[0].W = nn.Parameter(W_embed)
-        self.layers[1].W = nn.Parameter(W_embed.T)
+        W_embed = torch.zeros(4 * input_size - 2, dtype=dtype)
+        W_embed[2 * input_size - 2 : 2 * input_size] = torch.tensor([-1, 1])
+        W_embed = W_embed.as_strided((input_size, 2 * input_size), (2, 1)).flip(dims=(1,))
+        random_mix = torch.randn(input_size, input_size, dtype=dtype)
+        self.layers[0].W = nn.Parameter(random_mix @ W_embed)
+        self.layers[1].W = nn.Parameter(W_embed.T @ torch.linalg.inv(random_mix))
         for i in range(2):
             self.layers[i].b = nn.Parameter(torch.zeros_like(self.layers[i].b, dtype=dtype))
         self.fold_bias()
 
+
 # %%
 
+
 class RandomVectorDataset(Dataset):
-    def __init__(self,
-                 input_size: int,
-                 dataset_size: int,
-                 stds: Optional[Iterable] = None,
-                 dtype=torch.float32):
+    def __init__(
+        self,
+        input_size: int,
+        dataset_size: int,
+        stds: Optional[Iterable] = None,
+        dtype=torch.float32,
+    ):
         """
         Args:
             n (int): Length of each vector.
             size (int): Total number of vectors in the dataset.
         """
-        self.input_size = input_size 
+        self.input_size = input_size
         self.dataset_size = dataset_size
         if stds is None:
             self.data = torch.randn((dataset_size, input_size), dtype=dtype)
         else:
             assert len(stds) == input_size, "Length of stds must equal input_size"
-            self.data = torch.normal(torch.zeros((dataset_size, input_size)), torch.tensor(stds).broadcast_to((dataset_size, input_size)))
+            self.data = torch.normal(
+                torch.zeros((dataset_size, input_size)),
+                torch.tensor(stds).broadcast_to((dataset_size, input_size)),
+            )
         self.labels = torch.randn((dataset_size, input_size), dtype=dtype)
 
     def __len__(self):
@@ -114,6 +119,7 @@ class RandomVectorDataset(Dataset):
         """
         vector = self.data[idx]
         return vector, self.labels[idx]
+
 
 def get_node_layers(n_layers: int) -> list[str]:
     """Return the names of the layers that are nodes in the graph."""
@@ -173,6 +179,7 @@ def binarise(E_hats, tol=1e-1):
         E_hats_binary[k] = binary_matrix
     return E_hats_binary
 
+
 # %%
 
 
@@ -192,11 +199,11 @@ class Config:
         force: bool = True,
         data_stds=None,
         binarise=False,
-        ribmethods: list = ['OO', 'OA', 'AO', 'AA'],
+        ribmethods: list = ["OO", "OA", "AO", "AA"],
     ):
         """
         Initializes the configuration for the experiment.
-        
+
         :param exp_name: Name of the experiment.
         :param input_size: Size of the input.
         :param dataset_size: Size of the dataset.
@@ -206,7 +213,7 @@ class Config:
         :param truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         :param n_intervals: The number of intervals to use for integrated gradients.
         :param dtype: Data type of all tensors (except those overridden in certain functions).
-        :param node_layers: The names of the layers that are nodes in the graph. Defaults are set 
+        :param node_layers: The names of the layers that are nodes in the graph. Defaults are set
         based on 'layers' if None is provided.
         :param rotate_final_node_layer: Whether to rotate the final node layer.
         :param force: Whether to force the experiment to run even if the experiment directory
@@ -216,7 +223,7 @@ class Config:
         :param ribmethods: The methods to use for calculating the interaction edges.
             If O is included, the October method is used. If A is included, new_norm_november_A is
             used.
-        
+
         """
         self.exp_name = exp_name
         self.input_size = input_size
@@ -229,12 +236,13 @@ class Config:
         self.node_layers = node_layers if node_layers is not None else get_node_layers(1)
         self.rotate_final_node_layer = rotate_final_node_layer
         self.force = force
-        self.data_stds = data_stds #eval(data_stds) if data_stds is not None else None
+        self.data_stds = data_stds  # eval(data_stds) if data_stds is not None else None
         self.binarise = binarise
         self.ribmethods = ribmethods
 
     def to_dict(self):
         return vars(self)
+
 
 def main(config: Config) -> None:
     """Implement the main algorithm and store the graph to disk."""
@@ -243,7 +251,7 @@ def main(config: Config) -> None:
         print(f"Seed not specified, using {config.seed}")
     set_seed(config.seed)
     exp_name = config.exp_name
-    #add the other config variables to the exp_name
+    # add the other config variables to the exp_name
     exp_name += f"_n{config.input_size}"
     exp_name += f"_seed{config.seed}"
     if not config.rotate_final_node_layer:
@@ -253,7 +261,7 @@ def main(config: Config) -> None:
 
     assert all(
         [m in ["O", "A"] for method in config.ribmethods for m in method]
-    ),"Invalid ribmethods"
+    ), "Invalid ribmethods"
 
     out_dir = Path(__file__).parent / "results"
     out_file = out_dir / exp_name / "rib_graph.pt"
@@ -268,10 +276,12 @@ def main(config: Config) -> None:
     mlp.eval()
     mlp.to(device=torch.device(device), dtype=dtype)
     hooked_mlp = HookedModel(mlp)
-    dataset = RandomVectorDataset(input_size=config.input_size,
-                                  dataset_size=config.dataset_size,
-                                  stds=config.data_stds,
-                                  dtype=dtype)
+    dataset = RandomVectorDataset(
+        input_size=config.input_size,
+        dataset_size=config.dataset_size,
+        stds=config.data_stds,
+        dtype=dtype,
+    )
     dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
 
     node_layers = config.node_layers
@@ -289,99 +299,118 @@ def main(config: Config) -> None:
     )
     Cs = {}
     Us = {}
-    E_hats_rib = {}
-    E_hats_neuron = {}
-    E_hats_pca = {}
-    E_hats_binary_rib = {}
-    E_hats_binary_pca = {}
+    E_hats = {}
+    # E_hats_neuron = {}
+    # E_hats_pca = {}
+    E_hats_binary = {}
+    # E_hats_binary_pca = {}
     interaction_rotations = {}
     eigenvectors = {}
     for method in config.ribmethods:
         attr_name = METHOD_NAMES[method[0]]
-        basis = BASIS_NAMES[method[1]]
-        method_name = f"_Basis_{basis}_Attr_{attr_name}"
-        
-        Cs[method_name], Us[method_name] = calculate_interaction_rotations(
-            gram_matrices=gram_matrices,
-            section_names=non_output_node_layers,
-            node_layers=node_layers,
-            hooked_model=hooked_mlp,
-            data_loader=dataloader,
-            dtype=dtype,
-            device=device,
-            n_intervals=config.n_intervals,
-            truncation_threshold=config.truncation_threshold,
-            rotate_final_node_layer=config.rotate_final_node_layer,
-            basis_formula=basis,
-        )
+        print(attr_name)
+        if attr_name not in Cs:
+            Cs[attr_name] = {}
+            Us[attr_name] = {}
+            E_hats[attr_name] = {}
+            E_hats_binary[attr_name] = {}
+            interaction_rotations[attr_name] = {}
+            eigenvectors[attr_name] = {}
+        for basis in [BASIS_NAMES[method[1]], "svd", "neuron"]:
+            if basis in Cs[attr_name]:
+                continue
+            method_name = f"_Basis_{basis}_Attr_{attr_name}"
 
-        E_hats_rib[method_name] = collect_interaction_edges(
-            Cs=Cs[method_name],
-            hooked_model=hooked_mlp,
-            n_intervals=config.n_intervals,
-            section_names=non_output_node_layers,
-            data_loader=dataloader,
-            dtype=dtype,
-            device=device,
-            edge_formula=attr_name,
-        )
+            Cs[attr_name][basis], Us[attr_name][basis] = calculate_interaction_rotations(
+                gram_matrices=gram_matrices,
+                section_names=non_output_node_layers,
+                node_layers=node_layers,
+                hooked_model=hooked_mlp,
+                data_loader=dataloader,
+                dtype=dtype,
+                device=device,
+                n_intervals=config.n_intervals,
+                truncation_threshold=config.truncation_threshold,
+                rotate_final_node_layer=config.rotate_final_node_layer,
+                basis_formula=basis,
+            )
 
-        neuron_cs = cs_to_identity(Cs[method_name])
-        E_hats_neuron[method_name] = collect_interaction_edges(
-            Cs=neuron_cs,
-            hooked_model=hooked_mlp,
-            n_intervals=config.n_intervals,
-            section_names=non_output_node_layers,
-            data_loader=dataloader,
-            dtype=dtype,
-            device=device,
-            edge_formula=attr_name,
-        )
+            E_hats[attr_name][basis] = collect_interaction_edges(
+                Cs=Cs[attr_name][basis],
+                hooked_model=hooked_mlp,
+                n_intervals=config.n_intervals,
+                section_names=non_output_node_layers,
+                data_loader=dataloader,
+                dtype=dtype,
+                device=device,
+                edge_formula=attr_name,
+            )
 
-        pca_cs = cs_to_us(Cs[method_name], Us[method_name])
-        E_hats_pca[method_name] = collect_interaction_edges(
-            Cs=pca_cs,
-            hooked_model=hooked_mlp,
-            n_intervals=config.n_intervals,
-            section_names=non_output_node_layers,
-            data_loader=dataloader,
-            dtype=dtype,
-            device=device,
-            edge_formula=attr_name,
-        )
-        if config.binarise:
-            E_hats_binary_rib[method_name] = binarise(E_hats_rib[method_name])
-            E_hats_binary_pca[method_name] = binarise(E_hats_pca[method_name])
+            # # neuron_cs = cs_to_identity(Cs[method_name])
+            # E_hats_neuron[method_name] = collect_interaction_edges(
+            #     Cs=Cs,
+            #     hooked_model=hooked_mlp,
+            #     n_intervals=config.n_intervals,
+            #     section_names=non_output_node_layers,
+            #     data_loader=dataloader,
+            #     dtype=dtype,
+            #     device=device,
+            #     edge_formula=attr_name,
+            # )
+
+            # # pca_cs = cs_to_us(Cs[method_name], Us[method_name])
+            # E_hats_pca[method_name] = collect_interaction_edges(
+            #     Cs=Cs,
+            #     hooked_model=hooked_mlp,
+            #     n_intervals=config.n_intervals,
+            #     section_names=non_output_node_layers,
+            #     data_loader=dataloader,
+            #     dtype=dtype,
+            #     device=device,
+            #     edge_formula=attr_name,
+            # )
+            if config.binarise:
+                E_hats_binary[attr_name][basis] = binarise(E_hats[attr_name][basis])
 
         # Move interaction matrices to the cpu and store in dict
-        interaction_rotations[method_name] = []
-        for C_info in Cs[method_name]:
+        interaction_rotations[attr_name][basis] = []
+        for C_info in Cs[attr_name][basis]:
             info_dict = asdict(C_info)
             info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
             info_dict["C_pinv"] = (
                 info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
             )
-            interaction_rotations[method_name].append(info_dict)
+            interaction_rotations[attr_name][basis].append(info_dict)
 
-        eigenvectors[method_name] = [asdict(U_info) for U_info in Us[method_name]]
+        eigenvectors[attr_name][basis] = [asdict(U_info) for U_info in Us[attr_name][basis]]
 
     results = {
         "exp_name": exp_name,
         "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
-        "rib_edges": {
-            methodname: [(module, E_hats[module].cpu().detach()) for module in E_hats]
-            for methodname, E_hats in E_hats_rib.items()
+        "edges": {
+            attr_name: {
+                basis: [
+                    (module, E_hats[attr_name][basis][module].cpu().detach())
+                    for module in E_hats[attr_name][basis]
+                ]
+                for basis in E_hats[attr_name]
+            }
+            for attr_name in E_hats
         },
-        "neuron_edges": {
-            methodname: [(module, E_hats[module].cpu().detach()) for module in E_hats]
-            for methodname, E_hats in E_hats_neuron.items()
-        },
-        "pca_edges": {
-            methodname: [(module, E_hats[module].cpu().detach()) for module in E_hats]
-            for methodname, E_hats in E_hats_pca.items()
-        },
+        # "rib_edges": {
+        #     methodname: [(module, E_hats[module].cpu().detach()) for module in E_hats]
+        #     for methodname, E_hats in E_hats_rib.items()
+        # },
+        # "neuron_edges": {
+        #     methodname: [(module, E_hats[module].cpu().detach()) for module in E_hats]
+        #     for methodname, E_hats in E_hats_neuron.items()
+        # },
+        # "pca_edges": {
+        #     methodname: [(module, E_hats[module].cpu().detach()) for module in E_hats]
+        #     for methodname, E_hats in E_hats_pca.items()
+        # },
         "model_config_dict": config.to_dict(),
         "mlp": mlp.cpu().state_dict(),
     }
@@ -396,8 +425,8 @@ def main(config: Config) -> None:
     if not check_outfile_overwrite(out_file_mlp, config.force):
         return
 
-    nodes_per_layer = 2*config.input_size + 1
-    layer_names = results["model_config_dict"]["node_layers"]# + ["output"]
+    nodes_per_layer = 2 * config.input_size + 1
+    layer_names = results["model_config_dict"]["node_layers"]  # + ["output"]
 
     mlp = mlp.cpu()
     mlp_edges = []
@@ -416,76 +445,76 @@ def main(config: Config) -> None:
 
     for method in config.ribmethods:
         attr_name = METHOD_NAMES[method[0]]
-        basis = BASIS_NAMES[method[1]]
-        method_name = f"_Basis_{basis}_Attr_{attr_name}"
-        
-        out_file_graph = parent_dir / f"rib_graph_{method_name}.png"
-        out_file_neuron_basis = parent_dir / f"neuron_basis_graph_{method_name}.png"
-        out_file_pca = parent_dir / f"pca_graph_{method_name}.png"
-        if config.binarise:
-            out_file_rib_binary = parent_dir / f"rib_binary_graph_{method_name}.png"
-            out_file_pca_binary = parent_dir / f"pca_binary_graph_{method_name}.png"
+        for basis in [BASIS_NAMES[method[1]], "svd", "neuron"]:
+            method_name = f"_Basis_{basis}_Attr_{attr_name}"
 
-        mlp = mlp.cpu()
-        mlp_edges = []
-        for name in results["model_config_dict"]["node_layers"][:-1]:
-            num = int(name.split(".")[1])
-            mlp_edges.append((name, mlp.layers[num].W.data.T))
+            out_file_graph = parent_dir / f"graph_{method_name}.png"
+            # out_file_neuron_basis = parent_dir / f"neuron_basis_graph_{method_name}.png"
+            # out_file_pca = parent_dir / f"pca_graph_{method_name}.png"
+            if config.binarise:
+                out_file_binary = parent_dir / f"binary_graph_{method_name}.png"
+                # out_file_pca_binary = parent_dir / f"pca_binary_graph_{method_name}.png"
 
-        if not check_outfile_overwrite(out_file_graph, config.force):
-            return
-        
-        # make rib graph
-        plot_interaction_graph(
-            raw_edges=results["rib_edges"][method_name],
-            layer_names=layer_names,
-            exp_name=results["exp_name"],
-            nodes_per_layer=nodes_per_layer,
-            out_file=out_file_graph,
-        )
+            mlp = mlp.cpu()
+            mlp_edges = []
+            for name in results["model_config_dict"]["node_layers"][:-1]:
+                num = int(name.split(".")[1])
+                mlp_edges.append((name, mlp.layers[num].W.data.T))
 
-        # make pca graph
-        plot_interaction_graph(
-            raw_edges=results["pca_edges"][method_name],
-            layer_names=layer_names,
-            exp_name=results["exp_name"],
-            nodes_per_layer=nodes_per_layer,
-            out_file=out_file_pca,
-        )
+            if not check_outfile_overwrite(out_file_graph, config.force):
+                return
 
-        # make neuron basis graph
-        plot_interaction_graph(
-            raw_edges=results["neuron_edges"][method_name],
-            layer_names=layer_names,
-            exp_name=results["exp_name"],
-            nodes_per_layer=nodes_per_layer,
-            out_file=out_file_neuron_basis,
-        )
-
-        if config.binarise:
-            # make binary rib graph
+            # make graph
             plot_interaction_graph(
-                raw_edges=[
-                    (module, E_hats_binary_rib[method_name][module].cpu())
-                    for module in E_hats_binary_rib[method_name]
-                ],
+                raw_edges=results["edges"][attr_name][basis],
                 layer_names=layer_names,
                 exp_name=results["exp_name"],
                 nodes_per_layer=nodes_per_layer,
-                out_file=out_file_rib_binary,
+                out_file=out_file_graph,
             )
 
-            # make binary pca graph
-            plot_interaction_graph(
-                raw_edges=[
-                    (module, E_hats_binary_pca[method_name][module].cpu())
-                    for module in E_hats_binary_pca[method_name]
-                ],
-                layer_names=layer_names,
-                exp_name=results["exp_name"],
-                nodes_per_layer=nodes_per_layer,
-                out_file=out_file_pca_binary,
-            )
+            # # make pca graph
+            # plot_interaction_graph(
+            #     raw_edges=results["pca_edges"][method_name],
+            #     layer_names=layer_names,
+            #     exp_name=results["exp_name"],
+            #     nodes_per_layer=nodes_per_layer,
+            #     out_file=out_file_pca,
+            # )
+
+            # # make neuron basis graph
+            # plot_interaction_graph(
+            #     raw_edges=results["neuron_edges"][method_name],
+            #     layer_names=layer_names,
+            #     exp_name=results["exp_name"],
+            #     nodes_per_layer=nodes_per_layer,
+            #     out_file=out_file_neuron_basis,
+            # )
+
+            if config.binarise:
+                # make binary rib graph
+                plot_interaction_graph(
+                    raw_edges=[
+                        (module, E_hats_binary[attr_name][basis][module].cpu())
+                        for module in E_hats_binary[attr_name][basis]
+                    ],
+                    layer_names=layer_names,
+                    exp_name=results["exp_name"],
+                    nodes_per_layer=nodes_per_layer,
+                    out_file=out_file_binary,
+                )
+
+                # # make binary pca graph
+                # plot_interaction_graph(
+                #     raw_edges=[
+                #         (module, E_hats_binary_pca[method_name][module].cpu())
+                #         for module in E_hats_binary_pca[method_name]
+                #     ],
+                #     layer_names=layer_names,
+                #     exp_name=results["exp_name"],
+                #     nodes_per_layer=nodes_per_layer,
+                #     out_file=out_file_pca_binary,
+                # )
 
 
 if __name__ == "__main__":

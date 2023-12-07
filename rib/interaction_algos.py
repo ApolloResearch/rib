@@ -17,7 +17,7 @@ from rib.types import TORCH_DTYPES
 
 
 @dataclass
-class gitInteractionRotation:
+class InteractionRotation:
     """Dataclass storing the interaction rotation matrix and its inverse for a node layer."""
 
     node_layer_name: str
@@ -237,9 +237,20 @@ def calculate_interaction_rotations(
         total=len(section_names_to_calculate),
         desc="Interaction rotations",
     ):
+        if basis_formula == "neuron":
+            # Use identity matrix as C and then progress to the next loop
+            # TODO assert not rotate final
+            width = gram_matrices[node_layer].shape[0]
+            Id = torch.eye(width, dtype=dtype)
+            Cs.append(
+                InteractionRotation(node_layer_name=node_layer, out_dim=width, C=Id, C_pinv=Id)
+            )
+            continue
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
+        if n_small_eigenvals > 0:
+            print(f'{n_small_eigenvals} small eigenvalues for node layer {node_layer}.')
         # Truncate the D matrix to remove small eigenvalues
         D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
             torch.diag(D_dash)[:-n_small_eigenvals, :-n_small_eigenvals]
@@ -251,7 +262,13 @@ def calculate_interaction_rotations(
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
         )
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
-
+        if basis_formula == "svd":
+            # Use U as C and then progress to the next loop
+            Cs.append(
+                InteractionRotation(node_layer_name=node_layer, out_dim=U.shape[1], C=U, C_pinv=U.T)
+            )
+            continue
+        
         # Most recently stored interaction matrix
         C_out = Cs[-1].C.to(device=device) if Cs[-1].C is not None else None
         M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(

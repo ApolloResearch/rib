@@ -1,3 +1,4 @@
+import warnings
 from typing import Literal
 
 import torch
@@ -93,7 +94,7 @@ def convert_tlens_weights(
                 )
                 if not torch.allclose(buffer_val, tlens_param_val.to(buffer_val.dtype)):
                     if seq_param_name.endswith("IGNORE"):
-                        print(
+                        warnings.warn(
                             f"WARNING: Mismatch ignored in parameter {seq_param_name} ({buffer_val} vs {tlens_param_val})"
                         )
                     else:

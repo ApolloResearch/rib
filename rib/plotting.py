@@ -99,6 +99,7 @@ def plot_interaction_graph(
     exp_name: str,
     nodes_per_layer: Union[int, list[int]],
     out_file: Path,
+    node_labels: Optional[list[list[str]]] = None,
 ) -> None:
     """Plot the interaction graph for the given edges.
 
@@ -106,7 +107,7 @@ def plot_interaction_graph(
         raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
             (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
         layer_names (list[str]): The names of the layers. These should correspond to the first
-            element of each tuple in raw_edges, but also include a name for the output layer.
+            element of each tuple in raw_edges, but also include a name for the final node_layer.
         exp_name (str): The name of the experiment.
         nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
             all layers have the same number of nodes. If list, then the number of nodes in each
@@ -124,6 +125,10 @@ def plot_interaction_graph(
 
     # Verify that the layer names match the edge names
     edge_names = [edge_info[0] for edge_info in raw_edges]
+    if len(edge_names) != len(layer_names) - 1:
+        print(
+            f"WARNING: len(edge_names) != len(layer_names) - 1. edge_names={edge_names}, layer_names={layer_names}. This will probably cause the last layer in the plot to have no nodes. Are you using an old file?"
+        )
     for edge_name, layer_name in zip(edge_names, layer_names[:-1]):
         assert edge_name == layer_name, "The layer names must match the edge names."
 
@@ -156,6 +161,14 @@ def plot_interaction_graph(
         )
         # Add layer label above the nodes
         plt.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+
+    # Label nodes if node_labels is provided
+    if node_labels is not None:
+        node_label_dict = {}
+        for i, layer in enumerate(layers):
+            for j, node in enumerate(layer):
+                node_label_dict[node] = node_labels[i][j].replace("|", "\n")
+        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8)
 
     # Draw edges
     width_factor = 15

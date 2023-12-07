@@ -208,7 +208,7 @@ def get_rib_acts_test(results: RibBuildResults):
             prev_module_outputs.append(output)
     prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
     test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
-    utils_rib_acts = rib_acts[module_to_test]
+    utils_rib_acts = rib_acts[module_to_test].cpu()
     assert torch.allclose(utils_rib_acts, test_rib_acts, atol=1e-3)
 
 

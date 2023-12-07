@@ -92,9 +92,14 @@ def convert_tlens_weights(
                     f"of different dtypes."
                 )
                 if not torch.allclose(buffer_val, tlens_param_val.to(buffer_val.dtype)):
-                    raise ValueError(
-                        f"Buffer {seq_param_name} does not match between seq_model and tlens_model"
-                    )
+                    if seq_param_name.endswith("IGNORE"):
+                        print(
+                            f"Mismatch ignored in parameter {seq_param_name} ({buffer_val} vs {tlens_param_val})"
+                        )
+                    else:
+                        raise ValueError(
+                            f"Buffer {seq_param_name} does not match between seq_model and tlens_model"
+                        )
             state_dict[seq_param_name] = tlens_param_val
 
     return state_dict

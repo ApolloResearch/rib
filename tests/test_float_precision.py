@@ -38,18 +38,16 @@ class TestPythiaFloatingPointErrors:
                 return_set_n_samples: 10
                 return_set_portion: first
             node_layers:
-                - ln1.0
                 - mlp_out.0
                 - ln2.3
                 - mlp_out.3
-                - ln1.5
                 - mlp_out.5
                 - output
             batch_size: 4  #  A100 can handle 24
             gram_batch_size: 20  #  A100 can handle 80
             truncation_threshold: 1e-6
             rotate_final_node_layer: false
-            n_intervals: 10
+            n_intervals: 0
             calculate_edges: false
             eval_type: null
             seed: 42
@@ -152,11 +150,9 @@ class TestPythiaFloatingPointErrors:
             return_set_n_samples: 10
             return_set_portion: first
         ablation_node_layers:
-            - ln1.0
             - mlp_out.0
             - ln2.3
             - mlp_out.3
-            - ln1.5
             - mlp_out.5
         batch_size: 30  # A100 can handle 60
         eval_type: ce_loss

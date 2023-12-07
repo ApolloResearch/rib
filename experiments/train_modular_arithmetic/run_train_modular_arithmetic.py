@@ -22,7 +22,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.data import ModularArithmeticDatasetConfig
-from rib.loader import create_data_loader, load_dataset
+from rib.loader import load_dataset
 from rib.log import logger
 from rib.models.utils import save_model
 from rib.types import RootPath
@@ -30,7 +30,7 @@ from rib.utils import load_config, set_seed
 
 
 class ModelConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     n_layers: int
     d_model: int
     d_head: int
@@ -43,7 +43,7 @@ class ModelConfig(BaseModel):
 
 
 class TrainConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     learning_rate: float
     batch_size: int  # Set to max(batch_size, <number of samples in dataset>)
     epochs: int
@@ -57,14 +57,14 @@ class TrainConfig(BaseModel):
 
 
 class WandbConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     project: str
     entity: Optional[str]
 
 
 class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    seed: int
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    seed: Optional[int] = 0
     model: ModelConfig
     train: TrainConfig
     dataset: ModularArithmeticDatasetConfig
@@ -194,6 +194,8 @@ def evaluate_model(model, test_loader: DataLoader, device: str) -> float:
 def main(config_path_or_obj: Union[str, Config]) -> tuple[float, float]:
     config = load_config(config_path_or_obj, config_model=Config)
 
+    assert config.dataset.return_set == "train", "Must use the train set for training."
+
     set_seed(config.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
@@ -203,14 +205,20 @@ def main(config_path_or_obj: Union[str, Config]) -> tuple[float, float]:
     model = HookedTransformer(transformer_lens_config)
     model = model.to(device)
 
-    datasets = load_dataset(
+    train_dataset = load_dataset(
         dataset_config=config.dataset,
-        return_set=config.dataset.return_set,
+        return_set="train",
         model_n_ctx=transformer_lens_config.n_ctx,
     )
-    train_loader, test_loader = create_data_loader(
-        datasets, shuffle=True, batch_size=config.train.batch_size, seed=config.seed
+    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True)
+
+    test_dataset = load_dataset(
+        dataset_config=config.dataset,
+        return_set="test",
+        model_n_ctx=transformer_lens_config.n_ctx,
     )
+    test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size, shuffle=True)
+
     run_name = f"lr-{config.train.learning_rate}_bs-{config.train.batch_size}_norm-{config.model.normalization_type}"
     if config.wandb:
         wandb.init(

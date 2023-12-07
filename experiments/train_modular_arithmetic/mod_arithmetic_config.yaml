@@ -14,12 +14,8 @@ dataset:
   modulus: 113  # 'p' in the paper and code
   frac_train: .30
   fn_name: add
-  return_set: both
   seed: 0
 train:
-  modulus: 113  # 'p' in the paper and code
-  frac_train: .30
-  fn_name: add
   learning_rate: 0.001
   batch_size: 10000
   epochs: 60000

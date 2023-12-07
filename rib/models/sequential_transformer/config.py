@@ -31,9 +31,11 @@ class SequentialTransformerConfig(BaseModel):
             "standard" for gpt2).
         parallel_attn_mlp: Whether to parallelize the attention and MLP computations (as done in
             pythia).
+        original_architecture: The family of the model, used to help load weights from HuggingFace
+            or initialized to "custom" if not passed.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     n_layers: int
     d_model: int

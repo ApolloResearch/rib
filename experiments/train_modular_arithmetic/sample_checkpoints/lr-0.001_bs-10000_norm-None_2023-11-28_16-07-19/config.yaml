@@ -3,7 +3,6 @@ dataset:
   frac_train: 0.3
   modulus: 113
   name: modular_arithmetic
-  return_set: both
   seed: 0
   source: custom
 model:

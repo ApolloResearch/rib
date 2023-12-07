@@ -14,7 +14,7 @@ from rib.types import TORCH_DTYPES, StrDtype
 
 
 class MLPConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     hidden_sizes: Optional[list[int]] = Field(
         None,
         description="A list of integers specifying the sizes of the hidden layers. If None, "

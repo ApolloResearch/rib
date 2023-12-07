@@ -221,7 +221,7 @@ def calc_edge_functional(
     dataset_size: int,
     n_intervals: int,
 ) -> None:
-    """Calculate the interaction attribution (edge) for module_hat with inputs f_in_hat.
+    """Calculate the interaction attribution (edge) for module_hat using the functional method.
 
     Updates the edge in-place.
 
@@ -303,7 +303,7 @@ def calc_edge_squared(
     dataset_size: int,
     n_intervals: int,
 ) -> None:
-    """Calculate the interaction attribution (edge) for module_hat with inputs f_in_hat.
+    """Calculate the interaction attribution (edge) for module_hat using the squared method.
 
     Updates the edge in-place.
 
@@ -333,7 +333,6 @@ def calc_edge_squared(
 
     # Accumulate integral results for all x (batch) and t (out position) values.
     # We store values because we need to square the integral result before summing.
-    # This term is the content of the brackets before the square, i.e. the sum over tprime.
     J_hat = (
         torch.zeros(
             batch_size,
@@ -406,6 +405,112 @@ def calc_edge_squared(
     # Square, and sum over batch size and output pos (if applicable)
     J_hat = J_hat**2 / normalization_factor
     edge += J_hat.sum(dim=(0, 1) if has_pos else 0)
+
+
+def calc_edge_stochastic(
+    module_hat: Callable[
+        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
+    ],
+    f_in_hat: Float[Tensor, "... pos out_hidden_combined_trunc"],
+    in_tuple_dims: list[int],
+    edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    dataset_size: int,
+    n_intervals: int,
+    stochastic_noise_dim: int,
+) -> None:
+    """Calculate the interaction attribution (edge) for module_hat using the stochastic method.
+
+    Note that this method can only be run with models that have a position dimension.
+
+    Updates the edge in-place.
+
+    Args:
+        module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
+            in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
+        f_in_hat: The inputs to the module. May or may not include a position dimension.
+        in_tuple_dims: The final dimensions of the inputs to the module.
+        edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
+        dataset_size: The size of the dataset. Used for normalizing the gradients.
+        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        stochastic_noise_dim: The dimension of the stochastic noise to add to the inputs.
+    """
+
+    f_in_hat.requires_grad_(True)
+
+    alphas, interval_size = _calc_integration_intervals(n_intervals)
+
+    # Get sizes for intermediate result storage
+    batch_size = f_in_hat.shape[0]
+    out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = edge.shape
+
+    # Just run the model to see what the output pos size is
+    with torch.inference_mode():
+        out_pos_size = module_hat(f_in_hat, in_tuple_dims).shape[1]
+
+    # Accumulate integral results for all x (batch) and t (out position) values.
+    # We store values because we need to square the integral result before summing.
+    # J_hat = torch.zeros(
+    #     batch_size,
+    #     stochastic_noise_dim,
+    #     out_hidden_size_comb_trunc,
+    #     in_hidden_size_comb_trunc,
+    #     device=f_in_hat.device,
+    # )
+    J_hat = torch.empty(
+        batch_size,
+        stochastic_noise_dim,
+        out_hidden_size_comb_trunc,
+        in_hidden_size_comb_trunc,
+        device=f_in_hat.device,
+    )
+
+    phi = torch.randn(
+        (batch_size, stochastic_noise_dim, out_pos_size),
+        dtype=f_in_hat.dtype,
+        device=f_in_hat.device,
+    )
+    normalization_factor = f_in_hat.shape[1] * dataset_size * stochastic_noise_dim
+
+    # Integral
+    for alpha_index, alpha in tqdm(
+        enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
+    ):
+        # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
+        # alpha=0.5) and multiply by the interval size.
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+            trapezoidal_scaler = 0.5 * interval_size
+        else:
+            trapezoidal_scaler = interval_size
+
+        # We have to compute inputs from f_hat to make autograd work
+        alpha_f_in_hat = alpha * f_in_hat
+        f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
+
+        # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
+        for out_dim in range(out_hidden_size_comb_trunc):
+            for stochastic_dim in range(stochastic_noise_dim):
+                # autograd gives us the derivative w.r.t. b (batch dim), p (input pos) and
+                # j (input dim).
+                # The sum over the batch dimension before passing to autograd is just a trick
+                # to get the grad for every batch index vectorized.
+                phi_f_out_alpha_hat = torch.einsum(
+                    "bp,bp->", phi[:, stochastic_dim, :], f_out_alpha_hat[:, :, out_dim]
+                )
+                i_grad = (
+                    torch.autograd.grad(phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True)[0]
+                    * trapezoidal_scaler
+                )
+
+                with torch.inference_mode():
+                    # Element-wise multiply with f_in_hat and sum over the input pos
+                    J_hat[:, stochastic_noise_dim, out_dim, :] = -torch.einsum(
+                        "bpj,bpj->bj", i_grad, f_in_hat
+                    )
+
+    # Square, and sum over batch size and output pos
+    J_hat = J_hat**2 / normalization_factor
+    edge += J_hat.sum(dim=(0, 1))
 
 
 def integrated_gradient_trapezoidal_norm(

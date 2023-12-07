@@ -212,7 +212,8 @@ def collect_interaction_edges(
     dtype: torch.dtype,
     device: str,
     data_set_size: Optional[int] = None,
-    edge_formula: Literal["functional", "squared"] = "functional",
+    edge_formula: Literal["functional", "squared", "stochastic"] = "functional",
+    stochastic_noise_dim: Optional[int] = None,
 ) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -230,10 +231,12 @@ def collect_interaction_edges(
         device: The device to run the model on.
         data_set_size: the total size of the dataset, used to normalize. Defaults to
         `len(data_loader)`. Important to set when parallelizing over the dataset.
-        edge_formula: The formula to use for the attribution. Must be one of "functional" or
-            "squared". The former is the old (October) functional version, the latter is a new
-            (November) version.
-
+        edge_formula: The formula to use for the attribution.
+            - "functional" is the old (October 23) functional version
+            - "squared" is the version which iterates over the output dim and output pos dim
+            - "stochastic" is the version which iteratates over output dim and stochastic noise dim
+        stochastic_noise_dim: The dimension of the stochastic noise. Only used when
+            `edge_formula="stochastic"`. Defaults to None.
     Returns:
         A dictionary of interaction edge matrices, keyed by the module name which the edge passes
         through.
@@ -271,6 +274,7 @@ def collect_interaction_edges(
                     "n_intervals": n_intervals,
                     "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
                     "edge_formula": edge_formula,
+                    "stochastic_noise_dim": stochastic_noise_dim,
                 },
             )
         )

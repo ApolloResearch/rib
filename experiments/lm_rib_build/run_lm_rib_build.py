@@ -138,9 +138,14 @@ class Config(BaseModel):
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
         "use Us as Cs, giving the eigendecomposition of the gram matrix.",
     )
-    edge_formula: Literal["functional", "squared"] = Field(
+    edge_formula: Literal["functional", "squared", "stochastic"] = Field(
         "functional",
         description="The attribution method to use to calculate the edges.",
+    )
+    stochastic_noise_dim: Optional[int] = Field(
+        None,
+        description="The dimensionality of the noise vector to use when calculating stochastic"
+        "edges.",
     )
 
     @model_validator(mode="after")
@@ -149,6 +154,16 @@ class Config(BaseModel):
             raise ValueError(
                 "Exactly one of [tlens_pretrained, tlens_model_path] must be specified"
             )
+        return self
+
+    @model_validator(mode="after")
+    def verify_stochastic_noise_dim(self) -> "Config":
+        if self.edge_formula != "stochastic" and self.stochastic_noise_dim is not None:
+            raise ValueError(
+                "stochastic_noise_dim should only be set when edge_formula is stochastic"
+            )
+        if self.edge_formula == "stochastic" and self.stochastic_noise_dim is None:
+            raise ValueError("stochastic_noise_dim must be set when edge_formula is stochastic")
         return self
 
 
@@ -377,6 +392,7 @@ def main(
             device=device,
             data_set_size=full_dataset_len,  # includes data for other processes
             edge_formula=config.edge_formula,
+            stochastic_noise_dim=config.stochastic_noise_dim,
         )
 
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"

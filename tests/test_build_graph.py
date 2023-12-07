@@ -13,16 +13,30 @@ that have a small set of large numbers and a large set of small numbers.
 
 import sys
 from pathlib import Path
-from typing import Callable, Union
+from typing import Callable, Iterable, Union
 from unittest.mock import patch
 
 import pytest
 import torch
 import yaml
+from fancy_einsum import einsum
+
+from rib.analysis_utils import get_rib_acts, parse_c_infos
+from rib.data import (
+    HFDatasetConfig,
+    ModularArithmeticDatasetConfig,
+    VisionDatasetConfig,
+)
+from rib.hook_manager import HookedModel
+from rib.loader import load_dataset, load_mlp, load_sequential_transformer
+from rib.models.mlp import MLPConfig
+from rib.types import TORCH_DTYPES
 
 # Append the root directory to sys.path
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
+
+from torch.utils.data import DataLoader
 
 from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
@@ -107,6 +121,94 @@ def graph_build_test(
             atol=atol,
         ), f"act_size not equal to Lambdas for {module_name}"
 
+    return results
+
+
+def get_rib_acts_test(results):
+    Cs = parse_c_infos(results["interaction_rotations"])
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[results["config"]["dtype"]]
+    if "n_heads" in results["model_config_dict"]:
+        tlens_model_path = (
+            Path(results["config"]["tlens_model_path"])
+            if results["config"]["tlens_model_path"] is not None
+            else None
+        )
+        model, _ = load_sequential_transformer(
+            node_layers=results["config"]["node_layers"],
+            last_pos_module_type=results["config"]["last_pos_module_type"],
+            tlens_pretrained=results["config"]["tlens_pretrained"],
+            tlens_model_path=tlens_model_path,
+            fold_bias=True,
+            dtype=dtype,
+            device=device,
+        )
+        if results["config"]["dataset"]["source"] == "huggingface":
+            data_config = HFDatasetConfig(**results["config"]["dataset"])
+            load_data_kwargs = {"model_n_ctx": model.cfg.n_ctx}
+        else:
+            data_config = ModularArithmeticDatasetConfig(**results["config"]["dataset"])
+            load_data_kwargs = {"tlens_model_path": tlens_model_path}
+
+    else:
+        mlp_config = MLPConfig(**results["model_config_dict"]["model"])
+        model = load_mlp(
+            config=mlp_config,
+            mlp_path=Path(results["config"]["mlp_path"]),
+            fold_bias=True,
+            device=device,
+        )
+        model.to(device)
+        data_config = VisionDatasetConfig(**results["config"]["dataset"])
+        load_data_kwargs = {}
+
+    dataset = load_dataset(data_config, return_set="train", **load_data_kwargs)
+    data_loader = DataLoader(dataset, batch_size=16, shuffle=False)
+
+    hooked_model = HookedModel(model)
+
+    rib_acts = get_rib_acts(
+        hooked_model=hooked_model,
+        data_loader=data_loader,
+        c_infos=Cs.values(),
+        device=device,
+        dtype=dtype,
+    )
+    for m_name, acts in rib_acts.items():
+        assert acts.shape[0] == len(dataset), f"acts.shape[0] != len(dataset) for {m_name}"
+
+    # we choose a module to compare rib acts on and find the module immediately before it
+    if hasattr(model, "sections"):
+        # we choose the first module of node_layers, meaning the previous module is the last one
+        # in sections.pre
+        module_to_test = results["config"]["node_layers"][0]
+        prev_module_id = f"sections.pre.{len(model.sections['pre']) - 1}"
+    else:
+        # we arbitrarily choose the first layer.
+        assert "layers.1" in results["config"]["node_layers"], results["config"]["node_layers"]
+        module_to_test = "layers.1"
+        prev_module_id = "layers.0"
+
+    prev_module_outputs = []
+    with torch.inference_mode():
+        for input, _ in data_loader:
+            _, cache = hooked_model.run_with_cache(input.to(device=device))
+            # the cached outputs are always a list (e.g. with [mlp, residual])
+            output_list = cache[prev_module_id]["acts"]
+            output = torch.concatenate(output_list, dim=-1)
+            prev_module_outputs.append(output)
+    prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
+    test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
+    utils_rib_acts = rib_acts[module_to_test]
+    assert torch.allclose(utils_rib_acts, test_rib_acts, atol=1e-3), (
+        utils_rib_acts.shape,
+        test_rib_acts.shape,
+        utils_rib_acts.abs().mean(),
+        test_rib_acts.abs().mean(),
+        (utils_rib_acts - test_rib_acts).abs().mean(),
+    )
+
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
@@ -151,7 +253,8 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
 
-    graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
+    results = graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
+    get_rib_acts_test(results)
 
 
 @pytest.mark.slow
@@ -187,11 +290,12 @@ def test_pythia_14m_build_graph():
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
 
-    graph_build_test(
+    results = graph_build_test(
         config=config,
         build_graph_main_fn=lm_build_graph_main,
         atol=atol,
     )
+    get_rib_acts_test(results)
 
 
 @pytest.mark.slow
@@ -233,11 +337,12 @@ def test_mnist_build_graph(basis_formula, edge_formula):
     config_dict = yaml.safe_load(config_str)
     config = MlpRibConfig(**config_dict)
 
-    graph_build_test(
+    results = graph_build_test(
         config=config,
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
+    get_rib_acts_test(results)
 
 
 def rotate_final_layer_invariance(

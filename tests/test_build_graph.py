@@ -30,7 +30,7 @@ from rib.data import (
 from rib.hook_manager import HookedModel
 from rib.loader import load_dataset, load_mlp, load_sequential_transformer
 from rib.models.mlp import MLPConfig
-from rib.types import TORCH_DTYPES
+from rib.types import TORCH_DTYPES, RibBuildResults
 
 # Append the root directory to sys.path
 ROOT_DIR = Path(__file__).parent.parent.resolve()
@@ -124,7 +124,15 @@ def graph_build_test(
     return results
 
 
-def get_rib_acts_test(results):
+def get_rib_acts_test(results: RibBuildResults):
+    """Takes the results of a graph build and checks get_rib_acts computes the correct values.
+
+    This requires:
+    * loading the model and dataset
+    * 1) calling get_rib_acts, which hooks the model and computes the rib acts from that
+    * 2) using run_with_cache to get the output of the previous module and rotating with C
+    * comparing the results of 1) and 2)
+    """
     Cs = parse_c_infos(results["interaction_rotations"])
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -201,13 +209,7 @@ def get_rib_acts_test(results):
     prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
     test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
     utils_rib_acts = rib_acts[module_to_test]
-    assert torch.allclose(utils_rib_acts, test_rib_acts, atol=1e-3), (
-        utils_rib_acts.shape,
-        test_rib_acts.shape,
-        utils_rib_acts.abs().mean(),
-        test_rib_acts.abs().mean(),
-        (utils_rib_acts - test_rib_acts).abs().mean(),
-    )
+    assert torch.allclose(utils_rib_acts, test_rib_acts, atol=1e-3)
 
 
 @pytest.mark.slow

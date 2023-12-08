@@ -237,7 +237,7 @@ def calculate_interaction_rotations(
             # Use identity matrix as C and then progress to the next loop
             # TODO assert not rotate final
             width = gram_matrices[node_layer].shape[0]
-            Id = torch.eye(width)
+            Id = torch.eye(width, dtype=dtype, device=device)
             Cs.append(
                 InteractionRotation(node_layer_name=node_layer, out_dim=width, C=Id, C_pinv=Id)
             )

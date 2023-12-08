@@ -434,10 +434,6 @@ def calc_basis_jacobian(
     if has_pos or C_out is None:
         with torch.inference_mode():
             f_out_dummy = module(*inputs)
-            if isinstance(f_out_dummy, torch.Tensor):
-                print("Got f_out_dummy tensor")
-            else:
-                print("Got f_out_dummy tuple")
             f_out_dummy = (f_out_dummy,) if isinstance(f_out_dummy, torch.Tensor) else f_out_dummy
 
         out_hidden_size = sum(x.shape[-1] for x in f_out_dummy)

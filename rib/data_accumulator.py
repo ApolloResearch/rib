@@ -36,7 +36,9 @@ def run_dataset_through_model(
     assert len(hooks) > 0, "Hooks have not been applied to this model."
     loader: Union[tqdm, DataLoader]
     if use_tqdm:
-        loader = tqdm(dataloader, total=len(dataloader), desc="Batches through entire model")
+        loader = tqdm(
+            dataloader, total=len(dataloader), desc="Batches through entire model", leave=False
+        )
     else:
         loader = dataloader
 
@@ -245,7 +247,9 @@ def collect_interaction_edges(
 
     logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
     edge_hooks: list[Hook] = []
-    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
+    for idx, (C_info, module_name) in tqdm(
+        enumerate(zip(Cs[:-1], edge_modules)), total=len(Cs[:-1]), desc="Collecting edges"
+    ):
         # C from the next node layer
         assert C_info.C is not None, "C matrix is None."
         assert C_info.C_pinv is not None, "C_pinv matrix is None."

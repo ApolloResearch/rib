@@ -35,7 +35,6 @@ from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
 from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
     main as modular_dnn_build_main,
 )
-
 from rib.interaction_algos import build_sorted_lambda_matrices
 
 

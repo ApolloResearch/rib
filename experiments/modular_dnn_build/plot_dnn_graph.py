@@ -18,7 +18,7 @@ def main(results_file: str, force: bool = False) -> None:
 
     nodes_per_layer = 10
 
-    layer_names = results["config"]["node_layers"] + ["output"]
+    layer_names = results["config"]["node_layers"]
 
     plot_interaction_graph(
         raw_edges=results["edges"],
@@ -27,6 +27,8 @@ def main(results_file: str, force: bool = False) -> None:
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,
     )
+
+    print("Saved plot to", out_file)
 
 
 if __name__ == "__main__":

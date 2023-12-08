@@ -11,7 +11,7 @@ from rib.types import TORCH_DTYPES, StrDtype
 
 def generate_weights(
     total_width: int,
-    first_block_width: int,
+    first_block_width: Optional[int],
     block_variances: List[float],
     equal_columns: bool,
     dtype=torch.float32,
@@ -30,6 +30,7 @@ def generate_weights(
     Returns:
         A: a random block diagonal matrix
     """
+    first_block_width = first_block_width or total_width // 2
     assert total_width > first_block_width, "First block width must be smaller than total width"
     assert len(block_variances) == 2, "Only two blocks supported"
 
@@ -159,12 +160,13 @@ class ModularDNN(MLP):
 def generate_data(
     size: int,
     length: int,
-    first_block_length: int,
+    first_block_length: Optional[int],
     data_variances: List[float],
     data_perfect_correlation: bool,
     dtype: torch.dtype,
     seed: Optional[int] = None,
 ):
+    first_block_length = first_block_length or length // 2
     second_block_length = length - first_block_length
     data = torch.empty((size, length), dtype=dtype)
 

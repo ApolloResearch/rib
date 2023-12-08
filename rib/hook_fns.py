@@ -19,11 +19,11 @@ from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
+    calc_basis_integrated_gradient,
     calc_basis_jacobian,
     calc_edge_functional,
     calc_edge_squared,
     calc_gram_matrix,
-    integrated_gradient_trapezoidal_norm,
     module_hat,
 )
 from rib.models.sequential_transformer.components import AttentionOut
@@ -212,7 +212,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
     if basis_formula == "(1-alpha)^2" or basis_formula == "(1-0)*alpha":
-        in_grads = integrated_gradient_trapezoidal_norm(
+        in_grads = calc_basis_integrated_gradient(
             module=module,
             inputs=inputs,
             C_out=C_out,
@@ -257,7 +257,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         )  # shape:  batch, i, t (out_pos), tprime (in_pos), j/jprime
 
         # FIXME temporarily using old basis to compute Lambdas
-        in_grads_old = integrated_gradient_trapezoidal_norm(
+        in_grads_old = calc_basis_integrated_gradient(
             module=module,
             inputs=inputs,
             C_out=C_out,

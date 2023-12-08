@@ -9,12 +9,12 @@ from torch.func import jacrev
 
 from rib.linalg import (
     _calc_integration_intervals,
+    calc_basis_integrated_gradient,
     calc_edge_functional,
     calc_edge_squared,
     calc_gram_matrix,
     calc_rotation_matrix,
     eigendecompose,
-    integrated_gradient_trapezoidal_norm,
     pinv_diag,
 )
 
@@ -153,13 +153,13 @@ def test_intergrated_gradient_trapezoidal_norm_linear():
 
     linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
 
-    result_point_estimate = integrated_gradient_trapezoidal_norm(
+    result_point_estimate = calc_basis_integrated_gradient(
         module=linear, inputs=inputs, C_out=C_out, n_intervals=0
     )
-    result_1 = integrated_gradient_trapezoidal_norm(
+    result_1 = calc_basis_integrated_gradient(
         module=linear, inputs=inputs, C_out=C_out, n_intervals=1
     )
-    result_5 = integrated_gradient_trapezoidal_norm(
+    result_5 = calc_basis_integrated_gradient(
         module=linear, inputs=inputs, C_out=C_out, n_intervals=5
     )
 
@@ -198,14 +198,14 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
     C_out = torch.eye(hidden)
     inputs = (torch.randn(batch_size, hidden),)
 
-    result_2 = integrated_gradient_trapezoidal_norm(
+    result_2 = calc_basis_integrated_gradient(
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=2
     )
-    result_20 = integrated_gradient_trapezoidal_norm(
+    result_20 = calc_basis_integrated_gradient(
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=20
     )
 
-    result_200 = integrated_gradient_trapezoidal_norm(
+    result_200 = calc_basis_integrated_gradient(
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=200
     )
 
@@ -249,14 +249,14 @@ def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
     C_out = torch.eye(hidden)
     inputs = (torch.randn(batch_size, hidden),)
 
-    result_2 = integrated_gradient_trapezoidal_norm(
+    result_2 = calc_basis_integrated_gradient(
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=2
     )
-    result_20 = integrated_gradient_trapezoidal_norm(
+    result_20 = calc_basis_integrated_gradient(
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=20
     )
 
-    result_200 = integrated_gradient_trapezoidal_norm(
+    result_200 = calc_basis_integrated_gradient(
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=200
     )
 

@@ -506,7 +506,7 @@ def calc_basis_jacobian(
     return grads
 
 
-def integrated_gradient_trapezoidal_norm(
+def calc_basis_integrated_gradient(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch in_hidden"]],

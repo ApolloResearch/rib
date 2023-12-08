@@ -6,6 +6,7 @@ import torch
 
 from rib.hook_fns import gram_forward_hook_fn, gram_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
+from rib.loader import load_sequential_transformer
 
 
 @pytest.fixture
@@ -121,3 +122,42 @@ def test_gram_forward_hook_fn_accumulates_over_forward_passes(model):
 
     # Compare hooked_data with the expected gram matrix
     assert torch.allclose(hooked_model.hooked_data["test_forward"]["gram"], expected_gram)
+
+
+@pytest.mark.slow()
+def test_pythia_attn_causal_mask():
+    """Test that the causal mask is applied to the attention scores in the Pythia model
+
+    This test mainly exists to make sure the attention scores hook works sensibly.
+    """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float64
+    module_id = "attn_out.0"
+    batch_size = 2
+    n_ctx = 2048
+
+    seq_model, _ = load_sequential_transformer(
+        node_layers=[module_id],
+        last_pos_module_type=None,
+        tlens_pretrained="pythia-14m",
+        tlens_model_path=None,
+        fold_bias=True,
+        dtype=dtype,
+        device=device,
+    )
+    seq_model.eval()
+    hooked_model = HookedModel(seq_model)
+
+    # Create a fake data sample and run the model
+    input_ids = torch.randint(0, seq_model.cfg.d_vocab, (batch_size, n_ctx), device=device)
+    with torch.inference_mode():
+        _, cache = hooked_model.run_with_cache(input_ids)
+
+    # Check that the attention scores are masked correctly
+    for k in cache.keys():
+        if "attention_scores" in k:
+            attn_scores = cache[k]["acts"][0]
+            mask = torch.triu(torch.ones_like(attn_scores), diagonal=1)
+            assert torch.allclose(
+                attn_scores[mask == 1], torch.tensor(-float("inf"), dtype=torch.float64)
+            ), f"Attention scores for {k} are not masked correctly"

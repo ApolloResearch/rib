@@ -12,6 +12,7 @@ from rib.models.utils import get_model_attr
 
 
 def parse_c_infos(c_infos: list[dict[str, Any]]) -> dict[str, InteractionRotation]:
+    """Converts the list of dicts from loading rib results into a dict of InteractionRotations."""
     return {c_info["node_layer_name"]: InteractionRotation(**c_info) for c_info in c_infos}
 
 

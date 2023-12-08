@@ -1,8 +1,8 @@
 from .block_diagonal_dnn import (
+    BlockDiagonalDNN,
+    BlockDiagonalDNNConfig,
     BlockVectorDataset,
     BlockVectorDatasetConfig,
-    ModularDNN,
-    ModularDNNConfig,
 )
 from .mlp import MLP, MLPConfig, MLPLayer
 from .sequential_transformer.config import SequentialTransformerConfig

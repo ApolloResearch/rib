@@ -450,7 +450,7 @@ def calc_edge_stochastic(
 
     # Accumulate integral results for all x (batch) and r (stochastic dim) values.
     # We store values because we need to square the integral result before summing.
-    J_hat = torch.empty(
+    J_hat = torch.zeros(
         batch_size,
         stochastic_noise_dim,
         out_hidden_size_comb_trunc,
@@ -482,13 +482,13 @@ def calc_edge_stochastic(
 
         # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
         for out_dim in range(out_hidden_size_comb_trunc):
-            for stochastic_dim in range(stochastic_noise_dim):
+            for r in range(stochastic_noise_dim):
                 # autograd gives us the derivative w.r.t. b (batch dim), p (input pos) and
                 # j (input dim).
                 # The sum over the batch dimension before passing to autograd is just a trick
                 # to get the grad for every batch index vectorized.
                 phi_f_out_alpha_hat = torch.einsum(
-                    "bp,bp->", phi[:, stochastic_dim, :], f_out_alpha_hat[:, :, out_dim]
+                    "bp,bp->", phi[:, r, :], f_out_alpha_hat[:, :, out_dim]
                 )
                 i_grad = (
                     torch.autograd.grad(phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True)[0]
@@ -497,9 +497,7 @@ def calc_edge_stochastic(
 
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat and sum over the input pos
-                    J_hat[:, stochastic_noise_dim, out_dim, :] -= torch.einsum(
-                        "bpj,bpj->bj", i_grad, f_in_hat
-                    )
+                    J_hat[:, r, out_dim, :] -= torch.einsum("bpj,bpj->bj", i_grad, f_in_hat)
 
     # Square, and sum over batch size and output pos
     J_hat = J_hat**2 / normalization_factor

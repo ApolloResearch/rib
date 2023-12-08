@@ -409,7 +409,7 @@ def calc_edge_squared(
     edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1) if has_pos else 0)
 
 
-def integrated_gradient_trapezoidal_basis_jacobian(
+def calc_basis_jacobian(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch in_hidden"]],
@@ -418,7 +418,7 @@ def integrated_gradient_trapezoidal_basis_jacobian(
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
-) -> Float[Tensor, "... in_hidden_combined"]:
+) -> Float[Tensor, "batch out_hidden_trunc out_pos in_pos in_hidden"]:
     # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:
         x.requires_grad_(True)
@@ -432,7 +432,6 @@ def integrated_gradient_trapezoidal_basis_jacobian(
     in_pos_size = inputs[0].shape[1] if has_pos else None
     in_hidden_size = sum(x.shape[-1] for x in inputs)
     if has_pos or C_out is None:
-        print("Has pos")
         with torch.inference_mode():
             f_out_dummy = module(*inputs)
             if isinstance(f_out_dummy, torch.Tensor):
@@ -451,8 +450,8 @@ def integrated_gradient_trapezoidal_basis_jacobian(
 
     if has_pos:
         assert in_pos_size is not None  # needed for mypy
+        # grads.shape: batch, i, t (out_pos), tprime (in_pos), j/jprime
         grads = torch.zeros(
-            # batch, i, t (out), tprime (in), j/jprime
             batch_size,
             out_hat_hidden_size,
             out_pos_size,
@@ -465,45 +464,44 @@ def integrated_gradient_trapezoidal_basis_jacobian(
         # Old in_grads shape: batch pos j
         # New in_grads shape: batch i t tprime j
         for alpha_index, alpha in enumerate(alphas):
+            # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
+            # point estimate at alpha=0.5) and multiply by the interval size.
+            if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+                trapezoidal_scaler = 0.5 * interval_size
+            else:
+                trapezoidal_scaler = interval_size
             # Compute f^{l+1}(f^l(alpha x))
-            alpha_inputs = tuple(alpha * x for x in inputs)
-            outputs_alpha = module(*alpha_inputs)
-            out_acts_alpha = (
+            f_in_alpha = tuple(alpha * x for x in inputs)
+            outputs_alpha = module(*f_in_alpha)
+            f_out_alpha = (
                 outputs_alpha
                 if isinstance(outputs_alpha, torch.Tensor)
                 else torch.cat(outputs_alpha, dim=-1)
             )
-            out_acts_alpha_hat = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha
+            f_out_hat_alpha = f_out_alpha @ C_out if C_out is not None else f_out_alpha
             # out_acts_alpha_hat.shape: batch (pos) i
             # input shape:n batch, (in-pos), j/jprime
 
-            # Calculate the grads
+            # Calculate the grads, numerator indices i and t
             for i in range(out_hat_hidden_size):
                 for t in range(out_pos_size):
-                    # Sum over batch only, trick to get the grad for every batch index vectorized.
-                    out_acts_alpha_hat[:, t, i].sum(dim=0).backward(
-                        inputs=alpha_inputs, retain_graph=True
+                    # Sum over batch is a trick to get the grad for every batch index vectorized.
+                    # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
+                    # times (for each i and t, in a for loop) aka we're doing a jacobian.
+                    # Concatenate over the tuple dimension of the inputs.
+                    alpha_in_grads = torch.cat(
+                        torch.autograd.grad(
+                            f_out_hat_alpha[:, t, i].sum(dim=0), f_in_alpha, retain_graph=True
+                        ),
+                        dim=-1,
                     )
-                    alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
-                    # alpha_in_grads.shape: batch in_pos (tprime) in_hidden_comb (j)
-
-                    # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
-                    # estimate at alpha=1)
-                    if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
-                        alpha_in_grads = 0.5 * alpha_in_grads
-
-                    # TODO: Minus sign correct?
-                    # batch.shape: batch, i, t (out), tprime (in), j/jprime
-                    # -= for alpha integral
-                    grads[:, i, t, :, :] -= alpha_in_grads * interval_size
-                    # Contraction over batch, i, t and tprime happens after the integral,
+                    # grads.shape: batch, i, t (out_pos), tprime (in_pos), j/jprime
+                    grads[:, i, t, :, :] += alpha_in_grads * trapezoidal_scaler
+                    # Contraction over batch, i, t, and tprime happens after the integral,
                     # but we cannot contract earlier because we have to finish the integral
-
-                    for x in alpha_inputs:
-                        assert x.grad is not None, "Input grad should not be None."
-                        x.grad.zero_()
     else:
         raise NotImplementedError("No pos not implemented yet")
+        # TODO
 
     return grads
 
@@ -525,7 +523,7 @@ def integrated_gradient_trapezoidal_norm(
     Uses the trapezoidal rule to approximate the integral between 0+eps and 1-eps.
 
     Unlike in the integrated gradient calculation for the edge weights, this function takes the norm
-    of the output of the module, condensing the output to a single number which we can run backward
+    of the output of the module, condensing the output to a single number which we can run autograd
     on. (Thus we do not need to use jacrev.)
 
     Args:
@@ -567,6 +565,12 @@ def integrated_gradient_trapezoidal_norm(
     alphas, interval_size = _calc_integration_intervals(n_intervals)
 
     for alpha_index, alpha in enumerate(alphas):
+        # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
+        # point estimate at alpha=0.5) and multiply by the interval size.
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+            trapezoidal_scaler = 0.5 * interval_size
+        else:
+            trapezoidal_scaler = interval_size
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
@@ -586,7 +590,7 @@ def integrated_gradient_trapezoidal_norm(
             )
             # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
             # to taking the gradient of each output element separately, but it lets us simply use
-            # backward() instead of more complex (and probably less efficient) vmap operations.
+            # autograd.grad instead of more complex (and probably less efficient) vmap operations.
             # Note the minus sign here. In the paper this minus is in front of the integral, but
             # for generality we put it here.
             f_hat_norm = -(f_hat_1_alpha**2).sum()
@@ -604,19 +608,11 @@ def integrated_gradient_trapezoidal_norm(
             )
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors
-        f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
+        alpha_in_grads = torch.cat(
+            torch.autograd.grad(f_hat_norm, alpha_inputs, retain_graph=True), dim=-1
+        )
 
-        alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
-        # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
-        # estimate at alpha=0.5)
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
-            alpha_in_grads = 0.5 * alpha_in_grads
-
-        in_grads += alpha_in_grads * interval_size
-
-        for x in alpha_inputs:
-            assert x.grad is not None, "Input grad should not be None."
-            x.grad.zero_()
+        in_grads += alpha_in_grads * trapezoidal_scaler
 
     return in_grads
 

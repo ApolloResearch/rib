@@ -19,10 +19,10 @@ from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
+    calc_basis_jacobian,
     calc_edge_functional,
     calc_edge_squared,
     calc_gram_matrix,
-    integrated_gradient_trapezoidal_basis_jacobian,
     integrated_gradient_trapezoidal_norm,
     module_hat,
 )
@@ -218,7 +218,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             C_out=C_out,
             n_intervals=n_intervals,
             basis_formula=basis_formula,
-        )
+        )  # shape: batch pos j
         in_dtype = in_grads.dtype
 
         has_pos = inputs[0].dim() == 3
@@ -249,21 +249,21 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
 
     elif basis_formula == "jacobian":
-        in_grads = integrated_gradient_trapezoidal_basis_jacobian(
+        in_grads = calc_basis_jacobian(
             module=module,
             inputs=inputs,
             C_out=C_out,
             n_intervals=n_intervals,
-        )
+        )  # shape:  batch, i, t (out_pos), tprime (in_pos), j/jprime
+
         # FIXME temporarily using old basis to compute Lambdas
-        # TODO Will there be weird grads somewhere lying around?
         in_grads_old = integrated_gradient_trapezoidal_norm(
             module=module,
             inputs=inputs,
             C_out=C_out,
             n_intervals=n_intervals,
             basis_formula="(1-0)*alpha",
-        )
+        )  # shape: batch pos j
 
         has_pos = inputs[0].dim() == 3
         einsum_pattern = (

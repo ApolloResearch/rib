@@ -128,8 +128,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float):
     * 2) using run_with_cache to get the output of the previous module and rotating with C
     * comparing the results of 1) and 2)
     """
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results["config"]["dtype"]]
     model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=16, shuffle=False)

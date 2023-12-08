@@ -35,6 +35,7 @@ from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
 from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
     main as modular_dnn_build_main,
 )
+
 from rib.interaction_algos import build_sorted_lambda_matrices
 
 
@@ -63,6 +64,7 @@ def graph_build_test(
     config: Union[LMRibConfig, MlpRibConfig],
     build_graph_main_fn: Callable,
     atol: float,
+    test_lambdas: bool = True,
 ):
     results, Lambdas = build_get_lambdas(config, build_graph_main_fn)
 
@@ -98,17 +100,18 @@ def graph_build_test(
                     act_size / act_size.abs().max(),
                     edge_size / edge_size.abs().max(),
                     atol=atol,
-                ), f"act_size not equal to edge_size for {module_name}"
+                ), f"act_size not equal to edge_size for {module_name}, got {act_size}, {edge_size}"
 
-        # Check that the Lambdas are also the same as the act_size and edge_size
-        # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
-        # `rib.interaction_algos.build_sort_lambda_matrix)
-        Lambdas_trunc = Lambdas[i][: len(act_size)]
-        assert torch.allclose(
-            act_size / act_size.abs().max(),
-            Lambdas_trunc / Lambdas_trunc.max(),
-            atol=atol,
-        ), f"act_size not equal to Lambdas for {module_name}"
+        if test_lambdas:
+            # Check that the Lambdas are also the same as the act_size and edge_size
+            # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
+            # `rib.interaction_algos.build_sort_lambda_matrix)
+            Lambdas_trunc = Lambdas[i][: len(act_size)]
+            assert torch.allclose(
+                act_size / act_size.abs().max(),
+                Lambdas_trunc / Lambdas_trunc.max(),
+                atol=atol,
+            ), f"act_size not equal to Lambdas for {module_name}"
 
 
 @pytest.mark.slow
@@ -240,6 +243,70 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         config=config,
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula, dtype_str",
+    [
+        ("(1-alpha)^2", "squared", "float32"),
+        ("(1-alpha)^2", "squared", "float64"),
+        ("(1-0)*alpha", "squared", "float32"),
+        ("(1-0)*alpha", "squared", "float64"),
+        ("(1-alpha)^2", "functional", "float32"),
+        ("(1-alpha)^2", "functional", "float64"),
+        ("(1-0)*alpha", "functional", "float32"),
+        ("(1-0)*alpha", "functional", "float64"),
+        ("svd", "squared", "float32"),
+        ("svd", "squared", "float64"),
+        ("neuron", "squared", "float32"),
+        ("neuron", "squared", "float64"),
+        ("svd", "functional", "float32"),
+        ("svd", "functional", "float64"),
+        ("neuron", "functional", "float32"),
+        ("neuron", "functional", "float64"),
+    ],
+)
+def test_modular_dnn_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
+    config_str = f"""
+        exp_name: test
+        out_dir: null
+        node_layers:
+            - layers.0
+            - layers.1
+            - layers.2
+            - output
+        model:
+            n_hidden_layers: 2
+            width: 10
+            weight_variances: [1,1]
+            weight_equal_columns: false
+            bias: 0
+            activation_fn: relu
+        dataset:
+            size: 1000
+            length: 10
+            data_variances: [1,1]
+            data_perfect_correlation: false
+        seed: 123
+        batch_size: 256
+        n_intervals: 0
+        truncation_threshold: 1e-6
+        dtype: {dtype_str}
+        rotate_final_node_layer: false
+        basis_formula: {basis_formula}
+        edge_formula: {edge_formula}
+    """
+
+    config_dict = yaml.safe_load(config_str)
+    config = ModularDNNRibConfig(**config_dict)
+
+    graph_build_test(
+        config=config,
+        build_graph_main_fn=modular_dnn_build_main,
+        atol=atol,
+        test_lambdas=False if basis_formula in ["svd", "neuron"] else True,
     )
 
 

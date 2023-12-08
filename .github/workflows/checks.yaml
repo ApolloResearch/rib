@@ -32,6 +32,7 @@ jobs:
 
     - name: Set up or use existing virtual environment
       run: |
+        pwd
         if [ ! -d "venv" ]; then
           echo "Creating a new virtual environment."
           python -m venv venv

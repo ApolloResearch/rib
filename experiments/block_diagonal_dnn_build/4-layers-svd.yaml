@@ -1,4 +1,4 @@
-exp_name: 4-layers-n-svd
+exp_name: 4-layers-blockdiagonaldnn-svd
 node_layers:
   - layers.0
   - layers.1
@@ -16,7 +16,7 @@ model:
   width: 4
   weight_variances: [2, 2]
   weight_equal_columns: false
-  bias: 3.141
+  bias: 0
 seed: 0
 dtype: float64
 batch_size: 256

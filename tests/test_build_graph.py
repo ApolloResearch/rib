@@ -25,16 +25,16 @@ import yaml
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 
+from experiments.block_diagonal_dnn_build.run_block_diagonal_dnn_rib_build import (
+    Config as ModularDNNRibConfig,
+)
+from experiments.block_diagonal_dnn_build.run_block_diagonal_dnn_rib_build import (
+    main as block_diagonal_dnn_build_main,
+)
 from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
 from experiments.mlp_rib_build.run_mlp_rib_build import Config as MlpRibConfig
 from experiments.mlp_rib_build.run_mlp_rib_build import main as mlp_build_graph_main
-from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
-    Config as ModularDNNRibConfig,
-)
-from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
-    main as modular_dnn_build_main,
-)
 
 from rib.interaction_algos import build_sorted_lambda_matrices
 
@@ -268,7 +268,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         ("neuron", "functional", "float64"),
     ],
 )
-def test_modular_dnn_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
+def test_block_diagonal_dnn_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
     config_str = f"""
         exp_name: test
         out_dir: null
@@ -304,7 +304,7 @@ def test_modular_dnn_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
 
     graph_build_test(
         config=config,
-        build_graph_main_fn=modular_dnn_build_main,
+        build_graph_main_fn=block_diagonal_dnn_build_main,
         atol=atol,
         test_lambdas=False if basis_formula in ["svd", "neuron"] else True,
     )
@@ -397,7 +397,7 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
         ("(1-0)*alpha", "squared"),
     ],
 )
-def test_modular_dnn_rotate_final_layer_invariance(
+def test_block_diagonal_dnn_rotate_final_layer_invariance(
     basis_formula, edge_formula, rtol=1e-7, atol=1e-8
 ):
     """Test that the non-final edges are the same for ModularDNN whether or not we rotate the final layer."""
@@ -434,7 +434,7 @@ def test_modular_dnn_rotate_final_layer_invariance(
     rotate_final_layer_invariance(
         config_str_rotated=config_str_rotated,
         config_cls=ModularDNNRibConfig,
-        build_graph_main_fn=modular_dnn_build_main,
+        build_graph_main_fn=block_diagonal_dnn_build_main,
         rtol=rtol,
         atol=atol,
     )
@@ -641,7 +641,7 @@ all_combinations = list(
 
 @pytest.mark.slow
 @pytest.mark.parametrize("basis_formula, edge_formula, dtype_str, rotate_final", all_combinations)
-def test_modular_dnn_diagonal_edges_when_linear(
+def test_block_diagonal_dnn_diagonal_edges_when_linear(
     basis_formula, edge_formula, dtype_str, rotate_final, rtol=1e-7, atol=1e-5, gtol=1e-4
 ):
     """Test that RIB rotates to a diagonal basis when the ModularDNN is linear.
@@ -688,7 +688,7 @@ def test_modular_dnn_diagonal_edges_when_linear(
     diagonal_edges_when_linear(
         config_str=config_str,
         config_cls=ModularDNNRibConfig,
-        build_graph_main_fn=modular_dnn_build_main,
+        build_graph_main_fn=block_diagonal_dnn_build_main,
         rtol=rtol,
         atol=atol,
         gtol=gtol,

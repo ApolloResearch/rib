@@ -1,10 +1,16 @@
+import logging
 import warnings
+from logging.config import dictConfig
+from pathlib import Path
 from typing import Literal
 
 import torch
 from transformer_lens import HookedTransformer
 
 from rib.models import SequentialTransformer
+
+logging.captureWarnings(True)
+DEFAULT_LOGFILE = Path(__file__).resolve().parent.parent / "logs" / "logs.log"
 
 
 def convert_tlens_weights(
@@ -95,7 +101,7 @@ def convert_tlens_weights(
                 if not torch.allclose(buffer_val, tlens_param_val.to(buffer_val.dtype)):
                     if seq_param_name.endswith("IGNORE"):
                         warnings.warn(
-                            f"WARNING: Mismatch ignored in parameter {seq_param_name} ({buffer_val} vs {tlens_param_val})"
+                            f"Mismatch ignored in parameter {seq_param_name} ({buffer_val} vs {tlens_param_val})"
                         )
                     else:
                         raise ValueError(

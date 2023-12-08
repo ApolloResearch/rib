@@ -7,7 +7,10 @@ plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
+import logging
+import warnings
 from datetime import datetime
+from logging.config import dictConfig
 from pathlib import Path
 from typing import Literal, Optional, Union
 
@@ -15,6 +18,9 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
+
+logging.captureWarnings(True)
+DEFAULT_LOGFILE = Path(__file__).resolve().parent.parent / "logs" / "logs.log"
 
 
 def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:
@@ -126,8 +132,8 @@ def plot_interaction_graph(
     # Verify that the layer names match the edge names
     edge_names = [edge_info[0] for edge_info in raw_edges]
     if len(edge_names) != len(layer_names) - 1:
-        print(
-            f"WARNING: len(edge_names) != len(layer_names) - 1. edge_names={edge_names}, layer_names={layer_names}. This will probably cause the last layer in the plot to have no nodes. Are you using an old file?"
+        warnings.warn(
+            f"len(edge_names) != len(layer_names) - 1. edge_names={edge_names}, layer_names={layer_names}. This will probably cause the last layer in the plot to have no nodes. Are you using an old file?"
         )
     for edge_name, layer_name in zip(edge_names, layer_names[:-1]):
         assert edge_name == layer_name, "The layer names must match the edge names."

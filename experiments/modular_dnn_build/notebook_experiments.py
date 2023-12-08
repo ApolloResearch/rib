@@ -8,11 +8,11 @@ from unittest.mock import patch
 import fire
 import torch
 import yaml
-from experiments.block_diagonal_dnn_build.run_block_diagonal_dnn_rib_build import (
-    Config as block_diagonal_dnn_build_Config,
+from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
+    Config as modular_dnn_build_Config,
 )
-from experiments.block_diagonal_dnn_build.run_block_diagonal_dnn_rib_build import (
-    main as block_diagonal_dnn_build_main,
+from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
+    main as modular_dnn_build_main,
 )
 
 from rib.plotting import plot_interaction_graph
@@ -45,7 +45,7 @@ from rib.utils import check_outfile_overwrite
 
 
 def main(
-    exp_name: str = "small_block_diagonal_dnn",
+    exp_name: str = "small_modular_dnn",
     n_hidden_layers: int = 3,
     width: int = 4,
     weight_variances: list[float] = [1.0, 1.0],
@@ -97,18 +97,18 @@ def main(
     # out_dir = f"nhl={n_hidden_layers}_w={width}_wv={weight_variances}_wec={weight_equal_columns}_b={bias}_ds={dataset_size}_dv={data_variances}_pdc={perfect_data_correlation}_bf={basis_formula}_r={rotate_final_node_layer}_dt={dtype}_s={seed}_ef={edge_formula}"
 
     config_dict = yaml.safe_load(config_str)
-    config = block_diagonal_dnn_build_Config(**config_dict)
+    config = modular_dnn_build_Config(**config_dict)
 
     for type in ["rib", "svd", "neuron"]:
         if type == "rib":
             config.basis_formula = basis_formula
-            results = block_diagonal_dnn_build_main(config, force=force)
+            results = modular_dnn_build_main(config, force=force)
         elif type == "svd":
             config.basis_formula = "svd"
-            results = block_diagonal_dnn_build_main(config, force=force)
+            results = modular_dnn_build_main(config, force=force)
         elif type == "neuron":
             config.basis_formula = "neuron"
-            results = block_diagonal_dnn_build_main(config, force=force)
+            results = modular_dnn_build_main(config, force=force)
 
         out_dir = Path(__file__).parent / "out"
         out_file = out_dir / f"{results['exp_name']}_graph_{type}.png"

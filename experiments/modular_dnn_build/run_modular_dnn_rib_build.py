@@ -16,13 +16,13 @@ from rib.data_accumulator import collect_gram_matrices, collect_interaction_edge
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
-from rib.models.block_diagonal_dnn import (
+from rib.models.mlp import MLPConfig
+from rib.models.modular_dnn import (
     BlockVectorDataset,
     BlockVectorDatasetConfig,
     ModularDNN,
     ModularDNNConfig,
 )
-from rib.models.mlp import MLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import check_outfile_overwrite, load_config, set_seed
 

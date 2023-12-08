@@ -8,13 +8,13 @@ from unittest.mock import patch
 import fire
 import torch
 import yaml
-
 from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
     Config as modular_dnn_build_Config,
 )
 from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
     main as modular_dnn_build_main,
 )
+
 from rib.plotting import plot_interaction_graph
 from rib.utils import check_outfile_overwrite
 
@@ -125,4 +125,4 @@ def main(
 
 
 if __name__ == "__main__":
-    fire.Fire(lambda **kwargs: main(**kwargs))
+    fire.Fire(main)

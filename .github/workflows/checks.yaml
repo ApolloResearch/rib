@@ -21,33 +21,25 @@ on:
 jobs:
   build:
     runs-on: self-hosted
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Python 3.9
+    - name: Set up Python 3.10
       uses: actions/setup-python@v4
       with:
-        python-version: 3.9
+        python-version: 3.10
 
-    - name: Set up virtual environment
+    - name: Set up or use existing virtual environment
       run: |
-        python -m venv venv
+        if [ ! -d "venv" ]; then
+          echo "Creating a new virtual environment."
+          python -m venv venv
+        else
+          echo "Using existing virtual environment."
+        fi
 
-    - name: Cache virtual environment
-      uses: actions/cache@v3
-      with:
-        path: venv
-        key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-venv-
-
-    - name: Install mpi
-      run: |
-        sudo apt-get update
-        sudo apt-get install libopenmpi-dev
-
-    - name: Install dependencies
+    - name: Install or update dependencies
       run: |
         source venv/bin/activate
         python -m pip install --upgrade pip

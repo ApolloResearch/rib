@@ -23,11 +23,10 @@ def get_rib_acts(
     dtype: torch.dtype = torch.float32,
 ) -> dict[str, Float[torch.Tensor, "batch ... rotated"]]:
     def get_module_name(m_name):
-        try:
-            get_model_attr(hooked_model.model, m_name)
-            return m_name
-        except AttributeError:
+        if hasattr(hooked_model.model, "module_id_to_section_id"):
             return hooked_model.model.module_id_to_section_id[m_name]
+        else:
+            return m_name
 
     hooks = [
         Hook(

@@ -1,7 +1,7 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import torch
 import torchvision
@@ -21,6 +21,7 @@ from rib.data import (
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.mlp import MLP, MLPConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
+from rib.types import RibBuildResults
 from rib.utils import REPO_ROOT, get_data_subset, to_root_path, train_test_split
 
 
@@ -372,3 +373,55 @@ def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Da
     dataset_idx_start = dataset_len * chunk_idx // total_chunks
     dataset_idx_end = dataset_len * (chunk_idx + 1) // total_chunks
     return Subset(dataset, range(dataset_idx_start, dataset_idx_end))
+
+
+def load_model_and_dataset_from_rib_results(
+    results: RibBuildResults, device: str, dtype: torch.DeviceObjType
+) -> tuple[Union[SequentialTransformer, MLP], Dataset]:
+    """Loads the model and dataset used for a rib build from the results dictionary.
+
+    Combines both model and dataset loading in one function as the dataset conditionally needs
+    extra arguments depending on the dataset type."""
+    data_config: DatasetConfig
+    model: Union[SequentialTransformer, MLP]
+
+    if (
+        "tlens_model_path" in results["config"]
+        and results["config"]["tlens_model_path"] is not None
+    ):
+        tlens_model_path = to_root_path(Path(results["config"]["tlens_model_path"]))
+    else:
+        tlens_model_path = None
+
+    if "n_heads" in results["model_config_dict"]:  # sequential transformer
+        model, _ = load_sequential_transformer(
+            node_layers=results["config"]["node_layers"],
+            last_pos_module_type=results["config"]["last_pos_module_type"],
+            tlens_pretrained=results["config"]["tlens_pretrained"],
+            tlens_model_path=tlens_model_path,
+            fold_bias=True,
+            dtype=dtype,
+            device=device,
+        )
+        if results["config"]["dataset"]["source"] == "huggingface":
+            data_config = HFDatasetConfig(**results["config"]["dataset"])
+        else:
+            data_config = ModularArithmeticDatasetConfig(**results["config"]["dataset"])
+        model_n_ctx = model.cfg.n_ctx
+
+    else:  # mlp
+        mlp_config = MLPConfig(**results["model_config_dict"]["model"])
+        model = load_mlp(
+            config=mlp_config,
+            mlp_path=Path(results["config"]["mlp_path"]),
+            fold_bias=True,
+            device=device,
+        )
+        model.to(device)
+        data_config = VisionDatasetConfig(**results["config"]["dataset"])
+        model_n_ctx, tlens_model_path = None, None
+
+    dataset = load_dataset(
+        data_config, return_set="train", model_n_ctx=model_n_ctx, tlens_model_path=tlens_model_path
+    )
+    return model, dataset

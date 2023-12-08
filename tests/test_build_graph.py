@@ -28,7 +28,12 @@ from rib.data import (
     VisionDatasetConfig,
 )
 from rib.hook_manager import HookedModel
-from rib.loader import load_dataset, load_mlp, load_sequential_transformer
+from rib.loader import (
+    load_dataset,
+    load_mlp,
+    load_model_and_dataset_from_rib_results,
+    load_sequential_transformer,
+)
 from rib.models.mlp import MLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults
 
@@ -133,48 +138,12 @@ def get_rib_acts_test(results: RibBuildResults):
     * 2) using run_with_cache to get the output of the previous module and rotating with C
     * comparing the results of 1) and 2)
     """
-    Cs = parse_c_infos(results["interaction_rotations"])
-
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results["config"]["dtype"]]
-    if "n_heads" in results["model_config_dict"]:
-        tlens_model_path = (
-            Path(results["config"]["tlens_model_path"])
-            if results["config"]["tlens_model_path"] is not None
-            else None
-        )
-        model, _ = load_sequential_transformer(
-            node_layers=results["config"]["node_layers"],
-            last_pos_module_type=results["config"]["last_pos_module_type"],
-            tlens_pretrained=results["config"]["tlens_pretrained"],
-            tlens_model_path=tlens_model_path,
-            fold_bias=True,
-            dtype=dtype,
-            device=device,
-        )
-        if results["config"]["dataset"]["source"] == "huggingface":
-            data_config = HFDatasetConfig(**results["config"]["dataset"])
-            load_data_kwargs = {"model_n_ctx": model.cfg.n_ctx}
-        else:
-            data_config = ModularArithmeticDatasetConfig(**results["config"]["dataset"])
-            load_data_kwargs = {"tlens_model_path": tlens_model_path}
-
-    else:
-        mlp_config = MLPConfig(**results["model_config_dict"]["model"])
-        model = load_mlp(
-            config=mlp_config,
-            mlp_path=Path(results["config"]["mlp_path"]),
-            fold_bias=True,
-            device=device,
-        )
-        model.to(device)
-        data_config = VisionDatasetConfig(**results["config"]["dataset"])
-        load_data_kwargs = {}
-
-    dataset = load_dataset(data_config, return_set="train", **load_data_kwargs)
+    model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=16, shuffle=False)
-
     hooked_model = HookedModel(model)
+    Cs = parse_c_infos(results["interaction_rotations"])
 
     rib_acts = get_rib_acts(
         hooked_model=hooked_model,

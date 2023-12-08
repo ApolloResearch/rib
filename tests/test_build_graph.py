@@ -21,7 +21,7 @@ import pytest
 import torch
 import yaml
 
-# Append the root directory to sys.path
+# Append root directory to sys.path
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
 

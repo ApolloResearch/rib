@@ -376,7 +376,7 @@ def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Da
 
 
 def load_model_and_dataset_from_rib_results(
-    results: RibBuildResults, device: str, dtype: torch.DeviceObjType
+    results: RibBuildResults, device: str, dtype: torch.dtype
 ) -> tuple[Union[SequentialTransformer, MLP], Dataset]:
     """Loads the model and dataset used for a rib build from the results dictionary.
 

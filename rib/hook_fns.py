@@ -19,9 +19,9 @@ from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
+    calc_edge_functional,
+    calc_edge_squared,
     calc_gram_matrix,
-    integrated_gradient_trapezoidal_jacobian_functional,
-    integrated_gradient_trapezoidal_jacobian_squared,
     integrated_gradient_trapezoidal_norm,
     module_hat,
 )
@@ -305,7 +305,7 @@ def interaction_edge_pre_forward_hook_fn(
     edge = hooked_data[hook_name][data_key]
 
     if edge_formula == "functional":
-        integrated_gradient_trapezoidal_jacobian_functional(
+        calc_edge_functional(
             module_hat=module_hat,
             f_in_hat=f_hat,
             in_tuple_dims=in_tuple_dims,
@@ -314,7 +314,7 @@ def interaction_edge_pre_forward_hook_fn(
             n_intervals=n_intervals,
         )
     elif edge_formula == "squared":
-        integrated_gradient_trapezoidal_jacobian_squared(
+        calc_edge_squared(
             module_hat=module_hat,
             f_in_hat=f_hat,
             in_tuple_dims=in_tuple_dims,

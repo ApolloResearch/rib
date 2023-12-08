@@ -9,11 +9,11 @@ from torch.func import jacrev
 
 from rib.linalg import (
     _calc_integration_intervals,
+    calc_edge_functional,
+    calc_edge_squared,
     calc_gram_matrix,
     calc_rotation_matrix,
     eigendecompose,
-    integrated_gradient_trapezoidal_jacobian_functional,
-    integrated_gradient_trapezoidal_jacobian_squared,
     integrated_gradient_trapezoidal_norm,
     pinv_diag,
 )
@@ -277,18 +277,16 @@ def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
 
 
 @pytest.mark.parametrize("edge_formula", ["functional", "squared"])
-def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
+def test_calc_edge_n_intervals(edge_formula):
     """Check independence of n_intervals for integrated gradient jacobian over a linear module
     without bias.
 
     This should be the case as we're integrating over alpha * inputs, which is linear in alpha.
     """
     if edge_formula == "functional":
-        integrated_gradient_trapezoidal_jacobian = (
-            integrated_gradient_trapezoidal_jacobian_functional
-        )
+        calc_edge = calc_edge_functional
     elif edge_formula == "squared":
-        integrated_gradient_trapezoidal_jacobian = integrated_gradient_trapezoidal_jacobian_squared
+        calc_edge = calc_edge_squared
     else:
         raise ValueError(f"edge_formula {edge_formula} not recognized")
 
@@ -305,7 +303,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
 
     result_point_estimate: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
 
-    integrated_gradient_trapezoidal_jacobian(
+    calc_edge(
         module_hat=linear_partial,
         f_in_hat=in_tensor,
         in_tuple_dims=(in_hidden,),
@@ -314,7 +312,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
         dataset_size=batch_size,
     )
     result_1: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
-    integrated_gradient_trapezoidal_jacobian(
+    calc_edge(
         module_hat=linear_partial,
         f_in_hat=in_tensor,
         in_tuple_dims=(in_hidden,),
@@ -324,7 +322,7 @@ def test_integrated_gradient_trapezoidal_jacobian_n_intervals(edge_formula):
     )
 
     result_5: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
-    integrated_gradient_trapezoidal_jacobian(
+    calc_edge(
         module_hat=linear_partial,
         f_in_hat=in_tensor,
         in_tuple_dims=(in_hidden,),
@@ -369,12 +367,10 @@ def _integrated_gradient_jacobian_with_jacrev(
 
 
 @pytest.mark.parametrize("edge_formula", ["functional", "squared"])
-def test_integrated_gradient_trapezoidal_jacobian_jacrev(edge_formula):
+def test_calc_edge_jacrev(edge_formula):
     """Check that our custom jacobian in the integrated gradient matches torch.func.jacrev."""
     if edge_formula == "functional":
-        integrated_gradient_trapezoidal_jacobian = (
-            integrated_gradient_trapezoidal_jacobian_functional
-        )
+        calc_edge = calc_edge_functional
     elif edge_formula == "squared":
         pytest.skip("squared edge formula not implemented in the jacrev test")
     else:
@@ -392,7 +388,7 @@ def test_integrated_gradient_trapezoidal_jacobian_jacrev(edge_formula):
     linear_partial = lambda x, _: linear(x)
 
     result_ours: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
-    integrated_gradient_trapezoidal_jacobian(
+    calc_edge(
         module_hat=linear_partial,
         f_in_hat=in_tensor,
         in_tuple_dims=(in_hidden,),
@@ -406,9 +402,7 @@ def test_integrated_gradient_trapezoidal_jacobian_jacrev(edge_formula):
         n_intervals=5,
         dataset_size=batch_size,
     )
-    assert torch.allclose(
-        result_ours, result_jacrev
-    ), "integrated_gradient_trapezoidal_jacobian and jacrev are not close enough"
+    assert torch.allclose(result_ours, result_jacrev), "calc_edge and jacrev are not close enough"
 
 
 @pytest.mark.parametrize(

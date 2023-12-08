@@ -129,7 +129,7 @@ def graph_build_test(
     return results
 
 
-def get_rib_acts_test(results: RibBuildResults):
+def get_rib_acts_test(results: RibBuildResults, atol: float):
     """Takes the results of a graph build and checks get_rib_acts computes the correct values.
 
     This requires:
@@ -178,7 +178,7 @@ def get_rib_acts_test(results: RibBuildResults):
     prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
     test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
     utils_rib_acts = rib_acts[module_to_test].cpu()
-    assert torch.allclose(utils_rib_acts, test_rib_acts, atol=1e-3)
+    assert torch.allclose(utils_rib_acts, test_rib_acts, atol=atol)
 
 
 @pytest.mark.slow
@@ -225,7 +225,7 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     config = LMRibConfig(**config_dict)
 
     results = graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
-    get_rib_acts_test(results)
+    get_rib_acts_test(results, atol=1e-3)
 
 
 @pytest.mark.slow
@@ -266,7 +266,7 @@ def test_pythia_14m_build_graph():
         build_graph_main_fn=lm_build_graph_main,
         atol=atol,
     )
-    get_rib_acts_test(results)
+    get_rib_acts_test(results, atol=0)
 
 
 @pytest.mark.slow
@@ -313,7 +313,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
-    get_rib_acts_test(results)
+    get_rib_acts_test(results, atol=1e-6)
 
 
 def rotate_final_layer_invariance(

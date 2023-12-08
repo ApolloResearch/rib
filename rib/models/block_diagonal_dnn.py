@@ -64,7 +64,7 @@ def generate_weights(
     return A
 
 
-class BlockDiagonalDNNConfigDNNConfig(BaseModel):
+class ModularDNNConfig(BaseModel):
     n_hidden_layers: int = Field(
         4,
         description="The number of hidden layers [input, hidden, ..., hidden, output]",
@@ -101,10 +101,10 @@ class BlockDiagonalDNNConfigDNNConfig(BaseModel):
             self.first_block_width = self.width // 2
 
 
-class BlockDiagonalDNN(MLP):
+class ModularDNN(MLP):
     def __init__(
         self,
-        dnn_config: BlockDiagonalDNNConfigDNNConfig,
+        dnn_config: ModularDNNConfig,
         dtype: StrDtype = "float64",
         seed: Optional[int] = None,
     ):
@@ -133,7 +133,7 @@ class BlockDiagonalDNN(MLP):
             fold_bias=False,
             bias=True,
         )
-        super(BlockDiagonalDNN, self).__init__(config=self.mlp_config)
+        super(ModularDNN, self).__init__(config=self.mlp_config)
 
         # Hardcode weights and biases
         assert len(self.layers) == self.cfg.n_hidden_layers + 1

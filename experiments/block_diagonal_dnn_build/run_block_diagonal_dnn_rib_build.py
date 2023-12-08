@@ -17,10 +17,10 @@ from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
 from rib.models.block_diagonal_dnn import (
-    BlockDiagonalDNN,
-    BlockDiagonalDNNConfig,
     BlockVectorDataset,
     BlockVectorDatasetConfig,
+    ModularDNN,
+    ModularDNNConfig,
 )
 from rib.models.mlp import MLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
@@ -55,8 +55,8 @@ class Config(BaseModel):
         BlockVectorDatasetConfig(),
         description="The dataset to use.",
     )
-    model: BlockDiagonalDNNConfig = Field(
-        BlockDiagonalDNNConfig(),
+    model: ModularDNNConfig = Field(
+        ModularDNNConfig(),
         description="The model to use.",
     )
 
@@ -67,7 +67,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     model_config = config.model
     dataset_config = config.dataset
 
-    dnn = BlockDiagonalDNN(
+    dnn = ModularDNN(
         dnn_config=model_config,
         dtype=config.dtype,
         seed=config.seed,

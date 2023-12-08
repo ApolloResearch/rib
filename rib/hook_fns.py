@@ -12,20 +12,17 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 
 from typing import Any, Callable, Literal, Optional, Union
 
-import einops
 import torch
-from fancy_einsum import einsum
 from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
     calc_edge_functional,
     calc_edge_squared,
+    calc_edge_stochastic,
     calc_gram_matrix,
     integrated_gradient_trapezoidal_norm,
-    module_hat,
 )
-from rib.models.sequential_transformer.components import AttentionOut
 
 
 def _add_to_hooked_matrix(
@@ -262,7 +259,8 @@ def interaction_edge_pre_forward_hook_fn(
     ],
     n_intervals: int,
     dataset_size: int,
-    edge_formula: Literal["functional", "squared"] = "functional",
+    edge_formula: Literal["functional", "squared", "stochastic"] = "functional",
+    stochastic_noise_dim: Optional[int] = None,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -286,9 +284,12 @@ def interaction_edge_pre_forward_hook_fn(
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
-        edge_formula: The formula to use for the attribution. Must be one of "functional" or
-            "squared". The former is the old (October) functional version, the latter is a new
-            (November) version.
+        edge_formula: The formula to use for the attribution.
+            - "functional" is the old (October 23) functional version
+            - "squared" is the version which iterates over the output dim and output pos dim
+            - "stochastic" is the version which iteratates over output dim and stochastic noise dim
+        stochastic_noise_dim: The dimension of the stochastic noise. Only used if
+            edge_formula == "stochastic". Defaults to None.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -321,6 +322,19 @@ def interaction_edge_pre_forward_hook_fn(
             edge=edge,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
+        )
+    elif edge_formula == "stochastic":
+        assert stochastic_noise_dim is not None, "stochastic_noise_dim must be specified."
+        # Must have a position dimension
+        assert f_hat.dim() == 3, "f_hat must have a position dimension to use stochastic noise."
+        calc_edge_stochastic(
+            module_hat=module_hat,
+            f_in_hat=f_hat,
+            in_tuple_dims=in_tuple_dims,
+            edge=edge,
+            dataset_size=dataset_size,
+            n_intervals=n_intervals,
+            stochastic_noise_dim=stochastic_noise_dim,
         )
     else:
         raise ValueError(

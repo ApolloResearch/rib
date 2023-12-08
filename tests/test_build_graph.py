@@ -77,20 +77,16 @@ def graph_build_test(
         if E_hats:
             # E_hats[i] is a tuple (name, tensor)
             if config.edge_formula == "squared":
-                # edges must be positive >= 0
-                assert (E_hats[i][1] >= 0).all()
-            # edges should not all be zero
-            assert (E_hats[i][1] != 0).any()
+                assert (E_hats[i][1] >= 0).all(), f"edges not >= 0 for {module_name}"
+            assert (E_hats[i][1] != 0).any(), f"edges all zero for {module_name}"
             if config.edge_formula == "functional" and config.basis_formula == "(1-alpha)^2":
                 # Check that the size of the sum of activations in the interaction basis is equal
                 # to the outgoing edges of a node. The relation should hold only in this one config
                 # case.
                 edge_size = E_hats[i][1].sum(0).abs()
-                # Test shapes
                 assert (
                     act_size.shape == edge_size.shape
                 ), f"act_size and edge_size not same shape for {module_name}"
-                # Test sum of edges == function size
                 assert torch.allclose(
                     act_size / act_size.abs().max(),
                     edge_size / edge_size.abs().max(),

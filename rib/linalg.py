@@ -404,8 +404,7 @@ def calc_edge_squared(
                     J_hat[:, out_dim, :] -= torch.einsum("bj,bj->bj", i_grad, f_in_hat)
 
     # Square, and sum over batch size and output pos (if applicable)
-    J_hat = J_hat**2 / normalization_factor
-    edge += J_hat.sum(dim=(0, 1) if has_pos else 0)
+    edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1) if has_pos else 0)
 
 
 def integrated_gradient_trapezoidal_norm(

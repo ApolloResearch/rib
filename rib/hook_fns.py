@@ -129,8 +129,11 @@ def dataset_mean_pre_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
-    in_acts_mean_coontrib = in_acts.sum(dim=0) / dataset_size
-    _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts_mean_coontrib)
+    in_acts_mean_contrib = in_acts.sum(dim=0) / dataset_size  # sum over batch
+    if in_acts_mean_contrib.ndim == 2:
+        in_acts_mean_contrib = in_acts_mean_contrib.mean(dim=0)  # mean over seqpos
+    assert in_acts_mean_contrib.ndim == 1, f"mean must be 1D, shape={in_acts_mean_contrib.shape}"
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts_mean_contrib)
 
 
 def gram_forward_hook_fn(

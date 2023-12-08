@@ -82,7 +82,6 @@ def collect_dataset_means(
                 fn_kwargs={"dataset_size": dataset_size},
             )
         )
-        print("collecting dataset_mean (pre) for", module_name)
     if collect_output_dataset_means:
         # Add hook to collect model output
         dataset_mean_hooks.append(
@@ -94,7 +93,6 @@ def collect_dataset_means(
                 fn_kwargs={"dataset_size": dataset_size},
             )
         )
-        print("collecting dataset_mean for", module_name)
 
     run_dataset_through_model(
         hooked_model, data_loader, dataset_mean_hooks, dtype=dtype, device=device, use_tqdm=True

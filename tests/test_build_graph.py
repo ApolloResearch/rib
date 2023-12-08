@@ -174,6 +174,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float):
     test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
     utils_rib_acts = rib_acts[module_to_test].cpu()
     assert torch.allclose(utils_rib_acts, test_rib_acts, atol=atol)
+    return rib_acts
 
 
 @pytest.mark.slow
@@ -502,7 +503,7 @@ def test_svd_basis():
         - ln2.1
         - unembed
     batch_size: 2
-    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
+    return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
     rotate_final_node_layer: false
     n_intervals: 0
     dtype: {dtype_str}
@@ -520,3 +521,56 @@ def test_svd_basis():
         assert (C is None) == (U is None)
         if C is not None:
             assert torch.allclose(C, U, atol=0)
+
+
+@pytest.mark.slow
+def test_pca_basis():
+    dtype_str = "float64"
+
+    config_str = f"""
+    exp_name: test
+    seed: 0
+    tlens_pretrained: pythia-14m
+    tlens_model_path: null
+    dataset:
+      source: huggingface
+      name: NeelNanda/pile-10k
+      tokenizer_name: EleutherAI/pythia-14m
+      return_set: train
+      return_set_frac: null
+      return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
+      return_set_portion: first
+    node_layers:
+        - ln2.1
+        - unembed
+    batch_size: 2
+    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
+    rotate_final_node_layer: false
+    n_intervals: 0
+    dtype: {dtype_str}
+    calculate_edges: false
+    eval_type: ce_loss
+    out_dir: null
+    basis_formula: pca
+    """
+    config_dict = yaml.safe_load(config_str)
+    config = LMRibConfig(**config_dict)
+    results = lm_build_graph_main(config)
+    rib_acts = get_rib_acts_test(results, atol=1e-6)  # [batch, seqpos, rib_dir]
+
+    C_info = parse_c_infos(results["interaction_rotations"])["ln2.1"]
+
+    # gram matrix of bias component with non-bias component will always be zero, as this is just
+    # the avg value of the non-bias component, which we've centered.
+    # Even after eigendecomposing this means there should be exactly one dir that reads from bias
+    amount_dir_reads_bias = C_info.C_pinv[:, -1].abs()
+    bias_dir_idx = C_info.C_pinv[:, -1].abs().argmax()
+
+    atol = 1e-12
+    assert amount_dir_reads_bias[bias_dir_idx].abs() - 1 < atol
+    is_non_bias_dir = torch.arange(len(amount_dir_reads_bias)) != bias_dir_idx
+    assert amount_dir_reads_bias[is_non_bias_dir].abs().max() < atol
+
+    # all other rib acts should be centred as well
+    mean_rib_acts = rib_acts["ln2.1"].mean(dim=(0, 1))
+    assert mean_rib_acts[is_non_bias_dir].abs().max() < atol

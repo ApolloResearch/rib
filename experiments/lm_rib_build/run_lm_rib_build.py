@@ -43,7 +43,11 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.data_accumulator import (
+    collect_dataset_means,
+    collect_gram_matrices,
+    collect_interaction_edges,
+)
 from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
@@ -133,7 +137,7 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "pca"] = Field(
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
         "use Us as Cs, giving the eigendecomposition of the gram matrix.",
@@ -310,8 +314,25 @@ def main(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
 
+        if config.basis_formula == "pca":
+            logger.info("Collecting dataset means")
+            means = collect_dataset_means(
+                hooked_model=hooked_model,
+                module_names=section_names,
+                data_loader=gram_train_loader,
+                dtype=dtype,
+                device=device,
+                collect_output_dataset_means=collect_output_gram,
+                hook_names=[
+                    layer_name for layer_name in config.node_layers if layer_name != "output"
+                ],
+            )
+        else:
+            means = None
+
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
+
         gram_matrices = collect_gram_matrices(
             hooked_model=hooked_model,
             module_names=section_names,
@@ -320,6 +341,7 @@ def main(
             device=device,
             collect_output_gram=collect_output_gram,
             hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
+            means=means,
         )
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
@@ -341,6 +363,7 @@ def main(
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
+            means=means,
         )
         # Cs used to calculate edges
         edge_Cs = Cs

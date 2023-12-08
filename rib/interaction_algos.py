@@ -263,7 +263,7 @@ def calculate_interaction_rotations(
             continue
         if basis_formula == "pca":
             assert means is not None
-            assert node_layer in means
+            assert node_layer in means, f"{node_layer} not in {means.keys()}"
             gamma = shift_matrix(-means[node_layer])
             gamma_inv = shift_matrix(means[node_layer])
             Cs.append(

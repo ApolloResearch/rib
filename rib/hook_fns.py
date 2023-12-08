@@ -154,8 +154,9 @@ def rotate_pre_forward_hook_fn(
     rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
     hooked_data: dict[str, Any],
     hook_name: str,
-    data_key: Union[str, list[str]],
-) -> tuple[Float[Tensor, "batch d_hidden"], ...]:
+    data_key: str,
+    mode: Literal["modify", "cache"] = "modify",
+) -> Optional[tuple[Float[Tensor, "batch d_hidden"], ...]]:
     """Hook function for rotating the input tensor to a module.
 
     The input is rotated by the specified rotation matrix.
@@ -163,13 +164,17 @@ def rotate_pre_forward_hook_fn(
     Handles multiple inputs by concatenating over the hidden dimension and then splitting the
     rotated tensor back into the original input sizes.
 
+    Will either modify the activation within the forward pass (used for ablations) or cache the
+    rotated result in hooked_data (used for get_rib_acts).
+
     Args:
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module that we rotate.
         rotation_matrix: Rotation matrix to apply to the activations.
-        hooked_data: Dictionary of hook data (not used).
-        hook_name: Name of hook (not used).
-        data_key: Name of data (not used).
+        hooked_data: Dictionary of hook data (not used for mode=modify).
+        hook_name: Name of hook (not used for mode=modify).
+        data_key: Name of data (not used for mode=modify).
+        mode: if 'modify' return rotated inputs, if 'cache' store them but return None
 
     Returns:
         Rotated activations.
@@ -178,35 +183,13 @@ def rotate_pre_forward_hook_fn(
     in_hidden_dims = [x.shape[-1] for x in inputs]
     in_acts = torch.cat(inputs, dim=-1)
     rotated = in_acts @ rotation_matrix
-    adjusted_inputs = tuple(torch.split(rotated, in_hidden_dims, dim=-1))
-    return adjusted_inputs
-
-
-def rotated_acts_pre_forward_hook_fn(
-    module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch d_hidden"]],
-    rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
-    hooked_data: dict[str, Any],
-    hook_name: str,
-    data_key: str,
-) -> None:
-    """Hook function for rotating the input tensor to a module and saving it.
-
-    The input is concatenated over the hidden dimension, then rotated by the specified matrix.
-    Similar to `rotate_pre_forward_hook_fn` but saves rotated activations instead of passing them
-    forward in the model.
-
-    Args:
-        module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module that we rotate.
-        rotation_matrix: Rotation matrix to apply to the activations.
-        hooked_data: Dictionary of hook data.
-        hook_name: Name of hook.
-        data_key: Name of data.
-    """
-    in_acts = torch.cat(inputs, dim=-1)
-    rotated = in_acts @ rotation_matrix
-    _append_to_hooked_list(hooked_data, hook_name, data_key, rotated)
+    if mode == "cache":
+        _append_to_hooked_list(hooked_data, hook_name, data_key, rotated)
+        return None
+    else:
+        assert mode == "modify"
+        adjusted_inputs = tuple(torch.split(rotated, in_hidden_dims, dim=-1))
+        return adjusted_inputs
 
 
 def M_dash_and_Lambda_dash_pre_forward_hook_fn(

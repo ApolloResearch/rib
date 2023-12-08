@@ -13,7 +13,7 @@ that have a small set of large numbers and a large set of small numbers.
 
 import sys
 from pathlib import Path
-from typing import Callable, Iterable, Union
+from typing import Callable, Union
 from unittest.mock import patch
 
 import pytest
@@ -22,19 +22,9 @@ import yaml
 from fancy_einsum import einsum
 
 from rib.analysis_utils import get_rib_acts, parse_c_infos
-from rib.data import (
-    HFDatasetConfig,
-    ModularArithmeticDatasetConfig,
-    VisionDatasetConfig,
-)
-from rib.hook_manager import HookedModel
-from rib.loader import (
-    load_dataset,
-    load_mlp,
-    load_model_and_dataset_from_rib_results,
-    load_sequential_transformer,
-)
-from rib.models.mlp import MLPConfig
+from rib.hook_fns import acts_forward_hook_fn
+from rib.hook_manager import Hook, HookedModel
+from rib.loader import load_model_and_dataset_from_rib_results
 from rib.types import TORCH_DTYPES, RibBuildResults
 
 # Append the root directory to sys.path
@@ -138,7 +128,8 @@ def get_rib_acts_test(results: RibBuildResults, atol: float):
     * 2) using run_with_cache to get the output of the previous module and rotating with C
     * comparing the results of 1) and 2)
     """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
     dtype = TORCH_DTYPES[results["config"]["dtype"]]
     model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=16, shuffle=False)
@@ -169,12 +160,17 @@ def get_rib_acts_test(results: RibBuildResults, atol: float):
 
     prev_module_outputs = []
     with torch.inference_mode():
+        hook = Hook(
+            name=prev_module_id,
+            data_key="acts",
+            fn=acts_forward_hook_fn,
+            module_name=prev_module_id,
+        )
         for input, _ in data_loader:
-            _, cache = hooked_model.run_with_cache(input.to(device=device))
-            # the cached outputs are always a list (e.g. with [mlp, residual])
-            output_list = cache[prev_module_id]["acts"]
-            output = torch.concatenate(output_list, dim=-1)
-            prev_module_outputs.append(output)
+            hooked_model.forward(input.to(device=device), hooks=[hook])
+            cache_out = hooked_model.hooked_data[prev_module_id]["acts"]
+            hooked_model.clear_hooked_data()
+            prev_module_outputs.append(torch.concatenate(cache_out, dim=-1).cpu())
     prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
     test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
     utils_rib_acts = rib_acts[module_to_test].cpu()

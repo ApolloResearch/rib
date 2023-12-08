@@ -5,7 +5,7 @@ from jaxtyping import Float
 from torch.utils.data import DataLoader
 
 from rib.data_accumulator import run_dataset_through_model
-from rib.hook_fns import rotated_acts_pre_forward_hook_fn
+from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import InteractionRotation
 from rib.models.utils import get_model_attr
@@ -22,6 +22,10 @@ def get_rib_acts(
     device: str = "cuda",
     dtype: torch.dtype = torch.float32,
 ) -> dict[str, Float[torch.Tensor, "batch ... rotated"]]:
+    """Returns the activations in rib space when the model is run on the dataset.
+
+    Will be (cpu) memory intensive if the dataset is large."""
+
     def get_module_name(m_name):
         if hasattr(hooked_model.model, "module_id_to_section_id"):
             return hooked_model.model.module_id_to_section_id[m_name]
@@ -32,9 +36,9 @@ def get_rib_acts(
         Hook(
             name="rotated_acts",
             data_key=c_info.node_layer_name,
-            fn=rotated_acts_pre_forward_hook_fn,
+            fn=rotate_pre_forward_hook_fn,
             module_name=get_module_name(c_info.node_layer_name),
-            fn_kwargs={"rotation_matrix": c_info.C.to(device)},
+            fn_kwargs={"rotation_matrix": c_info.C.to(device), "mode": "cache"},
         )
         for c_info in c_infos
         if c_info.C is not None

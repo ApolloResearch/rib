@@ -70,115 +70,98 @@ def _append_to_hooked_list(
     hooked_data[hook_name][data_key].append(element_to_append)
 
 
+InputActType = Union[
+    tuple[Float[Tensor, "batch d_hidden"]],
+    tuple[Float[Tensor, "batch pos d_hidden"]],
+    tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+]
+
+OutputActType = Union[
+    Float[Tensor, "batch d_hidden"],
+    Float[Tensor, "batch pos d_hidden"],
+    tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+]
+
+
+def _to_tuple(x: OutputActType) -> InputActType:
+    return x if isinstance(x, tuple) else (x,)
+
+
 def dataset_mean_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: Union[
-        tuple[Float[Tensor, "batch d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
-    ],
-    output: Union[
-        Float[Tensor, "batch d_hidden"],
-        Float[Tensor, "batch pos d_hidden"],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
-    ],
+    inputs: InputActType,
+    output: OutputActType,
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
 ) -> None:
-    """ """
-    assert isinstance(data_key, str), "data_key must be a string."
-
-    outputs = output if isinstance(output, tuple) else (output,)
-
-    # Concat over the hidden dimension
-    out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
-
-    out_acts_mean_coontrib = out_acts.sum(dim=0) / dataset_size
-
-    _add_to_hooked_matrix(hooked_data, hook_name, data_key, out_acts_mean_coontrib)
+    """Wraps dataset_mean_pre_forward_hook_fn but for the output of module instead of the inputs."""
+    dataset_mean_pre_forward_hook_fn(
+        module=module,
+        inputs=_to_tuple(output),
+        hooked_data=hooked_data,
+        hook_name=hook_name,
+        data_key=data_key,
+        dataset_size=dataset_size,
+    )
 
 
 def dataset_mean_pre_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: Union[
-        tuple[Float[Tensor, "batch d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
-    ],
+    inputs: InputActType,
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
 ) -> None:
-    """ """
+    """Hook function for calculating the mean of the input activations.
+
+    Adds activations/dataset_size into hooked_data[hook_name][data_key].
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Tuple of inputs to the module.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the means.
+    """
     assert isinstance(data_key, str), "data_key must be a string."
-
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
-
     in_acts_mean_coontrib = in_acts.sum(dim=0) / dataset_size
-
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts_mean_coontrib)
 
 
 def gram_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: Union[
-        tuple[Float[Tensor, "batch d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
-    ],
-    output: Union[
-        Float[Tensor, "batch d_hidden"],
-        Float[Tensor, "batch pos d_hidden"],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
-    ],
+    inputs: InputActType,
+    output: OutputActType,
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
     mean: Optional[Float[Tensor, "d_hidden"]] = None,
 ) -> None:
-    """Hook function for calculating and updating the gram matrix.
+    """Hook function for calculating and updating the gram matrix on the output of the module.
 
-    The tuple of outputs is concatenated over the hidden dimension.
-
-    Args:
-        module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module (not used).
-        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
-            and positional indices. If no positional indices, assumes one output.
-        hooked_data: Dictionary of hook data.
-        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
-        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
-        dataset_size: Size of the dataset. Used to normalize the gram matrix.
-
+    Wraps gram_pre_forward_hook_fn but for the output of module instead of the inputs. Useful for
+    calculating the gram matrix of the output of the model.
     """
-    assert isinstance(data_key, str), "data_key must be a string."
-
-    outputs = output if isinstance(output, tuple) else (output,)
-
-    # Concat over the hidden dimension
-    out_acts = torch.cat([x.detach().clone() for x in outputs], dim=-1)
-    if mean is not None:
-        # center activations
-        # TODO: should do section by section instead of for catted tensor
-        # since there might be multiple bias terms
-        out_acts[..., :-1] -= mean[..., :-1]
-
-    gram_matrix = calc_gram_matrix(out_acts, dataset_size=dataset_size)
-
-    _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
+    gram_pre_forward_hook_fn(
+        module=module,
+        inputs=_to_tuple(output),
+        hooked_data=hooked_data,
+        hook_name=hook_name,
+        data_key=data_key,
+        dataset_size=dataset_size,
+        mean=mean,
+    )
 
 
 def gram_pre_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: Union[
-        tuple[Float[Tensor, "batch d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
-    ],
+    inputs: InputActType,
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
@@ -422,16 +405,8 @@ def interaction_edge_pre_forward_hook_fn(
 
 def acts_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: Union[
-        tuple[Float[Tensor, "batch d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden"]],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
-    ],
-    output: Union[
-        Float[Tensor, "batch d_hidden"],
-        Float[Tensor, "batch pos d_hidden"],
-        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
-    ],
+    inputs: InputActType,
+    output: OutputActType,
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],

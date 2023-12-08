@@ -19,10 +19,10 @@ from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
+    calc_edge_functional,
+    calc_edge_squared,
     calc_gram_matrix,
     integrated_gradient_trapezoidal_basis_jacobian,
-    integrated_gradient_trapezoidal_jacobian_functional,
-    integrated_gradient_trapezoidal_jacobian_squared,
     integrated_gradient_trapezoidal_norm,
     module_hat,
 )
@@ -131,70 +131,6 @@ def gram_pre_forward_hook_fn(
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
-def attn_scores_pre_forward_hook(
-    module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch pos head_index_d_head"], ...],
-    hooked_data: dict[str, Any],
-    hook_name: str,
-    data_key: Union[str, list[str]],
-) -> None:
-    """Calculate and store the attention scores.
-
-    This should only be applied to the AttentionOut module.
-
-    Note that this function overwrites hooked_data[hook_name] each time it is called since it is
-    expected to only be used on a single batch.
-
-    Args:
-        module: Module that the hook is attached to.
-        inputs: Inputs to the module. The first input is the residual, and the remaining inputs
-            are the q, k, and v tensors.
-        hooked_data: Dictionary of hook data.
-        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
-        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
-    """
-
-    assert isinstance(module, AttentionOut), "This hook can only be applied to AttentionOut."
-    _, q, k, v = inputs
-    # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)
-    q = einops.rearrange(
-        q,
-        "... pos (head_index d_head) -> ... pos head_index d_head",
-        head_index=module.cfg.n_heads,
-    )
-    k = einops.rearrange(
-        k,
-        "... pos (head_index d_head) -> ... pos head_index d_head",
-        head_index=module.cfg.n_heads,
-    )
-    v = einops.rearrange(
-        v,
-        "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
-        head_index=module.cfg.n_heads,
-    )
-
-    in_dtype = v.dtype
-
-    if in_dtype not in [torch.float32, torch.float64]:
-        # If using 16 bits, increase the precision to avoid numerical instabilities
-        q = q.to(torch.float32)
-        k = k.to(torch.float32)
-    attn_scores = (
-        einsum(
-            "... query_pos head_index d_head, \
-                    ... key_pos head_index d_head \
-                    -> ... head_index query_pos key_pos",
-            q,
-            k,
-        )
-        / module.attn_scale
-    )  # [..., head_index, query_pos, key_pos]
-
-    attn_scores = module.apply_causal_mask(attn_scores)  # [..., head_index, query_pos, key_pos]
-
-    hooked_data[hook_name] = {data_key: attn_scores}
-
-
 def rotate_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: tuple[Float[Tensor, "batch d_hidden"]],
@@ -243,7 +179,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "jacobian"] = "(1-alpha)^2",
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -275,7 +211,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    if basis_formula in ["(1-alpha)^2", "(1-0)*alpha"]:
+    if basis_formula == "(1-alpha)^2" or basis_formula == "(1-0)*alpha":
         in_grads = integrated_gradient_trapezoidal_norm(
             module=module,
             inputs=inputs,
@@ -418,7 +354,7 @@ def interaction_edge_pre_forward_hook_fn(
     edge = hooked_data[hook_name][data_key]
 
     if edge_formula == "functional":
-        integrated_gradient_trapezoidal_jacobian_functional(
+        calc_edge_functional(
             module_hat=module_hat,
             f_in_hat=f_hat,
             in_tuple_dims=in_tuple_dims,
@@ -427,7 +363,7 @@ def interaction_edge_pre_forward_hook_fn(
             n_intervals=n_intervals,
         )
     elif edge_formula == "squared":
-        integrated_gradient_trapezoidal_jacobian_squared(
+        calc_edge_squared(
             module_hat=module_hat,
             f_in_hat=f_hat,
             in_tuple_dims=in_tuple_dims,

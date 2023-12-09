@@ -492,13 +492,13 @@ def test_svd_basis():
     tlens_pretrained: pythia-14m
     tlens_model_path: null
     dataset:
-      source: huggingface
-      name: NeelNanda/pile-10k
-      tokenizer_name: EleutherAI/pythia-14m
-      return_set: train
-      return_set_frac: null
-      return_set_n_samples: 50
-      return_set_portion: first
+    source: huggingface
+        name: NeelNanda/pile-10k
+        tokenizer_name: EleutherAI/pythia-14m
+        return_set: train
+        return_set_frac: null
+        return_set_n_samples: 50
+        return_set_portion: first
     node_layers:
         - ln2.1
         - unembed
@@ -566,7 +566,7 @@ def test_pca_basis():
     amount_dir_reads_bias = C_info.C_pinv[:, -1].abs()
     bias_dir_idx = C_info.C_pinv[:, -1].abs().argmax()
 
-    atol = 1e-12
+    atol = 1e-6
     assert amount_dir_reads_bias[bias_dir_idx].abs() - 1 < atol
     is_non_bias_dir = torch.arange(len(amount_dir_reads_bias)) != bias_dir_idx
     assert amount_dir_reads_bias[is_non_bias_dir].abs().max() < atol

@@ -4,7 +4,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -61,7 +61,7 @@ def collect_dataset_means(
     dtype: torch.dtype,
     collect_output_dataset_means: bool = True,
     hook_names: Optional[list[str]] = None,
-) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
+) -> tuple[dict[str, Float[Tensor, "d_hidden"]], dict[str, Int[Tensor, "segments"]]]:
     """ """
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
@@ -102,6 +102,10 @@ def collect_dataset_means(
         hook_name: hooked_model.hooked_data[hook_name]["dataset_mean"]
         for hook_name in hooked_model.hooked_data
     }
+    bias_positions: dict[str, Int[Tensor, "segments"]] = {
+        hook_name: hooked_model.hooked_data[hook_name]["bias_positions"]
+        for hook_name in hooked_model.hooked_data
+    }
     hooked_model.clear_hooked_data()
 
     expected_keys = (
@@ -111,8 +115,7 @@ def collect_dataset_means(
         f"Gram matrix keys not the same as the module names that were hooked. "
         f"Expected: {expected_keys}, got: {set(dataset_mean.keys())}"
     )
-
-    return dataset_mean
+    return dataset_mean, bias_positions
 
 
 @torch.inference_mode()
@@ -125,6 +128,7 @@ def collect_gram_matrices(
     collect_output_gram: bool = True,
     hook_names: Optional[list[str]] = None,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
+    bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None,
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
     """Collect gram matrices for the module inputs and optionally the output of the final module.
 
@@ -153,16 +157,19 @@ def collect_gram_matrices(
     gram_hooks: list[Hook] = []
     # Add input hooks
     for module_name, hook_name in zip(module_names, hook_names):
+        if means is not None and hook_name in means:
+            assert bias_positions is not None
+            shift = means[hook_name]
+            shift[bias_positions[hook_name]] = 0.0
+        else:
+            shift = None
         gram_hooks.append(
             Hook(
                 name=hook_name,
                 data_key="gram",
                 fn=gram_pre_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={
-                    "dataset_size": dataset_size,
-                    "mean": means[hook_name] if means is not None else None,
-                },
+                fn_kwargs={"dataset_size": dataset_size, "shift": shift},
             )
         )
     if collect_output_gram:
@@ -175,7 +182,8 @@ def collect_gram_matrices(
                 module_name=module_names[-1],
                 fn_kwargs={
                     "dataset_size": dataset_size,
-                    "mean": means[hook_name] if means is not None else None,
+                    # we don't need to care about bias positions in the output
+                    "shift": means[hook_name] if means is not None else None,
                 },
             )
         )

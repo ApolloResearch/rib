@@ -110,6 +110,7 @@ def calculate_interaction_rotations(
     rotate_final_node_layer: bool = True,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "pca"] = "(1-alpha)^2",
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
+    bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -176,8 +177,9 @@ def calculate_interaction_rotations(
         assert U_output is not None
         if basis_formula == "pca":
             assert means is not None
+            assert bias_positions is not None
             assert node_layers[-1] in means
-            gamma = shift_matrix(-means[node_layers[-1]])
+            gamma = shift_matrix(-means[node_layers[-1]], bias_positions[node_layers[-1]])
             C_output = gamma.cpu() @ U_output.detach().cpu()
         else:
             C_output = U_output.detach().cpu()
@@ -263,9 +265,10 @@ def calculate_interaction_rotations(
             continue
         if basis_formula == "pca":
             assert means is not None
+            assert bias_positions is not None
             assert node_layer in means, f"{node_layer} not in {means.keys()}"
-            gamma = shift_matrix(-means[node_layer])
-            gamma_inv = shift_matrix(means[node_layer])
+            gamma = shift_matrix(-means[node_layer], bias_positions[node_layer])
+            gamma_inv = shift_matrix(means[node_layer], bias_positions[node_layer])
             Cs.append(
                 InteractionRotation(
                     node_layer_name=node_layer,

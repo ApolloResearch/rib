@@ -316,7 +316,7 @@ def main(
 
         if config.basis_formula == "pca":
             logger.info("Collecting dataset means")
-            means = collect_dataset_means(
+            means, bias_positions = collect_dataset_means(
                 hooked_model=hooked_model,
                 module_names=section_names,
                 data_loader=gram_train_loader,
@@ -328,7 +328,7 @@ def main(
                 ],
             )
         else:
-            means = None
+            means, bias_positions = None, None
 
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
@@ -342,6 +342,7 @@ def main(
             collect_output_gram=collect_output_gram,
             hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
             means=means,
+            bias_positions=bias_positions,
         )
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
@@ -364,6 +365,7 @@ def main(
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
             means=means,
+            bias_positions=bias_positions,
         )
         # Cs used to calculate edges
         edge_Cs = Cs

@@ -3,7 +3,7 @@ from typing import Callable, Literal, Optional, Union
 import numpy as np
 import torch
 from einops import rearrange
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 from tqdm import tqdm
 
@@ -567,9 +567,13 @@ def calc_gram_matrix(
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
 
 
-def shift_matrix(shift: Float[torch.Tensor, "n"]) -> Float[torch.Tensor, "n n"]:
+def shift_matrix(
+    shift: Float[torch.Tensor, "n"], bias_positions: Int[torch.Tensor, "sections"]
+) -> Float[torch.Tensor, "n n"]:
     assert shift.ndim == 1, "shift must be 1d"
-
-    S = torch.eye(shift.shape[0], dtype=shift.dtype, device=shift.device)
-    S[-1, :-1] = shift[:-1]
+    n = shift.shape[0]
+    S = torch.eye(n, dtype=shift.dtype, device=shift.device)
+    assert (n - 1) in bias_positions
+    is_not_bias_mask = ~torch.isin(torch.arange(n), bias_positions)
+    S[-1][is_not_bias_mask] = shift[is_not_bias_mask]
     return S

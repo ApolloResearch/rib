@@ -134,6 +134,10 @@ def dataset_mean_pre_forward_hook_fn(
         in_acts_mean_contrib = in_acts_mean_contrib.mean(dim=0)  # mean over seqpos
     assert in_acts_mean_contrib.ndim == 1, f"mean must be 1D, shape={in_acts_mean_contrib.shape}"
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts_mean_contrib)
+    if "bias_positions" not in hooked_data[hook_name]:
+        segment_lens = torch.tensor([x.shape[-1] for x in inputs])
+        # if the inputs are of length [128, 128] we want bias positions [127, 255]
+        hooked_data[hook_name]["bias_positions"] = torch.cumsum(segment_lens, dim=0) - 1
 
 
 def gram_forward_hook_fn(
@@ -144,7 +148,7 @@ def gram_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
-    mean: Optional[Float[Tensor, "d_hidden"]] = None,
+    shift: Optional[Float[Tensor, "d_hidden"]] = None,
 ) -> None:
     """Hook function for calculating and updating the gram matrix on the output of the module.
 
@@ -158,7 +162,7 @@ def gram_forward_hook_fn(
         hook_name=hook_name,
         data_key=data_key,
         dataset_size=dataset_size,
-        mean=mean,
+        shift=shift,
     )
 
 
@@ -169,7 +173,7 @@ def gram_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
-    mean: Optional[Float[Tensor, "d_hidden"]] = None,
+    shift: Optional[Float[Tensor, "d_hidden"]] = None,
 ) -> None:
     """Calculate the gram matrix for inputs with positional indices and add it to the global.
 
@@ -183,18 +187,15 @@ def gram_pre_forward_hook_fn(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
         dataset_size: Size of the dataset. Used to normalize the gram matrix.
+        shift: applied to the activations before gram matrix calculation. Used to center the data.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
-    if mean is not None:
-        # center activations
-        # TODO: should do section by section instead of for catted tensor
-        # since there might be multiple bias terms
-        in_acts[..., :-1] -= mean[..., :-1]
+    if shift is not None:
+        in_acts -= shift
 
     gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
-
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 

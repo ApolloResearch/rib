@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable, Union
 from unittest.mock import patch
 
+import einops
 import pytest
 import torch
 import yaml
@@ -262,7 +263,6 @@ def test_pythia_14m_build_graph():
         build_graph_main_fn=lm_build_graph_main,
         atol=atol,
     )
-    get_rib_acts_test(results, atol=0)
 
 
 @pytest.mark.slow
@@ -309,7 +309,6 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
-    get_rib_acts_test(results, atol=1e-6)
 
 
 def rotate_final_layer_invariance(
@@ -523,20 +522,19 @@ def test_svd_basis():
             assert torch.allclose(C, U, atol=0)
 
 
-def pca_rib_acts_test(C_info, rib_acts):
+def pca_rib_acts_test(C_info, rib_acts, atol=1e-6):
     # gram matrix of bias component with non-bias component will always be zero, as this is just
     # the avg value of the non-bias component, which we've centered.
     # Even after eigendecomposing this means there should be exactly one dir that reads from bias
     amount_dir_reads_bias = C_info.C_pinv[:, -1].abs()
     bias_dir_idx = C_info.C_pinv[:, -1].abs().argmax()
 
-    atol = 1e-6
     assert amount_dir_reads_bias[bias_dir_idx].abs() - 1 < atol
     is_non_bias_dir = torch.arange(len(amount_dir_reads_bias)) != bias_dir_idx
     assert amount_dir_reads_bias[is_non_bias_dir].abs().max() < atol
 
     # all other rib acts should be centred as well
-    mean_rib_acts = rib_acts["ln2.1"].mean(dim=(0, 1))
+    mean_rib_acts = einops.reduce(rib_acts, "... ribdir -> ribdir", "mean")
     assert mean_rib_acts[is_non_bias_dir].abs().max() < atol
 
 
@@ -573,6 +571,37 @@ def test_pca_basis_pythia():
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
     results = lm_build_graph_main(config)
-    rib_acts = get_rib_acts_test(results, atol=1e-6)  # [batch, seqpos, rib_dir]
+    rib_acts = get_rib_acts_test(results, atol=0)["ln2.1"]  # [batch, seqpos, rib_dir]
     C_info = parse_c_infos(results["interaction_rotations"])["ln2.1"]
-    pca_rib_acts_test(C_info, rib_acts)
+    pca_rib_acts_test(C_info, rib_acts, atol=1e-6)
+
+
+@pytest.mark.slow
+def test_pca_basis_mnist():
+    dtype_str = "float64"
+
+    config_str = f"""
+    exp_name: test
+    mlp_path: experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt
+    batch_size: 256
+    seed: 0
+    truncation_threshold: 1e-15
+    rotate_final_node_layer: false
+    n_intervals: 0
+    dtype: float32
+    dataset:
+        return_set_frac: 0.01  # 3 batches (with batch_size=256)
+    node_layers:
+    - layers.1
+    - layers.2
+    - output
+    out_dir: null
+    basis_formula: pca
+    """
+    config_dict = yaml.safe_load(config_str)
+    config = MlpRibConfig(**config_dict)
+    results = mlp_build_graph_main(config)
+    rib_acts = get_rib_acts_test(results, atol=1e-6)  # [batch, seqpos, rib_dir]
+    C_infos = parse_c_infos(results["interaction_rotations"])
+    pca_rib_acts_test(C_infos["layers.1"], rib_acts["layers.1"], atol=1e-4)
+    pca_rib_acts_test(C_infos["layers.2"], rib_acts["layers.2"], atol=1e-4)

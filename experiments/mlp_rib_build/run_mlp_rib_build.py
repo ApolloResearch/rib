@@ -107,7 +107,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
 
     if config.basis_formula == "pca":
         logger.info("Collecting dataset means")
-        means = collect_dataset_means(
+        means, bias_positions = collect_dataset_means(
             hooked_model=hooked_mlp,
             module_names=non_output_node_layers,
             data_loader=train_loader,
@@ -116,7 +116,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
             collect_output_dataset_means=collect_output_gram,
         )
     else:
-        means = None
+        means, bias_positions = None, None
 
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
@@ -126,6 +126,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         device=device,
         collect_output_gram=collect_output_gram,
         means=means,
+        bias_positions=bias_positions,
     )
 
     Cs, Us = calculate_interaction_rotations(
@@ -141,6 +142,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         rotate_final_node_layer=config.rotate_final_node_layer,
         basis_formula=config.basis_formula,
         means=means,
+        bias_positions=bias_positions,
     )
 
     E_hats = collect_interaction_edges(

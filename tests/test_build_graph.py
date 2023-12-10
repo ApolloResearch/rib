@@ -492,18 +492,18 @@ def test_svd_basis():
     tlens_pretrained: pythia-14m
     tlens_model_path: null
     dataset:
-    source: huggingface
+        source: huggingface
         name: NeelNanda/pile-10k
         tokenizer_name: EleutherAI/pythia-14m
         return_set: train
         return_set_frac: null
-        return_set_n_samples: 50
+        return_set_n_samples: 10
         return_set_portion: first
     node_layers:
         - ln2.1
         - unembed
     batch_size: 2
-    return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
+    truncation_threshold: 1e-15
     rotate_final_node_layer: false
     n_intervals: 0
     dtype: {dtype_str}
@@ -523,8 +523,25 @@ def test_svd_basis():
             assert torch.allclose(C, U, atol=0)
 
 
+def pca_rib_acts_test(C_info, rib_acts):
+    # gram matrix of bias component with non-bias component will always be zero, as this is just
+    # the avg value of the non-bias component, which we've centered.
+    # Even after eigendecomposing this means there should be exactly one dir that reads from bias
+    amount_dir_reads_bias = C_info.C_pinv[:, -1].abs()
+    bias_dir_idx = C_info.C_pinv[:, -1].abs().argmax()
+
+    atol = 1e-6
+    assert amount_dir_reads_bias[bias_dir_idx].abs() - 1 < atol
+    is_non_bias_dir = torch.arange(len(amount_dir_reads_bias)) != bias_dir_idx
+    assert amount_dir_reads_bias[is_non_bias_dir].abs().max() < atol
+
+    # all other rib acts should be centred as well
+    mean_rib_acts = rib_acts["ln2.1"].mean(dim=(0, 1))
+    assert mean_rib_acts[is_non_bias_dir].abs().max() < atol
+
+
 @pytest.mark.slow
-def test_pca_basis():
+def test_pca_basis_pythia():
     dtype_str = "float64"
 
     config_str = f"""
@@ -557,20 +574,5 @@ def test_pca_basis():
     config = LMRibConfig(**config_dict)
     results = lm_build_graph_main(config)
     rib_acts = get_rib_acts_test(results, atol=1e-6)  # [batch, seqpos, rib_dir]
-
     C_info = parse_c_infos(results["interaction_rotations"])["ln2.1"]
-
-    # gram matrix of bias component with non-bias component will always be zero, as this is just
-    # the avg value of the non-bias component, which we've centered.
-    # Even after eigendecomposing this means there should be exactly one dir that reads from bias
-    amount_dir_reads_bias = C_info.C_pinv[:, -1].abs()
-    bias_dir_idx = C_info.C_pinv[:, -1].abs().argmax()
-
-    atol = 1e-6
-    assert amount_dir_reads_bias[bias_dir_idx].abs() - 1 < atol
-    is_non_bias_dir = torch.arange(len(amount_dir_reads_bias)) != bias_dir_idx
-    assert amount_dir_reads_bias[is_non_bias_dir].abs().max() < atol
-
-    # all other rib acts should be centred as well
-    mean_rib_acts = rib_acts["ln2.1"].mean(dim=(0, 1))
-    assert mean_rib_acts[is_non_bias_dir].abs().max() < atol
+    pca_rib_acts_test(C_info, rib_acts)

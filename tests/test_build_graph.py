@@ -87,20 +87,16 @@ def graph_build_test(
         if E_hats:
             # E_hats[i] is a tuple (name, tensor)
             if config.edge_formula == "squared":
-                # edges must be positive >= 0
-                assert (E_hats[i][1] >= 0).all()
-            # edges should not all be zero
-            assert (E_hats[i][1] != 0).any()
+                assert (E_hats[i][1] >= 0).all(), f"edges not >= 0 for {module_name}"
+            assert (E_hats[i][1] != 0).any(), f"edges all zero for {module_name}"
             if config.edge_formula == "functional" and config.basis_formula == "(1-alpha)^2":
                 # Check that the size of the sum of activations in the interaction basis is equal
                 # to the outgoing edges of a node. The relation should hold only in this one config
                 # case.
                 edge_size = E_hats[i][1].sum(0).abs()
-                # Test shapes
                 assert (
                     act_size.shape == edge_size.shape
                 ), f"act_size and edge_size not same shape for {module_name}"
-                # Test sum of edges == function size
                 assert torch.allclose(
                     act_size / act_size.abs().max(),
                     edge_size / edge_size.abs().max(),
@@ -120,7 +116,7 @@ def graph_build_test(
     return results
 
 
-def get_rib_acts_test(results: RibBuildResults, atol: float):
+def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     """Takes the results of a graph build and checks get_rib_acts computes the correct values.
 
     This requires:
@@ -132,7 +128,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results["config"]["dtype"]]
     model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
-    data_loader = DataLoader(dataset, batch_size=16, shuffle=False)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     hooked_model = HookedModel(model)
     Cs = parse_c_infos(results["interaction_rotations"])
 
@@ -189,8 +185,8 @@ def get_rib_acts_test(results: RibBuildResults, atol: float):
     ],
 )
 def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
-    dtype_str = "float32"
-    atol = 1e-5  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
+    dtype_str = "float64"
+    atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
 
     config_str = f"""
     exp_name: test
@@ -222,7 +218,7 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     config = LMRibConfig(**config_dict)
 
     results = graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
-    get_rib_acts_test(results, atol=1e-3)
+    get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
 
 
 @pytest.mark.slow
@@ -263,6 +259,7 @@ def test_pythia_14m_build_graph():
         build_graph_main_fn=lm_build_graph_main,
         atol=atol,
     )
+    get_rib_acts_test(results, atol=0)
 
 
 @pytest.mark.slow
@@ -309,6 +306,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
+    get_rib_acts_test(results, atol=1e-6)
 
 
 def rotate_final_layer_invariance(

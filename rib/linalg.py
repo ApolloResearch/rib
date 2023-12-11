@@ -211,7 +211,7 @@ def _calc_integration_intervals(
     return alphas, interval_size
 
 
-def integrated_gradient_trapezoidal_jacobian_functional(
+def calc_edge_functional(
     module_hat: Callable[
         [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
     ],
@@ -222,6 +222,8 @@ def integrated_gradient_trapezoidal_jacobian_functional(
     n_intervals: int,
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat with inputs f_in_hat.
+
+    Updates the edge in-place.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
@@ -234,27 +236,29 @@ def integrated_gradient_trapezoidal_jacobian_functional(
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
     """
     has_pos = f_in_hat.ndim == 3
-    # Ensure inputs require grads
+
     f_in_hat.requires_grad_(True)
 
     einsum_pattern = "bpj,bpj->j" if f_in_hat.ndim == 3 else "bj,bj->j"
 
-    # Prepare integral
     alphas, interval_size = _calc_integration_intervals(n_intervals)
 
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         f_out_hat_const = module_hat(f_in_hat, in_tuple_dims)
 
+    normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
+
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
-        # As per the trapezoidal rule, multiply the endpoints by 1/2
-        # (unless we're taking a point estimate at alpha=0.5)
-        scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
+        # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
+        # alpha=0.5) and multiply by the interval size.
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+            trapezoidal_scaler = 0.5 * interval_size
+        else:
+            trapezoidal_scaler = interval_size
 
-        # Normalize by the dataset size and the number of positions (if the input has a position dim)
-        normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
         # Need to define alpha_f_in_hat for autograd
         alpha_f_in_hat = alpha * f_in_hat
         f_out_hat_alpha = module_hat(alpha_f_in_hat, in_tuple_dims)
@@ -280,19 +284,16 @@ def integrated_gradient_trapezoidal_jacobian_functional(
             i_grad = (
                 torch.autograd.grad(f_out_hat_norm[i], alpha_f_in_hat, retain_graph=True)[0]
                 / normalization_factor
-                * interval_size
-                * scaler
+                * trapezoidal_scaler
             )
             with torch.inference_mode():
                 E = torch.einsum(einsum_pattern, i_grad, f_in_hat)
-                # We have a minus sign in front of the IG integral, see e.g. the definition of g_j
-                # in equation (3.27)
                 # Note that edge is initialised to zeros in
                 # `rib.data_accumulator.collect_interaction_edges`
                 edge[i] -= E
 
 
-def integrated_gradient_trapezoidal_jacobian_squared(
+def calc_edge_squared(
     module_hat: Callable[
         [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
     ],
@@ -303,6 +304,8 @@ def integrated_gradient_trapezoidal_jacobian_squared(
     n_intervals: int,
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat with inputs f_in_hat.
+
+    Updates the edge in-place.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
@@ -315,25 +318,23 @@ def integrated_gradient_trapezoidal_jacobian_squared(
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
     """
     has_pos = f_in_hat.ndim == 3
-    # Ensure inputs require grads
+
     f_in_hat.requires_grad_(True)
 
-    # Prepare integral
     alphas, interval_size = _calc_integration_intervals(n_intervals)
 
-    # Get sizes for intermediate resullt storage
+    # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
     out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = edge.shape
     if has_pos:
         # Just run the model to see what the output pos size is
         with torch.inference_mode():
-            f_out_hat_const = module_hat(f_in_hat, in_tuple_dims)
-        out_pos_size = f_out_hat_const.shape[1]
+            out_pos_size = module_hat(f_in_hat, in_tuple_dims).shape[1]
 
-    # Accumulate integral results for all x (batch) and t (out position) values,
-    # store values because we need to square the integral result before summing
-    # This term is the content of the brackets before the square, i.e. the sum over tprime
-    inner_token_sums = (
+    # Accumulate integral results for all x (batch) and t (out position) values.
+    # We store values because we need to square the integral result before summing.
+    # This term is the content of the brackets before the square, i.e. the sum over tprime.
+    J_hat = (
         torch.zeros(
             batch_size,
             out_pos_size,
@@ -350,46 +351,45 @@ def integrated_gradient_trapezoidal_jacobian_squared(
         )
     )
 
+    normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
+
     # Integral
     for alpha_index, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
-        # As per the trapezoidal rule, multiply the endpoints by 1/2
-        # (unless we're taking a point estimate at alpha=0.5)
-        scaler = 0.5 if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals) else 1
+        # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
+        # alpha=0.5) and multiply by the interval size.
+        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+            trapezoidal_scaler = 0.5 * interval_size
+        else:
+            trapezoidal_scaler = interval_size
 
         # We have to compute inputs from f_hat to make autograd work
         alpha_f_in_hat = alpha * f_in_hat
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
-        normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
-
-        # Take the derivative of the (i, t) element (output dim and output pos) of the output
-        # Note that t (output pos) is different from p (tprime, input pos)
+        # Take the derivative of the (i, t) element (output dim and output pos) of the output.
         for out_dim in range(out_hidden_size_comb_trunc):
             if has_pos:
                 for output_pos_idx in range(out_pos_size):
-                    # autograd gives us the derivative w.r.t. j (input dim) and p (tprime, input pos).
-                    # Later (in the einsum) we sum over p (tprime) != output_pos_idx (t) according
-                    # to Lucius' formula.
-                    # The sum in the autograd is just a trick to get the grad for every batch index
-                    # vectorized.
+                    # autograd gives us the derivative w.r.t. b (batch dim), p (input pos) and
+                    # j (input dim).
+                    # The sum over the batch dimension before passing to autograd is just a trick
+                    # to get the grad for every batch index vectorized.
                     i_grad = (
                         torch.autograd.grad(
                             f_out_alpha_hat[:, output_pos_idx, out_dim].sum(dim=0),
                             alpha_f_in_hat,
                             retain_graph=True,
                         )[0]
-                        / normalization_factor
-                        * interval_size
-                        * scaler
+                        * trapezoidal_scaler
                     )
 
-                    # Sum over tprime (p, input pos) as per Lucius' formula (A.18)
                     with torch.inference_mode():
-                        inner_token_sum = torch.einsum("bpj,bpj->bj", i_grad, f_in_hat)
-                        # We have a minus sign in front of the IG integral
-                        inner_token_sums[:, output_pos_idx, out_dim, :] -= inner_token_sum
+                        # Element-wise multiply with f_in_hat and sum over the input pos
+                        J_hat[:, output_pos_idx, out_dim, :] -= torch.einsum(
+                            "bpj,bpj->bj", i_grad, f_in_hat
+                        )
             else:
                 i_grad = (
                     torch.autograd.grad(
@@ -397,27 +397,14 @@ def integrated_gradient_trapezoidal_jacobian_squared(
                         alpha_f_in_hat,
                         retain_graph=True,
                     )[0]
-                    / normalization_factor
-                    * interval_size
-                    * scaler
+                    * trapezoidal_scaler
                 )
                 with torch.inference_mode():
-                    # The einsum is actually just an elementwise multiplication here
-                    inner_token_sum = torch.einsum(
-                        "bj,bj->bj",
-                        i_grad,
-                        f_in_hat,
-                    ).to(inner_token_sums.device)
-                    # We have a minus sign in front of the IG integral
-                    inner_token_sums[:, out_dim, :] -= inner_token_sum
+                    # Element-wise multiply with f_in_hat
+                    J_hat[:, out_dim, :] -= torch.einsum("bj,bj->bj", i_grad, f_in_hat)
 
-    # Finished alpha integral, integral result present in inner_token_sums
-    # Square, and sum over batch size and t (not tprime)
-    inner_token_sums = inner_token_sums**2
-    if has_pos:
-        edge += inner_token_sums.sum(dim=(0, 1))
-    else:
-        edge += inner_token_sums.sum(dim=0)
+    # Square, and sum over batch size and output pos (if applicable)
+    edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1) if has_pos else 0)
 
 
 def integrated_gradient_trapezoidal_norm(

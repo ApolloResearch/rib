@@ -187,8 +187,8 @@ def get_rib_acts_test(results: RibBuildResults, atol: float):
     ],
 )
 def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
-    dtype_str = "float32"
-    atol = 1e-5  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
+    dtype_str = "float64"
+    atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
 
     config_str = f"""
     exp_name: test
@@ -220,7 +220,7 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     config = LMRibConfig(**config_dict)
 
     results = graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
-    get_rib_acts_test(results, atol=1e-3)
+    get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
 
 
 @pytest.mark.slow

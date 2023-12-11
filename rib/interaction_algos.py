@@ -111,6 +111,7 @@ def calculate_interaction_rotations(
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "pca"] = "(1-alpha)^2",
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
+    centred: bool = False,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -295,21 +296,32 @@ def calculate_interaction_rotations(
             basis_formula=basis_formula,
         )
 
-        U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
+        if centred:
+            assert means is not None
+            assert bias_positions is not None
+            Y = shift_matrix(-means[node_layer], bias_positions[node_layer])
+            Y_inv = shift_matrix(means[node_layer], bias_positions[node_layer])
+        else:
+            Y = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
+            Y_inv = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
+
+        Yinv_U_Dsqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = Y_inv @ U @ D.sqrt()
 
         # Converts M to fp64
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            U_D_sqrt.T.to(M_dtype) @ M_dash @ U_D_sqrt.to(M_dtype)
+            Yinv_U_Dsqrt.T.to(M_dtype) @ M_dash @ Yinv_U_Dsqrt.to(M_dtype)
         )
+        # todo: ignore index positions
         V = eigendecompose(M)[1]  # V has size (d_hidden_trunc, d_hidden_trunc)
         V = V.to(dtype)
 
-        # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
-        U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
-        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
-        U_D_sqrt_pinv_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
+        # left transform for lambda dash, first transform for C_pinv
+        Vt_Dsqrt_Ut_Yinv = V.T @ D.sqrt() @ U.T @ Y_inv
+        # right transform for lambda dash, first transform for C
+        Y_U_Dsqrtpinv_V = Y @ U @ pinv_diag(D.sqrt()) @ V
+
         Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
-            (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_V).diag().abs()
+            (Vt_Dsqrt_Ut_Yinv @ Lambda_dash @ Y_U_Dsqrtpinv_V).diag().abs()
         )
 
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
@@ -317,10 +329,10 @@ def calculate_interaction_rotations(
         )
 
         C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
-            (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
+            (Y_U_Dsqrtpinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
         )
         C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
-            (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
+            (Lambda_abs_sqrt_trunc_pinv @ Vt_Dsqrt_Ut_Yinv).detach().cpu()
         )
         Cs.append(
             InteractionRotation(node_layer_name=node_layer, out_dim=C.shape[1], C=C, C_pinv=C_pinv)

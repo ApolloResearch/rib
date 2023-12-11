@@ -19,10 +19,19 @@ from unittest.mock import patch
 import pytest
 import torch
 import yaml
+from fancy_einsum import einsum
+
+from rib.analysis_utils import get_rib_acts, parse_c_infos
+from rib.hook_fns import acts_forward_hook_fn
+from rib.hook_manager import Hook, HookedModel
+from rib.loader import load_model_and_dataset_from_rib_results
+from rib.types import TORCH_DTYPES, RibBuildResults
 
 # Append the root directory to sys.path
 ROOT_DIR = Path(__file__).parent.parent.resolve()
 sys.path.append(str(ROOT_DIR))
+
+from torch.utils.data import DataLoader
 
 from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
@@ -103,6 +112,65 @@ def graph_build_test(
             atol=atol,
         ), f"act_size not equal to Lambdas for {module_name}"
 
+    return results
+
+
+def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
+    """Takes the results of a graph build and checks get_rib_acts computes the correct values.
+
+    This requires:
+    * loading the model and dataset
+    * 1) calling get_rib_acts, which hooks the model and computes the rib acts from that
+    * 2) using run_with_cache to get the output of the previous module and rotating with C
+    * comparing the results of 1) and 2)
+    """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[results["config"]["dtype"]]
+    model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    hooked_model = HookedModel(model)
+    Cs = parse_c_infos(results["interaction_rotations"])
+
+    rib_acts = get_rib_acts(
+        hooked_model=hooked_model,
+        data_loader=data_loader,
+        c_infos=Cs.values(),
+        device=device,
+        dtype=dtype,
+    )
+    for m_name, acts in rib_acts.items():
+        assert acts.shape[0] == len(dataset), f"acts.shape[0] != len(dataset) for {m_name}"
+
+    # we choose a module to compare rib acts on and find the module immediately before it
+    if hasattr(model, "sections"):
+        # we choose the first module of node_layers, meaning the previous module is the last one
+        # in sections.pre
+        module_to_test = results["config"]["node_layers"][0]
+        prev_module_id = f"sections.pre.{len(model.sections['pre']) - 1}"
+    else:
+        # we arbitrarily choose the first layer.
+        assert "layers.1" in results["config"]["node_layers"], results["config"]["node_layers"]
+        module_to_test = "layers.1"
+        prev_module_id = "layers.0"
+
+    prev_module_outputs = []
+    with torch.inference_mode():
+        hook = Hook(
+            name=prev_module_id,
+            data_key="acts",
+            fn=acts_forward_hook_fn,
+            module_name=prev_module_id,
+        )
+        for input, _ in data_loader:
+            hooked_model.forward(input.to(device=device), hooks=[hook])
+            cache_out = hooked_model.hooked_data[prev_module_id]["acts"]
+            hooked_model.clear_hooked_data()
+            prev_module_outputs.append(torch.concatenate(cache_out, dim=-1).cpu())
+    prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
+    test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
+    utils_rib_acts = rib_acts[module_to_test].cpu()
+    assert torch.allclose(utils_rib_acts, test_rib_acts, atol=atol)
+
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
@@ -115,8 +183,8 @@ def graph_build_test(
     ],
 )
 def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
-    dtype_str = "float32"
-    atol = 1e-5  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
+    dtype_str = "float64"
+    atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
 
     config_str = f"""
     exp_name: test
@@ -147,7 +215,8 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
 
-    graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
+    results = graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
+    get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
 
 
 @pytest.mark.slow
@@ -183,11 +252,12 @@ def test_pythia_14m_build_graph():
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
 
-    graph_build_test(
+    results = graph_build_test(
         config=config,
         build_graph_main_fn=lm_build_graph_main,
         atol=atol,
     )
+    get_rib_acts_test(results, atol=0)
 
 
 @pytest.mark.slow
@@ -229,11 +299,12 @@ def test_mnist_build_graph(basis_formula, edge_formula):
     config_dict = yaml.safe_load(config_str)
     config = MlpRibConfig(**config_dict)
 
-    graph_build_test(
+    results = graph_build_test(
         config=config,
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
+    get_rib_acts_test(results, atol=1e-6)
 
 
 def rotate_final_layer_invariance(

@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional, Union
 import torch
 
 from rib.hook_fns import acts_forward_hook_fn
+from rib.models.mlp import MLP
 from rib.models.utils import get_model_attr
 
 
@@ -131,9 +132,15 @@ class HookedModel(torch.nn.Module):
         has_children: Callable[[torch.nn.Module], bool] = (
             lambda module: sum(1 for _ in module.children()) > 0
         )
-        # We use this check rather than has_children because we still want
-        # AttentionOut even though it has the child AttentionScores.
-        module_names = [name for name, mod in self.model.named_modules() if name.count(".") >= 2]
+        if isinstance(self.model, MLP):
+            module_names = [f"layers.{i}" for i in range(len(self.model.layers))]
+        else:
+            # We use this check rather than has_children because we still want
+            # AttentionOut even though it has the child AttentionScores.
+            module_names = [
+                name for name, mod in self.model.named_modules() if name.count(".") >= 2
+            ]
+
         act_hooks: list[Hook] = []
         for module_name in module_names:
             act_hooks.append(

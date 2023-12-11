@@ -95,11 +95,11 @@
             "justMyCode": true
         },
         {
-            "name": "modular dnn rib build",
+            "name": "modular mlp rib build",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/modular_dnn_build/run_modular_dnn_rib_build.py",
-            "args": "${workspaceFolder}/experiments/modular_dnn_build/4-layers.yaml",
+            "program": "${workspaceFolder}/experiments/mlp_rib_build/run_mlp_rib_build.py",
+            "args": "${workspaceFolder}/experiments/mlp_rib_build/block_diagonal.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },

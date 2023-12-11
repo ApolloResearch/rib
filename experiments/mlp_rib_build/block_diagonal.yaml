@@ -13,6 +13,7 @@ dataset:
   length: 4
   data_variances: [1, 1]
   data_perfect_correlation: false
+  seed: 0
 modular_mlp_config:
   n_hidden_layers: 4
   width: 4

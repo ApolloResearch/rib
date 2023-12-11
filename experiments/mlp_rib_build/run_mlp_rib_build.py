@@ -107,7 +107,9 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
-    mlp = load_mlp(mlp_config, mlp_path=config.mlp_path, fold_bias=True, device=device)
+    mlp = load_mlp(
+        mlp_config, mlp_path=config.mlp_path, fold_bias=True, device=device, seed=config.seed
+    )
     assert mlp.has_folded_bias, "MLP must have folded bias to run RIB"
 
     all_possible_node_layers = [f"layers.{i}" for i in range(len(mlp.layers))] + ["output"]

@@ -119,10 +119,11 @@ def load_mlp(
     mlp_path: Optional[Path],
     device: str,
     fold_bias: bool = True,
+    seed: Optional[int] = None,
 ) -> Union[MLP, ModularMLP]:
     mlp: Union[MLP, ModularMLP]
     if isinstance(config, ModularMLPConfig):
-        mlp = ModularMLP(config)
+        mlp = ModularMLP(config, seed=seed)
         mlp.to(device)
     else:
         assert isinstance(config, MLPConfig)

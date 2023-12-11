@@ -119,7 +119,7 @@ def graph_build_test(
     return results
 
 
-def get_rib_acts_test(results: RibBuildResults, atol: float):
+def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     """Takes the results of a graph build and checks get_rib_acts computes the correct values.
 
     This requires:
@@ -131,7 +131,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results["config"]["dtype"]]
     model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
-    data_loader = DataLoader(dataset, batch_size=16, shuffle=False)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     hooked_model = HookedModel(model)
     Cs = parse_c_infos(results["interaction_rotations"])
 

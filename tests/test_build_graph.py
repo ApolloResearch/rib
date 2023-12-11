@@ -520,14 +520,20 @@ def test_svd_basis():
             assert torch.allclose(C, U, atol=0)
 
 
-def pca_rib_acts_test(C_info, rib_acts, atol=1e-6):
-    # gram matrix of bias component with non-bias component will always be zero, as this is just
-    # the avg value of the non-bias component, which we've centered.
-    # Even after eigendecomposing this means there should be exactly one dir that reads from bias
-    amount_dir_reads_bias = C_info.C_pinv[:, -1].abs()
-    bias_dir_idx = C_info.C_pinv[:, -1].abs().argmax()
+def pca_rib_acts_test(C_info, rib_acts, bias_positions: list[int] = [-1], atol=1e-6):
+    """
+    Test that the 'pca' basis (aka svd with centre=true) works as expected.
 
-    assert amount_dir_reads_bias[bias_dir_idx].abs() - 1 < atol
+    There should be one direction that reads from the bias component (`bias_dir_idx below).
+    That is C_pinv[bias_dir_idx, -1] = 1 and all other C_pinv[:, -1] = 0.
+
+    Also, rib acts should be mean 0 for all of the non-bias rib directions
+    """
+    amount_dir_reads_bias = C_info.C_pinv[:, bias_positions].abs()  # [rib_dir, bias_pos]
+
+    bias_dir_idx = amount_dir_reads_bias[:, 0].abs().argmax()
+    assert torch.linalg.vector_norm(amount_dir_reads_bias[bias_dir_idx]).item() == pytest.approx(1)
+
     is_non_bias_dir = torch.arange(len(amount_dir_reads_bias)) != bias_dir_idx
     assert amount_dir_reads_bias[is_non_bias_dir].abs().max() < atol
 
@@ -538,6 +544,7 @@ def pca_rib_acts_test(C_info, rib_acts, atol=1e-6):
 
 @pytest.mark.slow
 def test_pca_basis_pythia():
+    """Test that the 'pca' basis (aka svd with centre=true) works for pythia."""
     dtype_str = "float64"
 
     config_str = f"""
@@ -564,20 +571,21 @@ def test_pca_basis_pythia():
     calculate_edges: false
     eval_type: ce_loss
     out_dir: null
-    basis_formula: pca
+    basis_formula: svd
+    centre: true
     """
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
     results = lm_build_graph_main(config)
     rib_acts = get_rib_acts_test(results, atol=0)["ln2.1"]  # [batch, seqpos, rib_dir]
     C_info = parse_c_infos(results["interaction_rotations"])["ln2.1"]
-    pca_rib_acts_test(C_info, rib_acts, atol=1e-6)
+    bias_positions = [results["model_config_dict"]["d_model"], -1]
+    pca_rib_acts_test(C_info, rib_acts, atol=1e-6, bias_positions=bias_positions)
 
 
 @pytest.mark.slow
 def test_pca_basis_mnist():
-    dtype_str = "float64"
-
+    """Test that the 'pca' basis (aka svd with centre=true) works for MNIST."""
     config_str = f"""
     exp_name: test
     mlp_path: experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt
@@ -594,7 +602,8 @@ def test_pca_basis_mnist():
     - layers.2
     - output
     out_dir: null
-    basis_formula: pca
+    basis_formula: svd
+    centre: true
     """
     config_dict = yaml.safe_load(config_str)
     config = MlpRibConfig(**config_dict)

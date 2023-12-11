@@ -12,9 +12,7 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 
 from typing import Any, Callable, Literal, Optional, Union
 
-import einops
 import torch
-from fancy_einsum import einsum
 from jaxtyping import Float
 from torch import Tensor
 
@@ -23,9 +21,7 @@ from rib.linalg import (
     integrated_gradient_trapezoidal_jacobian_functional,
     integrated_gradient_trapezoidal_jacobian_squared,
     integrated_gradient_trapezoidal_norm,
-    module_hat,
 )
-from rib.models.sequential_transformer.components import AttentionOut
 
 
 def _add_to_hooked_matrix(

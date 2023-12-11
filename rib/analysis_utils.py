@@ -8,7 +8,6 @@ from rib.data_accumulator import run_dataset_through_model
 from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import InteractionRotation
-from rib.models.utils import get_model_attr
 
 
 def parse_c_infos(c_infos: list[dict[str, Any]]) -> dict[str, InteractionRotation]:

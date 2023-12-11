@@ -415,7 +415,8 @@ def integrated_gradient_trapezoidal_norm(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "g*f"] = "(1-0)*alpha",
+    next_gradients: Optional[Float[Tensor, "batch out_hidden_trunc"]] = None,
 ) -> Float[Tensor, "... in_hidden_combined"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
     following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
@@ -434,32 +435,41 @@ def integrated_gradient_trapezoidal_norm(
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
         basis_formula: The formula to use for the integrated gradient. Must be one of
-            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
-            latter is a new (November) version that should be used from now on. The latter makes
-            sense especially in light of the new attribution (edge_formula="squared") but is
-            generally good and does not change results much. Defaults to "(1-0)*alpha".
+            "(1-alpha)^2", "(1-0)*alpha", or "g*f". The first is the old (October) version
+            while the second is a new (November) version that should be used from now on. The third
+            is for gradient flow. The second makes sense especially in light of the new attribution
+            (edge_formula="squared") but is generally good and does not change results
+            much. Defaults to "(1-0)*alpha".
+        next_gradients: The integrated gradients of the next layer. Only used if
+            basis_formula="g*f".
     """
-    # Compute f^{l+1}(x) to which the derivative is not applied.
-    with torch.inference_mode():
-        output_const = module(*tuple(x.detach().clone() for x in inputs))
-        # Concatenate the outputs over the hidden dimension
-        out_acts_const = (
-            output_const
-            if isinstance(output_const, torch.Tensor)
-            else torch.cat(output_const, dim=-1)
-        )
-        if basis_formula == "(1-0)*alpha":
-            output_zero = module(*tuple(torch.zeros_like(x) for x in inputs))
+    if basis_formula == "g*f":
+        assert next_gradients is not None, "next_gradients must be provided for basis_formula='g*f'"
+    else:
+        # Compute f^{l+1}(x) to which the derivative is not applied.
+        with torch.inference_mode():
+            output_const = module(*tuple(x.detach().clone() for x in inputs))
             # Concatenate the outputs over the hidden dimension
-            out_acts_zero = (
-                output_zero
-                if isinstance(output_zero, torch.Tensor)
-                else torch.cat(output_zero, dim=-1)
+            out_acts_const = (
+                output_const
+                if isinstance(output_const, torch.Tensor)
+                else torch.cat(output_const, dim=-1)
             )
+            if basis_formula == "(1-0)*alpha":
+                output_zero = module(*tuple(torch.zeros_like(x) for x in inputs))
+                # Concatenate the outputs over the hidden dimension
+                out_acts_zero = (
+                    output_zero
+                    if isinstance(output_zero, torch.Tensor)
+                    else torch.cat(output_zero, dim=-1)
+                )
 
     # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:
         x.requires_grad_(True)
+    # Ensure that next_gradients has requires_grad=False from now on
+    if next_gradients is not None:
+        next_gradients.requires_grad_(False)
 
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
@@ -497,6 +507,8 @@ def integrated_gradient_trapezoidal_norm(
                 else (out_acts_const - out_acts_zero)
             )
             f_hat_norm = (f_hat_alpha * f_hat_1_0).sum()
+        elif basis_formula == "g*f":
+            f_hat_norm = (out_acts_alpha * next_gradients).sum()
         else:
             raise ValueError(
                 f"Unexpected integrated gradient formula {basis_formula} != '(1-alpha)^2' or '(1-0)*alpha'"

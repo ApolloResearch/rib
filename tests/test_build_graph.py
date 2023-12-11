@@ -572,7 +572,7 @@ def test_svd_basis():
 
 def diagonal_edges_when_linear(
     config_str: str,
-    config_cls: Union["LMRibConfig", "MlpRibConfig", "MlpRibConfig"],
+    config_cls: Union["LMRibConfig", "MlpRibConfig"],
     build_graph_main_fn: Callable,
     rtol: float,
     atol: float,

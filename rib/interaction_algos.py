@@ -166,11 +166,6 @@ def calculate_interaction_rotations(
         section_names
     ), "Must specify a hook name for each section (except the output section)."
 
-    if centre and basis_formula != "svd":
-        raise NotImplementedError(
-            "Centring is currently only implemented for the svd basis formula."
-        )
-
     # We start appending Us and Cs from the output layer and work our way backwards
     Us: list[Eigenvectors] = []
     Cs: list[InteractionRotation] = []
@@ -305,15 +300,6 @@ def calculate_interaction_rotations(
             Lambda_einsum_dtype=Lambda_einsum_dtype,
             basis_formula=basis_formula,
         )
-
-        if centred:
-            assert means is not None
-            assert bias_positions is not None
-            Y = shift_matrix(-means[node_layer], bias_positions[node_layer])
-            Y_inv = shift_matrix(means[node_layer], bias_positions[node_layer])
-        else:
-            Y = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
-            Y_inv = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
 
         Yinv_U_Dsqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = Y_inv @ U @ D.sqrt()
 

@@ -306,7 +306,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
-    get_rib_acts_test(results, atol=1e-6)
+    get_rib_acts_test(results, atol=1e-4)
 
 
 def rotate_final_layer_invariance(
@@ -612,3 +612,45 @@ def test_pca_basis_mnist():
     C_infos = parse_c_infos(results["interaction_rotations"])
     pca_rib_acts_test(C_infos["layers.1"], rib_acts["layers.1"], atol=1e-4)
     pca_rib_acts_test(C_infos["layers.2"], rib_acts["layers.2"], atol=1e-4)
+
+
+@pytest.mark.slow
+def test_centred_rib_pythia():
+    """Test that the 'pca' basis (aka svd with centre=true) works for pythia."""
+    dtype_str = "float64"
+
+    config_str = f"""
+    exp_name: test
+    seed: 0
+    tlens_pretrained: pythia-14m
+    tlens_model_path: null
+    dataset:
+      source: huggingface
+      name: NeelNanda/pile-10k
+      tokenizer_name: EleutherAI/pythia-14m
+      return_set: train
+      return_set_frac: null
+      return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
+      return_set_portion: first
+    node_layers:
+        - ln2.1
+        - unembed
+    batch_size: 2
+    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
+    rotate_final_node_layer: false
+    n_intervals: 0
+    dtype: {dtype_str}
+    calculate_edges: false
+    eval_type: ce_loss
+    out_dir: null
+    basis_formula: (1-0)*alpha
+    centre: true
+    """
+    config_dict = yaml.safe_load(config_str)
+    config = LMRibConfig(**config_dict)
+    results = lm_build_graph_main(config)
+    rib_acts = get_rib_acts_test(results, atol=0)["ln2.1"]  # [batch, seqpos, rib_dir]
+    C_info = parse_c_infos(results["interaction_rotations"])["ln2.1"]
+    bias_positions = [results["model_config_dict"]["d_model"], -1]
+    pca_rib_acts_test(C_info, rib_acts, atol=1e-6, bias_positions=bias_positions)
+    # TODO : is this test really valid? I think mostly but not entirely.

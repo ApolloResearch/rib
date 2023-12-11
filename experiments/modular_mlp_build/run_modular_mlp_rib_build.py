@@ -1,4 +1,4 @@
-"""Calculate the interaction graph of an hand-coded modular DNN."""
+"""Calculate the interaction graph of an hand-coded modular MLP."""
 
 import json
 from dataclasses import asdict
@@ -7,22 +7,15 @@ from typing import Literal, Optional, Union
 
 import fire
 import torch
-import yaml
 from pydantic import BaseModel, Field
 from torch.utils.data import DataLoader
 
-from rib.data import VisionDatasetConfig
+from rib.data import BlockVectorDataset, BlockVectorDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.log import logger
-from rib.models.mlp import MLPConfig
-from rib.models.modular_dnn import (
-    BlockVectorDataset,
-    BlockVectorDatasetConfig,
-    ModularDNN,
-    ModularDNNConfig,
-)
+from rib.models.modular_mlp import ModularMLP, ModularMLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import check_outfile_overwrite, load_config, set_seed
 
@@ -55,8 +48,8 @@ class Config(BaseModel):
         BlockVectorDatasetConfig(),
         description="The dataset to use.",
     )
-    model: ModularDNNConfig = Field(
-        ModularDNNConfig(),
+    model: ModularMLPConfig = Field(
+        ModularMLPConfig(),
         description="The model to use.",
     )
 
@@ -67,8 +60,8 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     model_config = config.model
     dataset_config = config.dataset
 
-    dnn = ModularDNN(
-        dnn_config=model_config,
+    mlp = ModularMLP(
+        mlp_config=model_config,
         dtype=config.dtype,
         seed=config.seed,
     )
@@ -83,9 +76,9 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 
-    assert dnn.has_folded_bias, "MLP must have folded bias to run RIB"
+    assert mlp.has_folded_bias, "MLP must have folded bias to run RIB"
 
-    all_possible_node_layers = [f"layers.{i}" for i in range(len(dnn.layers))] + ["output"]
+    all_possible_node_layers = [f"layers.{i}" for i in range(len(mlp.layers))] + ["output"]
     assert "|".join(config.node_layers) in "|".join(all_possible_node_layers), (
         f"config.node_layers must be a subsequence of {all_possible_node_layers} for a plain MLP, "
         f"otherwise our algorithm will be invalid because we require that the output of a "
@@ -98,9 +91,9 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         if not check_outfile_overwrite(out_file, force):
             raise FileExistsError("Not overwriting output file")
 
-    dnn.eval()
-    dnn.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
-    hooked_dnn = HookedModel(dnn)
+    mlp.eval()
+    mlp.to(device=torch.device(device), dtype=TORCH_DTYPES[config.dtype])
+    hooked_mlp = HookedModel(mlp)
 
     train_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=True)
     non_output_node_layers = [layer for layer in config.node_layers if layer != "output"]
@@ -108,7 +101,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
     gram_matrices = collect_gram_matrices(
-        hooked_model=hooked_dnn,
+        hooked_model=hooked_mlp,
         module_names=non_output_node_layers,
         data_loader=train_loader,
         dtype=dtype,
@@ -120,7 +113,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         gram_matrices=gram_matrices,
         section_names=non_output_node_layers,
         node_layers=config.node_layers,
-        hooked_model=hooked_dnn,
+        hooked_model=hooked_mlp,
         data_loader=train_loader,
         dtype=dtype,
         device=device,
@@ -132,7 +125,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
 
     E_hats = collect_interaction_edges(
         Cs=Cs,
-        hooked_model=hooked_dnn,
+        hooked_model=hooked_mlp,
         n_intervals=config.n_intervals,
         section_names=non_output_node_layers,
         data_loader=train_loader,

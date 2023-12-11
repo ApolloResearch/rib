@@ -29,11 +29,11 @@ from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
 from experiments.mlp_rib_build.run_mlp_rib_build import Config as MlpRibConfig
 from experiments.mlp_rib_build.run_mlp_rib_build import main as mlp_build_graph_main
-from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
-    Config as ModularDNNRibConfig,
+from experiments.modular_mlp_build.run_modular_mlp_rib_build import (
+    Config as ModularMLPRibConfig,
 )
-from experiments.modular_dnn_build.run_modular_dnn_rib_build import (
-    main as modular_dnn_build_main,
+from experiments.modular_mlp_build.run_modular_mlp_rib_build import (
+    main as modular_mlp_build_main,
 )
 from rib.interaction_algos import build_sorted_lambda_matrices
 
@@ -267,7 +267,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         ("neuron", "functional", "float64"),
     ],
 )
-def test_modular_dnn_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
+def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
     config_str = f"""
         exp_name: test
         out_dir: null
@@ -299,11 +299,11 @@ def test_modular_dnn_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
     """
 
     config_dict = yaml.safe_load(config_str)
-    config = ModularDNNRibConfig(**config_dict)
+    config = ModularMLPRibConfig(**config_dict)
 
     graph_build_test(
         config=config,
-        build_graph_main_fn=modular_dnn_build_main,
+        build_graph_main_fn=modular_mlp_build_main,
         atol=atol,
         test_lambdas=False if basis_formula in ["svd", "neuron"] else True,
     )
@@ -311,7 +311,7 @@ def test_modular_dnn_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
 
 def rotate_final_layer_invariance(
     config_str_rotated: str,
-    config_cls: Union["LMRibConfig", "MlpRibConfig", "ModularDNNRibConfig"],
+    config_cls: Union["LMRibConfig", "MlpRibConfig", "ModularMLPRibConfig"],
     build_graph_main_fn: Callable,
     rtol: float = 1e-7,
     atol: float = 0,
@@ -396,10 +396,10 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
         ("(1-0)*alpha", "squared"),
     ],
 )
-def test_modular_dnn_rotate_final_layer_invariance(
+def test_modular_mlp_rotate_final_layer_invariance(
     basis_formula, edge_formula, rtol=1e-7, atol=1e-8
 ):
-    """Test that the non-final edges are the same for ModularDNN whether or not we rotate the final layer."""
+    """Test that the non-final edges are the same for ModularMLP whether or not we rotate the final layer."""
     config_str_rotated = f"""
         exp_name: test
         out_dir: null
@@ -432,8 +432,8 @@ def test_modular_dnn_rotate_final_layer_invariance(
 
     rotate_final_layer_invariance(
         config_str_rotated=config_str_rotated,
-        config_cls=ModularDNNRibConfig,
-        build_graph_main_fn=modular_dnn_build_main,
+        config_cls=ModularMLPRibConfig,
+        build_graph_main_fn=modular_mlp_build_main,
         rtol=rtol,
         atol=atol,
     )
@@ -575,7 +575,7 @@ def test_svd_basis():
 
 def diagonal_edges_when_linear(
     config_str: str,
-    config_cls: Union["LMRibConfig", "MlpRibConfig", "ModularDNNRibConfig"],
+    config_cls: Union["LMRibConfig", "MlpRibConfig", "ModularMLPRibConfig"],
     build_graph_main_fn: Callable,
     rtol: float,
     atol: float,
@@ -640,10 +640,10 @@ all_combinations = list(
 
 @pytest.mark.slow
 @pytest.mark.parametrize("basis_formula, edge_formula, dtype_str, rotate_final", all_combinations)
-def test_modular_dnn_diagonal_edges_when_linear(
+def test_modular_mlp_diagonal_edges_when_linear(
     basis_formula, edge_formula, dtype_str, rotate_final, rtol=1e-7, atol=1e-5, gtol=1e-4
 ):
-    """Test that RIB rotates to a diagonal basis when the ModularDNN is linear.
+    """Test that RIB rotates to a diagonal basis when the ModularMLP is linear.
 
     Args:
         basis_formula: The basis formula to use.
@@ -686,8 +686,8 @@ def test_modular_dnn_diagonal_edges_when_linear(
 
     diagonal_edges_when_linear(
         config_str=config_str,
-        config_cls=ModularDNNRibConfig,
-        build_graph_main_fn=modular_dnn_build_main,
+        config_cls=ModularMLPRibConfig,
+        build_graph_main_fn=modular_mlp_build_main,
         rtol=rtol,
         atol=atol,
         gtol=gtol,

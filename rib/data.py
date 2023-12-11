@@ -2,10 +2,12 @@
 from typing import Literal, Optional
 
 import torch
-from jaxtyping import Int
+from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import Dataset
+
+from rib.types import TORCH_DTYPES, StrDtype
 
 
 class DatasetConfig(BaseModel):
@@ -126,3 +128,93 @@ class VisionDatasetConfig(DatasetConfig):
     seed: Optional[int] = 0
     return_set_frac: Optional[float] = None  # Needed for some reason to avoid mypy errors
     return_set_n_samples: Optional[int] = None  # Needed for some reason to avoid mypy errors
+
+
+class BlockVectorDatasetConfig(BaseModel):
+    size: int = Field(
+        1000,
+        description="Number of samples in the dataset.",
+    )
+    length: int = Field(
+        4,
+        description="Length of each vector.",
+    )
+    first_block_length: Optional[int] = Field(
+        None,
+        description="Length of the first block. If None, defaults to length // 2.",
+    )
+    data_variances: list[float] = Field(
+        [1.0, 1.0],
+        description="Variance of the two blocks of the vectors.",
+    )
+    data_perfect_correlation: bool = Field(
+        False,
+        description="Whether to make the data within each block perfectly correlated.",
+    )
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        if self.first_block_length is None:
+            self.first_block_length = self.length // 2
+
+
+class BlockVectorDataset(Dataset):
+    def __init__(
+        self,
+        data_config: BlockVectorDatasetConfig,
+        dtype: StrDtype = "float64",
+        seed: Optional[int] = None,
+    ):
+        """Generate a dataset of vectors with two blocks of variance"""
+        self.cfg = data_config
+        self.data = self.generate_data(dtype=TORCH_DTYPES[dtype], seed=seed)
+        # Not needed, just here for Dataset class
+        self.labels = torch.nan * torch.ones(self.cfg.size)
+
+    def __len__(self):
+        return self.cfg.size
+
+    def __getitem__(self, idx):
+        return self.data[idx], self.labels[idx]
+
+    def generate_data(
+        self, dtype: torch.dtype, seed: Optional[int] = None
+    ) -> Float[Tensor, "size length"]:
+        """Generate a dataset of vectors with two blocks of variance.
+
+        Args:
+            dtype: data type of the vectors.
+            seed: random seed
+
+        Returns:
+            A dataset of vectors with two blocks of variance.
+        """
+        size = self.cfg.size
+        length = self.cfg.length
+        first_block_length = self.cfg.first_block_length
+        data_variances = self.cfg.data_variances
+        data_perfect_correlation = self.cfg.data_perfect_correlation
+
+        first_block_length = first_block_length or length // 2
+        second_block_length = length - first_block_length
+        data = torch.empty((size, length), dtype=dtype)
+
+        if seed is not None:
+            torch.manual_seed(seed)
+
+        if not data_perfect_correlation:
+            data[:, 0:first_block_length] = data_variances[0] * torch.randn(
+                size, first_block_length, dtype=dtype
+            )
+            data[:, first_block_length:] = data_variances[1] * torch.randn(
+                size, second_block_length, dtype=dtype
+            )
+        else:
+            data[:, 0:first_block_length] = data_variances[0] * torch.randn(
+                size, 1, dtype=dtype
+            ).repeat(1, first_block_length)
+            data[:, first_block_length:] = data_variances[1] * torch.randn(
+                size, 1, dtype=dtype
+            ).repeat(1, second_block_length)
+
+        return data

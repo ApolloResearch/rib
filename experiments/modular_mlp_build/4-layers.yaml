@@ -1,4 +1,4 @@
-exp_name: 4-layers-blockdiagonaldnn
+exp_name: 4-layers-blockdiagonalmlp
 node_layers:
   - layers.0
   - layers.1

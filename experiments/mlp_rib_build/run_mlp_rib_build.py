@@ -110,7 +110,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
-    if config.basis_formula == "pca":
+    if config.centre:
         logger.info("Collecting dataset means")
         means, bias_positions = collect_dataset_means(
             hooked_model=hooked_mlp,
@@ -146,6 +146,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         truncation_threshold=config.truncation_threshold,
         rotate_final_node_layer=config.rotate_final_node_layer,
         basis_formula=config.basis_formula,
+        centre=config.centre,
         means=means,
         bias_positions=bias_positions,
     )

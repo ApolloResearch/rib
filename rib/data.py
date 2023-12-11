@@ -131,7 +131,6 @@ class ModularArithmeticDataset(Dataset):
 
 
 class VisionDatasetConfig(DatasetConfig):
-    source: Literal["torchvision"] = "torchvision"
     name: Literal["CIFAR10", "MNIST"] = "MNIST"
     seed: Optional[int] = 0
     return_set_frac: Optional[float] = None  # Needed for some reason to avoid mypy errors
@@ -139,7 +138,6 @@ class VisionDatasetConfig(DatasetConfig):
 
 
 class BlockVectorDatasetConfig(DatasetConfig):
-    source: Literal["custom"] = "custom"
     name: Literal["block_vector"] = "block_vector"
     size: int = Field(
         1000,

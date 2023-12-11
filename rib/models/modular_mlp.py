@@ -68,8 +68,7 @@ class ModularMLP(MLP):
             output_size=self.cfg.width,
             activation_fn=self.cfg.activation_fn,
             dtype=dtype,
-            # Don't fold bias yet, fold later
-            fold_bias=False,
+            fold_bias=False,  # Don't fold bias here, we'll do it later
             bias=True,
         )
         super(ModularMLP, self).__init__(config=self.mlp_config)
@@ -82,7 +81,6 @@ class ModularMLP(MLP):
                 self.cfg.bias * torch.ones(self.cfg.width, dtype=TORCH_DTYPES[dtype])
             )
 
-        # Now fold biases
         self.fold_bias()
 
     def generate_weights(

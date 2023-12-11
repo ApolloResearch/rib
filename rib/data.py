@@ -3,9 +3,17 @@ from typing import Literal, Optional
 
 import torch
 from jaxtyping import Float, Int
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from torch import Tensor
 from torch.utils.data import Dataset
+from typing_extensions import Annotated
 
 from rib.types import TORCH_DTYPES, StrDtype
 
@@ -123,14 +131,16 @@ class ModularArithmeticDataset(Dataset):
 
 
 class VisionDatasetConfig(DatasetConfig):
-    source: Literal["custom"] = "custom"
+    source: Literal["torchvision"] = "torchvision"
     name: Literal["CIFAR10", "MNIST"] = "MNIST"
     seed: Optional[int] = 0
     return_set_frac: Optional[float] = None  # Needed for some reason to avoid mypy errors
     return_set_n_samples: Optional[int] = None  # Needed for some reason to avoid mypy errors
 
 
-class BlockVectorDatasetConfig(BaseModel):
+class BlockVectorDatasetConfig(DatasetConfig):
+    source: Literal["custom"] = "custom"
+    name: Literal["block_vector"] = "block_vector"
     size: int = Field(
         1000,
         description="Number of samples in the dataset.",
@@ -139,10 +149,14 @@ class BlockVectorDatasetConfig(BaseModel):
         4,
         description="Length of each vector.",
     )
-    first_block_length: Optional[int] = Field(
-        None,
-        description="Length of the first block. If None, defaults to length // 2.",
-    )
+    first_block_length: Annotated[
+        Optional[int],
+        Field(
+            None,
+            description="Length of the first block. If None, defaults to length // 2.",
+            validate_default=True,
+        ),
+    ]
     data_variances: list[float] = Field(
         [1.0, 1.0],
         description="Variance of the two blocks of the vectors.",
@@ -151,23 +165,25 @@ class BlockVectorDatasetConfig(BaseModel):
         False,
         description="Whether to make the data within each block perfectly correlated.",
     )
+    dtype: StrDtype = "float64"
+    seed: Optional[int] = 0
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        if self.first_block_length is None:
-            self.first_block_length = self.length // 2
+    @field_validator("first_block_length")
+    @classmethod
+    def set_first_block_length(cls, v: Optional[int], info: ValidationInfo) -> int:
+        if v is None:
+            return info.data["length"] // 2
+        return v
 
 
 class BlockVectorDataset(Dataset):
     def __init__(
         self,
-        data_config: BlockVectorDatasetConfig,
-        dtype: StrDtype = "float64",
-        seed: Optional[int] = None,
+        dataset_config: BlockVectorDatasetConfig,
     ):
         """Generate a dataset of vectors with two blocks of variance"""
-        self.cfg = data_config
-        self.data = self.generate_data(dtype=TORCH_DTYPES[dtype], seed=seed)
+        self.cfg = dataset_config
+        self.data = self.generate_data()
         # Not needed, just here for Dataset class
         self.labels = torch.nan * torch.ones(self.cfg.size)
 
@@ -177,18 +193,13 @@ class BlockVectorDataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx], self.labels[idx]
 
-    def generate_data(
-        self, dtype: torch.dtype, seed: Optional[int] = None
-    ) -> Float[Tensor, "size length"]:
+    def generate_data(self) -> Float[Tensor, "size length"]:
         """Generate a dataset of vectors with two blocks of variance.
-
-        Args:
-            dtype: data type of the vectors.
-            seed: random seed
 
         Returns:
             A dataset of vectors with two blocks of variance.
         """
+        dtype = TORCH_DTYPES[self.cfg.dtype]
         size = self.cfg.size
         length = self.cfg.length
         first_block_length = self.cfg.first_block_length
@@ -199,8 +210,8 @@ class BlockVectorDataset(Dataset):
         second_block_length = length - first_block_length
         data = torch.empty((size, length), dtype=dtype)
 
-        if seed is not None:
-            torch.manual_seed(seed)
+        if self.cfg.seed is not None:
+            torch.manual_seed(self.cfg.seed)
 
         if not data_perfect_correlation:
             data[:, 0:first_block_length] = data_variances[0] * torch.randn(

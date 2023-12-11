@@ -1,12 +1,9 @@
 # %%
 
-import sys
 from pathlib import Path
-from typing import Callable, Literal, Union
-from unittest.mock import patch
+from typing import Literal
 
 import fire
-import torch
 import yaml
 
 from experiments.modular_mlp_build.run_modular_mlp_rib_build import (
@@ -16,7 +13,6 @@ from experiments.modular_mlp_build.run_modular_mlp_rib_build import (
     main as modular_mlp_build_main,
 )
 from rib.plotting import plot_interaction_graph
-from rib.utils import check_outfile_overwrite
 
 # %%
 

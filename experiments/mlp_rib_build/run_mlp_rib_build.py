@@ -22,16 +22,17 @@ from typing import Literal, Optional, Union
 import fire
 import torch
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch.utils.data import DataLoader
 
-from rib.data import VisionDatasetConfig
+from rib.data import BlockVectorDatasetConfig, VisionDatasetConfig
 from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import load_dataset, load_mlp
 from rib.log import logger
 from rib.models.mlp import MLPConfig
+from rib.models.modular_mlp import ModularMLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import check_outfile_overwrite, load_config, set_seed
 
@@ -39,7 +40,11 @@ from rib.utils import check_outfile_overwrite, load_config, set_seed
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str
-    mlp_path: RootPath
+    mlp_path: Optional[RootPath] = Field(
+        None,
+        description="Path to the saved MLP model. If None, we expect the MLP class to not be "
+        "randomly initialized (e.g. like in the ModularMLP class).",
+    )
     batch_size: int
     seed: Optional[int] = 0
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
@@ -62,7 +67,22 @@ class Config(BaseModel):
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
-    dataset: VisionDatasetConfig = VisionDatasetConfig()
+    dataset: Union[VisionDatasetConfig, BlockVectorDatasetConfig] = Field(
+        VisionDatasetConfig(),
+        discriminator="name",
+        description="The dataset to use to build the graph.",
+    )
+    modular_mlp_config: Optional[ModularMLPConfig] = Field(
+        None,
+        description="The model to use. If None, we expect mlp_path to be set.",
+    )
+
+    @model_validator(mode="after")
+    def verify_model_config(self) -> "Config":
+        """Verify that model_config is set if modular_mlp_config is not."""
+        if self.mlp_path is None and self.modular_mlp_config is None:
+            raise ValueError("model must be set if modular_mlp_config is not.")
+        return self
 
 
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:
@@ -70,19 +90,24 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
 
-    with open(config.mlp_path.parent / "config.yaml", "r") as f:
-        model_config_dict = yaml.safe_load(f)
-
     if config.out_dir is not None:
         config.out_dir.mkdir(parents=True, exist_ok=True)
         out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
         if not check_outfile_overwrite(out_file, force):
             raise FileExistsError("Not overwriting output file")
 
+    mlp_config: Union[MLPConfig, ModularMLPConfig]
+    if config.mlp_path is not None:
+        with open(config.mlp_path.parent / "config.yaml", "r") as f:
+            model_config_dict = yaml.safe_load(f)
+        mlp_config = MLPConfig(**model_config_dict["model"])
+    else:
+        assert config.modular_mlp_config is not None
+        mlp_config = config.modular_mlp_config
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
-    mlp_config = MLPConfig(**model_config_dict["model"])
-    mlp = load_mlp(mlp_config, config.mlp_path, fold_bias=True, device=device)
+    mlp = load_mlp(mlp_config, mlp_path=config.mlp_path, fold_bias=True, device=device)
     assert mlp.has_folded_bias, "MLP must have folded bias to run RIB"
 
     all_possible_node_layers = [f"layers.{i}" for i in range(len(mlp.layers))] + ["output"]
@@ -154,7 +179,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         "eigenvectors": eigenvectors,
         "edges": [(module, E_hats[module].cpu()) for module in E_hats],
         "config": json.loads(config.model_dump_json()),
-        "model_config_dict": model_config_dict,
+        "model_config_dict": {} if config.mlp_path is None else model_config_dict,
     }
 
     # Save the results (which include torch tensors) to file

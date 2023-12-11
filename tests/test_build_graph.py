@@ -29,12 +29,6 @@ from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
 from experiments.mlp_rib_build.run_mlp_rib_build import Config as MlpRibConfig
 from experiments.mlp_rib_build.run_mlp_rib_build import main as mlp_build_graph_main
-from experiments.modular_mlp_build.run_modular_mlp_rib_build import (
-    Config as ModularMLPRibConfig,
-)
-from experiments.modular_mlp_build.run_modular_mlp_rib_build import (
-    main as modular_mlp_build_main,
-)
 from rib.interaction_algos import build_sorted_lambda_matrices
 
 
@@ -276,14 +270,16 @@ def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
             - layers.1
             - layers.2
             - output
-        model:
+        modular_mlp_config:
             n_hidden_layers: 2
             width: 10
             weight_variances: [1,1]
             weight_equal_columns: false
             bias: 0
             activation_fn: relu
+            seed: 0
         dataset:
+            name: block_vector
             size: 1000
             length: 10
             data_variances: [1,1]
@@ -299,11 +295,11 @@ def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
     """
 
     config_dict = yaml.safe_load(config_str)
-    config = ModularMLPRibConfig(**config_dict)
+    config = MlpRibConfig(**config_dict)
 
     graph_build_test(
         config=config,
-        build_graph_main_fn=modular_mlp_build_main,
+        build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
         test_lambdas=False if basis_formula in ["svd", "neuron"] else True,
     )
@@ -311,7 +307,7 @@ def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
 
 def rotate_final_layer_invariance(
     config_str_rotated: str,
-    config_cls: Union["LMRibConfig", "MlpRibConfig", "ModularMLPRibConfig"],
+    config_cls: Union["LMRibConfig", "MlpRibConfig"],
     build_graph_main_fn: Callable,
     rtol: float = 1e-7,
     atol: float = 0,
@@ -408,7 +404,7 @@ def test_modular_mlp_rotate_final_layer_invariance(
             - layers.1
             - layers.2
             - output
-        model:
+        modular_mlp_config:
             n_hidden_layers: 2
             width: 10
             weight_variances: [1,1]
@@ -416,6 +412,7 @@ def test_modular_mlp_rotate_final_layer_invariance(
             bias: 0
             activation_fn: relu
         dataset:
+            name: block_vector
             size: 1000
             length: 10
             data_variances: [1,1]
@@ -432,8 +429,8 @@ def test_modular_mlp_rotate_final_layer_invariance(
 
     rotate_final_layer_invariance(
         config_str_rotated=config_str_rotated,
-        config_cls=ModularMLPRibConfig,
-        build_graph_main_fn=modular_mlp_build_main,
+        config_cls=MlpRibConfig,
+        build_graph_main_fn=mlp_build_graph_main,
         rtol=rtol,
         atol=atol,
     )
@@ -575,7 +572,7 @@ def test_svd_basis():
 
 def diagonal_edges_when_linear(
     config_str: str,
-    config_cls: Union["LMRibConfig", "MlpRibConfig", "ModularMLPRibConfig"],
+    config_cls: Union["LMRibConfig", "MlpRibConfig", "MlpRibConfig"],
     build_graph_main_fn: Callable,
     rtol: float,
     atol: float,
@@ -662,7 +659,7 @@ def test_modular_mlp_diagonal_edges_when_linear(
             - layers.1
             - layers.2
             - output
-        model:
+        modular_mlp_config:
             n_hidden_layers: 2
             width: 10
             weight_variances: [1,1]
@@ -670,6 +667,7 @@ def test_modular_mlp_diagonal_edges_when_linear(
             bias: 0
             activation_fn: identity
         dataset:
+            name: block_vector
             size: 1000
             length: 10
             data_variances: [1,1]
@@ -686,8 +684,8 @@ def test_modular_mlp_diagonal_edges_when_linear(
 
     diagonal_edges_when_linear(
         config_str=config_str,
-        config_cls=ModularMLPRibConfig,
-        build_graph_main_fn=modular_mlp_build_main,
+        config_cls=MlpRibConfig,
+        build_graph_main_fn=mlp_build_graph_main,
         rtol=rtol,
         atol=atol,
         gtol=gtol,

@@ -69,7 +69,6 @@ class Config(BaseModel):
     )
     dataset: Union[VisionDatasetConfig, BlockVectorDatasetConfig] = Field(
         VisionDatasetConfig(),
-        discriminator="name",
         description="The dataset to use to build the graph.",
     )
     modular_mlp_config: Optional[ModularMLPConfig] = Field(

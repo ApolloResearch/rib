@@ -108,7 +108,8 @@ def calculate_interaction_rotations(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "pca"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-alpha)^2",
+    centre: bool = True,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
@@ -164,6 +165,11 @@ def calculate_interaction_rotations(
         section_names
     ), "Must specify a hook name for each section (except the output section)."
 
+    if centre and basis_formula != "svd":
+        raise NotImplementedError(
+            "Centring is currently only implemented for the svd basis formula."
+        )
+
     # We start appending Us and Cs from the output layer and work our way backwards
     Us: list[Eigenvectors] = []
     Cs: list[InteractionRotation] = []
@@ -175,12 +181,12 @@ def calculate_interaction_rotations(
     if rotate_final_node_layer:
         U_output = eigendecompose(gram_matrices[node_layers[-1]])[1].detach().cpu()
         assert U_output is not None
-        if basis_formula == "pca":
+        if centre:
             assert means is not None
             assert bias_positions is not None
             assert node_layers[-1] in means
-            gamma = shift_matrix(-means[node_layers[-1]], bias_positions[node_layers[-1]])
-            C_output = gamma.cpu() @ U_output.detach().cpu()
+            Y = shift_matrix(-means[node_layers[-1]], bias_positions[node_layers[-1]])
+            C_output = (Y @ U_output).detach().cpu()
         else:
             C_output = U_output.detach().cpu()
     else:
@@ -257,24 +263,28 @@ def calculate_interaction_rotations(
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
         )
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
-        if basis_formula == "svd":
-            # Use U as C and then progress to the next loop
-            Cs.append(
-                InteractionRotation(node_layer_name=node_layer, out_dim=U.shape[1], C=U, C_pinv=U.T)
-            )
-            continue
-        if basis_formula == "pca":
+
+        # currently only used for svd basis, but will be used more in text PR
+        if centre:
             assert means is not None
             assert bias_positions is not None
-            assert node_layer in means, f"{node_layer} not in {means.keys()}"
-            gamma = shift_matrix(-means[node_layer], bias_positions[node_layer])
-            gamma_inv = shift_matrix(means[node_layer], bias_positions[node_layer])
+            # Y (or Gamma) is a matrix that shifts the activations to be mean zero
+            # with the exception of the bias positions which are still 1
+            Y = shift_matrix(-means[node_layer], bias_positions[node_layer])
+            Y_inv = shift_matrix(means[node_layer], bias_positions[node_layer])
+        else:
+            # if not centring, we set Y to be the identity matrix
+            Y = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
+            Y_inv = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
+
+        if basis_formula == "svd":
+            # We set C based on U (maybe centred as well)
             Cs.append(
                 InteractionRotation(
                     node_layer_name=node_layer,
                     out_dim=U.shape[1],
-                    C=gamma @ U,
-                    C_pinv=U.T @ gamma_inv,
+                    C=(Y @ U).cpu(),
+                    C_pinv=(U.T @ Y_inv).cpu(),
                 )
             )
             continue

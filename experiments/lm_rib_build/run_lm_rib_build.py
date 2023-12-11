@@ -137,7 +137,7 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "pca"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
         "use Us as Cs, giving the eigendecomposition of the gram matrix.",
@@ -145,6 +145,11 @@ class Config(BaseModel):
     edge_formula: Literal["functional", "squared"] = Field(
         "functional",
         description="The attribution method to use to calculate the edges.",
+    )
+    centre: bool = Field(
+        False,
+        description="Whether to centre the activations before performing rib. Currently only"
+        "supported for basis_formula='svd', which gives the 'pca' basis.",
     )
 
     @model_validator(mode="after")
@@ -314,7 +319,7 @@ def main(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
 
-        if config.basis_formula == "pca":
+        if config.centre:
             logger.info("Collecting dataset means")
             means, bias_positions = collect_dataset_means(
                 hooked_model=hooked_model,
@@ -364,6 +369,7 @@ def main(
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
+            centre=config.centre,
             means=means,
             bias_positions=bias_positions,
         )

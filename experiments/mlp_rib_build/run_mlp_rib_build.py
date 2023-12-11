@@ -51,7 +51,7 @@ class Config(BaseModel):
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: StrDtype  # Data type of all tensors (except those overriden in certain functions).
     node_layers: list[str]
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "pca"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis.",
     )
@@ -65,6 +65,11 @@ class Config(BaseModel):
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     dataset: VisionDatasetConfig = VisionDatasetConfig()
+    centre: bool = Field(
+        False,
+        description="Whether to centre the activations before performing rib. Currently only"
+        "supported for basis_formula='svd', which gives the 'pca' basis.",
+    )
 
 
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:

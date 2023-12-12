@@ -616,23 +616,20 @@ def test_modular_mlp_diagonal_edges_when_linear(
         diag_target[:min_dim, :min_dim] = torch.diag(torch.diag(edge_val))
         difference = edge_val - diag_target
 
-        # For each element of difference, find the maximum entry in its row,
-        # and the maximum entry in its column. then divide by the maximum of both.
-        max_entry_in_row = edge_val.abs().amax(dim=1, keepdim=True)
-        max_entry_in_column = edge_val.abs().amax(dim=0, keepdim=True)
-        max_entry = torch.max(max_entry_in_row, max_entry_in_column)
-        max_entry = torch.max(max_entry, torch.diag(edge_val).abs().log().mean().exp())
-
         # Check that off-diagonal entries are small relative to the maximum of 1) the largest entry
         # in that entry's row or column (which should be on the diagonal) and 2) the geometric mean
         # of diagonal entries. The geometric mean is used because some of the diagonal entries may
         # be zero (or very close to it) and it is not neccessary that the off diagonal entries are
         # much smaller than even these small diagonal entries.
+        max_entries_in_row = edge_val.abs().amax(dim=1, keepdim=True)
+        max_entries_in_column = edge_val.abs().amax(dim=0, keepdim=True)
+        max_entries = torch.max(max_entries_in_row, max_entries_in_column)
+        max_entries = torch.max(max_entries, torch.diag(edge_val).abs().log().mean().exp())
         assert torch.allclose(
-            difference / max_entry, torch.zeros_like(difference), rtol=0, atol=gtol
+            difference / max_entries, torch.zeros_like(difference), rtol=0, atol=gtol
         ), (
             f"edges[{i}][1] not diagonal for {module_name},"
-            f" biggest relative deviation: {(difference / max_entry).abs().max()}"
+            f" biggest relative deviation: {(difference / max_entries).abs().max()}"
         )
 
         # Check off-diagonal edges are much smaller than the largest edge in that layer

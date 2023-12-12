@@ -48,10 +48,7 @@ def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main
 
 
 def graph_build_test(
-    config: Union[LMRibConfig, MlpRibConfig],
-    build_graph_main_fn: Callable,
-    atol: float,
-    test_lambdas: bool = True,
+    config: Union[LMRibConfig, MlpRibConfig], build_graph_main_fn: Callable, atol: float
 ):
     results, Lambdas = build_get_lambdas(config, build_graph_main_fn)
 
@@ -89,7 +86,7 @@ def graph_build_test(
                     atol=atol,
                 ), f"act_size not equal to edge_size for {module_name}, got {act_size}, {edge_size}"
 
-        if test_lambdas:
+        if config.basis_formula not in ["svd", "neuron"]:  # We don't have Lambdas for these
             # Check that the Lambdas are also the same as the act_size and edge_size
             # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
             # `rib.interaction_algos.build_sort_lambda_matrix)
@@ -289,12 +286,7 @@ def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
     config_dict = yaml.safe_load(config_str)
     config = MlpRibConfig(**config_dict)
 
-    graph_build_test(
-        config=config,
-        build_graph_main_fn=mlp_build_graph_main,
-        atol=atol,
-        test_lambdas=False if basis_formula in ["svd", "neuron"] else True,
-    )
+    graph_build_test(config=config, build_graph_main_fn=mlp_build_graph_main, atol=atol)
 
 
 def rotate_final_layer_invariance(
@@ -514,11 +506,7 @@ def test_mnist_build_graph_invalid_node_layers():
     config = MlpRibConfig(**config_dict)
 
     with pytest.raises(AssertionError):
-        graph_build_test(
-            config=config,
-            build_graph_main_fn=mlp_build_graph_main,
-            atol=0,
-        )
+        graph_build_test(config=config, build_graph_main_fn=mlp_build_graph_main, atol=0)
 
 
 @pytest.mark.slow

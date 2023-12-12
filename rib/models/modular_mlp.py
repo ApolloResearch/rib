@@ -79,20 +79,21 @@ class ModularMLP(MLP):
         self.cfg = mlp_config
         super(ModularMLP, self).__init__(config=self.cfg.mlp_config)
 
+        if seed is not None:
+            torch.manual_seed(seed)
+
         # Hardcode weights and biases
         assert len(self.layers) == self.cfg.n_hidden_layers + 1
         for layer in self.layers:
-            layer.W = nn.Parameter(self.generate_weights(seed=seed))
+            layer.W = nn.Parameter(self.generate_weights())
             layer.b = nn.Parameter(
                 torch.full((self.cfg.width,), fill_value=self.cfg.bias, dtype=self.cfg.dtype)
             )
 
-    def generate_weights(self, seed: Optional[int] = None) -> Float[Tensor, "width width"]:
+    def generate_weights(self) -> Float[Tensor, "width width"]:
         """Generate a random block diagonal matrix
 
-        Args:
-            seed: Random seed to ensure reproducibility. Note, changes to the structure of this
-                function may break reproducibility.
+        Note, changes to the structure of this function may break reproducibility.
 
         Returns:
             A random block diagonal matrix
@@ -105,9 +106,6 @@ class ModularMLP(MLP):
 
         assert total_width > first_block_width, "First block width must be smaller than total width"
         assert len(block_variances) == 2, "Only two blocks supported"
-
-        if seed is not None:
-            torch.manual_seed(seed)
 
         second_block_width = total_width - first_block_width
 

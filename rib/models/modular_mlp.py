@@ -107,27 +107,25 @@ class ModularMLP(MLP):
         if seed is not None:
             torch.manual_seed(seed)
 
-        block_matrix = torch.zeros((total_width, total_width), dtype=dtype)
-
         second_block_width = total_width - first_block_width
 
         if equal_columns:
             # Duplicate the same columns in each block
-            block_matrix[:first_block_width, :first_block_width] = (
+            first_block = (
                 block_variances[0]
                 * torch.randn(1, first_block_width, dtype=dtype).repeat(first_block_width, 1).T
             )
-            block_matrix[first_block_width:, first_block_width:] = (
+            second_block = (
                 block_variances[1]
                 * torch.randn(1, second_block_width, dtype=dtype).repeat(second_block_width, 1).T
             )
         else:
             # Normal random weights
-            block_matrix[:first_block_width, :first_block_width] = block_variances[0] * torch.randn(
+            first_block = block_variances[0] * torch.randn(
                 first_block_width, first_block_width, dtype=dtype
             )
-            block_matrix[first_block_width:, first_block_width:] = block_variances[1] * torch.randn(
+            second_block = block_variances[1] * torch.randn(
                 second_block_width, second_block_width, dtype=dtype
             )
 
-        return block_matrix
+        return torch.block_diag(first_block, second_block)

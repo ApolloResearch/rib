@@ -130,8 +130,8 @@ def load_mlp(
         assert mlp_path is not None, "mlp_path must be provided for MLPConfig"
         mlp = MLP(config)
         mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
-        if fold_bias:
-            mlp.fold_bias()
+    if fold_bias:
+        mlp.fold_bias()
     return mlp
 
 

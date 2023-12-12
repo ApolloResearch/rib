@@ -18,6 +18,7 @@ import pytest
 import torch
 import yaml
 from fancy_einsum import einsum
+from torch.utils.data import DataLoader
 
 from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main

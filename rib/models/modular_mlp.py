@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from torch import Tensor
 
 from rib.models import MLP, MLPConfig
-from rib.types import TORCH_DTYPES, StrDtype
 
 
 class ModularMLPConfig(BaseModel):
@@ -51,7 +50,7 @@ class ModularMLP(MLP):
     def __init__(
         self,
         mlp_config: ModularMLPConfig,
-        dtype: StrDtype = "float64",
+        dtype: torch.dtype = torch.float64,
         seed: Optional[int] = None,
     ):
         """Generate a block diagonal MLP
@@ -76,10 +75,8 @@ class ModularMLP(MLP):
         # Hardcode weights and biases
         assert len(self.layers) == self.cfg.n_hidden_layers + 1
         for layer in self.layers:
-            layer.W = nn.Parameter(self.generate_weights(dtype=TORCH_DTYPES[dtype], seed=seed))
-            layer.b = nn.Parameter(
-                self.cfg.bias * torch.ones(self.cfg.width, dtype=TORCH_DTYPES[dtype])
-            )
+            layer.W = nn.Parameter(self.generate_weights(dtype=dtype, seed=seed))
+            layer.b = nn.Parameter(self.cfg.bias * torch.ones(self.cfg.width, dtype=dtype))
 
     def generate_weights(
         self, dtype=torch.float32, seed: Optional[int] = None

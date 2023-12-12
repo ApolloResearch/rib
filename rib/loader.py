@@ -24,7 +24,7 @@ from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.mlp import MLP, MLPConfig
 from rib.models.modular_mlp import ModularMLP, ModularMLPConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
-from rib.utils import REPO_ROOT, get_data_subset, to_root_path, train_test_split
+from rib.utils import REPO_ROOT, get_data_subset, train_test_split
 
 
 def load_sequential_transformer(

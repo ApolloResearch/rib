@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import eigendecompose, pinv_diag, shift_matrix
+from rib.linalg import eigendecompose, masked_eigendecompose, pinv_diag, shift_matrix
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.transformer import SequentialTransformer
 
@@ -112,7 +112,6 @@ def calculate_interaction_rotations(
     centre: bool = True,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
-    centred: bool = False,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -247,17 +246,11 @@ def calculate_interaction_rotations(
     ):
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
 
-        n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
-        # Truncate the D matrix to remove small eigenvalues
-        D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            torch.diag(D_dash)[:-n_small_eigenvals, :-n_small_eigenvals]
-            if n_small_eigenvals > 0
-            else torch.diag(D_dash)
-        )
-        # Truncate the columns of U to remove small eigenvalues
-        U: Float[Tensor, "d_hidden d_hidden_trunc"] = (
-            U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
-        )
+        # we trucate all directions with eigenvalues smaller than some threshold
+        mask = D_dash > truncation_threshold  # true if we keep the direction
+        D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = D_dash[mask].diag()
+        U: Float[Tensor, "d_hidden d_hidden_trunc"] = U_dash[:, mask]
+
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
 
         # currently only used for svd basis, but will be used more in text PR
@@ -308,8 +301,28 @@ def calculate_interaction_rotations(
             Yinv_U_Dsqrt.T.to(M_dtype) @ M_dash @ Yinv_U_Dsqrt.to(M_dtype)
         )
         # todo: ignore index positions
-        V = eigendecompose(M)[1]  # V has size (d_hidden_trunc, d_hidden_trunc)
-        V = V.to(dtype)
+        if centre:
+            # there will be one direction pointing in a bias direction, but the position of this
+            # direction is permuted by U. The i_th row of U is the direction it maps the ith
+            # standard basis vector e_i. Thus we want the single non-zero entry of U[-1, :] as -1
+            # is a bias position in the neuron basis.
+            top_2_vals, top_2_idxs = torch.topk(U[-1, :].abs(), k=2)
+            # top value should be 1/sqrt(# bias positions in neuron basis)
+            assert bias_positions is not None
+            expected_top_val = len(bias_positions[node_layer]) ** (-0.5)
+            assert (
+                top_2_vals[0] - expected_top_val
+            ).abs() < 1e-3, f"largest = {top_2_vals[0]}, expected = {expected_top_val}"
+            assert (
+                top_2_vals[1] < 1e-6
+            ), f"Expected only one non-zero entry in U[-1, :], 2nd largest = {top_2_vals[1]}"
+            bias_pos_after_U: int = top_2_idxs[0].item()  # type: ignore[assignment]
+            # We use this so we can make sure that our bias position stays isolated when
+            # transforming by V.
+            V = masked_eigendecompose(M, [bias_pos_after_U])[1]
+        else:
+            V = eigendecompose(M)[1]
+        V = V.to(dtype)  # V has size (d_hidden_trunc, d_hidden_trunc)
 
         # left transform for lambda dash, first transform for C_pinv
         Vt_Dsqrt_Ut_Yinv = V.T @ D.sqrt() @ U.T @ Y_inv

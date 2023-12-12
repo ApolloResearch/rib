@@ -10,6 +10,52 @@ from tqdm import tqdm
 from rib.types import TORCH_DTYPES, StrDtype
 
 
+def masked_eigendecompose(
+    x: Float[Tensor, "d_hidden d_hidden"],
+    mask_positions: list[int],
+    descending: bool = True,
+    dtype: StrDtype = "float64",
+) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
+    """Eigendecompose a matrix ignoring certain rows/columns.
+
+    This means the eigenvectors will be a coordinate transform that preserves the masked components.
+    These coordinates will each have eigenvector of some basis vector e_i and eigenvalue 1.
+
+    If decending = True we sort after these masked components.
+
+    Args:
+        x: A matrix to eigendecompose
+        mask_positions: A tensor of indexes to mask when eigendecomposing. Masks both rows and cols.
+
+    Returns:
+        eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues
+        eigenvectors: Matrix whose columns are the eigenvectors.
+    """
+    d_full = x.shape[0]
+    assert x.shape == (d_full, d_full), "x must be a square matrix"
+
+    # Calculate the eigenvectors of the unmasked matrix
+    is_not_masked = ~torch.isin(torch.arange(d_full), torch.tensor(mask_positions))
+    is_not_masked = is_not_masked.to(device=x.device)
+    submatrix = x[is_not_masked, :][:, is_not_masked]
+    # decending = False, we will sort later.
+    eigenvalues, eigenvectors = eigendecompose(submatrix, descending=False, dtype=dtype)
+
+    eigenvalues_full = torch.ones(d_full, dtype=eigenvalues.dtype, device=eigenvalues.device)
+    eigenvalues_full[is_not_masked] = eigenvalues
+
+    # Create a matrix with the eigenvectors in the correct positions
+    eigenvectors_full = torch.eye(d_full, dtype=eigenvectors.dtype, device=eigenvectors.device)
+    eigenvectors_full[is_not_masked, :][:, is_not_masked] = eigenvectors
+
+    if descending:
+        idx = torch.argsort(eigenvalues, descending=True)
+        eigenvalues = eigenvalues[idx]
+        eigenvectors = eigenvectors[:, idx]
+
+    return eigenvalues_full, eigenvectors_full
+
+
 def eigendecompose(
     x: Float[Tensor, "d_hidden d_hidden"],
     descending: bool = True,
@@ -33,7 +79,7 @@ def eigendecompose(
         dtype: The precision in which to perform the eigendecomposition.
             Values below torch.float64 tend to be very unstable.
     Returns:
-        eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
+        eigenvalues: Vector of the eigenvalues of x.
         eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
     in_dtype = x.dtype
@@ -564,3 +610,25 @@ def shift_matrix(
     is_not_bias_mask = ~torch.isin(torch.arange(n), bias_positions)
     S[-1][is_not_bias_mask] = shift[is_not_bias_mask]
     return S
+
+
+def vector_subspace_similarity(
+    x: Float[Tensor, "*batch emb"], subspace: Float[Tensor, "basis emb"], eps=0
+) -> Float[Tensor, "*batch"]:
+    """Calculate the similarity of a vector (or batch of vectors) to a subspace.
+    This is a generalization of the cosine similarity, and for every vector x is equal to
+    `norm(proj(x)) / norm(x)` where `proj(x)` is the projection of x onto the subspace.
+
+    Args:
+        x: A vector to normalize.
+        subspace: An orthonormal basis of the subspace.
+        eps: Added to the norm of x, useful if we may have very small vectors.
+
+    Returns:
+        The similarities for each vector in x.
+    """
+    assert x.shape[-1] == subspace.shape[-1], "x and subspace must have the same last dimension."
+    proj = torch.einsum("...i,bi->...b", x, subspace)
+    x_norm: Float[Tensor, "*batch"] = x.norm(dim=-1)
+    proj_norm: Float[Tensor, "*batch"] = proj.norm(dim=-1)
+    return proj_norm / (x_norm + eps)

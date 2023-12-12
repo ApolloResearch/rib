@@ -520,19 +520,27 @@ def test_svd_basis():
             assert torch.allclose(C, U, atol=0)
 
 
-def pca_rib_acts_test(C_info, rib_acts, bias_positions: list[int] = [-1], atol=1e-6):
+def pca_rib_acts_test(
+    C_info, rib_acts, bias_positions: list[int] = [-1], assert_norm_1=False, atol=1e-6
+):
     """
     Test that the 'pca' basis (aka svd with centre=true) works as expected.
 
     There should be one direction that reads from the bias component (`bias_dir_idx below).
     That is C_pinv[bias_dir_idx, -1] = 1 and all other C_pinv[:, -1] = 0.
 
-    Also, rib acts should be mean 0 for all of the non-bias rib directions
+    Also, rib acts should be mean 0 for all of the non-bias rib directions.
+
+    Assert norm 1 should be true when C is normalized, but false when there are lambdas and
+    similar in play.
     """
     amount_dir_reads_bias = C_info.C_pinv[:, bias_positions].abs()  # [rib_dir, bias_pos]
 
     bias_dir_idx = amount_dir_reads_bias[:, 0].abs().argmax()
-    assert torch.linalg.vector_norm(amount_dir_reads_bias[bias_dir_idx]).item() == pytest.approx(1)
+    if assert_norm_1:
+        assert torch.linalg.vector_norm(
+            amount_dir_reads_bias[bias_dir_idx]
+        ).item() == pytest.approx(1)
 
     is_non_bias_dir = torch.arange(len(amount_dir_reads_bias)) != bias_dir_idx
     assert amount_dir_reads_bias[is_non_bias_dir].abs().max() < atol
@@ -580,7 +588,9 @@ def test_pca_basis_pythia():
     rib_acts = get_rib_acts_test(results, atol=0)["ln2.1"]  # [batch, seqpos, rib_dir]
     C_info = parse_c_infos(results["interaction_rotations"])["ln2.1"]
     bias_positions = [results["model_config_dict"]["d_model"], -1]
-    pca_rib_acts_test(C_info, rib_acts, atol=1e-6, bias_positions=bias_positions)
+    pca_rib_acts_test(
+        C_info, rib_acts, bias_positions=bias_positions, assert_norm_1=True, atol=1e-6
+    )
 
 
 @pytest.mark.slow
@@ -610,8 +620,8 @@ def test_pca_basis_mnist():
     results = mlp_build_graph_main(config)
     rib_acts = get_rib_acts_test(results, atol=1e-6)  # [batch, seqpos, rib_dir]
     C_infos = parse_c_infos(results["interaction_rotations"])
-    pca_rib_acts_test(C_infos["layers.1"], rib_acts["layers.1"], atol=1e-4)
-    pca_rib_acts_test(C_infos["layers.2"], rib_acts["layers.2"], atol=1e-4)
+    pca_rib_acts_test(C_infos["layers.1"], rib_acts["layers.1"], assert_norm_1=True, atol=1e-4)
+    pca_rib_acts_test(C_infos["layers.2"], rib_acts["layers.2"], assert_norm_1=True, atol=1e-4)
 
 
 @pytest.mark.slow

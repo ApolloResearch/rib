@@ -16,6 +16,7 @@ from rib.linalg import (
     eigendecompose,
     integrated_gradient_trapezoidal_norm,
     pinv_diag,
+    vector_subspace_similarity,
 )
 
 
@@ -452,3 +453,34 @@ def test_calc_gram_matrix(input_tensor, dataset_size, expected_output):
     assert torch.allclose(
         gram_matrix, expected_output
     ), f"gram_matrix: {gram_matrix} != {expected_output}"
+
+
+def test_vector_subspace_similarity():
+    """Test the vector_subspace_similarity function."""
+    torch.manual_seed(0)
+    hidden = 3
+    # Create a random orthonormal basis
+    q, _ = torch.linalg.qr(torch.randn(hidden, hidden))
+    basis = q / q.norm(dim=-1, keepdim=True)
+
+    subspace = basis[:2]
+    x_within = basis[0]
+    y_outside = basis[2]
+
+    atol = 1e-6
+    assert vector_subspace_similarity(x_within, subspace) == pytest.approx(1, abs=atol)
+    assert vector_subspace_similarity(y_outside, subspace) == pytest.approx(0, abs=atol)
+    assert vector_subspace_similarity(x_within + y_outside, subspace) == pytest.approx(
+        1 / 2**0.5, abs=atol
+    )
+    assert vector_subspace_similarity(x_within + x_within, subspace) == pytest.approx(1, abs=atol)
+
+    batch_shape = (5, 2)
+    random_vecs = torch.rand(*batch_shape, hidden)
+    assert vector_subspace_similarity(random_vecs, subspace).shape == batch_shape
+
+    # this is a generalization of cosine similarity when there is a single basis vector
+    cosine_sim_pytorch = torch.nn.functional.cosine_similarity(random_vecs, basis[0], dim=-1, eps=0)
+    our_sim = vector_subspace_similarity(random_vecs, basis[0].unsqueeze(0), eps=0)
+    # although if the vectors are in opposing directions cosine sim is -1 but our sim is 1
+    assert torch.allclose(cosine_sim_pytorch.abs(), our_sim)

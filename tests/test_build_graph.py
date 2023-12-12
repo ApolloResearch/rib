@@ -550,73 +550,11 @@ def test_svd_basis():
             assert torch.allclose(C, U, atol=0)
 
 
-def diagonal_edges_when_linear(
-    config_str: str,
-    config_cls: Union["LMRibConfig", "MlpRibConfig"],
-    build_graph_main_fn: Callable,
-    rtol: float,
-    atol: float,
-    gtol: float,
-):
-    config = config_cls(**yaml.safe_load(config_str))
-    edges = build_graph_main_fn(config)["edges"]
-
-    rotated_node_layers = config.node_layers[:-1]
-    if (not config.rotate_final_node_layer) and config.node_layers[-1] == "output":
-        rotated_node_layers = rotated_node_layers[:-1]
-
-    for i, module_name in enumerate(rotated_node_layers):
-        # assert that all off diagonal entries agree within rtol of 0. Deal appropriately with the
-        # case that matrices are not square
-        diag_target = torch.zeros_like(edges[i][1])
-        min_dim = min(edges[i][1].shape)
-        diag_target[:min_dim, :min_dim] = torch.diag(torch.diag(edges[i][1]))
-        difference = edges[i][1] - diag_target
-
-        # For each element of difference, find the maximum entry in its row,
-        # and the maximum entry in its column. then divide by the maximum of both.
-        max_entry_in_row = torch.max(torch.abs(edges[i][1]), dim=1).values.unsqueeze(1)
-        max_entry_in_column = torch.max(torch.abs(edges[i][1]), dim=0).values.unsqueeze(0)
-        max_entry = torch.max(max_entry_in_row, max_entry_in_column)
-        max_entry = torch.max(max_entry, torch.diag(edges[i][1]).abs().log().mean().exp())
-
-        # Check that off-diagonal entries are small relative to the maximum of 1) the largest entry
-        # in that entry's row or column (which should be on the diagonal) and 2) the geometric mean
-        # of diagonal entries. The geometric mean is used because some of the diagonal entries may
-        # be zero (or very close to it) and it is not neccessary that the off diagonal entries are
-        # much smaller than even these small diagonal entries.
-        assert torch.allclose(
-            difference / max_entry, torch.zeros_like(difference), rtol=0, atol=gtol
-        ), (
-            f"edges[{i}][1] not diagonal for {module_name},"
-            f" biggest relative deviation: {(difference / max_entry).abs().max()}"
-        )
-
-        # Check off-diagonal edges are much smaller than the largest edge in that layer
-        assert torch.allclose(
-            difference / edges[i][1].abs().max(), torch.zeros_like(difference), rtol=0, atol=rtol
-        ), (
-            f"edges[{i}][1] not diagonal for {module_name}, biggest relative deviation:"
-            f" {difference.abs().max() / edges[i][1].abs().max()}"
-        )
-        # Check off-diagonal edges are somewhat close to zero (absolute)
-        assert torch.allclose(difference, torch.zeros_like(difference), rtol=0, atol=atol), (
-            f"edges[{i}][1] not diagonal for {module_name}, "
-            f"biggest absolute deviation: {difference.abs().max()}"
-        )
-
-
-basis_formulas = ["(1-alpha)^2", "(1-0)*alpha"]
-edge_formulas = ["functional", "squared"]
-dtypes = ["float32", "float64"]
-rotate_final_node_layer = [True, False]
-all_combinations = list(
-    itertools.product(basis_formulas, edge_formulas, dtypes, rotate_final_node_layer)
-)
-
-
 @pytest.mark.slow
-@pytest.mark.parametrize("basis_formula, edge_formula, dtype_str, rotate_final", all_combinations)
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha"])
+@pytest.mark.parametrize("edge_formula", ["functional", "squared"])
+@pytest.mark.parametrize("dtype_str", ["float32", "float64"])
+@pytest.mark.parametrize("rotate_final", [True, False])
 def test_modular_mlp_diagonal_edges_when_linear(
     basis_formula, edge_formula, dtype_str, rotate_final, rtol=1e-7, atol=1e-5, gtol=1e-4
 ):
@@ -662,11 +600,50 @@ def test_modular_mlp_diagonal_edges_when_linear(
         edge_formula: {edge_formula}
     """
 
-    diagonal_edges_when_linear(
-        config_str=config_str,
-        config_cls=MlpRibConfig,
-        build_graph_main_fn=mlp_build_graph_main,
-        rtol=rtol,
-        atol=atol,
-        gtol=gtol,
-    )
+    config = MlpRibConfig(**yaml.safe_load(config_str))
+    edges = mlp_build_graph_main(config)["edges"]
+
+    rotated_node_layers = config.node_layers[:-1]
+    if (not config.rotate_final_node_layer) and config.node_layers[-1] == "output":
+        rotated_node_layers = rotated_node_layers[:-1]
+
+    for i, module_name in enumerate(rotated_node_layers):
+        # assert that all off diagonal entries agree within rtol of 0. Deal appropriately with the
+        # case that matrices are not square
+        edge_val = edges[i][1]
+        diag_target = torch.zeros_like(edge_val)
+        min_dim = min(edge_val.shape)
+        diag_target[:min_dim, :min_dim] = torch.diag(torch.diag(edge_val))
+        difference = edge_val - diag_target
+
+        # For each element of difference, find the maximum entry in its row,
+        # and the maximum entry in its column. then divide by the maximum of both.
+        max_entry_in_row = edge_val.abs().amax(dim=1, keepdim=True)
+        max_entry_in_column = edge_val.abs().amax(dim=0, keepdim=True)
+        max_entry = torch.max(max_entry_in_row, max_entry_in_column)
+        max_entry = torch.max(max_entry, torch.diag(edge_val).abs().log().mean().exp())
+
+        # Check that off-diagonal entries are small relative to the maximum of 1) the largest entry
+        # in that entry's row or column (which should be on the diagonal) and 2) the geometric mean
+        # of diagonal entries. The geometric mean is used because some of the diagonal entries may
+        # be zero (or very close to it) and it is not neccessary that the off diagonal entries are
+        # much smaller than even these small diagonal entries.
+        assert torch.allclose(
+            difference / max_entry, torch.zeros_like(difference), rtol=0, atol=gtol
+        ), (
+            f"edges[{i}][1] not diagonal for {module_name},"
+            f" biggest relative deviation: {(difference / max_entry).abs().max()}"
+        )
+
+        # Check off-diagonal edges are much smaller than the largest edge in that layer
+        assert torch.allclose(
+            difference / edge_val.abs().max(), torch.zeros_like(difference), rtol=0, atol=rtol
+        ), (
+            f"edges[{i}][1] not diagonal for {module_name}, biggest relative deviation:"
+            f" {difference.abs().max() / edge_val.abs().max()}"
+        )
+        # Check off-diagonal edges are somewhat close to zero (absolute)
+        assert torch.allclose(difference, torch.zeros_like(difference), rtol=0, atol=atol), (
+            f"edges[{i}][1] not diagonal for {module_name}, "
+            f"biggest absolute deviation: {difference.abs().max()}"
+        )

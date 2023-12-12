@@ -179,7 +179,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
         "edges": [(module, E_hats[module].cpu()) for module in E_hats],
-        "config": json.loads(config.model_dump_json()),
+        "config": config.model_dump(),
         "model_config_dict": {} if config.mlp_path is None else model_config_dict,
     }
 

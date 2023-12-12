@@ -1,16 +1,16 @@
 """
 Defines a generic MLP to be used for rib.
 """
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 from fancy_einsum import einsum
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor, nn
 
 from rib.models.utils import ACTIVATION_MAP, fold_mlp_in
-from rib.types import TORCH_DTYPES
+from rib.types import TorchDtype
 
 
 class MLPConfig(BaseModel):
@@ -37,18 +37,7 @@ class MLPConfig(BaseModel):
         "longer valid to train! Doesn't change the input / output behavior or input / output "
         "gradients, but will append a 1 to intermediate activations between layers.",
     )
-    dtype: torch.dtype = Field(torch.float32, description="The dtype to initialize the model with.")
-
-    @field_validator("dtype", mode="before")
-    @classmethod
-    def convert_dtype(cls, v: Any) -> torch.dtype:
-        """Convert dtype from str to a supported torch dtype."""
-        if v in TORCH_DTYPES:
-            return TORCH_DTYPES[v]
-        elif v in TORCH_DTYPES.values():
-            return v
-        else:
-            raise ValueError(f"Invalid dtype: {v}")
+    dtype: TorchDtype = Field(torch.float32, description="The dtype to initialize the model with.")
 
 
 class MLP(nn.Module):

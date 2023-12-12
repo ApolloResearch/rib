@@ -441,7 +441,7 @@ def load_model_and_dataset_from_rib_results(
         model_n_ctx = model.cfg.n_ctx
 
     else:  # mlp
-        mlp_config = MLPConfig(**results["model_config_dict"]["model"])
+        mlp_config = MLPConfig(**results["model_config_dict"])
         model = load_mlp(
             config=mlp_config,
             mlp_path=Path(results["config"]["mlp_path"]),

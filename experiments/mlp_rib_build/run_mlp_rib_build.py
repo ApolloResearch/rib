@@ -180,7 +180,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         "eigenvectors": eigenvectors,
         "edges": [(module, E_hats[module].cpu()) for module in E_hats],
         "config": config.model_dump(),
-        "model_config_dict": {} if config.mlp_path is None else model_config_dict,
+        "model_config_dict": mlp_config.model_dump(),
     }
 
     # Save the results (which include torch tensors) to file

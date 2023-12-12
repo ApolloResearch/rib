@@ -237,7 +237,8 @@ def calculate_interaction_rotations(
             # Use identity matrix as C and then progress to the next loop
             # TODO assert not rotate final
             width = gram_matrices[node_layer].shape[0]
-            Id = torch.eye(width, dtype=dtype, device=device)
+            Id = torch.eye(width, dtype=dtype, device="cpu")
+            Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=width, U=Id))
             Cs.append(
                 InteractionRotation(node_layer_name=node_layer, out_dim=width, C=Id, C_pinv=Id)
             )
@@ -258,6 +259,7 @@ def calculate_interaction_rotations(
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
         if basis_formula == "svd":
             # Use U as C and then progress to the next loop
+            U = U.detach().cpu()
             Cs.append(
                 InteractionRotation(node_layer_name=node_layer, out_dim=U.shape[1], C=U, C_pinv=U.T)
             )

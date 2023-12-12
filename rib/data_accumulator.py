@@ -6,11 +6,14 @@ from typing import TYPE_CHECKING, Literal, Optional, Union
 import torch
 from jaxtyping import Float
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from rib.hook_fns import (
+    Lambda_dash_pre_forward_hook_fn,
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
+    M_dash_pre_forward_hook_fn,
+    acts_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
@@ -138,7 +141,7 @@ def collect_M_dash_and_Lambda_dash(
     hook_name: Optional[str] = None,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "g*f"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
     next_gradients: Optional[Float[Tensor, "batch out_hidden_combined_trunc"]] = None,
 ) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
@@ -164,8 +167,7 @@ def collect_M_dash_and_Lambda_dash(
             fine on GPU. Defaults to float64.
         basis_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2", "(1-0)*alpha", or "g*f". The first is the old (October) version
-            while the second is a new (November) version that should be used from now on. The third
-            is for gradient flow. The second makes sense especially in light of the new attribution
+            while the second is a new (November) version that should be used from now on. The second makes sense especially in light of the new attribution
             (edge_formula="squared") but is generally good and does not change results
             much. Defaults to "(1-0)*alpha".
         next_gradients: The integrated gradients of the next layer. Only used if
@@ -177,8 +179,6 @@ def collect_M_dash_and_Lambda_dash(
         hook_name = module_name
 
     data_key = ["M_dash", "Lambda_dash"]
-    if basis_formula == "g*f":
-        data_key += ["next_gradients"]
 
     interaction_hook = Hook(
         name=hook_name,
@@ -204,16 +204,11 @@ def collect_M_dash_and_Lambda_dash(
         device=device,
         use_tqdm=True,
     )
-    if basis_formula == "g*f":
-        activations = hooked_model.hooked_data[hook_name]["activations"]
-    else:
-        M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
-        Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
+    M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
+    Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
 
     hooked_model.clear_hooked_data()
 
-    if basis_formula == "g*f":
-        return M_dash, Lambda_dash, next_gradients
     return M_dash, Lambda_dash
 
 
@@ -314,9 +309,9 @@ def collect_interaction_edges(
     return edges
 
 
-def collect_activations(
+def collect_activations_single_batch(
     hooked_model: HookedModel,
-    batch: torch.Tensor,
+    batch_loader: DataLoader,
     module_name: str,
     dtype: torch.dtype,
     device: str,
@@ -326,7 +321,7 @@ def collect_activations(
 
     Args:
         hooked_model: The hooked model.
-        batch: The batch of data to pass through the model.
+        batch: The batch of data to pass through the model. This should be a dataloader with a single batch
         module_name: The name of the module whose inputs are the node layer we collect the
         activations for.
         dtype: The data type to use for model computations.
@@ -336,23 +331,236 @@ def collect_activations(
     Returns:
 
     """
+    assert len(batch_loader) == 1, "Batch loader must have a single batch."
+
     if hook_name is None:
         hook_name = module_name
 
-    data_key = ["M_dash", "Lambda_dash"]
-    if basis_formula == "g*f":
-        data_key += ["next_gradients"]
+    data_key = ["activations"]
 
     interaction_hook = Hook(
         name=hook_name,
         data_key=data_key,
-        fn=M_dash_and_Lambda_dash_pre_forward_hook_fn,
+        fn=acts_forward_hook_fn,
+        module_name=module_name,
+        fn_kwargs={},
+    )
+
+    run_dataset_through_model(
+        hooked_model,
+        batch_loader,
+        hooks=[interaction_hook],
+        dtype=dtype,
+        device=device,
+        use_tqdm=True,
+    )
+    activations = hooked_model.hooked_data[hook_name]["activations"]
+
+    # hooked_model.clear_hooked_data()
+    return activations
+
+
+def collect_M_dash_global(
+    hooked_model: HookedModel,
+    section_names: list[str],
+    node_layers: list[str],
+    n_intervals: int,
+    data_loader: DataLoader,
+    device: str,
+    dtype: torch.dtype,
+    M_dtype: torch.dtype = torch.float64,
+    hook_names: Optional[list[str]] = None,
+    basis_formula: Literal["g*f"] = "g*f",
+) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
+    """Collect M matrices for global basis for the module inputs and the output of the
+    final module.
+
+    We collect activations using a forward hook.
+
+    Args:
+        hooked_model: The hooked model.
+        section_names: The names of the sections to apply the hooks to.
+        node_layers: The names of the node layers to apply the hooks to.
+        n_intervals: The number of integrated gradient intervals to use.
+        data_loader: The pytorch data loader.
+        device: The device to run the model on.
+        dtype: The data type to use for model computations.
+        M_dtype: The data type to use for the M_dash matrix. Needs to be
+            float64 for Pythia-14m (empirically). Defaults to float64.
+        hook_names: Used to store the M_dash matrices. Defaults to the same as node_layers
+        basis_formula: The formula to use for the integrated gradient. Must be one of "g*f".
+
+    Returns:
+        A dictionary of M matrices, where the keys are the hook names (a.k.a. node layer names)
+    """
+    module_names = node_layers
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    # generate activation hooks to store activations for calculating integrated gradients
+    activation_hooks: list[Hook] = []
+
+    # Add input hooks
+    for module_name, hook_name in zip(module_names, hook_names):
+        activation_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="activations",
+                fn=acts_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={},
+            )
+        )
+    # Add hook to collect model output
+    activation_hooks.append(
+        Hook(
+            name="output",
+            data_key="activations",
+            fn=acts_forward_hook_fn,
+            module_name=module_names[-1],
+            fn_kwargs={},
+        )
+    )
+
+    # generate M_dash hooks
+    M_dash_hooks: dict[str, Hook] = {}
+    for module_name, hook_name in zip(module_names, hook_names):
+        M_dash_hooks[module_name] = Hook(
+            name=hook_name,
+            data_keys=["M_dash", "integrated_gradients"],
+            fn=M_dash_pre_forward_hook_fn,
+            module_name=module_name,
+            fn_kwargs={
+                "n_intervals": n_intervals,
+                "dataset_size": len(data_loader.dataset),  # type: ignore
+                "basis_formula": basis_formula,
+                "M_dtype": M_dtype,
+                "basis_formula": basis_formula,
+            },
+        )
+
+    for batch in tqdm(data_loader, desc="Global interaction rotations"):
+        batch_dataset = TensorDataset(*batch)
+        batch_loader = DataLoader(batch_dataset, batch_size=1, shuffle=False)
+
+        run_dataset_through_model(
+            hooked_model=hooked_model,
+            data_loader=batch_loader,
+            hooks=activation_hooks,
+            dtype=dtype,
+            device=device,
+            use_tqdm=True,
+        )
+
+        # integrated_gradients: dict[str, Float[Tensor, "batch out_hidden_combined_trunc"]] = {}
+        # # final layer gradients are the same as outputs
+        # integrated_gradients[module_names[-1]] = hooked_model.hooked_data["output"]["activations"]
+
+        for module, next_module in zip(module_names[-2::-1], module_names[:1:-1]):
+            # get activations for layer
+            assert (
+                hooked_model.hooked_data[module]["activations"] is not None
+            ), f"Activations for {module} are None."
+            activations = hooked_model.hooked_data[module]["activations"]
+            # assert (
+            #     next_module in integrated_gradients
+            # ), f"Integrated gradients for {next_module} are None."
+
+            # next_gradients = integrated_gradients[next_module]
+
+            interaction_hook = Hook(
+                name=module,
+                data_key="integrated_gradient",
+                fn=M_dash_pre_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={
+                    "next_hook_name": next_module,
+                    "n_intervals": n_intervals,
+                    "dataset_size": len(data_loader.dataset),  # type: ignore
+                    "basis_formula": basis_formula,
+                    # "next_gradients": next_gradients,
+                },
+            )
+            interaction_hook = M_dash_hooks[module]
+            run_dataset_through_model(
+                hooked_model=hooked_model,
+                data_loader=batch_loader,
+                hooks=[interaction_hook],
+                dtype=dtype,
+                device=device,
+                use_tqdm=True,
+            )
+
+    M_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
+        hook_name: hooked_model.hooked_data[hook_name]["M_dash"]
+        for hook_name in hooked_model.hooked_data
+    }
+
+    assert set(M_matrices.keys()) == set(hook_names)
+
+    return M_matrices
+
+
+def collect_Lambda_dash(
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden"]],
+    hooked_model: HookedModel,
+    n_intervals: int,
+    data_loader: DataLoader,
+    module_name: str,
+    dtype: torch.dtype,
+    device: str,
+    hook_name: Optional[str] = None,
+    Lambda_einsum_dtype: torch.dtype = torch.float64,
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
+    next_gradients: Optional[Float[Tensor, "batch out_hidden_combined_trunc"]] = None,
+) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
+    """Collect the matrix Lambda' for the input to the module specifed by `module_name`.
+
+    We accumulate the matrixLambda' for each batch. To do this, we apply
+    a hook to the provided module. This hook will accumulate the matrix over the batches.
+
+    Args:
+        C_out: The rotation matrix for the next layer.
+        hooked_model: The hooked model.
+        n_intervals: The number of integrated gradient intervals to use.
+        data_loader: The data loader.
+        module_name: The name of the module whose inputs are the node layer we collect Lambda' for.
+        dtype: The data type to use for model computations.
+        device: The device to run the model on.
+        hook_name: The name of the hook to use to store the matrices in the hooked model.
+        Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
+            Lambda_dash matrix. Does not affect the output, only used for the einsum within
+            M_dash_and_Lambda_dash_pre_forward_hook_fn. Needs to be float64 on CPU but float32 was
+            fine on GPU. Defaults to float64.
+        basis_formula: The formula to use for the integrated gradient used in the attribution
+        formula (normally "(1-0)*alpha"). Defaults to "(1-0)*alpha". This is for a particular
+        simplified way of writing Lambda when the attribution method is functional, that is used in
+        the paper. This will need to be changed for squared attribution.
+    Returns:
+        A tuple containing M' and Lambda'.
+    """
+    if hook_name is None:
+        hook_name = module_name
+
+    data_key = ["Lambda_dash"]
+
+    interaction_hook = Hook(
+        name=hook_name,
+        data_key=data_key,
+        fn=Lambda_dash_pre_forward_hook_fn,
         module_name=module_name,
         fn_kwargs={
             "C_out": C_out,
             "n_intervals": n_intervals,
             "dataset_size": len(data_loader.dataset),  # type: ignore
-            "M_dtype": M_dtype,
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
             "basis_formula": basis_formula,
             "next_gradients": next_gradients,
@@ -367,14 +575,8 @@ def collect_activations(
         device=device,
         use_tqdm=True,
     )
-    if basis_formula == "g*f":
-        activations = hooked_model.hooked_data[hook_name]["activations"]
-    else:
-        M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
-        Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
+    Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
 
     hooked_model.clear_hooked_data()
 
-    if basis_formula == "g*f":
-        return M_dash, Lambda_dash, next_gradients
-    return M_dash, Lambda_dash
+    return Lambda_dash

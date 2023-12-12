@@ -147,14 +147,11 @@ class BlockVectorDatasetConfig(DatasetConfig):
         4,
         description="Length of each vector.",
     )
-    first_block_length: Annotated[
-        Optional[int],
-        Field(
-            None,
-            description="Length of the first block. If None, defaults to length // 2.",
-            validate_default=True,
-        ),
-    ]
+    first_block_length: Optional[int] = Field(
+        None,
+        description="Length of the first block. If None, defaults to length // 2.",
+        validate_default=True,
+    )
     data_variances: list[float] = Field(
         [1.0, 1.0],
         description="Variance of the two blocks of the vectors.",
@@ -166,7 +163,7 @@ class BlockVectorDatasetConfig(DatasetConfig):
     dtype: StrDtype = "float64"
     seed: Optional[int] = 0
 
-    @field_validator("first_block_length")
+    @field_validator("first_block_length", mode="after")
     @classmethod
     def set_first_block_length(cls, v: Optional[int], info: ValidationInfo) -> int:
         if v is None:

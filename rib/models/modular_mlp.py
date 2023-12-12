@@ -42,7 +42,7 @@ class ModularMLPConfig(BaseModel):
         '"relu".',
     )
 
-    @field_validator("first_block_width")
+    @field_validator("first_block_width", mode="after")
     @classmethod
     def set_first_block_width(cls, v: Optional[int], info: ValidationInfo) -> int:
         if v is None:

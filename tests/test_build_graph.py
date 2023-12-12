@@ -233,7 +233,6 @@ def test_mnist_build_graph(basis_formula, edge_formula):
     )
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize(
     "basis_formula, edge_formula, dtype_str",
     [

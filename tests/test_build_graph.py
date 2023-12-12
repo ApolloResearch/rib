@@ -12,18 +12,12 @@ that have a small set of large numbers and a large set of small numbers.
 """
 
 import itertools
-import sys
-from pathlib import Path
 from typing import Callable, Union
 from unittest.mock import patch
 
 import pytest
 import torch
 import yaml
-
-# Append root directory to sys.path
-ROOT_DIR = Path(__file__).parent.parent.resolve()
-sys.path.append(str(ROOT_DIR))
 
 from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main

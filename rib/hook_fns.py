@@ -287,12 +287,10 @@ def Lambda_dash_pre_forward_hook_fn(
     C_out: Optional[Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"]],
     n_intervals: int,
     dataset_size: int,
-    in_grads: Float[Tensor, "batch out_hidden_combined_trunc"],
     Lambda_einsum_dtype: torch.dtype = torch.float64,
-    # basis_formula: Literal["g*f"] = "g*f",
-    # next_gradients: Optional[Float[Tensor, "batch out_hidden_combined_trunc"]] = None,
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
 ) -> None:
-    """Hook function for accumulating the M' and Lambda' matrices.
+    """Hook function for accumulating Lambda'.
 
     Args:
         module: Module that the hook is attached to.
@@ -305,18 +303,14 @@ def Lambda_dash_pre_forward_hook_fn(
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gram matrix.
-        M_dtype: The data type to use for the M_dash matrix. Needs to be
-            float64 for Pythia-14m (empirically). Defaults to float64.
         Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
             Lambda_dash matrix. Does not affect the output, only used for the einsum itself.
             Needs to be float64 on CPU but float32 was fine on GPU. Defaults to float64.
-        basis_formula: The formula to use for the integrated gradient. Must be one of
-            "(1-alpha)^2", "(1-0)*alpha", or "g*f". The first is the old (October) version
-            while the second is a new (November) version that should be used from now on. The third
-            is for gradient flow. The second makes sense especially in light of the new attribution
-            (edge_formula="squared") but is generally good and does not change results
-            much. Defaults to "(1-0)*alpha".
-        next_gradients: The integrated gradients of the next layer. Only used if
+        basis_formula: The formula to use for the integrated gradient used in the attribution
+            formula (normally "(1-0)*alpha"). Defaults to "(1-0)*alpha". This is for a particular
+            simplified way of writing Lambda when the attribution method is functional, that is used in
+            the paper. This will need to be changed for squared attribution.
+            next_gradients: The integrated gradients of the next layer. Only used if
             basis_formula="g*f".
     """
     print("WARNING: function not finished")
@@ -331,7 +325,7 @@ def Lambda_dash_pre_forward_hook_fn(
         inputs=inputs,
         C_out=C_out,
         n_intervals=n_intervals,
-        basis_formula="(1-0)*alpha",
+        basis_formula=basis_formula,
     )
     in_dtype = in_grads.dtype
 
@@ -471,3 +465,84 @@ def acts_forward_hook_fn(
     detached_outputs = [x.detach().cpu() for x in outputs]
     # Store the output activations
     hooked_data[hook_name] = {data_key: detached_outputs}
+
+
+def M_dash_pre_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos in_hidden"], ...],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    next_hook_name: str,
+    data_key: Union[str, list[str]],
+    n_intervals: int,
+    dataset_size: int,
+    in_grads: Float[Tensor, "batch out_hidden_combined_trunc"],
+    M_dtype: torch.dtype = torch.float64,
+    basis_formula: Literal["g*f"] = "g*f",
+    # next_gradients: Optional[Float[Tensor, "batch out_hidden_combined_trunc"]] = None,
+) -> None:
+    """Hook function for calculating the integrated gradients associated with a layer.
+
+    Args:
+        module: Module that the hook is attached to.
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one input.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of 2nd-level keys to store in `hooked_data`.
+        C_out: The C matrix for the next layer (C^{l+1} in the paper).
+        n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
+            to taking a point estimate at alpha == 0.5.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
+        M_dtype: The data type to use for the M_dash matrix. Needs to be
+            float64 for Pythia-14m (empirically). Defaults to float64.
+        Lambda_einsum_dtype: The data type to use for the einsum computing batches for the
+            Lambda_dash matrix. Does not affect the output, only used for the einsum itself.
+            Needs to be float64 on CPU but float32 was fine on GPU. Defaults to float64.
+        basis_formula: The formula to use for the integrated gradient. Must be one of
+            "(1-alpha)^2", "(1-0)*alpha", or "g*f". The first is the old (October) version
+            while the second is a new (November) version that should be used from now on. The third
+            is for gradient flow. The second makes sense especially in light of the new attribution
+            (edge_formula="squared") but is generally good and does not change results
+            much. Defaults to "(1-0)*alpha".
+        next_gradients: The integrated gradients of the next layer. Only used if
+            basis_formula="g*f".
+    """
+    print("WARNING: function not finished")
+    assert isinstance(data_key, list), "data_key must be a list of strings."
+    # Remove the pre foward hook to avoid recursion when calculating the jacobian
+    module._forward_pre_hooks.popitem()
+    assert not module._forward_hooks, "Module has multiple forward hooks"
+    next_gradients = (
+        hooked_data[next_hook_name][data_key[1]]
+        if next_hook_name in hooked_data
+        else hooked_data[next_hook_name]["activations"]
+    )
+    in_grads = integrated_gradient_trapezoidal_norm(
+        module=module,
+        inputs=inputs,
+        C_out=None,
+        n_intervals=n_intervals,
+        basis_formula=basis_formula,
+        next_gradients=next_gradients,
+    )
+    in_dtype = in_grads.dtype
+
+    has_pos = inputs[0].dim() == 3
+
+    einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
+    normalization_factor = in_grads.shape[1] * dataset_size if has_pos else dataset_size
+
+    with torch.inference_mode():
+        M_dash = torch.einsum(
+            einsum_pattern,
+            in_grads.to(M_dtype) / normalization_factor,
+            in_grads.to(M_dtype),
+        )
+        M_dash = M_dash.to(in_dtype)
+
+        _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
+        hooked_data[hook_name][data_key[1]] = in_grads

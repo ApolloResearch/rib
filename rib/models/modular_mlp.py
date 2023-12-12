@@ -3,13 +3,14 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from jaxtyping import Float
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from torch import Tensor
 
 from rib.models import MLP, MLPConfig
 
 
 class ModularMLPConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
     n_hidden_layers: int = Field(
         4,
         description="The number of hidden layers [input, hidden, ..., hidden, output]",
@@ -21,6 +22,7 @@ class ModularMLPConfig(BaseModel):
     first_block_width: Optional[int] = Field(
         None,
         description="Width of the first block. If None, defaults to width // 2.",
+        validate_default=True,
     )
     weight_variances: List[float] = Field(
         [1.0, 1.0],
@@ -40,10 +42,12 @@ class ModularMLPConfig(BaseModel):
         '"relu".',
     )
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        if self.first_block_width is None:
-            self.first_block_width = self.width // 2
+    @field_validator("first_block_width")
+    @classmethod
+    def set_first_block_width(cls, v: Optional[int], info: ValidationInfo) -> int:
+        if v is None:
+            return info.data["width"] // 2
+        return v
 
 
 class ModularMLP(MLP):
@@ -93,11 +97,10 @@ class ModularMLP(MLP):
             A random block diagonal matrix
         """
         total_width = self.cfg.width
-        first_block_width = self.cfg.first_block_width
+        first_block_width = self.cfg.first_block_width or total_width // 2
         block_variances = self.cfg.weight_variances
         equal_columns = self.cfg.weight_equal_columns
 
-        first_block_width = first_block_width or total_width // 2
         assert total_width > first_block_width, "First block width must be smaller than total width"
         assert len(block_variances) == 2, "Only two blocks supported"
 
@@ -106,13 +109,14 @@ class ModularMLP(MLP):
 
         block_matrix = torch.zeros((total_width, total_width), dtype=dtype)
 
+        second_block_width = total_width - first_block_width
+
         if equal_columns:
             # Duplicate the same columns in each block
             block_matrix[:first_block_width, :first_block_width] = (
                 block_variances[0]
                 * torch.randn(1, first_block_width, dtype=dtype).repeat(first_block_width, 1).T
             )
-            second_block_width = total_width - first_block_width
             block_matrix[first_block_width:, first_block_width:] = (
                 block_variances[1]
                 * torch.randn(1, second_block_width, dtype=dtype).repeat(second_block_width, 1).T
@@ -122,7 +126,6 @@ class ModularMLP(MLP):
             block_matrix[:first_block_width, :first_block_width] = block_variances[0] * torch.randn(
                 first_block_width, first_block_width, dtype=dtype
             )
-            second_block_width = total_width - first_block_width
             block_matrix[first_block_width:, first_block_width:] = block_variances[1] * torch.randn(
                 second_block_width, second_block_width, dtype=dtype
             )

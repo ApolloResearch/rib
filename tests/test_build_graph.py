@@ -277,7 +277,6 @@ def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
             weight_equal_columns: false
             bias: 0
             activation_fn: relu
-            seed: 0
         dataset:
             name: block_vector
             size: 1000

@@ -7,10 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from torch import Tensor
 
 from rib.models import MLP, MLPConfig
+from rib.types import TorchDtype
 
 
 class ModularMLPConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     n_hidden_layers: int = Field(
         4,
         description="The number of hidden layers [input, hidden, ..., hidden, output]",
@@ -41,6 +42,7 @@ class ModularMLPConfig(BaseModel):
         description="The activation function to use for all but the last layer. Default is "
         '"relu".',
     )
+    dtype: TorchDtype = Field(torch.float32, description="The dtype to initialize the model with.")
 
     @field_validator("first_block_width", mode="after")
     @classmethod
@@ -49,53 +51,52 @@ class ModularMLPConfig(BaseModel):
             return info.data["width"] // 2
         return v
 
+    @property
+    def mlp_config(self) -> MLPConfig:
+        return MLPConfig(
+            hidden_sizes=[self.width] * self.n_hidden_layers,
+            input_size=self.width,
+            output_size=self.width,
+            activation_fn=self.activation_fn,
+            dtype=self.dtype,
+            fold_bias=False,  # Don't fold bias here, it should be done after initialisation
+            bias=True,
+        )
+
 
 class ModularMLP(MLP):
     def __init__(
         self,
         mlp_config: ModularMLPConfig,
-        dtype: torch.dtype = torch.float64,
         seed: Optional[int] = None,
     ):
         """Generate a block diagonal MLP
 
         Args:
             mlp_config: Config class for the block diagonal MLP
-            dtype: Data type of the weights
             seed: Seed for generating the weights
         """
         self.cfg = mlp_config
-        self.mlp_config = MLPConfig(
-            hidden_sizes=[self.cfg.width] * self.cfg.n_hidden_layers,
-            input_size=self.cfg.width,
-            output_size=self.cfg.width,
-            activation_fn=self.cfg.activation_fn,
-            dtype=dtype,
-            fold_bias=False,  # Don't fold bias here, it should be done after initialisation
-            bias=True,
-        )
-        super(ModularMLP, self).__init__(config=self.mlp_config)
+        super(ModularMLP, self).__init__(config=self.cfg.mlp_config)
 
         # Hardcode weights and biases
         assert len(self.layers) == self.cfg.n_hidden_layers + 1
         for layer in self.layers:
-            layer.W = nn.Parameter(self.generate_weights(dtype=dtype, seed=seed))
+            layer.W = nn.Parameter(self.generate_weights(seed=seed))
             layer.b = nn.Parameter(
-                torch.full((self.cfg.width,), fill_value=self.cfg.bias, dtype=dtype)
+                torch.full((self.cfg.width,), fill_value=self.cfg.bias, dtype=self.cfg.dtype)
             )
 
-    def generate_weights(
-        self, dtype=torch.float32, seed: Optional[int] = None
-    ) -> Float[Tensor, "width width"]:
+    def generate_weights(self, seed: Optional[int] = None) -> Float[Tensor, "width width"]:
         """Generate a random block diagonal matrix
 
         Args:
-            dtype: data type of the matrix.
             seed: random seed
 
         Returns:
             A random block diagonal matrix
         """
+        dtype = self.cfg.dtype
         total_width = self.cfg.width
         first_block_width = self.cfg.first_block_width or total_width // 2
         block_variances = self.cfg.weight_variances

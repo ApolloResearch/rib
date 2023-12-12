@@ -181,7 +181,6 @@ def pretrained_lm_comparison(hf_model_str: str, mappings: dict[str, dict[str, st
         assert torch.equal(tlens_act, seq_act), f"Activations are not equal for mapping index {i}"
 
 
-@pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
 @pytest.mark.slow()
 @pytest.mark.parametrize("model_str", ["gpt2", "tiny-stories-1M"])
 def test_gpt_conversion(model_str):
@@ -249,7 +248,6 @@ def test_gpt_conversion(model_str):
     pretrained_lm_comparison(model_str, mappings)
 
 
-@pytest.mark.skip_ci  # Seems like Github runners have issue with this test, don't use in CI
 @pytest.mark.slow()
 def test_pythia_conversion():
     """Test that pythia-14m in tlens and SequentialTransformer give the same outputs and internal

@@ -177,7 +177,9 @@ class BlockVectorDataset(Dataset):
         dataset_config: BlockVectorDatasetConfig,
     ):
         """Generate a dataset of random normal vectors.
-        The components in `[:first_block_length]` have variance `data_variances[0]`, while the components in `[first_block_length:length]` have variance `data_variances[1]`.
+
+        The components in `[:first_block_length]` have variance `data_variances[0]`, while the
+        components in `[first_block_length:length]` have variance `data_variances[1]`.
         If `data_perfect_correlation` is true, the entries in each block are identical. Otherwise
         they have no correlation.
         """

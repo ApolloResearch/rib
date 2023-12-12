@@ -178,7 +178,9 @@ class BlockVectorDataset(Dataset):
     ):
         """Generate a dataset of random normal vectors.
         The components in `[:first_block_length]` have variance `data_variances[0]`, while the components in `[first_block_length:length]` have variance `data_variances[1]`.
-        If `data_perfect_correlation` is true, the entries in each block are identical. Otherwise they have no correlation."""
+        If `data_perfect_correlation` is true, the entries in each block are identical. Otherwise
+        they have no correlation.
+        """
         self.cfg = dataset_config
         self.data = self.generate_data()
         # Not needed, just here for Dataset class
@@ -192,6 +194,8 @@ class BlockVectorDataset(Dataset):
 
     def generate_data(self) -> Float[Tensor, "size length"]:
         """Generate a dataset of vectors with two blocks of variance.
+
+        Warning, changing the structure of this function may break reproducibility.
 
         Returns:
             A dataset of vectors with two blocks of variance.

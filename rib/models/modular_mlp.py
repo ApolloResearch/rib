@@ -91,7 +91,8 @@ class ModularMLP(MLP):
         """Generate a random block diagonal matrix
 
         Args:
-            seed: random seed
+            seed: Random seed to ensure reproducibility. Note, changes to the structure of this
+                function may break reproducibility.
 
         Returns:
             A random block diagonal matrix

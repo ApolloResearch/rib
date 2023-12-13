@@ -250,12 +250,12 @@ def calc_edge_functional(
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
     # Integration with the trapzoidal rule
-    for alpha_index, alpha in tqdm(
+    for alpha_idx, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
         # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
         # alpha=0.5) and multiply by the interval size.
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
             trapezoidal_scaler = 0.5 * interval_size
         else:
             trapezoidal_scaler = interval_size
@@ -354,12 +354,12 @@ def calc_edge_squared(
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
     # Integration with the trapzoidal rule
-    for alpha_index, alpha in tqdm(
+    for alpha_idx, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
         # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
         # alpha=0.5) and multiply by the interval size.
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
             trapezoidal_scaler = 0.5 * interval_size
         else:
             trapezoidal_scaler = interval_size
@@ -369,7 +369,12 @@ def calc_edge_squared(
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output.
-        for out_dim in range(out_hidden_size_comb_trunc):
+        for out_dim in tqdm(
+            range(out_hidden_size_comb_trunc),
+            total=out_hidden_size_comb_trunc,
+            desc="Output dims",
+            leave=False,
+        ):
             if has_pos:
                 for output_pos_idx in range(out_pos_size):
                     # autograd gives us the derivative w.r.t. b (batch dim), p (input pos) and
@@ -459,19 +464,19 @@ def calc_edge_stochastic(
     )
 
     phi = torch.randn(
-        (batch_size, stochastic_noise_dim, out_pos_size),
+        (batch_size, len(alphas), stochastic_noise_dim, out_pos_size),
         dtype=f_in_hat.dtype,
         device=f_in_hat.device,
     )
     normalization_factor = f_in_hat.shape[1] * dataset_size * stochastic_noise_dim
 
     # Integration with the trapzoidal rule
-    for alpha_index, alpha in tqdm(
+    for alpha_idx, alpha in tqdm(
         enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
     ):
         # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
         # alpha=0.5) and multiply by the interval size.
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
             trapezoidal_scaler = 0.5 * interval_size
         else:
             trapezoidal_scaler = interval_size
@@ -488,7 +493,7 @@ def calc_edge_stochastic(
                 # The sum over the batch dimension before passing to autograd is just a trick
                 # to get the grad for every batch index vectorized.
                 phi_f_out_alpha_hat = torch.einsum(
-                    "bp,bp->", phi[:, r, :], f_out_alpha_hat[:, :, out_dim]
+                    "bp,bp->", phi[:, alpha_idx, r, :], f_out_alpha_hat[:, :, out_dim]
                 )
                 i_grad = (
                     torch.autograd.grad(phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True)[0]
@@ -562,7 +567,7 @@ def integrated_gradient_trapezoidal_norm(
 
     alphas, interval_size = _calc_integration_intervals(n_intervals)
 
-    for alpha_index, alpha in enumerate(alphas):
+    for alpha_idx, alpha in enumerate(alphas):
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
@@ -605,7 +610,7 @@ def integrated_gradient_trapezoidal_norm(
         alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=0.5)
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
             alpha_in_grads = 0.5 * alpha_in_grads
 
         in_grads += alpha_in_grads * interval_size

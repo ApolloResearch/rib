@@ -108,7 +108,7 @@ def calculate_interaction_rotations(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-alpha)^2",
     centre: bool = False,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
@@ -145,10 +145,11 @@ def calculate_interaction_rotations(
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
         basis_formula: The formula to use for the integrated gradient. Must be one of
-            "(1-alpha)^2", "(1-0)*alpha", or "svd".
+            "(1-alpha)^2", "(1-0)*alpha", "neuron", or "svd".
              - "(1-alpha)^2" is the old (October) version based on the functional edge formula.
              - "(1-0)*alpha" is the new (November) version based on the squared edge formula. This
                 is the default, and generally the best option.
+             - "neuron" performs no rotation.
              - "svd" only decomposes the gram matrix and uses that as the basis. It is a good
                 baseline. If `centre=true` this becomes the "pca" basis.
         centre: Whether to centre the activations while computing the desired basis. Only supported
@@ -253,6 +254,16 @@ def calculate_interaction_rotations(
         total=len(section_names_to_calculate),
         desc="Interaction rotations",
     ):
+        if basis_formula == "neuron":
+            # Use identity matrix as C and then progress to the next loop
+            # TODO assert not rotate final
+            width = gram_matrices[node_layer].shape[0]
+            Id = torch.eye(width, dtype=dtype, device="cpu")
+            Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=width, U=Id))
+            Cs.append(
+                InteractionRotation(node_layer_name=node_layer, out_dim=width, C=Id, C_pinv=Id)
+            )
+            continue
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())

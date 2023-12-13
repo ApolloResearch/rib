@@ -10,11 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor, nn
 
 from rib.models.utils import ACTIVATION_MAP, fold_mlp_in
-from rib.types import TORCH_DTYPES, StrDtype
+from rib.types import TorchDtype
 
 
 class MLPConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     hidden_sizes: Optional[list[int]] = Field(
         None,
         description="A list of integers specifying the sizes of the hidden layers. If None, "
@@ -37,7 +37,7 @@ class MLPConfig(BaseModel):
         "longer valid to train! Doesn't change the input / output behavior or input / output "
         "gradients, but will append a 1 to intermediate activations between layers.",
     )
-    dtype: StrDtype = Field("float32", description="The dtype to initialize the model with.")
+    dtype: TorchDtype = Field(torch.float32, description="The dtype to initialize the model with.")
 
 
 class MLP(nn.Module):
@@ -76,7 +76,7 @@ class MLP(nn.Module):
                     out_features=sizes[i + 1],
                     activation_fn=layer_act,
                     use_bias=config.bias,
-                    dtype=TORCH_DTYPES[config.dtype],
+                    dtype=config.dtype,
                 )
             )
 

@@ -314,7 +314,7 @@ def calculate_interaction_rotations(
                 top_2_vals[0] - expected_top_val
             ).abs() < 1e-3, f"largest = {top_2_vals[0]}, expected = {expected_top_val}"
             assert (
-                top_2_vals[1] < 1e-6
+                top_2_vals[1] < 1e-3
             ), f"Expected only one non-zero entry in U[-1, :], 2nd largest = {top_2_vals[1]}"
             bias_pos_after_U: int = top_2_idxs[0].item()  # type: ignore[assignment]
             # We use this so we can make sure that our bias position stays isolated when

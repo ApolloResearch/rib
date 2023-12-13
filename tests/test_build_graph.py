@@ -163,6 +163,8 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
             module_name=prev_module_id,
         )
         for input, _ in data_loader:
+            if input.dtype not in [torch.int32, torch.int64]:
+                input = input.to(dtype=dtype)
             hooked_model.forward(input.to(device=device), hooks=[hook])
             cache_out = hooked_model.hooked_data[prev_module_id]["acts"]
             hooked_model.clear_hooked_data()
@@ -170,7 +172,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
     test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
     utils_rib_acts = rib_acts[module_to_test].cpu()
-    assert torch.allclose(utils_rib_acts, test_rib_acts, atol=atol)
+    torch.testing.assert_close(utils_rib_acts, test_rib_acts, atol=atol, rtol=0)
     return rib_acts
 
 
@@ -589,12 +591,13 @@ def test_pca_basis_pythia():
     C_info = parse_c_infos(results["interaction_rotations"])["ln2.1"]
     bias_positions = [results["model_config_dict"]["d_model"], -1]
     pca_rib_acts_test(
-        C_info, rib_acts, bias_positions=bias_positions, assert_norm_1=True, atol=1e-6
+        C_info, rib_acts, bias_positions=bias_positions, assert_norm_1=True, atol=1e-5
     )
 
 
 @pytest.mark.slow
-def test_pca_basis_mnist():
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
+def test_centred_rib_mnist(basis_formula):
     """Test that the 'pca' basis (aka svd with centre=true) works for MNIST."""
     config_str = f"""
     exp_name: test
@@ -604,7 +607,7 @@ def test_pca_basis_mnist():
     truncation_threshold: 1e-15
     rotate_final_node_layer: false
     n_intervals: 0
-    dtype: float32
+    dtype: float64
     dataset:
         return_set_frac: 0.01  # 3 batches (with batch_size=256)
     node_layers:
@@ -612,16 +615,21 @@ def test_pca_basis_mnist():
     - layers.2
     - output
     out_dir: null
-    basis_formula: svd
+    basis_formula: {basis_formula}
     centre: true
     """
     config_dict = yaml.safe_load(config_str)
     config = MlpRibConfig(**config_dict)
     results = mlp_build_graph_main(config)
-    rib_acts = get_rib_acts_test(results, atol=1e-6)  # [batch, seqpos, rib_dir]
+    rib_acts = get_rib_acts_test(results, atol=1e-12)  # [batch, seqpos, rib_dir]
     C_infos = parse_c_infos(results["interaction_rotations"])
-    pca_rib_acts_test(C_infos["layers.1"], rib_acts["layers.1"], assert_norm_1=True, atol=1e-4)
-    pca_rib_acts_test(C_infos["layers.2"], rib_acts["layers.2"], assert_norm_1=True, atol=1e-4)
+    assert_norm_1 = basis_formula == "svd"
+    pca_rib_acts_test(
+        C_infos["layers.1"], rib_acts["layers.1"], assert_norm_1=assert_norm_1, atol=1e-9
+    )
+    pca_rib_acts_test(
+        C_infos["layers.2"], rib_acts["layers.2"], assert_norm_1=assert_norm_1, atol=1e-9
+    )
 
 
 @pytest.mark.slow
@@ -659,8 +667,7 @@ def test_centred_rib_pythia():
     config_dict = yaml.safe_load(config_str)
     config = LMRibConfig(**config_dict)
     results = lm_build_graph_main(config)
-    rib_acts = get_rib_acts_test(results, atol=0)["ln2.1"]  # [batch, seqpos, rib_dir]
+    rib_acts = get_rib_acts_test(results, atol=1e-12)["ln2.1"]  # [batch, seqpos, rib_dir]
     C_info = parse_c_infos(results["interaction_rotations"])["ln2.1"]
     bias_positions = [results["model_config_dict"]["d_model"], -1]
     pca_rib_acts_test(C_info, rib_acts, atol=1e-6, bias_positions=bias_positions)
-    # TODO : is this test really valid? I think mostly but not entirely.

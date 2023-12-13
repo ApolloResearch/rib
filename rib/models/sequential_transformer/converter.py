@@ -1,6 +1,5 @@
 import logging
 import warnings
-from logging.config import dictConfig
 from pathlib import Path
 from typing import Literal
 

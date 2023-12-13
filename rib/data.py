@@ -13,7 +13,6 @@ from pydantic import (
 )
 from torch import Tensor
 from torch.utils.data import Dataset
-from typing_extensions import Annotated
 
 from rib.types import TORCH_DTYPES, StrDtype
 
@@ -172,10 +171,7 @@ class BlockVectorDatasetConfig(DatasetConfig):
 
 
 class BlockVectorDataset(Dataset):
-    def __init__(
-        self,
-        dataset_config: BlockVectorDatasetConfig,
-    ):
+    def __init__(self, dataset_config: BlockVectorDatasetConfig):
         """Generate a dataset of random normal vectors.
 
         The components in `[:first_block_length]` have variance `data_variances[0]`, while the

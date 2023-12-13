@@ -308,14 +308,11 @@ def Lambda_dash_pre_forward_hook_fn(
             Needs to be float64 on CPU but float32 was fine on GPU. Defaults to float64.
         basis_formula: The formula to use for the integrated gradient used in the attribution
             formula (normally "(1-0)*alpha"). Defaults to "(1-0)*alpha". This is for a particular
-            simplified way of writing Lambda when the attribution method is functional, that is used in
-            the paper. This will need to be changed for squared attribution.
-            next_gradients: The integrated gradients of the next layer. Only used if
-            basis_formula="g*f".
+            simplified way of writing Lambda when the attribution method is functional, that is used
+            in the paper. This will need to be changed for squared attribution.
     """
-    print("WARNING: function not finished")
     assert isinstance(data_key, list), "data_key must be a list of strings."
-    assert len(data_key) == 1, "data_key must be a list of length 2 to store Lambda'."
+    assert len(data_key) == 1, "data_key must be a list of length 1 to store Lambda'."
     # Remove the pre foward hook to avoid recursion when calculating the jacobian
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"

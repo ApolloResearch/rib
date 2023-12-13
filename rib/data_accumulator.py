@@ -360,7 +360,7 @@ def collect_activations_single_batch(
     return activations
 
 
-def collect_M_dash_global(
+def collect_M_dash(
     hooked_model: HookedModel,
     section_names: list[str],
     node_layers: list[str],
@@ -520,8 +520,7 @@ def collect_Lambda_dash(
     hook_name: Optional[str] = None,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
-    next_gradients: Optional[Float[Tensor, "batch out_hidden_combined_trunc"]] = None,
-) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
+) -> Float[Tensor, "in_hidden in_hidden"]:
     """Collect the matrix Lambda' for the input to the module specifed by `module_name`.
 
     We accumulate the matrixLambda' for each batch. To do this, we apply
@@ -545,7 +544,7 @@ def collect_Lambda_dash(
         simplified way of writing Lambda when the attribution method is functional, that is used in
         the paper. This will need to be changed for squared attribution.
     Returns:
-        A tuple containing M' and Lambda'.
+        Lambda'.
     """
     if hook_name is None:
         hook_name = module_name
@@ -563,7 +562,6 @@ def collect_Lambda_dash(
             "dataset_size": len(data_loader.dataset),  # type: ignore
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
             "basis_formula": basis_formula,
-            "next_gradients": next_gradients,
         },
     )
 

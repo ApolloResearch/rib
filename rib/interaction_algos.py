@@ -109,7 +109,7 @@ def calculate_interaction_rotations(
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-alpha)^2",
-    centre: bool = True,
+    centre: bool = False,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
@@ -145,12 +145,16 @@ def calculate_interaction_rotations(
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
         basis_formula: The formula to use for the integrated gradient. Must be one of
-            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
-            latter is a new (November) version that should be used from now on. The latter makes
-            sense especially in light of the new attribution (edge_formula="squared") but is
-            generally good and does not change results much. Defaults to "(1-0)*alpha".
-        svd_basis: Returns Us as Cs, so basis is just the eigenvectors of the gram matrix.
-
+            "(1-alpha)^2", "(1-0)*alpha", or "svd".
+             - "(1-alpha)^2" is the old (October) version based on the functional edge formula.
+             - "(1-0)*alpha" is the new (November) version based on the squared edge formula. This
+                is the default, and generally the best option.
+             - "svd" only decomposes the gram matrix and uses that as the basis. It is a good
+                baseline. If `centre=true` this becomes the "pca" basis.
+        centre: Whether to centre the activations while computing the desired basis. Only supported
+            for the "svd" basis formula.
+        means: The means of the activations for each node layer. Only used if `centre=true`.
+        bias_positions: The positions of the biases for each node layer. Only used if `centre=true`.
     Returns:
         - A list of objects containing the interaction rotation matrices and their pseudoinverses,
         ordered by node layer appearance in model.

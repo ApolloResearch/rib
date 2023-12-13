@@ -37,7 +37,7 @@ from typing import Literal, Optional, Union
 
 import fire
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -319,6 +319,8 @@ def main(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
 
+        means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
+        bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
         if config.centre:
             logger.info("Collecting dataset means")
             means, bias_positions = collect_dataset_means(
@@ -328,12 +330,8 @@ def main(
                 dtype=dtype,
                 device=device,
                 collect_output_dataset_means=collect_output_gram,
-                hook_names=[
-                    layer_name for layer_name in config.node_layers if layer_name != "output"
-                ],
+                hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             )
-        else:
-            means, bias_positions = None, None
 
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
@@ -345,7 +343,7 @@ def main(
             dtype=dtype,
             device=device,
             collect_output_gram=collect_output_gram,
-            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
+            hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             means=means,
             bias_positions=bias_positions,
         )

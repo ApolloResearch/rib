@@ -11,3 +11,4 @@ node_layers:
   - layers.1
   - layers.2
   - output
+basis_formula: g*f

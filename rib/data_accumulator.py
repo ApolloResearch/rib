@@ -396,12 +396,14 @@ def collect_M_dash(
     module_names = node_layers
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
-        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+        # assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+        pass
     else:
         hook_names = module_names
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
-        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+        pass
+        # assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
     else:
         hook_names = module_names
 
@@ -409,6 +411,7 @@ def collect_M_dash(
     activation_hooks: list[Hook] = []
 
     # Add input hooks
+    module_names = module_names[:-1] if module_names[-1] == "output" else module_names
     for module_name, hook_name in zip(module_names, hook_names):
         activation_hooks.append(
             Hook(
@@ -432,10 +435,11 @@ def collect_M_dash(
 
     # generate M_dash hooks
     M_dash_hooks: dict[str, Hook] = {}
-    for module_name, hook_name in zip(module_names, hook_names):
+    next_hook_names = module_names[1:] + ["output"]
+    for module_name, hook_name, next_hook_name in zip(module_names, hook_names, next_hook_names):
         M_dash_hooks[module_name] = Hook(
             name=hook_name,
-            data_keys=["M_dash", "integrated_gradients"],
+            data_key=["M_dash", "integrated_gradients"],
             fn=M_dash_pre_forward_hook_fn,
             module_name=module_name,
             fn_kwargs={
@@ -444,6 +448,7 @@ def collect_M_dash(
                 "basis_formula": basis_formula,
                 "M_dtype": M_dtype,
                 "basis_formula": basis_formula,
+                "next_hook_name": next_hook_name,
             },
         )
 
@@ -453,18 +458,18 @@ def collect_M_dash(
 
         run_dataset_through_model(
             hooked_model=hooked_model,
-            data_loader=batch_loader,
+            dataloader=batch_loader,
             hooks=activation_hooks,
             dtype=dtype,
             device=device,
-            use_tqdm=True,
+            use_tqdm=False,
         )
 
         # integrated_gradients: dict[str, Float[Tensor, "batch out_hidden_combined_trunc"]] = {}
         # # final layer gradients are the same as outputs
         # integrated_gradients[module_names[-1]] = hooked_model.hooked_data["output"]["activations"]
 
-        for module, next_module in zip(module_names[-2::-1], module_names[:1:-1]):
+        for module, next_module in zip(node_layers[-2::-1], node_layers[:0:-1]):
             # get activations for layer
             assert (
                 hooked_model.hooked_data[module]["activations"] is not None
@@ -476,27 +481,26 @@ def collect_M_dash(
 
             # next_gradients = integrated_gradients[next_module]
 
-            interaction_hook = Hook(
-                name=module,
-                data_key="integrated_gradient",
-                fn=M_dash_pre_forward_hook_fn,
-                module_name=module_name,
-                fn_kwargs={
-                    "next_hook_name": next_module,
-                    "n_intervals": n_intervals,
-                    "dataset_size": len(data_loader.dataset),  # type: ignore
-                    "basis_formula": basis_formula,
-                    # "next_gradients": next_gradients,
-                },
-            )
+            # interaction_hook = Hook(
+            #     name=module,
+            #     data_key="integrated_gradient",
+            #     fn=M_dash_pre_forward_hook_fn,
+            #     module_name=module_name,
+            #     fn_kwargs={
+            #         "next_hook_name": next_module,
+            #         "n_intervals": n_intervals,
+            #         "dataset_size": len(data_loader.dataset),  # type: ignore
+            #         "basis_formula": basis_formula,
+            #     },
+            # )
             interaction_hook = M_dash_hooks[module]
             run_dataset_through_model(
                 hooked_model=hooked_model,
-                data_loader=batch_loader,
+                dataloader=batch_loader,
                 hooks=[interaction_hook],
                 dtype=dtype,
                 device=device,
-                use_tqdm=True,
+                use_tqdm=False,
             )
 
     M_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {

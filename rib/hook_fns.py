@@ -459,7 +459,7 @@ def acts_forward_hook_fn(
     """
     assert isinstance(data_key, str), "data_key must be a string."
     outputs = output if isinstance(output, tuple) else (output,)
-    detached_outputs = [x.detach().cpu() for x in outputs]
+    detached_outputs = torch.concatenate([x.detach() for x in outputs], dim=-1)
     # Store the output activations
     hooked_data[hook_name] = {data_key: detached_outputs}
 
@@ -476,7 +476,6 @@ def M_dash_pre_forward_hook_fn(
     data_key: Union[str, list[str]],
     n_intervals: int,
     dataset_size: int,
-    in_grads: Float[Tensor, "batch out_hidden_combined_trunc"],
     M_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["g*f"] = "g*f",
     # next_gradients: Optional[Float[Tensor, "batch out_hidden_combined_trunc"]] = None,
@@ -508,14 +507,13 @@ def M_dash_pre_forward_hook_fn(
         next_gradients: The integrated gradients of the next layer. Only used if
             basis_formula="g*f".
     """
-    print("WARNING: function not finished")
     assert isinstance(data_key, list), "data_key must be a list of strings."
     # Remove the pre foward hook to avoid recursion when calculating the jacobian
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
     next_gradients = (
         hooked_data[next_hook_name][data_key[1]]
-        if next_hook_name in hooked_data
+        if data_key[1] in hooked_data[next_hook_name]
         else hooked_data[next_hook_name]["activations"]
     )
     in_grads = integrated_gradient_trapezoidal_norm(

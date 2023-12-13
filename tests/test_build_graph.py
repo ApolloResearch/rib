@@ -11,24 +11,25 @@ various scales. This is because combining atol and rtol does not work particular
 that have a small set of large numbers and a large set of small numbers.
 """
 
-import sys
-from pathlib import Path
 from typing import Callable, Union
 from unittest.mock import patch
 
 import pytest
 import torch
 import yaml
-
-# Append the root directory to sys.path
-ROOT_DIR = Path(__file__).parent.parent.resolve()
-sys.path.append(str(ROOT_DIR))
+from fancy_einsum import einsum
+from torch.utils.data import DataLoader
 
 from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
 from experiments.mlp_rib_build.run_mlp_rib_build import Config as MlpRibConfig
 from experiments.mlp_rib_build.run_mlp_rib_build import main as mlp_build_graph_main
+from rib.analysis_utils import get_rib_acts, parse_c_infos
+from rib.hook_fns import acts_forward_hook_fn
+from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import build_sorted_lambda_matrices
+from rib.loader import load_model_and_dataset_from_rib_results
+from rib.types import TORCH_DTYPES, RibBuildResults
 
 
 def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main_fn: Callable):
@@ -53,9 +54,7 @@ def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main
 
 
 def graph_build_test(
-    config: Union[LMRibConfig, MlpRibConfig],
-    build_graph_main_fn: Callable,
-    atol: float,
+    config: Union[LMRibConfig, MlpRibConfig], build_graph_main_fn: Callable, atol: float
 ):
     results, Lambdas = build_get_lambdas(config, build_graph_main_fn)
 
@@ -91,17 +90,77 @@ def graph_build_test(
                     act_size / act_size.abs().max(),
                     edge_size / edge_size.abs().max(),
                     atol=atol,
-                ), f"act_size not equal to edge_size for {module_name}"
+                ), f"act_size not equal to edge_size for {module_name}, got {act_size}, {edge_size}"
 
-        # Check that the Lambdas are also the same as the act_size and edge_size
-        # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
-        # `rib.interaction_algos.build_sort_lambda_matrix)
-        Lambdas_trunc = Lambdas[i][: len(act_size)]
-        assert torch.allclose(
-            act_size / act_size.abs().max(),
-            Lambdas_trunc / Lambdas_trunc.max(),
-            atol=atol,
-        ), f"act_size not equal to Lambdas for {module_name}"
+        if config.basis_formula not in ["svd", "neuron"]:  # We don't have Lambdas for these
+            # Check that the Lambdas are also the same as the act_size and edge_size
+            # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
+            # `rib.interaction_algos.build_sort_lambda_matrix)
+            Lambdas_trunc = Lambdas[i][: len(act_size)]
+            assert torch.allclose(
+                act_size / act_size.abs().max(),
+                Lambdas_trunc / Lambdas_trunc.max(),
+                atol=atol,
+            ), f"act_size not equal to Lambdas for {module_name}"
+
+    return results
+
+
+def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
+    """Takes the results of a graph build and checks get_rib_acts computes the correct values.
+
+    This requires:
+    * loading the model and dataset
+    * 1) calling get_rib_acts, which hooks the model and computes the rib acts from that
+    * 2) using run_with_cache to get the output of the previous module and rotating with C
+    * comparing the results of 1) and 2)
+    """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[results["config"]["dtype"]]
+    model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    hooked_model = HookedModel(model)
+    Cs = parse_c_infos(results["interaction_rotations"])
+
+    rib_acts = get_rib_acts(
+        hooked_model=hooked_model,
+        data_loader=data_loader,
+        c_infos=Cs.values(),
+        device=device,
+        dtype=dtype,
+    )
+    for m_name, acts in rib_acts.items():
+        assert acts.shape[0] == len(dataset), f"acts.shape[0] != len(dataset) for {m_name}"
+
+    # we choose a module to compare rib acts on and find the module immediately before it
+    if hasattr(model, "sections"):
+        # we choose the first module of node_layers, meaning the previous module is the last one
+        # in sections.pre
+        module_to_test = results["config"]["node_layers"][0]
+        prev_module_id = f"sections.pre.{len(model.sections['pre']) - 1}"
+    else:
+        # we arbitrarily choose the first layer.
+        assert "layers.1" in results["config"]["node_layers"], results["config"]["node_layers"]
+        module_to_test = "layers.1"
+        prev_module_id = "layers.0"
+
+    prev_module_outputs = []
+    with torch.inference_mode():
+        hook = Hook(
+            name=prev_module_id,
+            data_key="acts",
+            fn=acts_forward_hook_fn,
+            module_name=prev_module_id,
+        )
+        for input, _ in data_loader:
+            hooked_model.forward(input.to(device=device), hooks=[hook])
+            cache_out = hooked_model.hooked_data[prev_module_id]["acts"]
+            hooked_model.clear_hooked_data()
+            prev_module_outputs.append(torch.concatenate(cache_out, dim=-1).cpu())
+    prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
+    test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
+    utils_rib_acts = rib_acts[module_to_test].cpu()
+    assert torch.allclose(utils_rib_acts, test_rib_acts, atol=atol)
 
 
 def get_modular_arithmetic_config(
@@ -204,12 +263,13 @@ def get_mnist_config(basis_formula: str, edge_formula: str, dtype_str: str) -> M
     ],
 )
 def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
-    dtype_str = "float32"
-    atol = 1e-5  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
+    dtype_str = "float64"
+    atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
     config = get_modular_arithmetic_config(
         basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
     )
-    graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
+    results = graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
+    get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
 
 
 @pytest.mark.slow
@@ -217,11 +277,12 @@ def test_pythia_14m_build_graph():
     dtype_str = "float64"
     atol = 0  # Works with 1e-7 for float32 and 0 for float64
     config = get_pythia_config(dtype_str=dtype_str, basis_formula="(1-0)*alpha")
-    graph_build_test(
+    results = graph_build_test(
         config=config,
         build_graph_main_fn=lm_build_graph_main,
         atol=atol,
     )
+    get_rib_acts_test(results, atol=0)
 
 
 @pytest.mark.slow
@@ -246,6 +307,66 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
+    get_rib_acts_test(results, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula, dtype_str",
+    [
+        ("(1-alpha)^2", "squared", "float32"),
+        ("(1-alpha)^2", "squared", "float64"),
+        ("(1-0)*alpha", "squared", "float32"),
+        ("(1-0)*alpha", "squared", "float64"),
+        ("(1-alpha)^2", "functional", "float32"),
+        ("(1-alpha)^2", "functional", "float64"),
+        ("(1-0)*alpha", "functional", "float32"),
+        ("(1-0)*alpha", "functional", "float64"),
+        ("svd", "squared", "float32"),
+        ("svd", "squared", "float64"),
+        ("neuron", "squared", "float32"),
+        ("neuron", "squared", "float64"),
+        ("svd", "functional", "float32"),
+        ("svd", "functional", "float64"),
+        ("neuron", "functional", "float32"),
+        ("neuron", "functional", "float64"),
+    ],
+)
+def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
+    config_str = f"""
+        exp_name: test
+        out_dir: null
+        node_layers:
+            - layers.0
+            - layers.1
+            - layers.2
+            - output
+        modular_mlp_config:
+            n_hidden_layers: 2
+            width: 10
+            weight_variances: [1,1]
+            weight_equal_columns: false
+            bias: 0
+            activation_fn: relu
+        dataset:
+            name: block_vector
+            size: 1000
+            length: 10
+            data_variances: [1,1]
+            data_perfect_correlation: false
+        seed: 123
+        batch_size: 256
+        n_intervals: 0
+        truncation_threshold: 1e-6
+        dtype: {dtype_str}
+        rotate_final_node_layer: false
+        basis_formula: {basis_formula}
+        edge_formula: {edge_formula}
+    """
+
+    config_dict = yaml.safe_load(config_str)
+    config = MlpRibConfig(**config_dict)
+
+    graph_build_test(config=config, build_graph_main_fn=mlp_build_graph_main, atol=atol)
 
 
 def rotate_final_layer_invariance(
@@ -298,6 +419,61 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     )
     rotate_final_layer_invariance(
         config_not_rotated=not_rotated_config,
+        build_graph_main_fn=mlp_build_graph_main,
+        rtol=rtol,
+        atol=atol,
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.xfail
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula",
+    [
+        ("(1-alpha)^2", "functional"),
+        ("(1-0)*alpha", "functional"),
+        ("(1-alpha)^2", "squared"),
+        ("(1-0)*alpha", "squared"),
+    ],
+)
+def test_modular_mlp_rotate_final_layer_invariance(
+    basis_formula, edge_formula, rtol=1e-7, atol=1e-8
+):
+    """Test that the non-final edges are the same for ModularMLP whether or not we rotate the final layer."""
+    config_str_rotated = f"""
+        exp_name: test
+        out_dir: null
+        node_layers:
+            - layers.0
+            - layers.1
+            - layers.2
+            - output
+        modular_mlp_config:
+            n_hidden_layers: 2
+            width: 10
+            weight_variances: [1,1]
+            weight_equal_columns: false
+            bias: 0
+            activation_fn: relu
+        dataset:
+            name: block_vector
+            size: 1000
+            length: 10
+            data_variances: [1,1]
+            data_perfect_correlation: false
+        seed: 123
+        batch_size: 256
+        n_intervals: 0
+        truncation_threshold: 1e-6
+        dtype: float64
+        rotate_final_node_layer: true  # Gets overridden by rotate_final_layer_invariance
+        basis_formula: {basis_formula}
+        edge_formula: {edge_formula}
+    """
+
+    rotate_final_layer_invariance(
+        config_str_rotated=config_str_rotated,
+        config_cls=MlpRibConfig,
         build_graph_main_fn=mlp_build_graph_main,
         rtol=rtol,
         atol=atol,
@@ -361,11 +537,7 @@ def test_mnist_build_graph_invalid_node_layers():
     config = MlpRibConfig(**config_dict)
 
     with pytest.raises(AssertionError):
-        graph_build_test(
-            config=config,
-            build_graph_main_fn=mlp_build_graph_main,
-            atol=0,
-        )
+        graph_build_test(config=config, build_graph_main_fn=mlp_build_graph_main, atol=0)
 
 
 @pytest.mark.slow
@@ -379,3 +551,99 @@ def test_svd_basis():
         assert (C is None) == (U is None)
         if C is not None:
             assert torch.allclose(C, U, atol=0)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha"])
+@pytest.mark.parametrize("edge_formula", ["functional", "squared"])
+@pytest.mark.parametrize("dtype_str", ["float32", "float64"])
+@pytest.mark.parametrize("rotate_final", [True, False])
+def test_modular_mlp_diagonal_edges_when_linear(
+    basis_formula, edge_formula, dtype_str, rotate_final, rtol=1e-7, atol=1e-5, gtol=1e-4
+):
+    """Test that RIB rotates to a diagonal basis when the ModularMLP is linear.
+
+    Args:
+        basis_formula: The basis formula to use.
+        edge_formula: The edge formula to use.
+        dtype_str: The dtype to use.
+        rotate_final: Whether to rotate the final node layer.
+        rtol: The relative tolerance to use.
+        atol: The absolute tolerance to use.
+        gtol: The geometric mean and max column/row value scaling tolerance to use.
+    """
+    config_str = f"""
+        exp_name: test
+        out_dir: null
+        node_layers:
+            - layers.0
+            - layers.1
+            - layers.2
+            - output
+        modular_mlp_config:
+            n_hidden_layers: 2
+            width: 10
+            weight_variances: [1,1]
+            weight_equal_columns: false
+            bias: 0
+            activation_fn: identity
+        dataset:
+            name: block_vector
+            size: 1000
+            length: 10
+            data_variances: [1,1]
+            data_perfect_correlation: false
+        seed: 123
+        batch_size: 256
+        n_intervals: 0
+        truncation_threshold: 1e-6
+        dtype: {dtype_str}
+        rotate_final_node_layer: {rotate_final}
+        basis_formula: {basis_formula}
+        edge_formula: {edge_formula}
+    """
+
+    config = MlpRibConfig(**yaml.safe_load(config_str))
+    edges = mlp_build_graph_main(config)["edges"]
+
+    rotated_node_layers = config.node_layers[:-1]
+    if (not config.rotate_final_node_layer) and config.node_layers[-1] == "output":
+        rotated_node_layers = rotated_node_layers[:-1]
+
+    for i, module_name in enumerate(rotated_node_layers):
+        # assert that all off diagonal entries agree within rtol of 0. Deal appropriately with the
+        # case that matrices are not square
+        edge_val = edges[i][1]
+        diag_target = torch.zeros_like(edge_val)
+        min_dim = min(edge_val.shape)
+        diag_target[:min_dim, :min_dim] = torch.diag(torch.diag(edge_val))
+        difference = edge_val - diag_target
+
+        # Check that off-diagonal entries are small relative to the maximum of 1) the largest entry
+        # in that entry's row or column (which should be on the diagonal) and 2) the geometric mean
+        # of diagonal entries. The geometric mean is used because some of the diagonal entries may
+        # be zero (or very close to it) and it is not neccessary that the off diagonal entries are
+        # much smaller than even these small diagonal entries.
+        max_entries_in_row = edge_val.abs().amax(dim=1, keepdim=True)
+        max_entries_in_column = edge_val.abs().amax(dim=0, keepdim=True)
+        max_entries = torch.max(max_entries_in_row, max_entries_in_column)
+        max_entries = torch.max(max_entries, torch.diag(edge_val).abs().log().mean().exp())
+        assert torch.allclose(
+            difference / max_entries, torch.zeros_like(difference), rtol=0, atol=gtol
+        ), (
+            f"edges[{i}][1] not diagonal for {module_name},"
+            f" biggest relative deviation: {(difference / max_entries).abs().max()}"
+        )
+
+        # Check off-diagonal edges are much smaller than the largest edge in that layer
+        assert torch.allclose(
+            difference / edge_val.abs().max(), torch.zeros_like(difference), rtol=0, atol=rtol
+        ), (
+            f"edges[{i}][1] not diagonal for {module_name}, biggest relative deviation:"
+            f" {difference.abs().max() / edge_val.abs().max()}"
+        )
+        # Check off-diagonal edges are somewhat close to zero (absolute)
+        assert torch.allclose(difference, torch.zeros_like(difference), rtol=0, atol=atol), (
+            f"edges[{i}][1] not diagonal for {module_name}, "
+            f"biggest absolute deviation: {difference.abs().max()}"
+        )

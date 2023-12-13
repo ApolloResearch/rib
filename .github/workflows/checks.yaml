@@ -56,6 +56,11 @@ jobs:
         source /home/user/actions-runner/rib-env/bin/activate
         isort --check --thirdparty wandb --profile black rib experiments tests
 
+    - name: Check unused imports with pylint
+      run: |
+        source /home/user/actions-runner/rib-env/bin/activate
+        pylint --disable=all --enable=unused-import --score=n rib experiments tests
+
     - name: Check with mypy
       run: |
         source /home/user/actions-runner/rib-env/bin/activate

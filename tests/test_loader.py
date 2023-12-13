@@ -1,5 +1,3 @@
-import warnings
-
 import pytest
 import torch
 from torch.utils.data import Subset, TensorDataset

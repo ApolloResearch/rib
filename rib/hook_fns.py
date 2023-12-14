@@ -150,7 +150,7 @@ def dataset_mean_pre_forward_hook_fn(
         mean_acts_at_bias_pos_is_1 = (in_acts_at_bias - 1).abs() < 1e-3
         if hook_name != "output":
             assert mean_acts_at_bias_pos_is_1.any(), hook_name
-        bias_positions = potential_bias_positions[mean_acts_at_bias_pos_is_1]
+        bias_positions = potential_bias_positions[mean_acts_at_bias_pos_is_1.cpu()]
 
         # if the inputs are of length [128, 128] we want bias positions [127, 255]
         hooked_data[hook_name]["bias_positions"] = bias_positions

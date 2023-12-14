@@ -13,6 +13,7 @@ if [[ -n "$CHANGED_PYTHON_FILES" ]]
 then
     black --check --diff --line-length 100 $CHANGED_PYTHON_FILES
     isort --check --thirdparty wandb --profile black $CHANGED_PYTHON_FILES
+    pylint --disable=all --enable=unused-import --score=n $CHANGED_PYTHON_FILES
     if [[ -n "$NON_TEST_PYTHON_FILES" ]]
     then
         mypy --ignore-missing-imports $NON_TEST_PYTHON_FILES

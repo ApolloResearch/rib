@@ -112,7 +112,7 @@ def calculate_interaction_rotations_local(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-alpha)^2",
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -239,6 +239,16 @@ def calculate_interaction_rotations_local(
         total=len(section_names_to_calculate),
         desc="Interaction rotations",
     ):
+        if basis_formula == "neuron":
+            # Use identity matrix as C and then progress to the next loop
+            # TODO assert not rotate final
+            width = gram_matrices[node_layer].shape[0]
+            Id = torch.eye(width, dtype=dtype, device="cpu")
+            Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=width, U=Id))
+            Cs.append(
+                InteractionRotation(node_layer_name=node_layer, out_dim=width, C=Id, C_pinv=Id)
+            )
+            continue
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
@@ -255,6 +265,7 @@ def calculate_interaction_rotations_local(
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
         if basis_formula == "svd":
             # Use U as C and then progress to the next loop
+            U = U.detach().cpu()
             Cs.append(
                 InteractionRotation(node_layer_name=node_layer, out_dim=U.shape[1], C=U, C_pinv=U.T)
             )

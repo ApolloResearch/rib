@@ -13,7 +13,6 @@ from pydantic import (
 )
 from torch import Tensor
 from torch.utils.data import Dataset
-from typing_extensions import Annotated
 
 from rib.types import TORCH_DTYPES, StrDtype
 

@@ -463,11 +463,11 @@ def calc_edge_stochastic(
         device=f_in_hat.device,
     )
 
-    phi = torch.randn(
-        (batch_size, len(alphas), stochastic_noise_dim, out_pos_size),
-        dtype=f_in_hat.dtype,
-        device=f_in_hat.device,
-    )
+    phi_shape = (batch_size, stochastic_noise_dim, out_pos_size)
+    phi = torch.where(
+        torch.randn(phi_shape) < 0.0, -1 * torch.ones(phi_shape), torch.ones(phi_shape)
+    ).to(dtype=f_in_hat.dtype, device=f_in_hat.device)
+
     normalization_factor = f_in_hat.shape[1] * dataset_size * stochastic_noise_dim
 
     # Integration with the trapzoidal rule
@@ -493,7 +493,7 @@ def calc_edge_stochastic(
                 # The sum over the batch dimension before passing to autograd is just a trick
                 # to get the grad for every batch index vectorized.
                 phi_f_out_alpha_hat = torch.einsum(
-                    "bp,bp->", phi[:, alpha_idx, r, :], f_out_alpha_hat[:, :, out_dim]
+                    "bp,bp->", phi[:, r, :], f_out_alpha_hat[:, :, out_dim]
                 )
                 i_grad = (
                     torch.autograd.grad(phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True)[0]

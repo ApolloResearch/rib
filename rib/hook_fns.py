@@ -22,6 +22,8 @@ from rib.linalg import (
     calc_gram_matrix,
     integrated_gradient_trapezoidal_norm,
 )
+from rib.models.sequential_transformer.components import AttentionOut
+from rib.models.sequential_transformer.transformer import MultiSequential
 
 
 def _add_to_hooked_matrix(
@@ -131,6 +133,13 @@ def dataset_mean_pre_forward_hook_fn(
     assert in_acts_mean_contrib.ndim == 1, f"mean must be 1D, shape={in_acts_mean_contrib.shape}"
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts_mean_contrib)
     if "bias_positions" not in hooked_data[hook_name]:
+        if isinstance(module, MultiSequential):
+            next_module = list(module._modules.values())[0]
+        else:
+            next_module = module
+        if isinstance(next_module, AttentionOut):
+            raise NotImplementedError("bias positon for AttentionOut is more complicated")
+
         segment_lens = torch.tensor([x.shape[-1] for x in inputs])
         # if the inputs are of length [128, 128] we want bias positions [127, 255]
         hooked_data[hook_name]["bias_positions"] = torch.cumsum(segment_lens, dim=0) - 1

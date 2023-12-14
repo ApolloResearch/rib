@@ -79,13 +79,18 @@ def collect_dataset_means(
         hook_names: Used to store the gram matrices in the hooked model. Often module ids.
 
     Returns:
-        A dictionary of gram matrices, where the keys are the hook names (a.k.a. node layer names)
+        A tuple of:
+            - Dataset means, a dictionary from hook_names to mean tensors of shape (d_hidden,)
+            - Bias positions, a dictionary from hook_names to tensor of bias position indices
     """
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
     else:
         hook_names = module_names
+
+    if not hooked_model.model.has_folded_bias:
+        logger.warning("model does not have folded bias, ")
 
     dataset_size = len(data_loader.dataset)  # type: ignore
     dataset_mean_hooks: list[Hook] = []

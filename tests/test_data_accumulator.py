@@ -84,7 +84,9 @@ def test_collect_dataset_means():
     # Ensure hooked_mlp.hooked_data got removed after collect_gram_matrices
     assert not hooked_mlp.hooked_data
 
+    # The acts before layer 0 are the inputs with bias folded in. The inputs are all zeros here.
     assert torch.allclose(means["layers.0"], torch.tensor([0.0, 0.0, 0.0, 1.0]))
+    # The acts before layer 1 will be `relu(Wx + b)`. This is relu(b) since x is all zeros.
     mean_l1 = torch.concatenate([torch.clip(b0, min=0), torch.tensor([1.0])])
     assert torch.allclose(means["layers.1"], mean_l1)
     assert index_pos["layers.0"] == torch.tensor([mlp.input_size])

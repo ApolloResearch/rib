@@ -24,12 +24,12 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch.utils.data import DataLoader
 
+from rib.data import BlockVectorDatasetConfig, VisionDatasetConfig
 from rib.data_accumulator import (
     collect_dataset_means,
     collect_gram_matrices,
     collect_interaction_edges,
 )
-from rib.data import BlockVectorDatasetConfig, VisionDatasetConfig
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import load_dataset, load_mlp

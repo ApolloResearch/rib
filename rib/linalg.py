@@ -561,6 +561,7 @@ def shift_matrix(
     n = shift.shape[0]
     S = torch.eye(n, dtype=shift.dtype, device=shift.device)
     assert (n - 1) in bias_positions
-    is_not_bias_mask = ~torch.isin(torch.arange(n), bias_positions)
-    S[-1][is_not_bias_mask] = shift[is_not_bias_mask]
+    shift = shift / len(bias_positions)  # we'll spread the shift out across bias pos
+    shift[bias_positions] = 0  # we don't shift at bias positions
+    S[bias_positions, :] += shift[None, :]
     return S

@@ -138,11 +138,22 @@ def dataset_mean_pre_forward_hook_fn(
         else:
             next_module = module
         if isinstance(next_module, AttentionOut):
-            raise NotImplementedError("bias positon for AttentionOut is more complicated")
+            raise NotImplementedError("there are many bias positions, could impliment if needed")
 
         segment_lens = torch.tensor([x.shape[-1] for x in inputs])
+        potential_bias_positions = torch.cumsum(segment_lens, dim=0) - 1
+        # before adds we have one bias be 0 and the other be 1.
+        # before mlpact, one bias is sometimes the root.
+        in_acts_at_bias = in_acts[..., potential_bias_positions].mean(
+            dim=(0 if in_acts.ndim == 2 else (0, 1))
+        )
+        mean_acts_at_bias_pos_is_1 = (in_acts_at_bias - 1).abs() < 1e-3
+        if hook_name != "output":
+            assert mean_acts_at_bias_pos_is_1.any(), hook_name
+        bias_positions = potential_bias_positions[mean_acts_at_bias_pos_is_1]
+
         # if the inputs are of length [128, 128] we want bias positions [127, 255]
-        hooked_data[hook_name]["bias_positions"] = torch.cumsum(segment_lens, dim=0) - 1
+        hooked_data[hook_name]["bias_positions"] = bias_positions
 
 
 def gram_forward_hook_fn(

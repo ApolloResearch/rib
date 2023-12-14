@@ -504,11 +504,8 @@ def collect_M_dash(
             )
 
     M_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
-        hook_name: hooked_model.hooked_data[hook_name]["M_dash"]
-        for hook_name in hooked_model.hooked_data
+        hook_name: hooked_model.hooked_data[hook_name]["M_dash"] for hook_name in module_names
     }
-
-    assert set(M_matrices.keys()) == set(hook_names)
 
     return M_matrices
 

@@ -720,3 +720,52 @@ def test_modular_mlp_diagonal_edges_when_linear(
         )
         # Check off-diagonal edges are somewhat close to zero (absolute)
         assert_close(difference, torch.zeros_like(difference), rtol=0, atol=atol)
+
+
+@pytest.mark.slow
+def test_stochastic_source_modadd():
+    """Show that modadd after add_resid1 should only need a single stochastic source.
+
+    Since there is only a single position dimension after add_resid1 in modadd, and since our
+    stochastic sources are either -1 or 1 and are then squared in the edge formula, we should only
+    need a single source to get exactly the same edges as edge_formula=squared.
+    """
+    config_str = """
+    exp_name: test
+    seed: 0
+    tlens_pretrained: null
+    tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+    dataset:
+        source: custom
+        name: modular_arithmetic
+        return_set: train
+        return_set_frac: null
+        return_set_n_samples: 10  # full dataset is 3830 samples
+    node_layers:
+        - mlp_in.0
+        - mlp_out.0
+    batch_size: 6
+    gram_batch_size: 6
+    edge_batch_size: 6
+    truncation_threshold: 1e-15
+    rotate_final_node_layer: true  # Gets overridden by rotate_final_layer_invariance
+    last_pos_module_type: add_resid1
+    n_intervals: 0
+    dtype: float64
+    eval_type: accuracy
+    out_dir: null
+    basis_formula: (1-0)*alpha
+    edge_formula: {edge_formula}
+    stochastic_noise_dim: {stochastic_noise_dim}
+    """
+    # Calc squared edges
+    config_squared_str = config_str.format(edge_formula="squared", stochastic_noise_dim="null")
+    config_squared = LMRibConfig(**yaml.safe_load(config_squared_str))
+    squared_edges = lm_build_graph_main(config_squared)["edges"][0][1]
+
+    # Calc stochastic edges
+    config_stochastic_str = config_str.format(edge_formula="stochastic", stochastic_noise_dim=1)
+    config_stochastic = LMRibConfig(**yaml.safe_load(config_stochastic_str))
+    stochastic_edges = lm_build_graph_main(config_stochastic)["edges"][0][1]
+
+    assert_is_close(squared_edges, stochastic_edges, atol=0, rtol=0)

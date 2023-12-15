@@ -21,11 +21,17 @@ from typing import Literal, Optional, Union
 import fire
 import torch
 import yaml
+from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.data import BlockVectorDatasetConfig, VisionDatasetConfig
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.data_accumulator import (
+    collect_dataset_means,
+    collect_gram_matrices,
+    collect_interaction_edges,
+)
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import load_dataset, load_mlp
@@ -65,6 +71,11 @@ class Config(BaseModel):
         Path(__file__).parent / "out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
+    )
+    center: bool = Field(
+        False,
+        description="Whether to center the activations before performing rib. Currently only"
+        "supported for basis_formula='svd', which gives the 'pca' basis.",
     )
     dataset: Union[VisionDatasetConfig, BlockVectorDatasetConfig] = Field(
         VisionDatasetConfig(),
@@ -128,6 +139,19 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
+    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
+    bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
+    if config.center:
+        logger.info("Collecting dataset means")
+        means, bias_positions = collect_dataset_means(
+            hooked_model=hooked_mlp,
+            module_names=non_output_node_layers,
+            data_loader=train_loader,
+            dtype=dtype,
+            device=device,
+            collect_output_dataset_means=collect_output_gram,
+        )
+
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
         module_names=non_output_node_layers,
@@ -135,6 +159,8 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         dtype=dtype,
         device=device,
         collect_output_gram=collect_output_gram,
+        means=means,
+        bias_positions=bias_positions,
     )
 
     Cs, Us = calculate_interaction_rotations(
@@ -149,6 +175,9 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         truncation_threshold=config.truncation_threshold,
         rotate_final_node_layer=config.rotate_final_node_layer,
         basis_formula=config.basis_formula,
+        center=config.center,
+        means=means,
+        bias_positions=bias_positions,
     )
 
     E_hats = collect_interaction_edges(

@@ -1,16 +1,10 @@
-import logging
 import warnings
-from logging.config import dictConfig
-from pathlib import Path
 from typing import Literal
 
 import torch
 from transformer_lens import HookedTransformer
 
 from rib.models import SequentialTransformer
-
-logging.captureWarnings(True)
-DEFAULT_LOGFILE = Path(__file__).resolve().parent.parent / "logs" / "logs.log"
 
 
 def convert_tlens_weights(

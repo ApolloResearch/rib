@@ -4,13 +4,15 @@ from functools import partial
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
+    dataset_mean_forward_hook_fn,
+    dataset_mean_pre_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
@@ -51,6 +53,95 @@ def run_dataset_through_model(
 
 
 @torch.inference_mode()
+def collect_dataset_means(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    device: str,
+    dtype: torch.dtype,
+    collect_output_dataset_means: bool = True,
+    hook_names: Optional[list[str]] = None,
+) -> tuple[dict[str, Float[Tensor, "d_hidden"]], dict[str, Int[Tensor, "segments"]]]:
+    """Collect the mean input activation for each module on the dataset.
+
+    Also returns the positions of the bias terms in each input activation. The mean should be
+    one at these positions.
+
+    Can also collect the mean output of the model if `collect_output_dataset_means` is True.
+
+    Args:
+        hooked_model: The hooked model.
+        module_names: The names of the modules to collect gram matrices for. Often section ids.
+        data_loader: The pytorch data loader.
+        device: The device to run the model on.
+        dtype: The data type to use for model computations.
+        collect_output_dataset_means: Whether to collect the mean output of the final module.
+        hook_names: Used to store the gram matrices in the hooked model. Often module ids.
+
+    Returns:
+        A tuple of:
+            - Dataset means, a dictionary from hook_names to mean tensors of shape (d_hidden,)
+            - Bias positions, a dictionary from hook_names to tensor of bias position indices
+    """
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    if not hooked_model.model.has_folded_bias:
+        logger.warning("model does not have folded bias, ")
+
+    dataset_size = len(data_loader.dataset)  # type: ignore
+    dataset_mean_hooks: list[Hook] = []
+    # Add input hooks
+    for module_name, hook_name in zip(module_names, hook_names):
+        dataset_mean_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="dataset_mean",
+                fn=dataset_mean_pre_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"dataset_size": dataset_size},
+            )
+        )
+    if collect_output_dataset_means:
+        # Add hook to collect model output
+        dataset_mean_hooks.append(
+            Hook(
+                name="output",
+                data_key="dataset_mean",
+                fn=dataset_mean_forward_hook_fn,
+                module_name=module_names[-1],
+                fn_kwargs={"dataset_size": dataset_size},
+            )
+        )
+
+    run_dataset_through_model(
+        hooked_model, data_loader, dataset_mean_hooks, dtype=dtype, device=device, use_tqdm=True
+    )
+
+    dataset_mean: dict[str, Float[Tensor, "d_hidden"]] = {
+        hook_name: hooked_model.hooked_data[hook_name]["dataset_mean"]
+        for hook_name in hooked_model.hooked_data
+    }
+    bias_positions: dict[str, Int[Tensor, "segments"]] = {
+        hook_name: hooked_model.hooked_data[hook_name]["bias_positions"]
+        for hook_name in hooked_model.hooked_data
+    }
+    hooked_model.clear_hooked_data()
+
+    expected_keys = (
+        set(hook_names + ["output"]) if collect_output_dataset_means else set(hook_names)
+    )
+    assert set(dataset_mean.keys()) == expected_keys, (
+        f"Gram matrix keys not the same as the module names that were hooked. "
+        f"Expected: {expected_keys}, got: {set(dataset_mean.keys())}"
+    )
+    return dataset_mean, bias_positions
+
+
+@torch.inference_mode()
 def collect_gram_matrices(
     hooked_model: HookedModel,
     module_names: list[str],
@@ -59,11 +150,17 @@ def collect_gram_matrices(
     dtype: torch.dtype,
     collect_output_gram: bool = True,
     hook_names: Optional[list[str]] = None,
+    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
+    bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None,
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
     """Collect gram matrices for the module inputs and optionally the output of the final module.
 
     We use pre_forward hooks for the input to each module. If `collect_output_gram` is True, we
     also collect the gram matrix for the output of the final module using a forward hook.
+
+    Will collect correlation matrices (that is, gram matrices of centered activations) if `means` is
+    provided. In this case, `bias_positions` must also be provided. The bias positions will not be
+    centered.
 
     Args:
         hooked_model: The hooked model.
@@ -73,6 +170,10 @@ def collect_gram_matrices(
         dtype: The data type to use for model computations.
         collect_output_gram: Whether to collect the gram matrix for the output of the final module.
         hook_names: Used to store the gram matrices in the hooked model.
+        means: A dictionary of mean activations for each module. The keys are the hook names. If
+            not none, will be used to center the activations when computing the gram matrices.
+        bias_positions: A dictionary of the positions of the bias terms in each module. Must be
+            non-none if `means` is provided, with the same keys.
 
     Returns:
         A dictionary of gram matrices, where the keys are the hook names (a.k.a. node layer names)
@@ -87,13 +188,18 @@ def collect_gram_matrices(
     gram_hooks: list[Hook] = []
     # Add input hooks
     for module_name, hook_name in zip(module_names, hook_names):
+        shift: Optional[Float[Tensor, "d_hidden"]] = None
+        if means is not None and hook_name in means:
+            assert bias_positions is not None
+            shift = -means[hook_name]
+            shift[bias_positions[hook_name]] = 0.0
         gram_hooks.append(
             Hook(
                 name=hook_name,
                 data_key="gram",
                 fn=gram_pre_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"dataset_size": dataset_size},
+                fn_kwargs={"dataset_size": dataset_size, "shift": shift},
             )
         )
     if collect_output_gram:
@@ -104,7 +210,11 @@ def collect_gram_matrices(
                 data_key="gram",
                 fn=gram_forward_hook_fn,
                 module_name=module_names[-1],
-                fn_kwargs={"dataset_size": dataset_size},
+                fn_kwargs={
+                    "dataset_size": dataset_size,
+                    # we don't need to care about bias positions in the output
+                    "shift": -means["output"] if means is not None else None,
+                },
             )
         )
 

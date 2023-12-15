@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import eigendecompose, pinv_diag
+from rib.linalg import eigendecompose, pinv_diag, shift_matrix
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.transformer import SequentialTransformer
 
@@ -109,6 +109,9 @@ def calculate_interaction_rotations(
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-alpha)^2",
+    center: bool = False,
+    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
+    bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -142,12 +145,17 @@ def calculate_interaction_rotations(
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
         basis_formula: The formula to use for the integrated gradient. Must be one of
-            "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
-            latter is a new (November) version that should be used from now on. The latter makes
-            sense especially in light of the new attribution (edge_formula="squared") but is
-            generally good and does not change results much. Defaults to "(1-0)*alpha".
-        svd_basis: Returns Us as Cs, so basis is just the eigenvectors of the gram matrix.
-
+            "(1-alpha)^2", "(1-0)*alpha", "neuron", or "svd".
+             - "(1-alpha)^2" is the old (October) version based on the functional edge formula.
+             - "(1-0)*alpha" is the new (November) version based on the squared edge formula. This
+                is the default, and generally the best option.
+             - "neuron" performs no rotation.
+             - "svd" only decomposes the gram matrix and uses that as the basis. It is a good
+                baseline. If `center=true` this becomes the "pca" basis.
+        center: Whether to center the activations while computing the desired basis. Only supported
+            for the "svd" basis formula.
+        means: The means of the activations for each node layer. Only used if `center=true`.
+        bias_positions: The positions of the biases for each node layer. Only used if `center=true`.
     Returns:
         - A list of objects containing the interaction rotation matrices and their pseudoinverses,
         ordered by node layer appearance in model.
@@ -162,20 +170,31 @@ def calculate_interaction_rotations(
         section_names
     ), "Must specify a hook name for each section (except the output section)."
 
+    if center and basis_formula != "svd":
+        raise NotImplementedError(
+            "centering is currently only implemented for the svd basis formula."
+        )
+
     # We start appending Us and Cs from the output layer and work our way backwards
     Us: list[Eigenvectors] = []
     Cs: list[InteractionRotation] = []
 
     # The C matrix for the final layer is either the eigenvectors U if rotate_final_node_layer is
     # True, and None otherwise
-    U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = (
-        eigendecompose(gram_matrices[node_layers[-1]])[1].detach().cpu()
-        if rotate_final_node_layer
-        else None
-    )
-    C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = (
-        U_output.detach().cpu() if U_output is not None else None
-    )
+    U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
+    C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
+    if rotate_final_node_layer:
+        U_output = eigendecompose(gram_matrices[node_layers[-1]])[1].detach()
+        assert U_output is not None
+        if center:
+            assert means is not None
+            assert bias_positions is not None
+            assert node_layers[-1] in means
+            Y = shift_matrix(-means[node_layers[-1]], bias_positions[node_layers[-1]])
+            C_output = (Y @ U_output).detach().cpu()
+        else:
+            C_output = U_output.detach().cpu()
+        U_output = U_output.cpu()
 
     if node_layers[-1] not in gram_matrices:
         # Technically we don't actually need the final node layer to be in gram_matrices if we're
@@ -257,11 +276,29 @@ def calculate_interaction_rotations(
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
         )
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
+
+        # currently only used for svd basis, but will be used more in text PR
+        if center:
+            assert means is not None
+            assert bias_positions is not None
+            # Y (or Gamma) is a matrix that shifts the activations to be mean zero
+            # with the exception of the bias positions which are still 1
+            Y = shift_matrix(-means[node_layer], bias_positions[node_layer])
+            Y_inv = shift_matrix(means[node_layer], bias_positions[node_layer])
+        else:
+            # if not centering, we set Y to be the identity matrix
+            Y = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
+            Y_inv = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
+
         if basis_formula == "svd":
-            # Use U as C and then progress to the next loop
-            U = U.detach().cpu()
+            # We set C based on U (maybe centered as well)
             Cs.append(
-                InteractionRotation(node_layer_name=node_layer, out_dim=U.shape[1], C=U, C_pinv=U.T)
+                InteractionRotation(
+                    node_layer_name=node_layer,
+                    out_dim=U.shape[1],
+                    C=(Y @ U).cpu(),
+                    C_pinv=(U.T @ Y_inv).cpu(),
+                )
             )
             continue
 

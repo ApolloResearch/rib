@@ -3,7 +3,7 @@ from typing import TypeVar
 import pytest
 import torch
 
-from rib.hook_manager import Hook, HookedModel
+from rib.hook_manager import HookedModel
 from rib.loader import load_sequential_transformer
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.sequential_transformer.transformer import MultiSequential

@@ -7,10 +7,8 @@ plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
-import logging
 import warnings
 from datetime import datetime
-from logging.config import dictConfig
 from pathlib import Path
 from typing import Literal, Optional, Union
 
@@ -18,9 +16,6 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
-
-logging.captureWarnings(True)
-DEFAULT_LOGFILE = Path(__file__).resolve().parent.parent / "logs" / "logs.log"
 
 
 def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:

@@ -14,10 +14,12 @@ that have a small set of large numbers and a large set of small numbers.
 from typing import Callable, Union
 from unittest.mock import patch
 
+import einops
 import pytest
 import torch
 import yaml
 from fancy_einsum import einsum
+from torch.testing import assert_close
 from torch.utils.data import DataLoader
 
 from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
@@ -25,12 +27,14 @@ from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_mai
 from experiments.mlp_rib_build.run_mlp_rib_build import Config as MlpRibConfig
 from experiments.mlp_rib_build.run_mlp_rib_build import main as mlp_build_graph_main
 from rib.analysis_utils import get_rib_acts, parse_c_infos
+from rib.data_accumulator import collect_dataset_means
 from rib.hook_fns import acts_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import build_sorted_lambda_matrices
 from rib.loader import load_model_and_dataset_from_rib_results
 from rib.models.modular_mlp import ModularMLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults
+from tests.utils import assert_is_close, assert_is_ones, assert_is_zeros
 
 
 def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main_fn: Callable):
@@ -87,7 +91,7 @@ def graph_build_test(
                 assert (
                     act_size.shape == edge_size.shape
                 ), f"act_size and edge_size not same shape for {module_name}"
-                torch.testing.assert_close(
+                assert_close(
                     act_size / act_size.abs().max(),
                     edge_size / edge_size.abs().max(),
                     rtol=0,
@@ -120,6 +124,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results["config"]["dtype"]]
     model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
+    model.to(device=torch.device(device), dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     hooked_model = HookedModel(model)
     Cs = parse_c_infos(results["interaction_rotations"])
@@ -155,6 +160,8 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
             module_name=prev_module_id,
         )
         for input, _ in data_loader:
+            if input.dtype not in [torch.int32, torch.int64]:
+                input = input.to(dtype=dtype)
             hooked_model.forward(input.to(device=device), hooks=[hook])
             cache_out = hooked_model.hooked_data[prev_module_id]["acts"]
             hooked_model.clear_hooked_data()
@@ -163,6 +170,43 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
     utils_rib_acts = rib_acts[module_to_test].cpu()
     assert torch.allclose(utils_rib_acts, test_rib_acts, atol=atol)
+    return rib_acts
+
+
+def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
+    """Takes the results of a graph build and runs collect_dataset_means."""
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[results["config"]["dtype"]]
+    model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
+    model.to(device=torch.device(device), dtype=dtype)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    hooked_model = HookedModel(model)
+
+    module_ids = [m_name for m_name in results["config"]["node_layers"] if m_name != "output"]
+    if hasattr(model, "sections"):
+        module_names = [model.module_id_to_section_id[m_name] for m_name in module_ids]
+    else:
+        module_names = module_ids
+    means, bias_positions = collect_dataset_means(
+        hooked_model=hooked_model,
+        module_names=module_names,
+        data_loader=data_loader,
+        device=device,
+        dtype=dtype,
+        collect_output_dataset_means=False,
+        hook_names=module_ids,
+    )
+    for m_name in module_ids:
+        is_bias_mask = torch.zeros(means[m_name].shape[-1]).bool()
+        is_bias_mask[bias_positions[m_name]] = True
+        assert_is_ones(means[m_name][is_bias_mask], atol=atol, m_name=m_name)
+        # we want to check we didn't miss a bias position. We do this by checking that the other
+        # means aren't 1. This is a bit sketchy, as there's nothing guarenteeing they can't be 1.
+        mean_1_positions = (means[m_name][~is_bias_mask] - 1).abs() < atol
+        assert (
+            not mean_1_positions.any()
+        ), f"means at positions {mean_1_positions.nonzero()} are unexpectely 1"
+    return means, bias_positions
 
 
 def get_modular_arithmetic_config(
@@ -401,7 +445,7 @@ def rotate_final_layer_invariance(
             rot.shape == notrot.shape
         ), f"edges_not_rotated and edges_rotated not same shape for {module_name}"
         # Check values
-        torch.testing.assert_close(
+        assert_close(
             rot,
             notrot,
             rtol=rtol,
@@ -525,7 +569,7 @@ def test_mnist_build_graph_invalid_node_layers():
 @pytest.mark.slow
 def test_svd_basis():
     dtype_str = "float64"
-    config = get_pythia_config(dtype_str=dtype_str, basis_formula="svd")
+    config = get_pythia_config(basis_formula="svd", dtype_str=dtype_str)
     results = lm_build_graph_main(config)
     for c_info, u_info in zip(results["interaction_rotations"], results["eigenvectors"]):
         C = c_info["C"]
@@ -533,6 +577,88 @@ def test_svd_basis():
         assert (C is None) == (U is None)
         if C is not None:
             assert torch.allclose(C, U, atol=0)
+
+
+def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
+    """
+    Test that the 'pca' basis (aka svd with center=true) works as expected.
+
+    In particular:
+    1. We collect the rib activations
+    2. We collect the means, checking that the mean == 1 exactly at the bias positions
+    3. We expect there to be a single rib direction encoding the bias and means activation.
+        We call this `bias_dir` and expect it's value to be the mean activation at non-bias
+        positions, and equal to 1/sqrt(# bias positions) at bias positions. C_inv gives us all
+        rib directions in the original coordinate system, so we compute the expected direction and
+        compare cosine similarities with rows of C_inv.
+    4. We assert the `bias_dir` does match what we expect
+    5. We assert that all other rib directions have no bias component (in the original coordinates)
+    6. We assert the rib activation of `bias_dir` is always 1
+    7. We assert the mean rib activation of all other directions is 0 (they are centered)
+    """
+    # 1 and 2: collect C_inv, rib acts, means, bias positions
+    all_rib_acts = get_rib_acts_test(results, atol=1e-6)
+    all_mean_acts, all_bias_pos = get_means_test(results, atol=atol)
+    C_infos = parse_c_infos(results["interaction_rotations"])
+    # output and pre-unembed have no bias
+    m_names = [m_name for m_name in results["config"]["node_layers"] if m_name not in ["output"]]
+    for m_name in m_names:
+        C_inv = C_infos[m_name].C_pinv  # [rib_dir, emb_pos]
+        if C_inv is None:  # this happens when rotate_final_layer is true
+            continue
+        bias_positions = all_bias_pos[m_name].cpu()
+        mean_acts = all_mean_acts[m_name].cpu()  # [emb_pos]
+        rib_acts = all_rib_acts[m_name]  # [batch, (seqpos?), rib_dir]
+
+        # find the bias direction. This should be the only dir with non-zero magnitude
+        # in the bias_positions directions
+        bias_dir_idx = C_inv[:, bias_positions[0]].abs().argmax()
+        # sometimes rib finds the opposite direction, which is OK
+        bias_dir_sign = C_inv[bias_dir_idx, bias_positions[0]].sign()
+
+        # 3) compute the expected bias direction
+        expected_bias_dir = mean_acts.clone()  # [emb]
+        expected_bias_dir[bias_positions] = 1
+        scale_factor = bias_dir_sign / len(bias_positions) ** 0.5
+        expected_bias_dir *= scale_factor
+        # and assert it's close to the actual bias direction
+        assert_is_close(C_inv[bias_dir_idx, :], expected_bias_dir, atol=atol, rtol=0, m_name=m_name)
+
+        # mask over rib dir. True everywhere except the bias dir
+        non_bias_dir_mask = torch.ones(C_inv.shape[0]).bool()  # [rib_dir]
+        non_bias_dir_mask[bias_dir_idx] = False
+
+        # 5) no other rib dir point in the bias dir
+        assert_is_zeros(C_inv[non_bias_dir_mask][:, bias_positions], atol=atol, m_name=m_name)
+
+        # 6) bias dir rib act is always the same, the correct amount to scale back to the mean +
+        # bias in original coordinates
+        assert_is_close(
+            rib_acts[..., bias_dir_idx], 1 / scale_factor, atol=atol, rtol=0, m_name=m_name
+        )
+
+        # 7) all other rib acts are centered (mean zero)
+        mean_rib_acts = einops.reduce(rib_acts, "... ribdir -> ribdir", "mean")
+        assert_is_zeros(mean_rib_acts[non_bias_dir_mask], atol=atol, m_name=m_name)
+
+
+@pytest.mark.slow
+def test_pca_basis_mnist():
+    """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
+    config = get_mnist_config(basis_formula="svd", edge_formula="functional", dtype_str="float64")
+    config = config.model_copy(update={"center": True})
+    results = mlp_build_graph_main(config)
+    pca_rib_acts_test(results, atol=1e-4)
+
+
+@pytest.mark.slow
+def test_pca_basis_pythia():
+    """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
+    dtype_str = "float64"
+    config = get_pythia_config(dtype_str=dtype_str, basis_formula="svd")
+    config = config.model_copy(update={"center": True, "rotate_final_node_layer": True})
+    results = lm_build_graph_main(config)
+    pca_rib_acts_test(results, atol=1e-6)
 
 
 @pytest.mark.slow
@@ -585,13 +711,11 @@ def test_modular_mlp_diagonal_edges_when_linear(
         max_entries_in_column = edge_val.abs().amax(dim=0, keepdim=True)
         max_entries = torch.max(max_entries_in_row, max_entries_in_column)
         max_entries = torch.max(max_entries, torch.diag(edge_val).abs().log().mean().exp())
-        torch.testing.assert_close(
-            difference / max_entries, torch.zeros_like(difference), rtol=0, atol=gtol
-        )
+        assert_close(difference / max_entries, torch.zeros_like(difference), rtol=0, atol=gtol)
         # Check off-diagonal edges are much smaller than the largest edge in that layer
         # atol=rtol is correct here, we are measuring a relative value against 0.
-        torch.testing.assert_close(
+        assert_close(
             difference / edge_val.abs().max(), torch.zeros_like(difference), rtol=0, atol=rtol
         )
         # Check off-diagonal edges are somewhat close to zero (absolute)
-        torch.testing.assert_close(difference, torch.zeros_like(difference), rtol=0, atol=atol)
+        assert_close(difference, torch.zeros_like(difference), rtol=0, atol=atol)

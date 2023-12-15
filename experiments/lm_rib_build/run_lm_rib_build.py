@@ -37,13 +37,17 @@ from typing import Literal, Optional, Union
 
 import fire
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.data_accumulator import (
+    collect_dataset_means,
+    collect_gram_matrices,
+    collect_interaction_edges,
+)
 from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
@@ -142,6 +146,11 @@ class Config(BaseModel):
     edge_formula: Literal["functional", "squared"] = Field(
         "functional",
         description="The attribution method to use to calculate the edges.",
+    )
+    center: bool = Field(
+        False,
+        description="Whether to center the activations before performing rib. Currently only"
+        "supported for basis_formula='svd', which gives the 'pca' basis.",
     )
 
     @model_validator(mode="after")
@@ -311,8 +320,23 @@ def main(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
 
+        means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
+        bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
+        if config.center:
+            logger.info("Collecting dataset means")
+            means, bias_positions = collect_dataset_means(
+                hooked_model=hooked_model,
+                module_names=section_names,
+                data_loader=gram_train_loader,
+                dtype=dtype,
+                device=device,
+                collect_output_dataset_means=collect_output_gram,
+                hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
+            )
+
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
+
         gram_matrices = collect_gram_matrices(
             hooked_model=hooked_model,
             module_names=section_names,
@@ -320,7 +344,9 @@ def main(
             dtype=dtype,
             device=device,
             collect_output_gram=collect_output_gram,
-            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
+            hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
+            means=means,
+            bias_positions=bias_positions,
         )
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
@@ -342,6 +368,9 @@ def main(
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
+            center=config.center,
+            means=means,
+            bias_positions=bias_positions,
         )
         # Cs used to calculate edges
         edge_Cs = Cs

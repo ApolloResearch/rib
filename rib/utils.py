@@ -12,8 +12,6 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
 from rib.log import logger
-from rib.models.sequential_transformer.components import AttentionOut
-from rib.models.sequential_transformer.transformer import MultiSequential
 
 if TYPE_CHECKING:
     from rib.hook_manager import Hook, HookedModel

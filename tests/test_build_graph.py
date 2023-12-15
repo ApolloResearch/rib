@@ -724,7 +724,7 @@ def test_modular_mlp_diagonal_edges_when_linear(
 
 @pytest.mark.slow
 def test_stochastic_source_modadd():
-    """Show that modadd after add_resid1 should only need a single stochastic source.
+    """Show that modadd after add_resid1 only needs a single stochastic source.
 
     Since there is only a single position dimension after add_resid1 in modadd, and since our
     stochastic sources are either -1 or 1 and are then squared in the edge formula, we should only

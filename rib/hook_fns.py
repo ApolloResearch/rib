@@ -464,7 +464,6 @@ def interaction_edge_pre_forward_hook_fn(
         )
     elif edge_formula == "stochastic":
         assert stochastic_noise_dim is not None, "stochastic_noise_dim must be specified."
-        # Must have a position dimension
         assert f_hat.dim() == 3, "f_hat must have a position dimension to use stochastic noise."
         calc_edge_stochastic(
             module_hat=module_hat,

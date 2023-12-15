@@ -8,6 +8,7 @@ from torch import Tensor
 from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES, StrDtype
+from rib.utils import put_into_submatrix_
 
 
 def masked_eigendecompose(
@@ -46,7 +47,12 @@ def masked_eigendecompose(
 
     # Create a matrix with the eigenvectors in the correct positions
     eigenvectors_full = torch.eye(d_full, dtype=eigenvectors.dtype, device=eigenvectors.device)
-    eigenvectors_full[is_not_masked, :][:, is_not_masked] = eigenvectors
+    put_into_submatrix_(
+        full=eigenvectors_full,
+        new_sub_matrix=eigenvectors,
+        row_idxs=torch.arange(d_full)[is_not_masked.cpu()],
+        col_idxs=torch.arange(d_full)[is_not_masked.cpu()],
+    )
 
     if descending:
         idx = torch.argsort(eigenvalues, descending=True)
@@ -618,7 +624,7 @@ def shift_matrix(
     assert shift.ndim == 1, "shift must be 1d"
     n = shift.shape[0]
     S = torch.eye(n, dtype=shift.dtype, device=shift.device)
-    assert (n - 1) in bias_positions
+    assert len(bias_positions) > 0
     shift = shift / len(bias_positions)  # we'll spread the shift out across bias pos
     shift[bias_positions] = 0  # we don't shift at bias positions
     S[bias_positions, :] += shift[None, :]

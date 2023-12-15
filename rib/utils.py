@@ -337,3 +337,38 @@ def get_data_subset(
         return Subset(dataset, selected_indices)
     else:
         return dataset
+
+
+def put_into_submatrix_(
+    full,
+    new_sub_matrix,
+    row_idxs: Int[Tensor, "n_rows"],
+    col_idxs: Int[Tensor, "n_cols"],
+) -> None:
+    """
+    Returns a new matrix with same shape as full. The submatrix of rows in row_idx and cols in
+    col_idx is replaced with new_sub_matrix.
+
+    For example,
+    >>> full = torch.zeros(4, 4)
+    >>> new_sub_matrix = torch.ones(3, 3)
+    >>> row_mask = torch.tensor([0, 1])
+    >>> col_mask = torch.tensor([0, 1, 2])
+    >>> put_into_submatrix(full, new_sub_matrix, row_mask, col_mask)
+    tensor([[1., 1., 1., 0.],
+            [1., 1., 1., 0.],
+            [0., 0., 0., 0.],
+            [0., 0., 0., 0.]])
+
+    This is not to be confused with:
+    >>> full[row_mask, col_mask] = new_sub_matrix
+    which errors as row_mask and col_mask are not broadcastable.
+    Or
+    >>> full[row_mask, :][:, col_mask] = new_sub_matrix
+    which doesn't change full at all, as the first full[row_mask, :] creates a copy of full instead
+    of an in-place view. Pytorch avoids this for single indexing in assignemtns but not for double
+    indexing in assignments!
+    """
+    row_idxs = torch.as_tensor(row_idxs, dtype=torch.long)
+    col_idxs = torch.as_tensor(col_idxs, dtype=torch.long)
+    full[row_idxs.unsqueeze(1), col_idxs.unsqueeze(0)] = new_sub_matrix

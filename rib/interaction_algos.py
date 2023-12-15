@@ -310,7 +310,7 @@ def calculate_interaction_rotations(
             basis_formula=basis_formula,
         )
 
-        Yinv_U_Dsqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = Y_inv @ U @ D.sqrt()
+        Yinv_U_Dsqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = Y_inv.T @ U @ D.sqrt()
 
         # Converts M to fp64
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
@@ -335,6 +335,7 @@ def calculate_interaction_rotations(
             bias_pos_after_U: int = top_2_idxs[0].item()  # type: ignore[assignment]
             # We use this so we can make sure that our bias position stays isolated when
             # transforming by V.
+            # V = eigendecompose(M)[1]
             V = masked_eigendecompose(M, [bias_pos_after_U])[1]
         else:
             V = eigendecompose(M)[1]

@@ -463,6 +463,7 @@ def calc_edge_stochastic(
         device=f_in_hat.device,
     )
 
+    # Create phis that are -1 or 1 with equal probability
     phi_shape = (batch_size, stochastic_noise_dim, out_pos_size)
     phi = torch.where(
         torch.randn(phi_shape) < 0.0, -1 * torch.ones(phi_shape), torch.ones(phi_shape)

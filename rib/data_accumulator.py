@@ -14,6 +14,7 @@ from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
     M_dash_pre_forward_hook_fn,
     acts_forward_hook_fn,
+    acts_pre_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
@@ -412,12 +413,12 @@ def collect_M_dash(
 
     # Add input hooks
     module_names = module_names[:-1] if module_names[-1] == "output" else module_names
-    for module_name, hook_name in zip(module_names, hook_names):
+    for module_name in module_names:
         activation_hooks.append(
             Hook(
-                name=hook_name,
+                name=module_name,
                 data_key="activations",
-                fn=acts_forward_hook_fn,
+                fn=acts_pre_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={},
             )
@@ -436,9 +437,9 @@ def collect_M_dash(
     # generate M_dash hooks
     M_dash_hooks: dict[str, Hook] = {}
     next_hook_names = module_names[1:] + ["output"]
-    for module_name, hook_name, next_hook_name in zip(module_names, hook_names, next_hook_names):
+    for module_name, next_hook_name in zip(module_names, next_hook_names):
         M_dash_hooks[module_name] = Hook(
-            name=hook_name,
+            name=module_name,
             data_key=["M_dash", "integrated_gradients"],
             fn=M_dash_pre_forward_hook_fn,
             module_name=module_name,
@@ -454,7 +455,8 @@ def collect_M_dash(
 
     for batch in tqdm(data_loader, desc="Global interaction rotations"):
         batch_dataset = TensorDataset(*batch)
-        batch_loader = DataLoader(batch_dataset, batch_size=1, shuffle=False)
+        batch_loader = DataLoader(batch_dataset, batch_size=len(batch_dataset), shuffle=False)
+        assert len(batch_loader) == 1, "Batch loader must have a single batch."
 
         run_dataset_through_model(
             hooked_model=hooked_model,
@@ -469,30 +471,12 @@ def collect_M_dash(
         # # final layer gradients are the same as outputs
         # integrated_gradients[module_names[-1]] = hooked_model.hooked_data["output"]["activations"]
 
-        for module, next_module in zip(node_layers[-2::-1], node_layers[:0:-1]):
+        for module in module_names[::-1]:
             # get activations for layer
             assert (
                 hooked_model.hooked_data[module]["activations"] is not None
             ), f"Activations for {module} are None."
-            activations = hooked_model.hooked_data[module]["activations"]
-            # assert (
-            #     next_module in integrated_gradients
-            # ), f"Integrated gradients for {next_module} are None."
 
-            # next_gradients = integrated_gradients[next_module]
-
-            # interaction_hook = Hook(
-            #     name=module,
-            #     data_key="integrated_gradient",
-            #     fn=M_dash_pre_forward_hook_fn,
-            #     module_name=module_name,
-            #     fn_kwargs={
-            #         "next_hook_name": next_module,
-            #         "n_intervals": n_intervals,
-            #         "dataset_size": len(data_loader.dataset),  # type: ignore
-            #         "basis_formula": basis_formula,
-            #     },
-            # )
             interaction_hook = M_dash_hooks[module]
             run_dataset_through_model(
                 hooked_model=hooked_model,

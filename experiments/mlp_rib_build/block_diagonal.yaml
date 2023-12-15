@@ -8,21 +8,22 @@ node_layers:
   - output
 dataset:
   name: block_vector
-  size: 10000
-  length: 4
+  size: 1000
+  length: 10
   data_variances: [1, 1]
   data_perfect_correlation: false
   seed: 0
 modular_mlp_config:
   n_hidden_layers: 4
-  width: 4
+  width: 10
   weight_variances: [2, 2]
   weight_equal_columns: false
   bias: 0
+  activation_fn: relu
 seed: 0
 dtype: float64
 batch_size: 256
 n_intervals: 0
 truncation_threshold: 1e-15
-rotate_final_node_layer: false
-basis_formula: (1-0)*alpha
+rotate_final_node_layer: true
+basis_formula: g*f

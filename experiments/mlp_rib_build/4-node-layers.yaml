@@ -3,7 +3,7 @@ mlp_path: experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-
 batch_size: 256
 seed: 0
 truncation_threshold: 1e-6
-rotate_final_node_layer: false
+rotate_final_node_layer: true
 n_intervals: 0
 dtype: float32
 node_layers:

@@ -35,6 +35,11 @@ def main(
 
     # Input layer is much larger for mnist so include more nodes in it
     nodes_per_layer = [40, 10, 10, 10] if nodes_per_layer is None else nodes_per_layer
+    # nodes_per_layer = (
+    #     [max(e[1].shape) for e in results["edges"]] + [max(results["edges"][-1][1].shape)]
+    #     if nodes_per_layer is None
+    #     else nodes_per_layer
+    # )
 
     if not check_outfile_overwrite(out_file, force):
         return

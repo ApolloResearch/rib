@@ -470,7 +470,7 @@ def calculate_interaction_rotations_global(
     for node_layer, section_name in tqdm(
         zip(node_layers[-2::-1], section_names_to_calculate[::-1]),
         total=len(section_names_to_calculate),
-        desc="Interaction rotations",
+        desc="Interaction rotations and Lambda",
     ):
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
 

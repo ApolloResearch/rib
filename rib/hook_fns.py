@@ -464,6 +464,34 @@ def acts_forward_hook_fn(
     hooked_data[hook_name] = {data_key: detached_outputs}
 
 
+def acts_pre_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden"]],
+        tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    ],
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+) -> None:
+    """Hook function for storing the inputs activations.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one input.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+    in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+
+    # Store the output activations
+    hooked_data[hook_name] = {data_key: in_acts}
+
+
 def M_dash_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
@@ -480,7 +508,7 @@ def M_dash_pre_forward_hook_fn(
     basis_formula: Literal["g*f"] = "g*f",
     # next_gradients: Optional[Float[Tensor, "batch out_hidden_combined_trunc"]] = None,
 ) -> None:
-    """Hook function for calculating the integrated gradients associated with a layer.
+    """Hook function for calculating the M_dash associated with a layer.
 
     Args:
         module: Module that the hook is attached to.
@@ -511,11 +539,14 @@ def M_dash_pre_forward_hook_fn(
     # Remove the pre foward hook to avoid recursion when calculating the jacobian
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
-    next_gradients = (
-        hooked_data[next_hook_name][data_key[1]]
-        if data_key[1] in hooked_data[next_hook_name]
-        else hooked_data[next_hook_name]["activations"]
-    )
+
+    if data_key[1] in hooked_data[next_hook_name]:
+        assert next_hook_name != "output"
+        next_gradients = hooked_data[next_hook_name][data_key[1]]
+    else:
+        assert next_hook_name == "output"
+        next_gradients = hooked_data[next_hook_name]["activations"]
+
     in_grads = integrated_gradient_trapezoidal_norm(
         module=module,
         inputs=inputs,
@@ -537,7 +568,7 @@ def M_dash_pre_forward_hook_fn(
             in_grads.to(M_dtype) / normalization_factor,
             in_grads.to(M_dtype),
         )
-        M_dash = M_dash.to(in_dtype)
+        # M_dash = M_dash.to(in_dtype)
 
         _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
         hooked_data[hook_name][data_key[1]] = in_grads

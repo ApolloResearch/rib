@@ -100,7 +100,10 @@ def _fold_jacobian_pos_recursive(
     if isinstance(x, torch.Tensor):
         out = rearrange(
             x,
-            "batch out_pos out_hidden in_pos in_hidden -> batch (out_pos out_hidden) (in_pos in_hidden)",
+            (
+                "batch out_pos out_hidden in_pos in_hidden -> "
+                "batch (out_pos out_hidden) (in_pos in_hidden)"
+            ),
         )
         return out
     elif isinstance(x, tuple):
@@ -493,9 +496,10 @@ def integrated_gradient_trapezoidal_norm(
                 if C_out is not None
                 else (out_acts_const - out_acts_alpha)
             )
-            # Note that the below also sums over the batch dimension. Mathematically, this is equivalent
-            # to taking the gradient of each output element separately, but it lets us simply use
-            # backward() instead of more complex (and probably less efficient) vmap operations.
+            # Note that the below also sums over the batch dimension. Mathematically, this is
+            # equivalent to taking the gradient of each output element separately, but it lets us
+            # simply use backward() instead of more complex (and probably less efficient) vmap
+            # operations.
             # Note the minus sign here. In the paper this minus is in front of the integral, but
             # for generality we put it here.
             f_hat_norm = -(f_hat_1_alpha**2).sum()
@@ -511,7 +515,8 @@ def integrated_gradient_trapezoidal_norm(
             f_hat_norm = (out_acts_alpha * next_gradients).sum()
         else:
             raise ValueError(
-                f"Unexpected integrated gradient formula {basis_formula} != '(1-alpha)^2' or '(1-0)*alpha'"
+                f"Unexpected integrated gradient formula {basis_formula} != '(1-alpha)^2' or "
+                "'(1-0)*alpha'"
             )
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors

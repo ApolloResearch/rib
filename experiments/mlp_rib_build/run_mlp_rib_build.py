@@ -72,9 +72,9 @@ class Config(BaseModel):
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
-    centre: bool = Field(
+    center: bool = Field(
         False,
-        description="Whether to centre the activations before performing rib. Currently only"
+        description="Whether to center the activations before performing rib. Currently only"
         "supported for basis_formula='svd', which gives the 'pca' basis.",
     )
     dataset: Union[VisionDatasetConfig, BlockVectorDatasetConfig] = Field(
@@ -141,7 +141,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
 
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
     bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
-    if config.centre:
+    if config.center:
         logger.info("Collecting dataset means")
         means, bias_positions = collect_dataset_means(
             hooked_model=hooked_mlp,
@@ -175,7 +175,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         truncation_threshold=config.truncation_threshold,
         rotate_final_node_layer=config.rotate_final_node_layer,
         basis_formula=config.basis_formula,
-        centre=config.centre,
+        center=config.center,
         means=means,
         bias_positions=bias_positions,
     )

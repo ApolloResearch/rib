@@ -581,7 +581,7 @@ def test_svd_basis():
 
 def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
     """
-    Test that the 'pca' basis (aka svd with centre=true) works as expected.
+    Test that the 'pca' basis (aka svd with center=true) works as expected.
 
     In particular:
     1. We collect the rib activations
@@ -594,7 +594,7 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
     4. We assert the `bias_dir` does match what we expect
     5. We assert that all other rib directions have no bias component (in the original coordinates)
     6. We assert the rib activation of `bias_dir` is always 1
-    7. We assert the mean rib activation of all other directions is 0 (they are centred)
+    7. We assert the mean rib activation of all other directions is 0 (they are centered)
     """
     # 1 and 2: collect C_inv, rib acts, means, bias positions
     all_rib_acts = get_rib_acts_test(results, atol=1e-6)
@@ -637,26 +637,26 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
             rib_acts[..., bias_dir_idx], 1 / scale_factor, atol=atol, rtol=0, m_name=m_name
         )
 
-        # 7) all other rib acts are centred (mean zero)
+        # 7) all other rib acts are centered (mean zero)
         mean_rib_acts = einops.reduce(rib_acts, "... ribdir -> ribdir", "mean")
         assert_is_zeros(mean_rib_acts[non_bias_dir_mask], atol=atol, m_name=m_name)
 
 
 @pytest.mark.slow
 def test_pca_basis_mnist():
-    """Test that the 'pca' basis (aka svd with centre=true) works for MNIST."""
+    """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
     config = get_mnist_config(basis_formula="svd", edge_formula="functional", dtype_str="float64")
-    config = config.model_copy(update={"centre": True})
+    config = config.model_copy(update={"center": True})
     results = mlp_build_graph_main(config)
     pca_rib_acts_test(results, atol=1e-4)
 
 
 @pytest.mark.slow
 def test_pca_basis_pythia():
-    """Test that the 'pca' basis (aka svd with centre=true) works for pythia."""
+    """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
     dtype_str = "float64"
     config = get_pythia_config(dtype_str=dtype_str, basis_formula="svd")
-    config = config.model_copy(update={"centre": True, "rotate_final_node_layer": True})
+    config = config.model_copy(update={"center": True, "rotate_final_node_layer": True})
     results = lm_build_graph_main(config)
     pca_rib_acts_test(results, atol=1e-6)
 

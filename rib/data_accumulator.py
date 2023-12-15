@@ -158,9 +158,9 @@ def collect_gram_matrices(
     We use pre_forward hooks for the input to each module. If `collect_output_gram` is True, we
     also collect the gram matrix for the output of the final module using a forward hook.
 
-    Will collect correlation matrices (that is, gram matrices of centred activations) if `means` is
+    Will collect correlation matrices (that is, gram matrices of centered activations) if `means` is
     provided. In this case, `bias_positions` must also be provided. The bias positions will not be
-    centred.
+    centered.
 
     Args:
         hooked_model: The hooked model.
@@ -171,7 +171,7 @@ def collect_gram_matrices(
         collect_output_gram: Whether to collect the gram matrix for the output of the final module.
         hook_names: Used to store the gram matrices in the hooked model.
         means: A dictionary of mean activations for each module. The keys are the hook names. If
-            not none, will be used to centre the activations when computing the gram matrices.
+            not none, will be used to center the activations when computing the gram matrices.
         bias_positions: A dictionary of the positions of the bias terms in each module. Must be
             non-none if `means` is provided, with the same keys.
 

@@ -109,7 +109,7 @@ def calculate_interaction_rotations(
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-alpha)^2",
-    centre: bool = False,
+    center: bool = False,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
@@ -151,11 +151,11 @@ def calculate_interaction_rotations(
                 is the default, and generally the best option.
              - "neuron" performs no rotation.
              - "svd" only decomposes the gram matrix and uses that as the basis. It is a good
-                baseline. If `centre=true` this becomes the "pca" basis.
-        centre: Whether to centre the activations while computing the desired basis. Only supported
+                baseline. If `center=true` this becomes the "pca" basis.
+        center: Whether to center the activations while computing the desired basis. Only supported
             for the "svd" basis formula.
-        means: The means of the activations for each node layer. Only used if `centre=true`.
-        bias_positions: The positions of the biases for each node layer. Only used if `centre=true`.
+        means: The means of the activations for each node layer. Only used if `center=true`.
+        bias_positions: The positions of the biases for each node layer. Only used if `center=true`.
     Returns:
         - A list of objects containing the interaction rotation matrices and their pseudoinverses,
         ordered by node layer appearance in model.
@@ -170,7 +170,7 @@ def calculate_interaction_rotations(
         section_names
     ), "Must specify a hook name for each section (except the output section)."
 
-    if centre and basis_formula != "svd":
+    if center and basis_formula != "svd":
         raise NotImplementedError(
             "Centring is currently only implemented for the svd basis formula."
         )
@@ -186,7 +186,7 @@ def calculate_interaction_rotations(
     if rotate_final_node_layer:
         U_output = eigendecompose(gram_matrices[node_layers[-1]])[1].detach()
         assert U_output is not None
-        if centre:
+        if center:
             assert means is not None
             assert bias_positions is not None
             assert node_layers[-1] in means
@@ -278,7 +278,7 @@ def calculate_interaction_rotations(
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
 
         # currently only used for svd basis, but will be used more in text PR
-        if centre:
+        if center:
             assert means is not None
             assert bias_positions is not None
             # Y (or Gamma) is a matrix that shifts the activations to be mean zero
@@ -291,7 +291,7 @@ def calculate_interaction_rotations(
             Y_inv = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
 
         if basis_formula == "svd":
-            # We set C based on U (maybe centred as well)
+            # We set C based on U (maybe centered as well)
             Cs.append(
                 InteractionRotation(
                     node_layer_name=node_layer,

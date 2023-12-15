@@ -147,9 +147,9 @@ class Config(BaseModel):
         "functional",
         description="The attribution method to use to calculate the edges.",
     )
-    centre: bool = Field(
+    center: bool = Field(
         False,
-        description="Whether to centre the activations before performing rib. Currently only"
+        description="Whether to center the activations before performing rib. Currently only"
         "supported for basis_formula='svd', which gives the 'pca' basis.",
     )
 
@@ -322,7 +322,7 @@ def main(
 
         means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
         bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
-        if config.centre:
+        if config.center:
             logger.info("Collecting dataset means")
             means, bias_positions = collect_dataset_means(
                 hooked_model=hooked_model,
@@ -368,7 +368,7 @@ def main(
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
-            centre=config.centre,
+            center=config.center,
             means=means,
             bias_positions=bias_positions,
         )

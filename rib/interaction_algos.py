@@ -172,7 +172,7 @@ def calculate_interaction_rotations(
 
     if center and basis_formula != "svd":
         raise NotImplementedError(
-            "Centring is currently only implemented for the svd basis formula."
+            "centering is currently only implemented for the svd basis formula."
         )
 
     # We start appending Us and Cs from the output layer and work our way backwards
@@ -286,7 +286,7 @@ def calculate_interaction_rotations(
             Y = shift_matrix(-means[node_layer], bias_positions[node_layer])
             Y_inv = shift_matrix(means[node_layer], bias_positions[node_layer])
         else:
-            # if not centring, we set Y to be the identity matrix
+            # if not centering, we set Y to be the identity matrix
             Y = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
             Y_inv = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
 

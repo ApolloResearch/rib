@@ -107,7 +107,7 @@ def _get_bias_positions(
     potential_bias_positions = torch.cumsum(segment_lens, dim=0) - 1
     # Sometimes not all of our potential bias positons are guarenteed to be 1.
     # For instance, before Add one bias is 0. Before mlpact, one bias is act^{-1}(1).
-    # We need to find at least a single bias position that is 1 for centring to work properly.
+    # We need to find at least a single bias position that is 1 for centering to work properly.
     # We thus filter potential bias positons for ones where the activation is 1.
     in_acts_at_bias = cat_in_acts[..., potential_bias_positions].mean(
         dim=(0 if cat_in_acts.ndim == 2 else (0, 1))

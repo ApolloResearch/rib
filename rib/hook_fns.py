@@ -196,9 +196,9 @@ def gram_forward_hook_fn(
     dataset_size: int,
     shift: Optional[Float[Tensor, "d_hidden"]] = None,
 ) -> None:
-    """Hook function for calculating the mean of the input activations.
+    """Hook function for calculating and updating the gram matrix.
 
-    Adds activations/dataset_size into hooked_data[hook_name][data_key].
+    The tuple of outputs is concatenated over the hidden dimension.
 
     Args:
         module: Module that the hook is attached to (not used).

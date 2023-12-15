@@ -27,7 +27,10 @@ as well as the output of the final node layer. For example, if `node_layers` is 
     output of "mlp_in.0".
 - (If logits_node_layer is True:) One on the output of the model, i.e. the logits.
 
-This file also support parallelization to compute edge values across multiple processes using mpi. To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data and output it as a single file.
+This file also support parallelization to compute edge values across multiple processes using mpi.
+To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will
+distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data
+and output it as a single file.
 """
 import json
 import time
@@ -37,7 +40,7 @@ from typing import Literal, Optional, Union
 
 import fire
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -137,19 +140,19 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = Field(
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
-        "use Us as Cs, giving the eigendecomposition of the gram matrix.",
+        "use Us as Cs, giving the eigendecomposition of the gram matrix. If 'neuron', will use "
+        "the neuron-basis.",
     )
     edge_formula: Literal["functional", "squared"] = Field(
         "functional",
         description="The attribution method to use to calculate the edges.",
     )
-    centre: bool = Field(
+    center: bool = Field(
         False,
-        description="Whether to centre the activations before performing rib. Currently only"
-        "supported for basis_formula='svd', which gives the 'pca' basis.",
+        description="Whether to center the activations before performing rib.",
     )
 
     @model_validator(mode="after")
@@ -319,7 +322,9 @@ def main(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
 
-        if config.centre:
+        means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
+        bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
+        if config.center:
             logger.info("Collecting dataset means")
             means, bias_positions = collect_dataset_means(
                 hooked_model=hooked_model,
@@ -328,12 +333,8 @@ def main(
                 dtype=dtype,
                 device=device,
                 collect_output_dataset_means=collect_output_gram,
-                hook_names=[
-                    layer_name for layer_name in config.node_layers if layer_name != "output"
-                ],
+                hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             )
-        else:
-            means, bias_positions = None, None
 
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
@@ -345,7 +346,7 @@ def main(
             dtype=dtype,
             device=device,
             collect_output_gram=collect_output_gram,
-            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
+            hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             means=means,
             bias_positions=bias_positions,
         )
@@ -369,7 +370,7 @@ def main(
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
-            centre=config.centre,
+            center=config.center,
             means=means,
             bias_positions=bias_positions,
         )

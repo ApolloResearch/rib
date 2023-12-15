@@ -603,32 +603,24 @@ def calc_gram_matrix(
 def shift_matrix(
     shift: Float[torch.Tensor, "n"], bias_positions: Int[torch.Tensor, "sections"]
 ) -> Float[torch.Tensor, "n n"]:
+    """
+    Returns a matrix S such that `x @ S = shifted_x`, for x with `x[bias_positions] = 1`.
+    `shifted_x` is `x + shift` at all non bias positions, and still 1 at all bias positions. The value of `shift` at bias positions is ignored.
+
+    Example:
+        >>> shift = torch.tensor([2., 2., 4., 4.])
+        >>> bias_positions = torch.tensor([1, 3])
+        >>> shift_matrix(shift, bias_positions)
+        tensor([[1., 0., 0., 0.],
+                [1., 1., 2., 0.],
+                [0., 0., 1., 0.],
+                [1., 0., 2., 1.]])
+    """
     assert shift.ndim == 1, "shift must be 1d"
     n = shift.shape[0]
     S = torch.eye(n, dtype=shift.dtype, device=shift.device)
     assert (n - 1) in bias_positions
-    is_not_bias_mask = ~torch.isin(torch.arange(n), bias_positions)
-    S[-1][is_not_bias_mask] = shift[is_not_bias_mask]
+    shift = shift / len(bias_positions)  # we'll spread the shift out across bias pos
+    shift[bias_positions] = 0  # we don't shift at bias positions
+    S[bias_positions, :] += shift[None, :]
     return S
-
-
-def vector_subspace_similarity(
-    x: Float[Tensor, "*batch emb"], subspace: Float[Tensor, "basis emb"], eps=0
-) -> Float[Tensor, "*batch"]:
-    """Calculate the similarity of a vector (or batch of vectors) to a subspace.
-    This is a generalization of the cosine similarity, and for every vector x is equal to
-    `norm(proj(x)) / norm(x)` where `proj(x)` is the projection of x onto the subspace.
-
-    Args:
-        x: A vector to normalize.
-        subspace: An orthonormal basis of the subspace.
-        eps: Added to the norm of x, useful if we may have very small vectors.
-
-    Returns:
-        The similarities for each vector in x.
-    """
-    assert x.shape[-1] == subspace.shape[-1], "x and subspace must have the same last dimension."
-    proj = torch.einsum("...i,bi->...b", x, subspace)
-    x_norm: Float[Tensor, "*batch"] = x.norm(dim=-1)
-    proj_norm: Float[Tensor, "*batch"] = proj.norm(dim=-1)
-    return proj_norm / (x_norm + eps)

@@ -62,12 +62,35 @@ def collect_dataset_means(
     collect_output_dataset_means: bool = True,
     hook_names: Optional[list[str]] = None,
 ) -> tuple[dict[str, Float[Tensor, "d_hidden"]], dict[str, Int[Tensor, "segments"]]]:
-    """ """
+    """Collect the mean input activation for each module on the dataset.
+
+    Also returns the positions of the bias terms in each input activation. The mean should be
+    one at these positions.
+
+    Can also collect the mean output of the model if `collect_output_dataset_means` is True.
+
+    Args:
+        hooked_model: The hooked model.
+        module_names: The names of the modules to collect gram matrices for. Often section ids.
+        data_loader: The pytorch data loader.
+        device: The device to run the model on.
+        dtype: The data type to use for model computations.
+        collect_output_dataset_means: Whether to collect the mean output of the final module.
+        hook_names: Used to store the gram matrices in the hooked model. Often module ids.
+
+    Returns:
+        A tuple of:
+            - Dataset means, a dictionary from hook_names to mean tensors of shape (d_hidden,)
+            - Bias positions, a dictionary from hook_names to tensor of bias position indices
+    """
     assert len(module_names) > 0, "No modules specified."
     if hook_names is not None:
         assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
     else:
         hook_names = module_names
+
+    if not hooked_model.model.has_folded_bias:
+        logger.warning("model does not have folded bias, ")
 
     dataset_size = len(data_loader.dataset)  # type: ignore
     dataset_mean_hooks: list[Hook] = []
@@ -135,6 +158,10 @@ def collect_gram_matrices(
     We use pre_forward hooks for the input to each module. If `collect_output_gram` is True, we
     also collect the gram matrix for the output of the final module using a forward hook.
 
+    Will collect correlation matrices (that is, gram matrices of centered activations) if `means` is
+    provided. In this case, `bias_positions` must also be provided. The bias positions will not be
+    centered.
+
     Args:
         hooked_model: The hooked model.
         module_names: The names of the modules to collect gram matrices for.
@@ -143,6 +170,10 @@ def collect_gram_matrices(
         dtype: The data type to use for model computations.
         collect_output_gram: Whether to collect the gram matrix for the output of the final module.
         hook_names: Used to store the gram matrices in the hooked model.
+        means: A dictionary of mean activations for each module. The keys are the hook names. If
+            not none, will be used to center the activations when computing the gram matrices.
+        bias_positions: A dictionary of the positions of the bias terms in each module. Must be
+            non-none if `means` is provided, with the same keys.
 
     Returns:
         A dictionary of gram matrices, where the keys are the hook names (a.k.a. node layer names)
@@ -157,12 +188,11 @@ def collect_gram_matrices(
     gram_hooks: list[Hook] = []
     # Add input hooks
     for module_name, hook_name in zip(module_names, hook_names):
+        shift: Optional[Float[Tensor, "d_hidden"]] = None
         if means is not None and hook_name in means:
             assert bias_positions is not None
-            shift = means[hook_name]
+            shift = -means[hook_name]
             shift[bias_positions[hook_name]] = 0.0
-        else:
-            shift = None
         gram_hooks.append(
             Hook(
                 name=hook_name,
@@ -183,7 +213,7 @@ def collect_gram_matrices(
                 fn_kwargs={
                     "dataset_size": dataset_size,
                     # we don't need to care about bias positions in the output
-                    "shift": means[hook_name] if means is not None else None,
+                    "shift": -means["output"] if means is not None else None,
                 },
             )
         )

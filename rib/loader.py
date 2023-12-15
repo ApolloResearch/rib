@@ -12,6 +12,8 @@ from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
 
 from rib.data import (
+    BlockVectorDataset,
+    BlockVectorDatasetConfig,
     DatasetConfig,
     HFDatasetConfig,
     ModularArithmeticDataset,
@@ -20,6 +22,7 @@ from rib.data import (
 )
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.mlp import MLP, MLPConfig
+from rib.models.modular_mlp import ModularMLP, ModularMLPConfig
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.types import RibBuildResults
 from rib.utils import REPO_ROOT, get_data_subset, to_root_path, train_test_split
@@ -112,10 +115,22 @@ def load_sequential_transformer(
     return seq_model.to(device), tlens_cfg_dict
 
 
-def load_mlp(config: MLPConfig, mlp_path: Path, device: str, fold_bias: bool = True) -> MLP:
-    mlp = MLP(config)
-    mlp_path = to_root_path(mlp_path)  # if relative, fixes root to be ROOT_DIR
-    mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
+def load_mlp(
+    config: Union[MLPConfig, ModularMLPConfig],
+    mlp_path: Optional[Path],
+    device: str,
+    fold_bias: bool = True,
+    seed: Optional[int] = None,
+) -> Union[MLP, ModularMLP]:
+    mlp: Union[MLP, ModularMLP]
+    if isinstance(config, ModularMLPConfig):
+        mlp = ModularMLP(config, seed=seed)
+        mlp.to(device)
+    else:
+        assert isinstance(config, MLPConfig)
+        assert mlp_path is not None, "mlp_path must be provided for MLPConfig"
+        mlp = MLP(config)
+        mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
     if fold_bias:
         mlp.fold_bias()
     return mlp
@@ -294,7 +309,7 @@ def create_hf_dataset(
 def create_vision_dataset(
     dataset_config: VisionDatasetConfig,
     return_set: Literal["train", "test", "all"],
-):
+) -> Dataset:
     dataset_fn = getattr(torchvision.datasets, dataset_config.name)
     assert return_set != "all", "Cannot return 'all' for vision datasets."
     raw_dataset = dataset_fn(
@@ -303,6 +318,20 @@ def create_vision_dataset(
         download=True,
         transform=torchvision.transforms.ToTensor(),
     )
+
+    dataset = get_data_subset(
+        raw_dataset,
+        frac=dataset_config.return_set_frac,
+        n_samples=dataset_config.return_set_n_samples,
+        seed=dataset_config.seed,
+    )
+    return dataset
+
+
+def create_block_vector_dataset(
+    dataset_config: BlockVectorDatasetConfig,
+) -> Dataset:
+    raw_dataset = BlockVectorDataset(dataset_config=dataset_config)
 
     dataset = get_data_subset(
         raw_dataset,
@@ -343,9 +372,11 @@ def load_dataset(
         return create_hf_dataset(
             dataset_config=dataset_config, return_set=return_set, model_n_ctx=model_n_ctx
         )
-    else:
-        assert isinstance(dataset_config, VisionDatasetConfig)
+    elif isinstance(dataset_config, VisionDatasetConfig):
         return create_vision_dataset(dataset_config=dataset_config, return_set=return_set)
+    else:
+        assert isinstance(dataset_config, BlockVectorDatasetConfig)
+        return create_block_vector_dataset(dataset_config=dataset_config)
 
 
 def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Dataset:
@@ -410,7 +441,7 @@ def load_model_and_dataset_from_rib_results(
         model_n_ctx = model.cfg.n_ctx
 
     else:  # mlp
-        mlp_config = MLPConfig(**results["model_config_dict"]["model"])
+        mlp_config = MLPConfig(**results["model_config_dict"])
         model = load_mlp(
             config=mlp_config,
             mlp_path=Path(results["config"]["mlp_path"]),

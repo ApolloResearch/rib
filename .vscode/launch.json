@@ -95,6 +95,15 @@
             "justMyCode": true
         },
         {
+            "name": "modular mlp rib build",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/mlp_rib_build/run_mlp_rib_build.py",
+            "args": "${workspaceFolder}/experiments/mlp_rib_build/block_diagonal.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "train modadd",
             "type": "python",
             "request": "launch",

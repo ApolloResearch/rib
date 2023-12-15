@@ -13,7 +13,7 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 from typing import Any, Callable, Literal, Optional, Union
 
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from torch import Tensor
 
 from rib.linalg import (
@@ -22,6 +22,8 @@ from rib.linalg import (
     calc_gram_matrix,
     integrated_gradient_trapezoidal_norm,
 )
+from rib.models.sequential_transformer.components import AttentionOut
+from rib.models.sequential_transformer.transformer import MultiSequential
 
 
 def _add_to_hooked_matrix(
@@ -83,6 +85,38 @@ def _to_tuple(x: OutputActType) -> InputActType:
     return x if isinstance(x, tuple) else (x,)
 
 
+def _get_bias_positions(
+    module: torch.nn.Module, inputs: tuple[Tensor, ...]
+) -> Int[Tensor, "segments"]:
+    """
+    This function finds the bias positions within a particular module's input.
+
+    The code is super ugly, will be rendered obsolete by by fixing issue #231.
+    """
+    if isinstance(module, MultiSequential):
+        next_module = list(module._modules.values())[0]
+    else:
+        next_module = module
+    if isinstance(next_module, AttentionOut):
+        raise NotImplementedError("there are many bias positions, could impliment if needed")
+
+    cat_in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+
+    # if the inputs are of length [128, 128] bias positons might be 127 and/or 255
+    segment_lens = torch.tensor([x.shape[-1] for x in inputs], device=cat_in_acts.device)
+    potential_bias_positions = torch.cumsum(segment_lens, dim=0) - 1
+    # Sometimes not all of our potential bias positons are guarenteed to be 1.
+    # For instance, before Add one bias is 0. Before mlpact, one bias is act^{-1}(1).
+    # We need to find at least a single bias position that is 1 for centering to work properly.
+    # We thus filter potential bias positons for ones where the activation is 1.
+    in_acts_at_bias = cat_in_acts[..., potential_bias_positions].mean(
+        dim=(0 if cat_in_acts.ndim == 2 else (0, 1))
+    )
+    mean_acts_at_bias_pos_is_1 = (in_acts_at_bias - 1).abs() < 1e-3
+    bias_positions = potential_bias_positions[mean_acts_at_bias_pos_is_1]
+    return bias_positions
+
+
 def dataset_mean_forward_hook_fn(
     module: torch.nn.Module,
     inputs: InputActType,
@@ -92,15 +126,33 @@ def dataset_mean_forward_hook_fn(
     data_key: Union[str, list[str]],
     dataset_size: int,
 ) -> None:
-    """Wraps dataset_mean_pre_forward_hook_fn but for the output of module instead of the inputs."""
-    dataset_mean_pre_forward_hook_fn(
-        module=module,
-        inputs=_to_tuple(output),
-        hooked_data=hooked_data,
-        hook_name=hook_name,
-        data_key=data_key,
-        dataset_size=dataset_size,
-    )
+    """Calculates the mean of the output activations and adds it to hooked_data.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module (not used).
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
+    """
+
+    assert isinstance(data_key, str), "data_key must be a string."
+    out_acts = torch.cat([x.detach().clone() for x in _to_tuple(output)], dim=-1)
+    out_acts_mean_contrib = out_acts.sum(dim=0) / dataset_size  # sum over batch
+    if out_acts_mean_contrib.ndim == 2:
+        out_acts_mean_contrib = out_acts_mean_contrib.mean(dim=0)  # mean over seqpos
+    assert out_acts_mean_contrib.ndim == 1, f"mean must be 1D, shape={out_acts_mean_contrib.shape}"
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, out_acts_mean_contrib)
+    if "bias_positions" not in hooked_data[hook_name]:
+        # bias positions is for the bias positions at the input, while this hook operates on the
+        # output. It's also generally only called for the output of the model where there is no
+        # bias position.
+        hooked_data[hook_name]["bias_positions"] = torch.tensor(
+            [], device=out_acts.device, dtype=torch.long
+        )
 
 
 def dataset_mean_pre_forward_hook_fn(
@@ -131,9 +183,7 @@ def dataset_mean_pre_forward_hook_fn(
     assert in_acts_mean_contrib.ndim == 1, f"mean must be 1D, shape={in_acts_mean_contrib.shape}"
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts_mean_contrib)
     if "bias_positions" not in hooked_data[hook_name]:
-        segment_lens = torch.tensor([x.shape[-1] for x in inputs])
-        # if the inputs are of length [128, 128] we want bias positions [127, 255]
-        hooked_data[hook_name]["bias_positions"] = torch.cumsum(segment_lens, dim=0) - 1
+        hooked_data[hook_name]["bias_positions"] = _get_bias_positions(module=module, inputs=inputs)
 
 
 def gram_forward_hook_fn(
@@ -146,20 +196,27 @@ def gram_forward_hook_fn(
     dataset_size: int,
     shift: Optional[Float[Tensor, "d_hidden"]] = None,
 ) -> None:
-    """Hook function for calculating and updating the gram matrix on the output of the module.
+    """Hook function for calculating the mean of the input activations.
 
-    Wraps gram_pre_forward_hook_fn but for the output of module instead of the inputs. Useful for
-    calculating the gram matrix of the output of the model.
+    Adds activations/dataset_size into hooked_data[hook_name][data_key].
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Tuple of inputs to the module.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
+        shift: added to the activations before gram matrix calculation. Used to center the data.
     """
-    gram_pre_forward_hook_fn(
-        module=module,
-        inputs=_to_tuple(output),
-        hooked_data=hooked_data,
-        hook_name=hook_name,
-        data_key=data_key,
-        dataset_size=dataset_size,
-        shift=shift,
-    )
+    assert isinstance(data_key, str), "data_key must be a string."
+    # Concat over the hidden dimension
+    out_acts = torch.cat([x.detach().clone() for x in _to_tuple(output)], dim=-1)
+    if shift is not None:
+        out_acts += shift
+
+    gram_matrix = calc_gram_matrix(out_acts, dataset_size=dataset_size)
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
 def gram_pre_forward_hook_fn(
@@ -183,13 +240,13 @@ def gram_pre_forward_hook_fn(
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
         dataset_size: Size of the dataset. Used to normalize the gram matrix.
-        shift: applied to the activations before gram matrix calculation. Used to center the data.
+        shift: added to the activations before gram matrix calculation. Used to center the data.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
     if shift is not None:
-        in_acts -= shift
+        in_acts += shift
 
     gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)

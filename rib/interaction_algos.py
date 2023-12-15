@@ -181,10 +181,10 @@ def calculate_interaction_rotations(
 
     # The C matrix for the final layer is either the eigenvectors U if rotate_final_node_layer is
     # True, and None otherwise
-    U_output: Optional[Float[Tensor, "d_hidden d_hidden"]]
-    C_output: Optional[Float[Tensor, "d_hidden d_hidden"]]
+    U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
+    C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
     if rotate_final_node_layer:
-        U_output = eigendecompose(gram_matrices[node_layers[-1]])[1].detach().cpu()
+        U_output = eigendecompose(gram_matrices[node_layers[-1]])[1].detach()
         assert U_output is not None
         if centre:
             assert means is not None
@@ -194,9 +194,7 @@ def calculate_interaction_rotations(
             C_output = (Y @ U_output).detach().cpu()
         else:
             C_output = U_output.detach().cpu()
-    else:
-        U_output = None
-        C_output = None
+        U_output = U_output.cpu()
 
     if node_layers[-1] not in gram_matrices:
         # Technically we don't actually need the final node layer to be in gram_matrices if we're

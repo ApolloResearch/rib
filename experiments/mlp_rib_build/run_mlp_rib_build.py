@@ -21,7 +21,9 @@ from typing import Literal, Optional, Union
 import fire
 import torch
 import yaml
+from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.data import BlockVectorDatasetConfig, VisionDatasetConfig
@@ -137,6 +139,8 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
+    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
+    bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
     if config.centre:
         logger.info("Collecting dataset means")
         means, bias_positions = collect_dataset_means(
@@ -147,8 +151,6 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
             device=device,
             collect_output_dataset_means=collect_output_gram,
         )
-    else:
-        means, bias_positions = None, None
 
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,

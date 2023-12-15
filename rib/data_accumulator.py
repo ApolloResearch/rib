@@ -188,12 +188,11 @@ def collect_gram_matrices(
     gram_hooks: list[Hook] = []
     # Add input hooks
     for module_name, hook_name in zip(module_names, hook_names):
+        shift: Optional[Float[Tensor, "d_hidden"]] = None
         if means is not None and hook_name in means:
             assert bias_positions is not None
-            shift = means[hook_name]
+            shift = -means[hook_name]
             shift[bias_positions[hook_name]] = 0.0
-        else:
-            shift = None
         gram_hooks.append(
             Hook(
                 name=hook_name,
@@ -214,7 +213,7 @@ def collect_gram_matrices(
                 fn_kwargs={
                     "dataset_size": dataset_size,
                     # we don't need to care about bias positions in the output
-                    "shift": means["output"] if means is not None else None,
+                    "shift": -means["output"] if means is not None else None,
                 },
             )
         )

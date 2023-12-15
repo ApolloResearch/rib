@@ -526,7 +526,6 @@ def calc_gram_matrix(
         Float[Tensor, "batch d_hidden"],
     ],
     dataset_size: int,
-    Gammas: Optional[Float[Tensor, "d_hidden d_hidden"]] = None,
 ) -> Float[Tensor, "d_hidden d_hidden"]:
     """Calculate the gram matrix for a given tensor.
 
@@ -557,6 +556,19 @@ def calc_gram_matrix(
 def shift_matrix(
     shift: Float[torch.Tensor, "n"], bias_positions: Int[torch.Tensor, "sections"]
 ) -> Float[torch.Tensor, "n n"]:
+    """
+    Returns a matrix S such that `x @ S = shifted_x`, for x with `x[bias_positions] = 1`.
+    `shifted_x` is `x + shift` at all non bias positions, and still 1 at all bias positions. The value of `shift` at bias positions is ignored.
+
+    Example:
+        >>> shift = torch.tensor([2., 2., 4., 4.])
+        >>> bias_positions = torch.tensor([1, 3])
+        >>> shift_matrix(shift, bias_positions)
+        tensor([[1., 0., 0., 0.],
+                [1., 1., 2., 0.],
+                [0., 0., 1., 0.],
+                [1., 0., 2., 1.]])
+    """
     assert shift.ndim == 1, "shift must be 1d"
     n = shift.shape[0]
     S = torch.eye(n, dtype=shift.dtype, device=shift.device)

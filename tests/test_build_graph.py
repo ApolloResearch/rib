@@ -600,16 +600,18 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
     all_rib_acts = get_rib_acts_test(results, atol=1e-6)
     all_mean_acts, all_bias_pos = get_means_test(results, atol=atol)
     C_infos = parse_c_infos(results["interaction_rotations"])
-    m_names = [
-        m_name for m_name in results["config"]["node_layers"] if m_name not in ["output", "unembed"]
-    ]
+    # output and pre-unembed have no bias
+    m_names = [m_name for m_name in results["config"]["node_layers"] if m_name not in ["output"]]
     for m_name in m_names:
         C_inv = C_infos[m_name].C_pinv  # [rib_dir, emb_pos]
-        bias_positions = all_bias_pos[m_name]
+        if C_inv is None:  # this happens when rotate_final_layer is true
+            continue
+        bias_positions = all_bias_pos[m_name].cpu()
         mean_acts = all_mean_acts[m_name].cpu()  # [emb_pos]
         rib_acts = all_rib_acts[m_name]  # [batch, (seqpos?), rib_dir]
 
-        # find the bias direction
+        # find the bias direction. This should be the only dir with non-zero magnitude
+        # in the bias_positions directions
         bias_dir_idx = C_inv[:, bias_positions[0]].abs().argmax()
         # sometimes rib finds the opposite direction, which is OK
         bias_dir_sign = C_inv[bias_dir_idx, bias_positions[0]].sign()
@@ -654,7 +656,7 @@ def test_pca_basis_pythia():
     """Test that the 'pca' basis (aka svd with centre=true) works for pythia."""
     dtype_str = "float64"
     config = get_pythia_config(dtype_str=dtype_str, basis_formula="svd")
-    config = config.model_copy(update={"centre": True})
+    config = config.model_copy(update={"centre": True, "rotate_final_node_layer": True})
     results = lm_build_graph_main(config)
     pca_rib_acts_test(results, atol=1e-6)
 

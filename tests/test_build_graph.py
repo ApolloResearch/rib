@@ -32,6 +32,7 @@ from rib.hook_fns import acts_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import build_sorted_lambda_matrices
 from rib.loader import load_model_and_dataset_from_rib_results
+from rib.log import logger
 from rib.models.modular_mlp import ModularMLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults
 from tests.utils import assert_is_close, assert_is_ones, assert_is_zeros
@@ -437,7 +438,7 @@ def rotate_final_layer_invariance(
     comparison_layers = config_rotated.node_layers[:-2]
     for i, module_name in enumerate(comparison_layers):
         # E_hats[i] is a tuple (name, tensor)
-        print("Comparing", module_name)
+        logger.info(("Comparing", module_name))
         rot = edges_rotated[i][1]
         notrot = edges_not_rotated[i][1]
         # Check shape

@@ -17,8 +17,8 @@ import pytest
 import torch
 import yaml
 
-from experiments.lm_ablations.run_lm_ablations import Config as LMAblationConfig
-from experiments.lm_ablations.run_lm_ablations import main as lm_ablations_main
+from experiments.lm_ablations.run_ablations import Config as LMAblationConfig
+from experiments.lm_ablations.run_ablations import main as lm_ablations_main
 from experiments.mlp_ablations.run_mlp_ablations import Config as MNISTAblationConfig
 from experiments.mlp_ablations.run_mlp_ablations import main as mnist_ablations_main
 from rib.ablations import AblationAccuracies

@@ -5,6 +5,15 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "ablate rib mnist",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/ablations/run_ablations.py",
+            "args": "${workspaceFolder}/experiments/ablations/rib_mlp_mnist.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "lm rib ablate modadd",
             "type": "python",
             "request": "launch",

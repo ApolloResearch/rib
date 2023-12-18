@@ -455,4 +455,5 @@ def load_model_and_dataset_from_rib_results(
     dataset = load_dataset(
         data_config, return_set="train", model_n_ctx=model_n_ctx, tlens_model_path=tlens_model_path
     )
+    model.eval()
     return model, dataset

@@ -1,7 +1,7 @@
-"""Run an LM on a dataset while rotating to and from a (truncated) rib or orthogonal basis.
+"""Run a model on a dataset while rotating to and from a (truncated) rib or orthogonal basis.
 
 The process is as follows:
-    1. Load a SequentialTransformer model and dataset.
+    1. Load a model and dataset.
     2. For each number of ablated nodes `n`, create a rotation matrix that has the effect of
     rotating to and from the new basis with `n` fewer basis vectors.
     3. Run the test set through the model, applying the above rotations at each node layer, and
@@ -13,7 +13,7 @@ In this script, we don't create a node layer at the output of the final module, 
 this layer is not useful.
 
 Usage:
-    python run_lm_ablations.py <path/to/yaml_config_file>
+    python run_ablations.py <path/to/yaml_config_file>
 
 """
 import json
@@ -33,9 +33,17 @@ from rib.ablations import (
     load_basis_matrices,
     run_ablations,
 )
-from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
+from rib.data import (
+    HFDatasetConfig,
+    ModularArithmeticDatasetConfig,
+    VisionDatasetConfig,
+)
 from rib.hook_manager import HookedModel
-from rib.loader import load_dataset, load_sequential_transformer
+from rib.loader import (
+    load_dataset,
+    load_model_and_dataset_from_rib_results,
+    load_sequential_transformer,
+)
 from rib.log import logger
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
@@ -62,7 +70,7 @@ class Config(BaseModel):
         discriminator="schedule_type",
         description="The schedule to use for ablations.",
     )
-    dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig] = Field(
+    dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig, VisionDatasetConfig] = Field(
         ...,
         discriminator="dataset_type",
         description="The dataset to use to build the graph.",
@@ -107,36 +115,42 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         device=device,
     )
 
-    tlens_model_path = (
-        Path(interaction_graph_info["config"]["tlens_model_path"])
-        if interaction_graph_info["config"]["tlens_model_path"] is not None
-        else None
+    model, dataset = load_model_and_dataset_from_rib_results(
+        interaction_graph_info, device=device, dtype=dtype
     )
+    model.to(device=torch.device(device), dtype=dtype)
+    data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    hooked_model = HookedModel(model)
+    # tlens_model_path = (
+    #     Path(interaction_graph_info["config"]["tlens_model_path"])
+    #     if interaction_graph_info["config"]["tlens_model_path"] is not None
+    #     else None
+    # )
 
     # Note that we specify node_layers as config.ablation_node_layers, even though the original
     # graph was built with interaction_graph_info["config"]["node_layers"]. This is because
     # changing the sections in the model has no effect on the computation, and we would like the
     # sections to match ablation_node_layers so we can hook them easily.
-    seq_model, _ = load_sequential_transformer(
-        node_layers=config.ablation_node_layers,
-        last_pos_module_type=interaction_graph_info["config"]["last_pos_module_type"],
-        tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
-        tlens_model_path=tlens_model_path,
-        fold_bias=True,
-        dtype=dtype,
-        device=device,
-    )
+    # seq_model, _ = load_sequential_transformer(
+    #     node_layers=config.ablation_node_layers,
+    #     last_pos_module_type=interaction_graph_info["config"]["last_pos_module_type"],
+    #     tlens_pretrained=interaction_graph_info["config"]["tlens_pretrained"],
+    #     tlens_model_path=tlens_model_path,
+    #     fold_bias=True,
+    #     dtype=dtype,
+    #     device=device,
+    # )
 
-    seq_model.eval()
-    hooked_model = HookedModel(seq_model)
+    # seq_model.eval()
+    # hooked_model = HookedModel(seq_model)
 
-    dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set=config.dataset.return_set,
-        model_n_ctx=seq_model.cfg.n_ctx,
-        tlens_model_path=tlens_model_path,
-    )
-    data_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
+    # dataset = load_dataset(
+    #     dataset_config=config.dataset,
+    #     return_set=config.dataset.return_set,
+    #     model_n_ctx=seq_model.cfg.n_ctx,
+    #     tlens_model_path=tlens_model_path,
+    # )
+    # data_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
 
     # Test model accuracy/loss before graph building, ta be sure
     eval_fn: Callable = (

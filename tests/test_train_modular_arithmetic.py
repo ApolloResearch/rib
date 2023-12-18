@@ -20,8 +20,7 @@ model:
   act_fn: relu
   normalization_type: null
 dataset:
-  source: custom
-  name: modular_arithmetic
+  dataset_type: modular_arithmetic
   modulus: 113
   frac_train: .30
   fn_name: add

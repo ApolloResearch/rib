@@ -55,7 +55,7 @@ class DatasetConfig(BaseModel):
 class HFDatasetConfig(DatasetConfig):
     """Config for the HuggingFace datasets library."""
 
-    source: Literal["huggingface"] = "huggingface"
+    dataset_type: Literal["huggingface"] = "huggingface"
     name: str = Field(
         ..., description="The name of the dataset to load from the HuggingFace datasets library."
     )
@@ -84,8 +84,7 @@ class ModularArithmeticDatasetConfig(DatasetConfig):
     file (see `rib/loader.create_modular_arithmetic_dataset`)
     """
 
-    source: Literal["custom"] = "custom"
-    name: Literal["modular_arithmetic"] = "modular_arithmetic"
+    dataset_type: Literal["modular_arithmetic"] = "modular_arithmetic"
     return_set: Literal["train", "test", "all"] = Field(
         "train",
         description="The dataset to return. If 'all', returns the combined train and test datasets.",
@@ -130,6 +129,7 @@ class ModularArithmeticDataset(Dataset):
 
 
 class VisionDatasetConfig(DatasetConfig):
+    dataset_type: Literal["torchvision"] = "torchvision"
     name: Literal["CIFAR10", "MNIST"] = "MNIST"
     seed: Optional[int] = 0
     return_set_frac: Optional[float] = None  # Needed for some reason to avoid mypy errors
@@ -137,7 +137,7 @@ class VisionDatasetConfig(DatasetConfig):
 
 
 class BlockVectorDatasetConfig(DatasetConfig):
-    name: Literal["block_vector"] = "block_vector"
+    dataset_type: Literal["block_vector"] = "block_vector"
     size: int = Field(
         1000,
         description="Number of samples in the dataset.",

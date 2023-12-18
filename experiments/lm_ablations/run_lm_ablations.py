@@ -64,7 +64,7 @@ class Config(BaseModel):
     )
     dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig] = Field(
         ...,
-        discriminator="source",
+        discriminator="dataset_type",
         description="The dataset to use to build the graph.",
     )
     ablation_node_layers: list[str]

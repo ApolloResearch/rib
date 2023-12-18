@@ -1,8 +1,8 @@
 data:
+  dataset_type: torchvision
   name: MNIST
   return_set_frac: null
   seed: null
-  source: custom
 model:
   activation_fn: relu
   bias: true

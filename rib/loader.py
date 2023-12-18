@@ -434,7 +434,7 @@ def load_model_and_dataset_from_rib_results(
             dtype=dtype,
             device=device,
         )
-        if results["config"]["dataset"]["source"] == "huggingface":
+        if results["config"]["dataset"]["dataset_type"] == "huggingface":
             data_config = HFDatasetConfig(**results["config"]["dataset"])
         else:
             data_config = ModularArithmeticDatasetConfig(**results["config"]["dataset"])

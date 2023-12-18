@@ -3,7 +3,7 @@ seed: 0
 tlens_pretrained: tiny-stories-1M
 tlens_model_path: null
 dataset:
-  source: huggingface
+  dataset_type: huggingface
   name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if part of training
   tokenizer_name: EleutherAI/gpt-neo-125M
   return_set: train

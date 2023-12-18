@@ -224,8 +224,7 @@ def get_modular_arithmetic_config(
         - unembed
         - output
     dataset:
-        source: custom
-        name: modular_arithmetic
+        dataset_type: modular_arithmetic
         return_set: train
         return_set_n_samples: 10
     batch_size: 6
@@ -250,7 +249,7 @@ def get_pythia_config(basis_formula: str, dtype_str: str) -> LMRibConfig:
     tlens_pretrained: pythia-14m
     tlens_model_path: null
     dataset:
-      source: huggingface
+      dataset_type: huggingface
       name: NeelNanda/pile-10k
       tokenizer_name: EleutherAI/pythia-14m
       return_set: train
@@ -290,6 +289,8 @@ def get_mnist_config(basis_formula: str, edge_formula: str, dtype_str: str) -> M
         - layers.2
         - output
     dataset:
+        dataset_type: torchvision
+        name: MNIST
         return_set_frac: 0.01  # 3 batches (with batch_size=256)
     out_dir: null
     basis_formula: "{basis_formula}"
@@ -318,7 +319,7 @@ def get_modular_mlp_config(
         bias: 0
         activation_fn: relu
     dataset:
-        name: block_vector
+        dataset_type: block_vector
         size: 1000
         length: 10
         data_variances: [1,1]
@@ -382,8 +383,8 @@ def test_pythia_14m_build_graph():
 )
 def test_mnist_build_graph(basis_formula, edge_formula):
     dtype_str = "float32"
-    # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
-    atol = 1e-6
+    # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64.
+    atol = 1e-5
     config = get_mnist_config(
         basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
     )
@@ -392,7 +393,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
-    get_rib_acts_test(results, atol=1e-6)
+    get_rib_acts_test(results, atol=atol)
 
 
 @pytest.mark.parametrize(

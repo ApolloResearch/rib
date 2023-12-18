@@ -28,8 +28,7 @@ class TestDistributed:
             - unembed
             - output
         dataset:
-            source: custom
-            name: modular_arithmetic
+            dataset_type: modular_arithmetic
             return_set: train
             return_set_n_samples: 10
         batch_size: 6

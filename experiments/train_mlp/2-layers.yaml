@@ -16,3 +16,6 @@ train:
 wandb:
   project: mlp-mnist
   entity: null
+dataset:
+  dataset_type: torchvision
+  name: MNIST

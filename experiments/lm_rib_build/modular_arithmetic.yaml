@@ -4,8 +4,7 @@ tlens_pretrained: null
 tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
 interaction_matrices_path: null
 dataset:
-  source: custom
-  name: modular_arithmetic
+  dataset_type: modular_arithmetic
   return_set: train
 node_layers:
   - ln1.0

@@ -178,8 +178,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
         exp_base: 2.0
         specific_points: [30, 31]
     dataset:
-        source: custom
-        name: modular_arithmetic
+        dataset_type: modular_arithmetic
         return_set: test
     ablation_node_layers:
         - ln1.0

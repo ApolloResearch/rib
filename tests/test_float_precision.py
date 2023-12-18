@@ -29,7 +29,7 @@ class TestPythiaFloatingPointErrors:
             tlens_pretrained: pythia-14m
             tlens_model_path: null
             dataset:
-                source: huggingface
+                dataset_type: huggingface
                 name: NeelNanda/pile-10k
                 tokenizer_name: EleutherAI/pythia-14m
                 return_set: train  # pile-10k only has train, so we take the first 90% for building and last 10% for ablations
@@ -143,7 +143,7 @@ class TestPythiaFloatingPointErrors:
             n_points: 3
             specific_points: [128]
         dataset:
-            source: huggingface
+            dataset_type: huggingface
             name: NeelNanda/pile-10k
             tokenizer_name: EleutherAI/pythia-14m
             return_set: train  # pile-10k only has train, so we take the first 90% for building and last 10% for ablations

@@ -96,7 +96,7 @@ class Config(BaseModel):
     )
     dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig] = Field(
         ...,
-        discriminator="source",
+        discriminator="dataset_type",
         description="The dataset to use to build the graph.",
     )
     batch_size: int = Field(..., description="The batch size to use when building the graph.")
@@ -168,6 +168,9 @@ def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
     TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
     path management nice with this Config being defined in this file in the experiments dir.
     """
+    assert (
+        config.dataset.dataset_type == loaded_config.dataset.dataset_type
+    ), "Dataset types must match"
 
     # config.node_layers must be a subsequence of loaded_config.node_layers
     assert "|".join(config.node_layers) in "|".join(loaded_config.node_layers), (
@@ -186,9 +189,11 @@ def _verify_compatible_configs(config: Config, loaded_config: Config) -> None:
             f"{attr} in loaded matrices ({getattr(loaded_config, attr)})"
         )
 
-    # Verify that, for huggingface datasets, we're not trying to calculate edges on data that
+    # Verify that, for transfomers datasets, we're not trying to calculate edges on data that
     # wasn't used to calculate the Cs
-    assert config.dataset.name == loaded_config.dataset.name, "Dataset names must match"
+    if hasattr(config.dataset, "name"):
+        assert hasattr(loaded_config.dataset, "name"), "loaded_config doesn't have a dataset name"
+        assert config.dataset.name == loaded_config.dataset.name, "Dataset names must match"
     assert config.dataset.return_set == loaded_config.dataset.return_set, "Return sets must match"
     if isinstance(config.dataset, HFDatasetConfig):
         assert isinstance(loaded_config.dataset, HFDatasetConfig)

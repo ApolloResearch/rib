@@ -13,6 +13,6 @@ train:
   epochs: 12
   save_every_n_epochs: null
 wandb: null
-data:
+dataset:
+  dataset_type: torchvision
   name: CIFAR10
-  return_set: train

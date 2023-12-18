@@ -52,7 +52,7 @@ class Config(BaseModel):
     model: MLPConfig
     train: TrainConfig
     wandb: Optional[WandbConfig]
-    data: VisionDatasetConfig = VisionDatasetConfig()
+    dataset: VisionDatasetConfig = VisionDatasetConfig()
 
 
 @logging_redirect_tqdm()
@@ -158,7 +158,7 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
 
-    dataset = load_dataset(config.data, "train")
+    dataset = load_dataset(config.dataset, "train")
     train_loader = DataLoader(dataset, batch_size=config.train.batch_size, shuffle=True)
 
     #  Get the input size from the flattened first input
@@ -182,7 +182,7 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
     trained_model = train_model(config, model, train_loader, device, run_name)
 
     # Evaluate the model on the test set
-    test_dataset = load_dataset(config.data, "test")
+    test_dataset = load_dataset(config.dataset, "test")
     test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size, shuffle=True)
     accuracy = evaluate_model(trained_model, test_loader, device)
     logger.info(f"Accuracy of the network on the {len(test_dataset)} test images: %d %%", accuracy)  # type: ignore

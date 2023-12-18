@@ -1,10 +1,9 @@
 dataset:
+  dataset_type: modular_arithmetic
   fn_name: add
   frac_train: 0.3
   modulus: 113
-  name: modular_arithmetic
   seed: 0
-  source: custom
 model:
   act_fn: relu
   d_head: 32

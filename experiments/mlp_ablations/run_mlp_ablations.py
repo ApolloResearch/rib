@@ -98,7 +98,7 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         device=device,
     )
 
-    mlp_config = MLPConfig(**interaction_graph_info["model_config_dict"]["model"])
+    mlp_config = MLPConfig(**interaction_graph_info["model_config_dict"])
     mlp = load_mlp(
         config=mlp_config,
         mlp_path=interaction_graph_info["config"]["mlp_path"],

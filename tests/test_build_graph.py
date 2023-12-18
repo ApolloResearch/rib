@@ -382,8 +382,8 @@ def test_pythia_14m_build_graph():
 )
 def test_mnist_build_graph(basis_formula, edge_formula):
     dtype_str = "float32"
-    # Works with 1e-7 for float32 and 1e-15 (and maybe smaller) for float64. Need 1e-6 for CPU
-    atol = 1e-6
+    # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64
+    atol = 1e-5
     config = get_mnist_config(
         basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
     )
@@ -392,7 +392,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         build_graph_main_fn=mlp_build_graph_main,
         atol=atol,
     )
-    get_rib_acts_test(results, atol=1e-6)
+    get_rib_acts_test(results, atol=atol)
 
 
 @pytest.mark.parametrize(

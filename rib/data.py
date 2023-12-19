@@ -21,6 +21,11 @@ class DatasetConfig(BaseModel):
     """Base class for dataset configs."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+    return_set: Literal["train", "test", "all"] = Field(
+        "train",
+        description="The dataset split to return. If 'all', returns the combined train and test "
+        "datasets.",
+    )
     return_set_frac: Optional[float] = Field(
         None,
         description="The fraction of the returned dataset (train/test/all) to use. Cannot be"
@@ -85,10 +90,6 @@ class ModularArithmeticDatasetConfig(DatasetConfig):
     """
 
     dataset_type: Literal["modular_arithmetic"] = "modular_arithmetic"
-    return_set: Literal["train", "test", "all"] = Field(
-        "train",
-        description="The dataset to return. If 'all', returns the combined train and test datasets.",
-    )
     modulus: Optional[int] = Field(None, description="The modulus to use for the dataset.")
     fn_name: Optional[Literal["add", "subtract", "x2xyy2"]] = Field(
         None,

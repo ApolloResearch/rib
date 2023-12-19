@@ -50,74 +50,38 @@
             "justMyCode": true
         },
         {
-            "name": "lm build modadd",
+            "name": "build modadd",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/lm_rib_build/run_lm_rib_build.py",
-            "args": "${workspaceFolder}/experiments/lm_rib_build/modular_arithmetic.yaml",
+            "program": "${workspaceFolder}/experiments/rib_build/run_rib_build.py",
+            "args": "${workspaceFolder}/experiments/rib_build/modular_arithmetic.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },
         {
-            "name": "lm build Cs_pythia-14m",
+            "name": "build mnist",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/lm_rib_build/run_lm_rib_build.py",
-            "args": "${workspaceFolder}/experiments/lm_rib_build/Cs_pythia-14m.yaml",
+            "program": "${workspaceFolder}/experiments/rib_build/run_rib_build.py",
+            "args": "${workspaceFolder}/experiments/rib_build/mlp_mnist.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },
         {
-            "name": "lm build edges_pythia-14m",
+            "name": "build Cs_pythia-14m",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/lm_rib_build/run_lm_rib_build.py",
-            "args": "${workspaceFolder}/experiments/lm_rib_build/edges_pythia-14m.yaml",
+            "program": "${workspaceFolder}/experiments/rib_build/run_rib_build.py",
+            "args": "${workspaceFolder}/experiments/rib_build/Cs_pythia-14m.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },
         {
-            "name": "lm build gpt2",
+            "name": "build edges_pythia-14m",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/lm_rib_build/run_lm_rib_build.py",
-            "args": "${workspaceFolder}/experiments/lm_rib_build/gpt2.yaml",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "mnist rib ablate",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/experiments/mnist_ablations/run_mnist_ablations.py",
-            "args": "${workspaceFolder}/experiments/mnist_ablations/rib_3-node-layers.yaml",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "mnist orthog ablate",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/experiments/mnist_ablations/run_mnist_ablations.py",
-            "args": "${workspaceFolder}/experiments/mnist_ablations/orthog_3-node-layers.yaml",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "mnist rib build",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/experiments/mnist_rib_build/run_mnist_rib_build.py",
-            "args": "${workspaceFolder}/experiments/mnist_rib_build/4-node-layers.yaml",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "modular mlp rib build",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/experiments/mlp_rib_build/run_mlp_rib_build.py",
-            "args": "${workspaceFolder}/experiments/mlp_rib_build/block_diagonal.yaml",
+            "program": "${workspaceFolder}/experiments/rib_build/run_rib_build.py",
+            "args": "${workspaceFolder}/experiments/rib_build/edges_pythia-14m.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },
@@ -131,20 +95,11 @@
             "justMyCode": true
         },
         {
-            "name": "plot lm rib graph",
+            "name": "plot rib graph modadd",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/lm_rib_build/plot_lm_graph.py",
-            "args": "${workspaceFolder}/experiments/lm_rib_build/out/modular_arithmetic_interaction_graph.pt",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },
-        {
-            "name": "plot mnist rib graph",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/experiments/mnist_rib_build/plot_mnist_graph.py",
-            "args": "${workspaceFolder}/experiments/mnist_rib_build/out/3-node-layers_interaction_graph.pt",
+            "program": "${workspaceFolder}/experiments/rib_build/plot_graph.py",
+            "args": "${workspaceFolder}/experiments/rib_build/out/modular_arithmetic_rib_graph.pt",
             "console": "integratedTerminal",
             "justMyCode": true
         },

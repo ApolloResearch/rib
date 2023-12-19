@@ -107,22 +107,20 @@ def test_run_mnist_ablations(ablation_type):
     import torch
     from pathlib import Path
     from rib.utils import REPO_ROOT
-    rib_graph = torch.load("experiments/mlp_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
+    rib_graph = torch.load("experiments/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
     mlp_path = Path(rib_graph['config']['mlp_path'])
     rib_graph['config']['mlp_path'] = str(mlp_path.relative_to(REPO_ROOT))
-    torch.save(rib_graph, "experiments/mlp_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
+    torch.save(rib_graph, "experiments/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
     ```
     """
-    rib_graph = torch.load(
-        "experiments/mlp_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt"
-    )
+    rib_graph = torch.load("experiments/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
     model_path = Path(rib_graph["config"]["mlp_path"])
     assert not model_path.is_absolute(), "must be relative to run in ci, see docstring"
 
     config_str = f"""
     exp_name: "test_ablation_mnist"
     ablation_type: {ablation_type}
-    interaction_graph_path: experiments/mlp_rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
+    interaction_graph_path: experiments/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
     schedule:
         schedule_type: exponential
         early_stopping_threshold: 0.05
@@ -155,13 +153,13 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     we need this path to be local. If that isn't the case you can manually fix this with:
     ```
     import torch
-    rib_graph = torch.load("experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
+    rib_graph = torch.load("experiments/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
     rib_graph['config']['tlens_model_path'] = "experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt"
-    torch.save(rib_graph, "experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
+    torch.save(rib_graph, "experiments/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
     ```
     """
     rib_graph = torch.load(
-        "experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt"
+        "experiments/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt"
     )
     model_path = Path(rib_graph["config"]["tlens_model_path"])
     assert not model_path.is_absolute(), "must be relative to run in ci, see docstring"
@@ -169,7 +167,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     config_str = f"""
     exp_name: "test_ablation_mod_add"
     ablation_type: {ablation_type}
-    interaction_graph_path: experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
+    interaction_graph_path: experiments/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
     schedule:
         schedule_type: exponential
         early_stopping_threshold: 0.2

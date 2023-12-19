@@ -10,8 +10,8 @@ import yaml
 
 from experiments.ablations.run_ablations import Config as AblationConfig
 from experiments.ablations.run_ablations import main as ablation_main
-from experiments.lm_rib_build.run_lm_rib_build import Config as RibConfig
-from experiments.lm_rib_build.run_lm_rib_build import main as rib_main
+from experiments.rib_build.run_rib_build import Config as RibConfig
+from experiments.rib_build.run_rib_build import main as rib_main
 from rib.log import logger
 
 

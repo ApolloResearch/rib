@@ -6,10 +6,10 @@ import yaml
 from mpi4py import MPI
 from torch.utils.data import ConcatDataset, TensorDataset
 
-from experiments.lm_rib_build.combine_edges import main as combine_edges
-from experiments.lm_rib_build.distributed_edges import main as run_edges
-from experiments.lm_rib_build.run_lm_rib_build import Config
-from experiments.lm_rib_build.run_lm_rib_build import main as run_rib_build
+from experiments.rib_build.combine_edges import main as combine_edges
+from experiments.rib_build.distributed_edges import main as run_edges
+from experiments.rib_build.run_rib_build import Config
+from experiments.rib_build.run_rib_build import main as run_rib_build
 from rib.loader import get_dataset_chunk
 
 

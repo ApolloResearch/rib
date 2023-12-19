@@ -1,6 +1,6 @@
 exp_name: rib_modular_arithmetic
 ablation_type: rib
-interaction_graph_path: experiments/lm_rib_build/out/modular_arithmetic_rib_graph.pt
+interaction_graph_path: experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
 schedule:
   schedule_type: exponential
   early_stopping_threshold: null

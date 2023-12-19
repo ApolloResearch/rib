@@ -4,8 +4,8 @@
 # local machine, not from within the cluster. It now takes four arguments:
 #   1. The job spec file (e.g. specs/dan-a5000-job.yaml)
 #   2. Path to the environment activation script (e.g. /mnt/ssd-apollo/dan/RIB/rib-env/bin/activate)
-#   3. Path to script on the cluster (e.g. /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/distributed_edges.sh)
-#   4. The config file for the script (e.g. /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/pythia-14m.yaml)
+#   3. Path to script on the cluster (e.g. /mnt/ssd-apollo/dan/RIB/rib/experiments/rib_build/distributed_edges.sh)
+#   4. The config file for the script (e.g. /mnt/ssd-apollo/dan/RIB/rib/experiments/rib_build/pythia-14m.yaml)
 #   5. The number of jobs to deploy (e.g. 4)
 
 # Each job will be associated with a single pod. Depending on your job spec file and the script you
@@ -15,8 +15,8 @@
 #   ./deploy_distributed.sh \
 #       specs/dan-a5000-job.yaml \
 #       /mnt/ssd-apollo/dan/RIB/rib-env/bin/activate \
-#       /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/distributed_edges.sh \
-#       /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/pythia-14m.yaml \
+#       /mnt/ssd-apollo/dan/RIB/rib/experiments/rib_build/distributed_edges.sh \
+#       /mnt/ssd-apollo/dan/RIB/rib/experiments/rib_build/pythia-14m.yaml \
 #       4
 
 

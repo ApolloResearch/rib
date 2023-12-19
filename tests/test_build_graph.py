@@ -11,7 +11,7 @@ various scales. This is because combining atol and rtol does not work particular
 that have a small set of large numbers and a large set of small numbers.
 """
 
-from typing import Callable, Union
+from typing import Callable
 from unittest.mock import patch
 
 import einops
@@ -22,10 +22,8 @@ from fancy_einsum import einsum
 from torch.testing import assert_close
 from torch.utils.data import DataLoader
 
-from experiments.lm_rib_build.run_lm_rib_build import Config as LMRibConfig
-from experiments.lm_rib_build.run_lm_rib_build import main as lm_build_graph_main
-from experiments.mlp_rib_build.run_mlp_rib_build import Config as MlpRibConfig
-from experiments.mlp_rib_build.run_mlp_rib_build import main as mlp_build_graph_main
+from experiments.rib_build.run_rib_build import Config as RibConfig
+from experiments.rib_build.run_rib_build import main as build_graph_main
 from rib.analysis_utils import get_rib_acts, parse_c_infos
 from rib.data_accumulator import collect_dataset_means
 from rib.hook_fns import acts_forward_hook_fn
@@ -38,7 +36,7 @@ from rib.types import TORCH_DTYPES, RibBuildResults
 from tests.utils import assert_is_close, assert_is_ones, assert_is_zeros
 
 
-def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main_fn: Callable):
+def build_get_lambdas(config: RibConfig):
     """Build the graph but extracting the lambdas"""
     Lambda_abs: list[torch.Tensor] = []
 
@@ -51,7 +49,7 @@ def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main
         "rib.interaction_algos.build_sorted_lambda_matrices",
         side_effect=mock_build_sorted_lambda_matrices,
     ):
-        results = build_graph_main_fn(config)
+        results = build_graph_main(config)
 
     # Sort each row, and reverse the order of the Lambda_abs
     Lambdas = [torch.sort(lambda_row, descending=True).values for lambda_row in Lambda_abs[::-1]]
@@ -59,10 +57,8 @@ def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main
     return results, Lambdas
 
 
-def graph_build_test(
-    config: Union[LMRibConfig, MlpRibConfig], build_graph_main_fn: Callable, atol: float
-):
-    results, Lambdas = build_get_lambdas(config, build_graph_main_fn)
+def graph_build_test(config: RibConfig, atol: float):
+    results, Lambdas = build_get_lambdas(config)
 
     grams = results["gram_matrices"]
     Cs = results["interaction_rotations"]
@@ -212,7 +208,7 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
 
 def get_modular_arithmetic_config(
     basis_formula: str, edge_formula: str, dtype_str: str
-) -> LMRibConfig:
+) -> RibConfig:
     config_str = f"""
     exp_name: test
     seed: 0
@@ -239,10 +235,10 @@ def get_modular_arithmetic_config(
     edge_formula: "{edge_formula}"
     """
     config_dict = yaml.safe_load(config_str)
-    return LMRibConfig(**config_dict)
+    return RibConfig(**config_dict)
 
 
-def get_pythia_config(basis_formula: str, dtype_str: str) -> LMRibConfig:
+def get_pythia_config(basis_formula: str, dtype_str: str) -> RibConfig:
     config_str = f"""
     exp_name: test
     seed: 0
@@ -270,10 +266,10 @@ def get_pythia_config(basis_formula: str, dtype_str: str) -> LMRibConfig:
     basis_formula: {basis_formula}
     """
     config_dict = yaml.safe_load(config_str)
-    return LMRibConfig(**config_dict)
+    return RibConfig(**config_dict)
 
 
-def get_mnist_config(basis_formula: str, edge_formula: str, dtype_str: str) -> MlpRibConfig:
+def get_mnist_config(basis_formula: str, edge_formula: str, dtype_str: str) -> RibConfig:
     config_str = f"""
     exp_name: test
     mlp_path: "experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
@@ -297,7 +293,7 @@ def get_mnist_config(basis_formula: str, edge_formula: str, dtype_str: str) -> M
     edge_formula: "{edge_formula}"
     """
     config_dict = yaml.safe_load(config_str)
-    return MlpRibConfig(**config_dict)
+    return RibConfig(**config_dict)
 
 
 def get_modular_mlp_config(
@@ -334,7 +330,7 @@ def get_modular_mlp_config(
     edge_formula: {edge_formula}
     """
     config_dict = yaml.safe_load(config_str)
-    config = MlpRibConfig(**config_dict)
+    config = RibConfig(**config_dict)
     return config
 
 
@@ -354,7 +350,7 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     config = get_modular_arithmetic_config(
         basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
     )
-    results = graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
+    results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
 
 
@@ -363,11 +359,7 @@ def test_pythia_14m_build_graph():
     dtype_str = "float64"
     atol = 0  # Works with 1e-7 for float32 and 0 for float64
     config = get_pythia_config(dtype_str=dtype_str, basis_formula="(1-0)*alpha")
-    results = graph_build_test(
-        config=config,
-        build_graph_main_fn=lm_build_graph_main,
-        atol=atol,
-    )
+    results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=0)
 
 
@@ -388,11 +380,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
     config = get_mnist_config(
         basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
     )
-    results = graph_build_test(
-        config=config,
-        build_graph_main_fn=mlp_build_graph_main,
-        atol=atol,
-    )
+    results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=atol)
 
 
@@ -421,11 +409,11 @@ def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
     config = get_modular_mlp_config(
         basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
     )
-    graph_build_test(config=config, build_graph_main_fn=mlp_build_graph_main, atol=atol)
+    graph_build_test(config=config, atol=atol)
 
 
 def rotate_final_layer_invariance(
-    config_not_rotated: Union[LMRibConfig, MlpRibConfig],
+    config_not_rotated: RibConfig,
     build_graph_main_fn: Callable,
     rtol: float = 1e-7,
     atol: float = 0,
@@ -476,7 +464,7 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     )
     rotate_final_layer_invariance(
         config_not_rotated=not_rotated_config,
-        build_graph_main_fn=mlp_build_graph_main,
+        build_graph_main_fn=build_graph_main,
         rtol=rtol,
         atol=atol,
     )
@@ -502,7 +490,7 @@ def test_modular_mlp_rotate_final_layer_invariance(
     )
     rotate_final_layer_invariance(
         config_not_rotated=config,
-        build_graph_main_fn=mlp_build_graph_main,
+        build_graph_main_fn=build_graph_main,
         rtol=rtol,
         atol=atol,
     )
@@ -538,7 +526,7 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
     """
     rotate_final_layer_invariance(
         config_not_rotated=get_modular_arithmetic_config(basis_formula, edge_formula, dtype_str),
-        build_graph_main_fn=lm_build_graph_main,
+        build_graph_main_fn=build_graph_main,
         rtol=rtol,
         atol=atol,
     )
@@ -558,21 +546,24 @@ def test_mnist_build_graph_invalid_node_layers():
     node_layers:
         - layers.0
         - layers.2
+    dataset:
+        dataset_type: torchvision
+        name: MNIST
     out_dir: null
     """
 
     config_dict = yaml.safe_load(mock_config)
-    config = MlpRibConfig(**config_dict)
+    config = RibConfig(**config_dict)
 
     with pytest.raises(AssertionError):
-        graph_build_test(config=config, build_graph_main_fn=mlp_build_graph_main, atol=0)
+        graph_build_test(config=config, atol=0)
 
 
 @pytest.mark.slow
 def test_svd_basis():
     dtype_str = "float64"
     config = get_pythia_config(basis_formula="svd", dtype_str=dtype_str)
-    results = lm_build_graph_main(config)
+    results = build_graph_main(config)
     for c_info, u_info in zip(results["interaction_rotations"], results["eigenvectors"]):
         C = c_info["C"]
         U = u_info["U"]
@@ -649,7 +640,7 @@ def test_pca_basis_mnist():
     """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
     config = get_mnist_config(basis_formula="svd", edge_formula="functional", dtype_str="float64")
     config = config.model_copy(update={"center": True})
-    results = mlp_build_graph_main(config)
+    results = build_graph_main(config)
     pca_rib_acts_test(results, atol=1e-4)
 
 
@@ -659,7 +650,7 @@ def test_pca_basis_pythia():
     dtype_str = "float64"
     config = get_pythia_config(dtype_str=dtype_str, basis_formula="svd")
     config = config.model_copy(update={"center": True, "rotate_final_node_layer": True})
-    results = lm_build_graph_main(config)
+    results = build_graph_main(config)
     pca_rib_acts_test(results, atol=1e-6)
 
 
@@ -689,16 +680,16 @@ def test_modular_mlp_diagonal_edges_when_linear(
     config = config.model_copy(
         update={"rotate_final_node_layer": rotate_final, "modular_mlp_config": new_mod_mlp_config}
     )
-    edges = mlp_build_graph_main(config)["edges"]
+    edges = build_graph_main(config)["edges"]
 
     rotated_node_layers = config.node_layers[:-1]
     if (not config.rotate_final_node_layer) and config.node_layers[-1] == "output":
         rotated_node_layers = rotated_node_layers[:-1]
 
-    for i, module_name in enumerate(rotated_node_layers):
+    for node_layer_idx in range(len(rotated_node_layers)):
         # assert that all off diagonal entries agree within rtol of 0. Deal appropriately with the
         # case that matrices are not square
-        edge_val = edges[i][1]
+        edge_val = edges[node_layer_idx][1]
         diag_target = torch.zeros_like(edge_val)
         min_dim = min(edge_val.shape)
         diag_target[:min_dim, :min_dim] = torch.diag(torch.diag(edge_val))

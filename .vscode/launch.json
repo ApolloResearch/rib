@@ -5,29 +5,47 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "lm rib ablate modadd",
+            "name": "ablate rib mnist",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/lm_ablations/run_lm_ablations.py",
-            "args": "${workspaceFolder}/experiments/lm_ablations/rib_modular_arithmetic.yaml",
+            "program": "${workspaceFolder}/experiments/ablations/run_ablations.py",
+            "args": "${workspaceFolder}/experiments/ablations/rib_mlp_mnist.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },
         {
-            "name": "lm rib ablate pythia-14m",
+            "name": "ablate orthog mnist",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/lm_ablations/run_lm_ablations.py",
-            "args": "${workspaceFolder}/experiments/lm_ablations/rib_pythia-14m.yaml",
+            "program": "${workspaceFolder}/experiments/ablations/run_ablations.py",
+            "args": "${workspaceFolder}/experiments/ablations/orthog_mlp_mnist.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },
         {
-            "name": "lm orthog ablate modadd",
+            "name": "ablate rib modadd",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/lm_ablations/run_lm_ablations.py",
-            "args": "${workspaceFolder}/experiments/lm_ablations/orthog_modular_arithmetic.yaml",
+            "program": "${workspaceFolder}/experiments/ablations/run_ablations.py",
+            "args": "${workspaceFolder}/experiments/ablations/rib_modular_arithmetic.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "ablate orthog modadd",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/ablations/run_ablations.py",
+            "args": "${workspaceFolder}/experiments/ablations/orthog_modular_arithmetic.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "ablate rib pythia-14m",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/ablations/run_ablations.py",
+            "args": "${workspaceFolder}/experiments/ablations/rib_pythia-14m.yaml",
             "console": "integratedTerminal",
             "justMyCode": true
         },

@@ -17,10 +17,8 @@ import pytest
 import torch
 import yaml
 
-from experiments.lm_ablations.run_lm_ablations import Config as LMAblationConfig
-from experiments.lm_ablations.run_lm_ablations import main as lm_ablations_main
-from experiments.mlp_ablations.run_mlp_ablations import Config as MNISTAblationConfig
-from experiments.mlp_ablations.run_mlp_ablations import main as mnist_ablations_main
+from experiments.ablations.run_ablations import Config as AblationConfig
+from experiments.ablations.run_ablations import main as ablations_main
 from rib.ablations import AblationAccuracies
 
 
@@ -51,7 +49,7 @@ def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool =
 
 def check_accuracies(
     accuracies: AblationAccuracies,
-    config: Union[MNISTAblationConfig, LMAblationConfig],
+    config: AblationConfig,
     max_accuracy_threshold: float,
     sort_tolerance: int = 10,
 ) -> None:
@@ -99,7 +97,6 @@ def check_accuracies(
         assert _is_roughly_sorted(accuracy_vals, k=sort_tolerance, reverse=True)
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
 def test_run_mnist_ablations(ablation_type):
     """Test various ablation result properties for ablations on MNIST.
@@ -129,25 +126,27 @@ def test_run_mnist_ablations(ablation_type):
     schedule:
         schedule_type: exponential
         early_stopping_threshold: 0.05
-        ablate_every_vec_cutoff: 2
+        ablate_every_vec_cutoff: 1
         exp_base: 4.0
     dtype: float32
     ablation_node_layers:
         - layers.1
         - layers.2
     dataset:
-        return_set_n_samples: 200
-    batch_size: 64
+        dataset_type: torchvision
+        name: MNIST
+        return_set_n_samples: 100
+    batch_size: 64  # two batches
     seed: 0
     out_dir: null
+    eval_type: accuracy
     """
     config_dict = yaml.safe_load(config_str)
-    config = MNISTAblationConfig(**config_dict)
-    accuracies = mnist_ablations_main(config)
+    config = AblationConfig(**config_dict)
+    accuracies = ablations_main(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
 def test_run_modular_arithmetic_rib_ablations(ablation_type):
     """Test various ablation result properties on modular arithmetic.
@@ -180,16 +179,17 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     dataset:
         dataset_type: modular_arithmetic
         return_set: test
+        return_set_n_samples: 1000
     ablation_node_layers:
         - ln1.0
         - unembed
-    batch_size: 64
+    batch_size: 1000  # single batch
     dtype: float32
     seed: 0
     eval_type: accuracy
     out_dir: null
     """
     config_dict = yaml.safe_load(config_str)
-    config = LMAblationConfig(**config_dict)
-    accuracies = lm_ablations_main(config)
+    config = AblationConfig(**config_dict)
+    accuracies = ablations_main(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)

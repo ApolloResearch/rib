@@ -1,25 +1,25 @@
-"""Run an mlp on MNIST while rotating to and from a (truncated) rib or orthogonal basis.
+"""Run a model on a dataset while rotating to and from a (truncated) rib or orthogonal basis.
 
 The process is as follows:
-    1. Load an MLP trained on MNIST and a test set of MNIST images.
+    1. Load a model and dataset.
     2. For each number of ablated nodes `n`, create a rotation matrix that has the effect of
     rotating to and from the new basis with `n` fewer basis vectors.
-    3. Run the test set through the MLP, applying the above rotations at each node layer, and
-    calculate the resulting accuracy.
-    5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies.
+    3. Run the test set through the model, applying the above rotations at each node layer, and
+    calculate the resulting accuracy/loss.
+    5. Repeat steps 3 and 4 for a range of values of n, plotting the resulting accuracies/losses.
 
 A node layer is positioned at the input of each module specified in `node_layers` in the config.
 In this script, we don't create a node layer at the output of the final module, as ablating nodes in
 this layer is not useful.
 
 Usage:
-    python run_mnist_ablations.py <path/to/yaml_config_file>
+    python run_ablations.py <path/to/yaml_config_file>
 
 """
-
 import json
+import time
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Callable, Literal, Optional, Union
 
 import fire
 import torch
@@ -33,14 +33,19 @@ from rib.ablations import (
     load_basis_matrices,
     run_ablations,
 )
-from rib.data import VisionDatasetConfig
+from rib.data import (
+    HFDatasetConfig,
+    ModularArithmeticDatasetConfig,
+    VisionDatasetConfig,
+)
 from rib.hook_manager import HookedModel
-from rib.loader import load_dataset, load_mlp
+from rib.loader import load_model_and_dataset_from_rib_results
 from rib.log import logger
-from rib.models import MLPConfig
+from rib.models import MLP, SequentialTransformer
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
+    eval_cross_entropy_loss,
     eval_model_accuracy,
     load_config,
     set_seed,
@@ -50,6 +55,11 @@ from rib.utils import (
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str
+    out_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
+    )
     ablation_type: Literal["rib", "orthogonal"]
     interaction_graph_path: RootPath
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
@@ -57,19 +67,23 @@ class Config(BaseModel):
         discriminator="schedule_type",
         description="The schedule to use for ablations.",
     )
-    dtype: StrDtype
+    dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig, VisionDatasetConfig] = Field(
+        ...,
+        discriminator="dataset_type",
+        description="The dataset to use to build the graph.",
+    )
     ablation_node_layers: list[str]
     batch_size: int
-    seed: Optional[int] = 0
-    out_dir: Optional[RootPath] = Field(
-        Path(__file__).parent / "out",
-        description="Directory for the output files. Defaults to `./out/`. If None, no output "
-        "is written. If a relative path, it is relative to the root of the rib repo.",
+    dtype: StrDtype
+    seed: int
+    eval_type: Literal["accuracy", "ce_loss"] = Field(
+        ...,
+        description="The type of evaluation to perform on the model before building the graph.",
     )
-    dataset: VisionDatasetConfig = VisionDatasetConfig()
 
 
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> AblationAccuracies:
+    start_time = time.time()
     config = load_config(config_path_or_obj, config_model=Config)
 
     if config.out_dir is not None:
@@ -97,51 +111,58 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         dtype=dtype,
         device=device,
     )
-    assert (
-        interaction_graph_info["config"]["modular_mlp_config"] is None
-    ), "This script only works with MLPs, not ModularMLPs (which have no labels)."
-    mlp_config = MLPConfig(**interaction_graph_info["model_config_dict"])
-    mlp = load_mlp(
-        config=mlp_config,
-        mlp_path=interaction_graph_info["config"]["mlp_path"],
-        fold_bias=True,
+
+    model, dataset = load_model_and_dataset_from_rib_results(
+        interaction_graph_info,
         device=device,
+        dtype=dtype,
+        node_layers=config.ablation_node_layers,
+        dataset_config=config.dataset,
+        return_set=config.dataset.return_set,
     )
-    mlp.eval()
-    mlp.to(device)
-    mlp.to(dtype)
-    hooked_mlp = HookedModel(mlp)
-
-    dataset = load_dataset(config.dataset, "train")
+    model.to(device=torch.device(device), dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    hooked_model = HookedModel(model)
 
-    # Test model accuracy before ablation
-    accuracy = eval_model_accuracy(hooked_mlp, data_loader, dtype=dtype, device=device)
-    logger.info("Accuracy before ablation: %.2f%%", accuracy * 100)
+    # Test model accuracy/loss before running ablations, ta be sure
+    eval_fn: Callable = (
+        eval_model_accuracy if config.eval_type == "accuracy" else eval_cross_entropy_loss
+    )
+    eval_results = eval_fn(hooked_model, data_loader, dtype=dtype, device=device)
+    logger.info("Model %s on dataset: %.4f", config.eval_type, eval_results)
 
-    accuracies: AblationAccuracies = run_ablations(
+    if isinstance(model, MLP):
+        graph_module_names = config.ablation_node_layers
+    else:
+        assert isinstance(model, SequentialTransformer)
+        graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+
+    ablation_results: AblationAccuracies = run_ablations(
         basis_matrices=basis_matrices,
         ablation_node_layers=config.ablation_node_layers,
-        hooked_model=hooked_mlp,
+        hooked_model=hooked_model,
         data_loader=data_loader,
-        eval_fn=eval_model_accuracy,
-        graph_module_names=config.ablation_node_layers,
+        eval_fn=eval_fn,
+        graph_module_names=graph_module_names,
         schedule_config=config.schedule,
         device=device,
         dtype=dtype,
     )
 
+    time_taken = f"{(time.time() - start_time) / 60:.1f} minutes"
+    logger.info("Finished in %s.", time_taken)
+
     results = {
         "config": json.loads(config.model_dump_json()),
-        "accuracies": accuracies,
+        "results": ablation_results,
+        "time_taken": time_taken,
     }
-
     if config.out_dir is not None:
         with open(out_file, "w") as f:
             json.dump(results, f)
         logger.info("Wrote results to %s", out_file)
 
-    return accuracies
+    return ablation_results
 
 
 if __name__ == "__main__":

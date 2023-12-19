@@ -1,6 +1,6 @@
-exp_name: orthog_modular_arithmetic
-ablation_type: orthogonal
-interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/modular_arithmetic_rib_graph.pt
+exp_name: rib_modular_arithmetic
+ablation_type: rib
+interaction_graph_path: experiments/lm_rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
 schedule:
   schedule_type: exponential
   early_stopping_threshold: null
@@ -9,7 +9,7 @@ schedule:
 dataset:
   dataset_type: modular_arithmetic
   return_set: train
-ablation_node_layers:  # Rotate the input to these modules into the orthogonal basis
+ablation_node_layers:  # Rotate the input to these modules into the interaction basis
   - ln1.0
   - ln2.0
   - mlp_out.0

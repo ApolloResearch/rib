@@ -407,13 +407,33 @@ def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Da
 
 
 def load_model_and_dataset_from_rib_results(
-    results: RibBuildResults, device: str, dtype: torch.dtype
+    results: RibBuildResults,
+    device: str,
+    dtype: torch.dtype,
+    node_layers: Optional[list[str]] = None,
+    dataset_config: Optional[DatasetConfig] = None,
+    return_set: Literal["train", "test", "all"] = "train",
 ) -> tuple[Union[SequentialTransformer, MLP], Dataset]:
     """Loads the model and dataset used for a rib build from the results dictionary.
 
     Combines both model and dataset loading in one function as the dataset conditionally needs
-    extra arguments depending on the dataset type."""
-    data_config: DatasetConfig
+    extra arguments depending on the dataset type.
+
+    Args:
+        results (RibBuildResults): The results from a rib build.
+        device (str): The device to use for the model.
+        dtype (torch.dtype): The dtype to use for the model.
+        node_layers (Optional[list[str]]): The node layers to use for the model. If None, uses the
+            node layers from the config in the results. Note that changing the sections in the model
+            has no effect on the model computation, so we allow specifying any node_layers for the
+            convenience of hooking different sections of the model.
+        dataset_config (Optional[DatasetConfig]): The dataset config to use for the dataset. If
+            None, uses the dataset config from the results.
+        return_set (Literal["train", "test", "all"]): The dataset to return. Defaults to "train".
+
+    Returns:
+        tuple[Union[SequentialTransformer, MLP], Dataset]: The model and dataset.
+    """
     model: Union[SequentialTransformer, MLP]
 
     if (
@@ -426,7 +446,7 @@ def load_model_and_dataset_from_rib_results(
 
     if "n_heads" in results["model_config_dict"]:  # sequential transformer
         model, _ = load_sequential_transformer(
-            node_layers=results["config"]["node_layers"],
+            node_layers=node_layers or results["config"]["node_layers"],
             last_pos_module_type=results["config"]["last_pos_module_type"],
             tlens_pretrained=results["config"]["tlens_pretrained"],
             tlens_model_path=tlens_model_path,
@@ -434,13 +454,17 @@ def load_model_and_dataset_from_rib_results(
             dtype=dtype,
             device=device,
         )
-        if results["config"]["dataset"]["dataset_type"] == "huggingface":
-            data_config = HFDatasetConfig(**results["config"]["dataset"])
-        else:
-            data_config = ModularArithmeticDatasetConfig(**results["config"]["dataset"])
+        if dataset_config is None:
+            if results["config"]["dataset"]["dataset_type"] == "huggingface":
+                dataset_config = HFDatasetConfig(**results["config"]["dataset"])
+            else:
+                dataset_config = ModularArithmeticDatasetConfig(**results["config"]["dataset"])
         model_n_ctx = model.cfg.n_ctx
 
     else:  # mlp
+        assert (
+            results["config"]["modular_mlp_config"] is None
+        ), "This script only works with MLPs, not ModularMLPs (which have no labels)."
         mlp_config = MLPConfig(**results["model_config_dict"])
         model = load_mlp(
             config=mlp_config,
@@ -449,10 +473,15 @@ def load_model_and_dataset_from_rib_results(
             device=device,
         )
         model.to(device)
-        data_config = VisionDatasetConfig(**results["config"]["dataset"])
+        if dataset_config is None:
+            dataset_config = VisionDatasetConfig(**results["config"]["dataset"])
         model_n_ctx, tlens_model_path = None, None
 
     dataset = load_dataset(
-        data_config, return_set="train", model_n_ctx=model_n_ctx, tlens_model_path=tlens_model_path
+        dataset_config,
+        return_set=return_set,
+        model_n_ctx=model_n_ctx,
+        tlens_model_path=tlens_model_path,
     )
+    model.eval()
     return model, dataset

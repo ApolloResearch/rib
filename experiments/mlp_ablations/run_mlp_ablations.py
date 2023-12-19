@@ -37,7 +37,7 @@ from rib.data import VisionDatasetConfig
 from rib.hook_manager import HookedModel
 from rib.loader import load_dataset, load_mlp
 from rib.log import logger
-from rib.models.mlp import MLPConfig
+from rib.models import MLPConfig
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
@@ -97,8 +97,10 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
         dtype=dtype,
         device=device,
     )
-
-    mlp_config = MLPConfig(**interaction_graph_info["model_config_dict"]["model"])
+    assert (
+        interaction_graph_info["config"]["modular_mlp_config"] is None
+    ), "This script only works with MLPs, not ModularMLPs (which have no labels)."
+    mlp_config = MLPConfig(**interaction_graph_info["model_config_dict"])
     mlp = load_mlp(
         config=mlp_config,
         mlp_path=interaction_graph_info["config"]["mlp_path"],

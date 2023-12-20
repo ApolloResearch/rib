@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from setuptools import setup
+from setuptools import find_packages, setup
 
 if Path("requirements.txt").exists():
     requirements = Path("requirements.txt").read_text("utf-8").splitlines()
@@ -15,7 +15,7 @@ setup(
     author="Dan Braun",
     author_email="dan@apolloresearch.ai",
     url="https://github.com/ApolloResearch/rib",
-    packages=["rib", "rib_scripts"],
+    packages=find_packages(include=["rib", "rib.*", "rib_scripts", "rib_scripts.*"]),
     install_requires=requirements,
     extras_require={
         "dev": [

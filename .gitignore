@@ -1,6 +1,6 @@
 .vscode/launch.json
-# ignore all out folders in experiments
-experiments/**/out/
+# ignore all out folders in rib_scripts
+rib_scripts/**/out/
 wandb/
 .data/
 .checkpoints/

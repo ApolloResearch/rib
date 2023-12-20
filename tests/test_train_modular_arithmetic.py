@@ -2,8 +2,8 @@
 import pytest
 import yaml
 
-from experiments.train_modular_arithmetic.run_train_modular_arithmetic import Config
-from experiments.train_modular_arithmetic.run_train_modular_arithmetic import (
+from rib_scripts.train_modular_arithmetic.run_train_modular_arithmetic import Config
+from rib_scripts.train_modular_arithmetic.run_train_modular_arithmetic import (
     main as train_main,
 )
 

@@ -259,7 +259,7 @@ def test_validate_node_layers_valid(node_layers: list[str], module_ids: list[str
     ],
 )
 def test_validate_node_layers_invalid(node_layers: list[str], module_ids: list[str]):
-    with pytest.raises(ValueError):
+    with pytest.raises(AssertionError):
         SequentialTransformer.validate_node_layers(node_layers, module_ids)
 
 

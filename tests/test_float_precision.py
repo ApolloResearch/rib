@@ -8,11 +8,9 @@ import pytest
 import torch
 import yaml
 
-from experiments.ablations.run_ablations import Config as AblationConfig
-from experiments.ablations.run_ablations import main as ablation_main
-from experiments.rib_build.run_rib_build import Config as RibConfig
-from experiments.rib_build.run_rib_build import main as rib_main
+from rib.ablations import AblationConfig, load_bases_and_ablate
 from rib.log import logger
+from rib.rib_builder import RIBConfig, rib_build
 
 
 @pytest.mark.slow
@@ -67,7 +65,7 @@ class TestPythiaFloatingPointErrors:
             logger.info(
                 ("Running RIB build with batch size", rib_config["batch_size"], "for", dtype)
             )
-            rib_main(RibConfig(**rib_config))
+            rib_build(RIBConfig(**rib_config))
             basis_matrices = torch.load(
                 f"{temp_dir}/float-precision-test-pythia-14m-{dtype}_rib_Cs.pt"
             )
@@ -177,7 +175,7 @@ class TestPythiaFloatingPointErrors:
             logger.info(
                 ("Running ablations with batch size", ablation_config["batch_size"], "for", dtype)
             )
-            ablation_main(AblationConfig(**ablation_config))
+            load_bases_and_ablate(AblationConfig(**ablation_config))
             ablation_result = json.load(open(f"{temp_dir}/{exp_name}_ablation_results.json"))[
                 "results"
             ]

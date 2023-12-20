@@ -3,8 +3,8 @@
 import pytest
 import yaml
 
-from experiments.train_mlp.run_train_mlp import Config
-from experiments.train_mlp.run_train_mlp import main as train_main
+from rib_scripts.train_mlp.run_train_mlp import Config
+from rib_scripts.train_mlp.run_train_mlp import main as train_main
 
 CONFIG_STR = """
 seed: 0

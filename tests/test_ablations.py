@@ -17,9 +17,7 @@ import pytest
 import torch
 import yaml
 
-from rib.ablations import AblationAccuracies
-from rib_scripts.ablations.run_ablations import Config as AblationConfig
-from rib_scripts.ablations.run_ablations import main as ablations_main
+from rib.ablations import AblationAccuracies, AblationConfig, load_bases_and_ablate
 
 
 def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool = False) -> bool:
@@ -141,7 +139,7 @@ def test_run_mnist_ablations(ablation_type):
     """
     config_dict = yaml.safe_load(config_str)
     config = AblationConfig(**config_dict)
-    accuracies = ablations_main(config)
+    accuracies = load_bases_and_ablate(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
 
 
@@ -189,5 +187,5 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     """
     config_dict = yaml.safe_load(config_str)
     config = AblationConfig(**config_dict)
-    accuracies = ablations_main(config)
+    accuracies = load_bases_and_ablate(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)

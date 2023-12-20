@@ -8,10 +8,9 @@ import pytest
 import torch
 import yaml
 
+from rib.ablations import AblationConfig, load_bases_and_ablate
 from rib.log import logger
 from rib.rib_builder import RIBConfig, rib_build
-from rib_scripts.ablations.run_ablations import Config as AblationConfig
-from rib_scripts.ablations.run_ablations import main as ablation_main
 
 
 @pytest.mark.slow
@@ -176,7 +175,7 @@ class TestPythiaFloatingPointErrors:
             logger.info(
                 ("Running ablations with batch size", ablation_config["batch_size"], "for", dtype)
             )
-            ablation_main(AblationConfig(**ablation_config))
+            load_bases_and_ablate(AblationConfig(**ablation_config))
             ablation_result = json.load(open(f"{temp_dir}/{exp_name}_ablation_results.json"))[
                 "results"
             ]

@@ -1,12 +1,13 @@
 """Plotting functions
 
-plot_rib_graph:
+plot_graph:
     - Plot an interaction graph given a results file contain the graph edges.
 
 plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
+import csv
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,9 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
+
+from rib.log import logger
+from rib.utils import check_outfile_overwrite
 
 
 def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:
@@ -94,101 +98,6 @@ def _prepare_edges_for_plotting(
     return edges
 
 
-def plot_interaction_graph(
-    raw_edges: list[tuple[str, torch.Tensor]],
-    layer_names: list[str],
-    exp_name: str,
-    nodes_per_layer: Union[int, list[int]],
-    out_file: Path,
-    node_labels: Optional[list[list[str]]] = None,
-) -> None:
-    """Plot the interaction graph for the given edges.
-
-    Args:
-        raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
-            (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
-        layer_names (list[str]): The names of the layers. These should correspond to the first
-            element of each tuple in raw_edges, but also include a name for the final node_layer.
-        exp_name (str): The name of the experiment.
-        nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
-            all layers have the same number of nodes. If list, then the number of nodes in each
-            layer is given by the list.
-        out_file (Path): The file to save the plot to.
-    """
-
-    if isinstance(nodes_per_layer, int):
-        # Note that there is one more layer than there edge matrices
-        nodes_per_layer = [nodes_per_layer] * (len(raw_edges) + 1)
-
-    max_layer_height = max(nodes_per_layer)
-
-    edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
-
-    # Verify that the layer names match the edge names
-    edge_names = [edge_info[0] for edge_info in raw_edges]
-    if len(edge_names) != len(layer_names) - 1:
-        warnings.warn(
-            f"len(edge_names) != len(layer_names) - 1. edge_names={edge_names}, layer_names={layer_names}. This will probably cause the last layer in the plot to have no nodes. Are you using an old file?"
-        )
-    for edge_name, layer_name in zip(edge_names, layer_names[:-1]):
-        assert edge_name == layer_name, "The layer names must match the edge names."
-
-    # Create the undirected graph
-    graph = nx.Graph()
-
-    fig, ax = plt.subplots(1, 1, figsize=(20, 10))
-
-    layers = _create_node_layers(edges)
-    # Add nodes to the graph object
-    for layer in layers:
-        graph.add_nodes_from(layer)
-
-    _add_edges_to_graph(graph, edges, layers)
-
-    # Create positions for each node
-    pos: dict[int, tuple[int, Union[int, float]]] = {}
-    for i, layer in enumerate(layers):
-        # Add extra spacing for nodes that have fewer nodes than the biggest layer
-        spacing = 1 if i == 0 else max_layer_height / len(layer)
-        for j, node in enumerate(layer):
-            pos[node] = (i, j * spacing)
-
-    # Draw nodes
-    colors = ["black", "green", "orange", "purple"]  # Add more colors if you have more layers
-    options = {"edgecolors": "tab:gray", "node_size": 100, "alpha": 0.3}
-    for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
-        nx.draw_networkx_nodes(
-            graph, pos, nodelist=layer, node_color=colors[i % len(colors)], **options
-        )
-        # Add layer label above the nodes
-        plt.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
-
-    # Label nodes if node_labels is provided
-    if node_labels is not None:
-        node_label_dict = {}
-        for i, layer in enumerate(layers):
-            for j, node in enumerate(layer):
-                node_label_dict[node] = node_labels[i][j].replace("|", "\n")
-        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8)
-
-    # Draw edges
-    width_factor = 15
-    # for edge in graph.edges(data=True):
-    nx.draw_networkx_edges(
-        graph,
-        pos,
-        edgelist=[(edge[0], edge[1]) for edge in graph.edges(data=True)],
-        width=[width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
-        alpha=1,
-        edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
-    )
-
-    plt.suptitle(exp_name)
-    plt.tight_layout()
-    ax.axis("off")
-    plt.savefig(out_file)
-
-
 def plot_ablation_results(
     results: list[dict[str, dict[str, float]]],
     out_file: Path,
@@ -264,3 +173,125 @@ def plot_ablation_results(
     plt.subplots_adjust(hspace=0.4)
 
     plt.savefig(out_file)
+
+
+def plot_graph(
+    results_file: str,
+    nodes_per_layer: Union[int, list[int]] = 40,
+    labels_file: Optional[str] = None,
+    out_file: Optional[Union[str, Path]] = None,
+    force: bool = False,
+) -> None:
+    """Plot an interaction graph given a results file contain the graph edges.
+
+    Args:
+        results_file (str): Path to the results file containing the graph edges.
+        nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
+            all layers have the same number of nodes. If list, then the number of nodes in each
+            layer is given by the list.
+        labels_file (Optional[str]): Path to a csv file containing the labels for each node. Each
+            row should correspond to a layer and each column should correspond to a node in that
+            layer. Defaults to None.
+        out_file (Optional[Union[str, Path]]): The file to save the plot to. Defaults to None.
+        force (bool): Whether to overwrite the output file if it already exists. Defaults to False.
+    """
+    results = torch.load(results_file)
+    out_dir = Path(__file__).parent / "out"
+    if out_file is None:
+        out_file = out_dir / f"{results['exp_name']}_rib_graph.png"
+    else:
+        out_file = Path(out_file)
+
+    if not check_outfile_overwrite(out_file, force):
+        return
+
+    # Ensure that we have edges
+    assert results["edges"], "The results file does not contain any edges."
+
+    # Add labels if provided
+    if labels_file is not None:
+        with open(labels_file, "r", newline="") as file:
+            reader = csv.reader(file)
+            node_labels = list(reader)
+    else:
+        node_labels = None
+
+    raw_edges = results["edges"]
+    layer_names = results["config"]["node_layers"]
+    exp_name = results["exp_name"]
+    if isinstance(nodes_per_layer, int):
+        # Note that there is one more layer than there edge matrices
+        nodes_per_layer = [nodes_per_layer] * (len(raw_edges) + 1)
+
+    max_layer_height = max(nodes_per_layer)
+
+    edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
+
+    # Verify that the layer names match the edge names
+    edge_names = [edge_info[0] for edge_info in raw_edges]
+    if len(edge_names) != len(layer_names) - 1:
+        warnings.warn(
+            f"len(edge_names) != len(layer_names) - 1. edge_names={edge_names},"
+            f"layer_names={layer_names}. This will probably cause the last layer in the plot to"
+            f"have no nodes. Are you using an old file?"
+        )
+    for edge_name, layer_name in zip(edge_names, layer_names[:-1]):
+        assert edge_name == layer_name, "The layer names must match the edge names."
+
+    # Create the undirected graph
+    graph = nx.Graph()
+
+    fig, ax = plt.subplots(1, 1, figsize=(20, 10))
+
+    layers = _create_node_layers(edges)
+    # Add nodes to the graph object
+    for layer in layers:
+        graph.add_nodes_from(layer)
+
+    _add_edges_to_graph(graph, edges, layers)
+
+    # Create positions for each node
+    pos: dict[int, tuple[int, Union[int, float]]] = {}
+    for i, layer in enumerate(layers):
+        # Add extra spacing for nodes that have fewer nodes than the biggest layer
+        spacing = 1 if i == 0 else max_layer_height / len(layer)
+        for j, node in enumerate(layer):
+            pos[node] = (i, j * spacing)
+
+    # Draw nodes
+    colors = ["black", "green", "orange", "purple"]  # Add more colors if you have more layers
+    options = {"edgecolors": "tab:gray", "node_size": 100, "alpha": 0.3}
+    for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
+        nx.draw_networkx_nodes(
+            graph, pos, nodelist=layer, node_color=colors[i % len(colors)], **options
+        )
+        # Add layer label above the nodes
+        plt.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+
+    # Label nodes if node_labels is provided
+    if node_labels is not None:
+        node_label_dict = {}
+        for i, layer in enumerate(layers):
+            for j, node in enumerate(layer):
+                node_label_dict[node] = node_labels[i][j].replace("|", "\n")
+        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8)
+
+    # Draw edges
+    width_factor = 15
+    # for edge in graph.edges(data=True):
+    nx.draw_networkx_edges(
+        graph,
+        pos,
+        edgelist=[(edge[0], edge[1]) for edge in graph.edges(data=True)],
+        width=[width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
+        alpha=1,
+        edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
+    )
+
+    plt.suptitle(exp_name)
+    plt.tight_layout()
+    ax.axis("off")
+    plt.savefig(out_file)
+    plt.clf()
+
+    logger.info(f"Saved plot to {out_file}")

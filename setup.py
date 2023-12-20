@@ -15,7 +15,7 @@ setup(
     author="Dan Braun",
     author_email="dan@apolloresearch.ai",
     url="https://github.com/ApolloResearch/rib",
-    packages=find_packages(),
+    packages=find_packages(exclude=["tests"]),
     install_requires=requirements,
     extras_require={
         "dev": [

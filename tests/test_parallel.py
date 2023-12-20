@@ -8,9 +8,8 @@ from torch.utils.data import ConcatDataset, TensorDataset
 
 from experiments.rib_build.combine_edges import main as combine_edges
 from experiments.rib_build.distributed_edges import main as run_edges
-from experiments.rib_build.run_rib_build import Config
-from experiments.rib_build.run_rib_build import main as run_rib_build
 from rib.loader import get_dataset_chunk
+from rib.rib_builder import RIBConfig, rib_build
 
 
 @pytest.mark.slow
@@ -50,7 +49,7 @@ class TestDistributed:
             calculate_edges=True,
             interaction_matrices_path=f"{tmpdir}/compute_cs_rib_Cs.pt",
         )
-        return run_rib_build(Config(**single_config_dict))["edges"]
+        return rib_build(RIBConfig(**single_config_dict))["edges"]
 
     def get_double_edges(self, tmpdir):
         double_config_path = f"{tmpdir}/double_config.yaml"
@@ -75,10 +74,10 @@ class TestDistributed:
     def test_edges_are_same(self, tmpdir):
         # first we compute the cs. we do this separately as there are occasional reproducibility
         # issues with computing them.
-        cs_config = Config(
+        cs_config = RIBConfig(
             **self.make_config_dict("compute_cs", out_dir=tmpdir, calculate_edges=False)
         )
-        run_rib_build(cs_config)
+        rib_build(cs_config)
         # not using fixtures as we need to compute Cs first
         single_edges = self.get_single_edges(tmpdir)
         double_edges = self.get_double_edges(tmpdir)

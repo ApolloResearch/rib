@@ -221,12 +221,11 @@ class SequentialTransformer(nn.Module):
             try:
                 node_layer_idx = module_ids.index(node_layer)
             except ValueError:
-                raise ValueError(f"Provided node_layer: {node_layer} is not a valid module_id")
-            if node_layer_idx < module_id_idx:
-                raise ValueError(
-                    f"Node layers must be in order. {node_layer} appears before "
-                    f"{module_ids[module_id_idx]}"
-                )
+                raise AssertionError(f"Provided node_layer: {node_layer} is not a valid module_id")
+            assert node_layer_idx >= module_id_idx, (
+                f"Node layers must be in order. {node_layer} appears before "
+                f"{module_ids[module_id_idx]}"
+            )
             module_id_idx = node_layer_idx
 
     def create_sections(

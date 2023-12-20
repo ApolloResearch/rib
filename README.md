@@ -1,6 +1,6 @@
 # rib
 
-This repository contains the core functionality and experiments related to Rotation into the
+This repository contains the core functionality and rib_scripts related to Rotation into the
 Interaction Basis.
 
 For a formal introduction to the method, see
@@ -17,7 +17,7 @@ pip install -e .
 ## Usage
 
 The core functionality of RIB is contained in the `rib` package. Experiments that use RIB are
-contained in the experiments directory, with the directory encapsulating related files such as
+contained in the rib_scripts directory, with the directory encapsulating related files such as
 configs, scripts, and outputs.
 
 Most experiment scripts take in a yaml config file or a json data file as cli argument. These files reside in
@@ -30,11 +30,11 @@ variable `WANDB_API_KEY` to your API key.
 
 ### MNIST
 
-Supported experiments:
+Supported rib_scripts:
 
-- Training an MLP: `experiments/train_mnist/`
-- Ablating vectors from the interaction or orthogonal basis: `experiments/mnist_ablations/`
-- Building an interaction graph: `experiments/mnist_rib_build/`
+- Training an MLP: `rib_scripts/train_mnist/`
+- Ablating vectors from the interaction or orthogonal basis: `rib_scripts/mnist_ablations/`
+- Building an interaction graph: `rib_scripts/mnist_rib_build/`
 
 ### LMs
 
@@ -44,13 +44,13 @@ are the unmodified outputs to the previous module.
 
 An image of the Sequential Transformer architecture is provided [here](docs/SequentialTransformer.drawio.png).
 
-Supported experiments:
+Supported rib_scripts:
 
-- Training a 1-layer LM on a modular arithmetic task: `experiments/train_modular_arithmetic/`
-- Ablating vectors from the interaction or orthogonal basis: `experiments/lm_ablations/`
-- Building an interaction graph: `experiments/lm_rib_build/`
+- Training a 1-layer LM on a modular arithmetic task: `rib_scripts/train_modular_arithmetic/`
+- Ablating vectors from the interaction or orthogonal basis: `rib_scripts/lm_ablations/`
+- Building an interaction graph: `rib_scripts/lm_rib_build/`
 
-As can be seen in `experiments/lm_rib_build/run_lm_rib_build.py`, the process for building a graph
+As can be seen in `rib_scripts/lm_rib_build/run_lm_rib_build.py`, the process for building a graph
 for an LM is as follows:
 
 - Load a pretrained LM (currently only supports some transformer-lens models and modular arithmetic).
@@ -58,8 +58,8 @@ for an LM is as follows:
 arbitrary sections of the LM.
 - Fold in the model's biases into the weights. This is required for our integrated gradient formalism.
 - Run the RIB algorithm, outlined in the Code Implementation section of [this writeup](https://www.overleaf.com/project/6516ddc99f52dd99cab58d8d).
-- Plot the RIB graph using `experiments/lm_rib_build/plot_lm_graph.py`, passing in the path to the
-results file generated from `experiments/lm_rib_build/run_lm_rib_build.py`
+- Plot the RIB graph using `rib_scripts/lm_rib_build/plot_lm_graph.py`, passing in the path to the
+results file generated from `rib_scripts/lm_rib_build/run_lm_rib_build.py`
 
 ## Development
 

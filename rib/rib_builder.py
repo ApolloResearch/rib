@@ -211,7 +211,7 @@ def _verify_compatible_configs(config: RIBConfig, loaded_config: RIBConfig) -> N
     """Ensure that the config for calculating edges is compatible with that used to calculate Cs.
 
     TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
-    path management nice with this Config being defined in this file in the experiments dir.
+    path management nice with this Config being defined in this file in the rib_scripts dir.
     """
     assert (
         config.dataset.dataset_type == loaded_config.dataset.dataset_type

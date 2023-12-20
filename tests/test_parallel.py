@@ -6,10 +6,10 @@ import yaml
 from mpi4py import MPI
 from torch.utils.data import ConcatDataset, TensorDataset
 
-from experiments.rib_build.combine_edges import main as combine_edges
-from experiments.rib_build.distributed_edges import main as run_edges
 from rib.loader import get_dataset_chunk
 from rib.rib_builder import RIBConfig, rib_build
+from rib.utils import combine_edges
+from rib_scripts.rib_build.run_distributed_edges import main as run_edges
 
 
 @pytest.mark.slow
@@ -19,7 +19,7 @@ class TestDistributed:
         exp_name: {exp_name}
         seed: 0
         tlens_pretrained: null
-        tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+        tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
         interaction_matrices_path: null
         node_layers:
             - ln1.0

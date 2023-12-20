@@ -1,13 +1,12 @@
 """Plotting functions
 
 plot_graph:
-    - Plot an interaction graph given a results file contain the graph edges.
+    - Plot a rib graph given a results file contain the graph edges.
 
 plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
-import csv
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -17,9 +16,6 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
-
-from rib.log import logger
-from rib.utils import check_outfile_overwrite
 
 
 def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:
@@ -114,7 +110,7 @@ def plot_ablation_results(
         results: A list of dictionares mapping node layers to an inner dictionary that maps the
             number of basis vectors remaining to the accuracy/loss.
         out_file: The file to save the plot to.
-        exp_names: The names of the experiments.
+        exp_names: The names of the rib_scripts.
         ablation_types: The type of ablation performed for each experiment ("orthogonal" or "rib").
         log_scale: Whether to use a log scale for the x-axis. Defaults to False.
         xlim: The limits for the x-axis. Defaults to None.
@@ -175,50 +171,27 @@ def plot_ablation_results(
     plt.savefig(out_file)
 
 
-def plot_graph(
-    results_file: str,
-    nodes_per_layer: Union[int, list[int]] = 40,
-    labels_file: Optional[str] = None,
-    out_file: Optional[Union[str, Path]] = None,
-    force: bool = False,
+def plot_rib_graph(
+    raw_edges: list[tuple[str, torch.Tensor]],
+    layer_names: list[str],
+    exp_name: str,
+    nodes_per_layer: Union[int, list[int]],
+    out_file: Path,
+    node_labels: Optional[list[list[str]]] = None,
 ) -> None:
-    """Plot an interaction graph given a results file contain the graph edges.
+    """Plot the interaction graph for the given edges.
 
     Args:
-        results_file (str): Path to the results file containing the graph edges.
+        raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
+            (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
+        layer_names (list[str]): The names of the layers. These should correspond to the first
+            element of each tuple in raw_edges, but also include a name for the final node_layer.
+        exp_name (str): The name of the experiment.
         nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
             all layers have the same number of nodes. If list, then the number of nodes in each
             layer is given by the list.
-        labels_file (Optional[str]): Path to a csv file containing the labels for each node. Each
-            row should correspond to a layer and each column should correspond to a node in that
-            layer. Defaults to None.
-        out_file (Optional[Union[str, Path]]): The file to save the plot to. Defaults to None.
-        force (bool): Whether to overwrite the output file if it already exists. Defaults to False.
+        out_file (Path): The file to save the plot to.
     """
-    results = torch.load(results_file)
-    out_dir = Path(__file__).parent / "out"
-    if out_file is None:
-        out_file = out_dir / f"{results['exp_name']}_rib_graph.png"
-    else:
-        out_file = Path(out_file)
-
-    if not check_outfile_overwrite(out_file, force):
-        return
-
-    # Ensure that we have edges
-    assert results["edges"], "The results file does not contain any edges."
-
-    # Add labels if provided
-    if labels_file is not None:
-        with open(labels_file, "r", newline="") as file:
-            reader = csv.reader(file)
-            node_labels = list(reader)
-    else:
-        node_labels = None
-
-    raw_edges = results["edges"]
-    layer_names = results["config"]["node_layers"]
-    exp_name = results["exp_name"]
     if isinstance(nodes_per_layer, int):
         # Note that there is one more layer than there edge matrices
         nodes_per_layer = [nodes_per_layer] * (len(raw_edges) + 1)
@@ -293,5 +266,3 @@ def plot_graph(
     ax.axis("off")
     plt.savefig(out_file)
     plt.clf()
-
-    logger.info(f"Saved plot to {out_file}")

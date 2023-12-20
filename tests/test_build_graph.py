@@ -212,7 +212,7 @@ def get_modular_arithmetic_config(
     exp_name: test
     seed: 0
     tlens_pretrained: null
-    tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+    tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
     node_layers:
         - ln1.0
         - mlp_in.0
@@ -271,7 +271,7 @@ def get_pythia_config(basis_formula: str, dtype_str: str) -> RIBConfig:
 def get_mnist_config(basis_formula: str, edge_formula: str, dtype_str: str) -> RIBConfig:
     config_str = f"""
     exp_name: test
-    mlp_path: "experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
+    mlp_path: "rib_scripts/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
     batch_size: 256
     seed: 0
     truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
@@ -539,7 +539,7 @@ def test_mnist_build_graph_invalid_node_layers():
     """
     config_str = """
     exp_name: test
-    mlp_path: "experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
+    mlp_path: "rib_scripts/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
     batch_size: 10
     seed: 0
     truncation_threshold: 1e-15
@@ -569,7 +569,7 @@ def test_modular_arithmetic_build_graph_invalid_node_layers():
     exp_name: test
     seed: 0
     tlens_pretrained: null
-    tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+    tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
     node_layers:
         - mlp_in.0
         - ln1.0  # This should appear before mlp_in.0

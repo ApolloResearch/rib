@@ -8,10 +8,10 @@ import pytest
 import torch
 import yaml
 
-from experiments.ablations.run_ablations import Config as AblationConfig
-from experiments.ablations.run_ablations import main as ablation_main
 from rib.log import logger
 from rib.rib_builder import RIBConfig, rib_build
+from rib_scripts.ablations.run_ablations import Config as AblationConfig
+from rib_scripts.ablations.run_ablations import main as ablation_main
 
 
 @pytest.mark.slow

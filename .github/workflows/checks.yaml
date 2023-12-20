@@ -32,21 +32,15 @@ jobs:
       with:
         python-version: "3.10"
 
-    # - name: Set up or use existing virtual environment
-    #   run: |
-    #     VENV_PATH="/home/user/actions-runner/rib-env"
-    #     if [ ! -d "$VENV_PATH" ]; then
-    #       echo "Creating a new virtual environment."
-    #       python -m venv "$VENV_PATH"
-    #     else
-    #       echo "Using existing virtual environment."
-    #     fi
-    - name: Setup virtualenv
+    - name: Set up or use existing virtual environment
       run: |
         VENV_PATH="/home/user/actions-runner/rib-env"
-        rm -rf "$VENV_PATH"
-        echo "Creating a new virtual environment."
-        python -m venv "$VENV_PATH"
+        if [ ! -d "$VENV_PATH" ]; then
+          echo "Creating a new virtual environment."
+          python -m venv "$VENV_PATH"
+        else
+          echo "Using existing virtual environment."
+        fi
 
     - name: Install or update dependencies
       run: |

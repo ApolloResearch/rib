@@ -36,6 +36,7 @@ class SequentialTransformerConfig(BaseModel):
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+    config_type: Literal["SequentialTransformer"] = "SequentialTransformer"
 
     n_layers: int
     d_model: int

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,7 @@ from rib.types import TorchDtype
 
 class ModularMLPConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+    config_type: Literal["ModularMLP"] = "ModularMLP"
     n_hidden_layers: int = Field(
         4,
         description="The number of hidden layers [input, hidden, ..., hidden, output]",
@@ -67,27 +68,30 @@ class ModularMLPConfig(BaseModel):
 class ModularMLP(MLP):
     def __init__(
         self,
-        mlp_config: ModularMLPConfig,
+        cfg: ModularMLPConfig,
         seed: Optional[int] = None,
     ):
         """Generate a block diagonal MLP
 
+        # TODO: Instead of a new ModularMLP class, just create a function that returns an MLP
+        # instance and initialises the weights and biases using generate_weights.
+
         Args:
-            mlp_config: Config class for the block diagonal MLP
+            cfg: Config class for the block diagonal MLP
             seed: Seed for generating the weights
         """
-        self.cfg = mlp_config
-        super(ModularMLP, self).__init__(config=self.cfg.mlp_config)
+        super(ModularMLP, self).__init__(cfg=cfg.mlp_config)
+        self.cfg = cfg  # type: ignore
 
         if seed is not None:
             torch.manual_seed(seed)
 
         # Hardcode weights and biases
-        assert len(self.layers) == self.cfg.n_hidden_layers + 1
+        assert len(self.layers) == cfg.n_hidden_layers + 1
         for layer in self.layers:
             layer.W = nn.Parameter(self.generate_weights())
             layer.b = nn.Parameter(
-                torch.full((self.cfg.width,), fill_value=self.cfg.bias, dtype=self.cfg.dtype)
+                torch.full((cfg.width,), fill_value=cfg.bias, dtype=self.cfg.dtype)
             )
 
     def generate_weights(self) -> Float[Tensor, "width width"]:
@@ -99,10 +103,10 @@ class ModularMLP(MLP):
             A random block diagonal matrix
         """
         dtype = self.cfg.dtype
-        total_width = self.cfg.width
-        first_block_width = self.cfg.first_block_width or total_width // 2
-        block_variances = self.cfg.weight_variances
-        equal_columns = self.cfg.weight_equal_columns
+        total_width = self.cfg.width  # type: ignore
+        first_block_width = self.cfg.first_block_width or total_width // 2  # type: ignore
+        block_variances = self.cfg.weight_variances  # type: ignore
+        equal_columns = self.cfg.weight_equal_columns  # type: ignore
 
         assert total_width > first_block_width, "First block width must be smaller than total width"
         assert len(block_variances) == 2, "Only two blocks supported"

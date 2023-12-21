@@ -74,7 +74,9 @@ from rib.models import (
     ModularMLP,
     ModularMLPConfig,
     SequentialTransformer,
+    SequentialTransformerConfig,
 )
+from rib.settings import REPO_ROOT
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
@@ -89,7 +91,7 @@ class RibBuildConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str = Field(..., description="The name of the experiment")
     out_dir: Optional[RootPath] = Field(
-        Path(__file__).parent / "out",
+        REPO_ROOT / "rib_scripts/rib_build/out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
@@ -231,8 +233,9 @@ class RibBuildResults(BaseModel):
         "done in rib.utils.combine_edges)."
     )
     config: RibBuildConfig = Field(description="The config used to build the graph.")
-    # TODO: Use a raw config for raw_model_config_dict
-    raw_model_config_dict: dict[str, Any] = Field(description="The config used to build the model.")
+    ml_model_config: Union[MLPConfig, ModularMLPConfig, SequentialTransformerConfig] = Field(
+        discriminator="config_type", description="The config of the model used to build the graph."
+    )
     calc_C_time: Optional[str] = Field(
         None, description="The time taken to calculate the interaction rotations."
     )
@@ -388,9 +391,8 @@ def rib_build(
             mlp_config, mlp_path=config.mlp_path, fold_bias=True, device=device, seed=config.seed
         ).to(device=torch.device(device), dtype=dtype)
         assert model.has_folded_bias, "MLP must have folded bias to run RIB"
-        raw_model_config_dict = mlp_config.model_dump()
     else:
-        model, raw_model_config_dict = load_sequential_transformer(
+        model = load_sequential_transformer(
             node_layers=config.node_layers,
             last_pos_module_type=config.last_pos_module_type,
             tlens_pretrained=config.tlens_pretrained,
@@ -548,7 +550,7 @@ def rib_build(
         dist_info=dist_info,
         contains_all_edges=dist_info.global_size == 1,  # True if no parallelisation
         config=config,
-        raw_model_config_dict=raw_model_config_dict,
+        ml_model_config=model.cfg,
         calc_C_time=calc_C_time,
         calc_edges_time=calc_edges_time,
     )

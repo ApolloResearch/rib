@@ -30,6 +30,7 @@ from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import build_sorted_lambda_matrices
 from rib.loader import load_model_and_dataset_from_rib_results
 from rib.log import logger
+from rib.models import SequentialTransformer
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 from rib.types import TORCH_DTYPES
 from tests.utils import assert_is_close, assert_is_ones, assert_is_zeros
@@ -138,7 +139,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
         assert acts.shape[0] == len(dataset), f"acts.shape[0] != len(dataset) for {m_name}"
 
     # we choose a module to compare rib acts on and find the module immediately before it
-    if hasattr(model, "sections"):
+    if isinstance(model, SequentialTransformer):
         # we choose the first module of node_layers, meaning the previous module is the last one
         # in sections.pre
         module_to_test = results.config.node_layers[0]

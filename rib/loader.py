@@ -39,7 +39,7 @@ def load_sequential_transformer(
     fold_bias: bool = True,
     dtype: torch.dtype = torch.float32,
     device: str = "cpu",
-) -> tuple[SequentialTransformer, dict]:
+) -> SequentialTransformer:
     """Load a SequentialTransformer model from a pretrained transformerlens model.
 
     Requires config to contain a pretrained model name or a path to a transformerlens model.
@@ -58,8 +58,7 @@ def load_sequential_transformer(
         device (str): The device to use for the model. Defaults to "cpu".
 
     Returns:
-        - SequentialTransformer: The SequentialTransformer model.
-        - dict: The config used in the transformerlens model.
+        The SequentialTransformer model.
     """
     assert (
         tlens_pretrained is not None or tlens_model_path is not None
@@ -115,7 +114,7 @@ def load_sequential_transformer(
         f"Model dtype ({next(seq_model.parameters()).dtype}) does not match specified dtype "
         f"({dtype})."
     )
-    return seq_model.to(device), tlens_cfg_dict
+    return seq_model.to(device)
 
 
 def load_mlp(
@@ -439,8 +438,8 @@ def load_model_and_dataset_from_rib_results(
     """
     model: Union[SequentialTransformer, MLP]
 
-    if "n_heads" in results.raw_model_config_dict:  # sequential transformer
-        model, _ = load_sequential_transformer(
+    if results.ml_model_config.config_type == "SequentialTransformer":
+        model = load_sequential_transformer(
             node_layers=node_layers or results.config.node_layers,
             last_pos_module_type=results.config.last_pos_module_type,
             tlens_pretrained=results.config.tlens_pretrained,
@@ -451,13 +450,13 @@ def load_model_and_dataset_from_rib_results(
         )
         model_n_ctx = model.cfg.n_ctx
 
-    else:  # mlp
+    else:
         assert (
-            results.config.modular_mlp_config is None
+            results.ml_model_config.config_type == "MLP"
+            and results.config.modular_mlp_config is None
         ), "This function only works with MLPs, not ModularMLPs (which have no labels)."
-        mlp_config = MLPConfig(**results.raw_model_config_dict)
         model = load_mlp(
-            config=mlp_config,
+            config=results.ml_model_config,
             mlp_path=results.config.mlp_path,
             fold_bias=True,
             device=device,

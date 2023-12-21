@@ -69,14 +69,14 @@ def graph_build_test(config: RibBuildConfig, atol: float):
     # The output interaction matrix should be None if rotate_final_node_layer is False
     if not config.rotate_final_node_layer:
         assert (
-            Cs[-1]["C"] is None
+            Cs[-1].C is None
         ), "The output interaction matrix should be None if rotate_final_node_layer is False"
 
     # We don't have edges or lambdas for the final layer in node_layers
     comparison_layers = config.node_layers[:-1]
     for i, module_name in enumerate(comparison_layers):
         # Get the module names from the grams
-        act_size = (Cs[i]["C"].T @ grams[module_name] @ Cs[i]["C"]).diag()
+        act_size = (Cs[i].C.T @ grams[module_name] @ Cs[i].C).diag()
         if E_hats:
             # E_hats[i] is a tuple (name, tensor)
             if config.edge_formula == "squared":
@@ -595,8 +595,8 @@ def test_svd_basis():
     config = get_build_config_pythia(basis_formula="svd", dtype_str=dtype_str)
     results = rib_build(config)
     for c_info, u_info in zip(results.interaction_rotations, results.eigenvectors):
-        C = c_info["C"]
-        U = u_info["U"]
+        C = c_info.C
+        U = u_info.U
         assert (C is None) == (U is None)
         if C is not None:
             assert torch.allclose(C, U, atol=0)

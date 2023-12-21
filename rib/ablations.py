@@ -18,6 +18,7 @@ from rib.data import (
 )
 from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
+from rib.interaction_algos import Eigenvectors, InteractionRotation
 from rib.linalg import calc_rotation_matrix
 from rib.loader import load_model_and_dataset_from_rib_results
 from rib.log import logger
@@ -266,15 +267,17 @@ def load_basis_matrices(
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
     for module_name in ablation_node_layers:
         for basis_info in getattr(interaction_graph_info, basis_matrix_key):
-            if basis_info["node_layer_name"] == module_name:
+            if basis_info.node_layer_name == module_name:
                 if ablation_type == "rib":
-                    assert basis_info["C"] is not None, f"{module_name} has no C matrix."
-                    assert basis_info["C_pinv"] is not None, f"{module_name} has no C_pinv matrix."
-                    basis_vecs = basis_info["C"].to(dtype=dtype, device=device)
-                    basis_vecs_pinv = basis_info["C_pinv"].to(dtype=dtype, device=device)
+                    assert isinstance(basis_info, InteractionRotation)
+                    assert basis_info.C is not None, f"{module_name} has no C matrix."
+                    assert basis_info.C_pinv is not None, f"{module_name} has no C_pinv matrix."
+                    basis_vecs = basis_info.C.to(dtype=dtype, device=device)
+                    basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
                 elif ablation_type == "orthogonal":
-                    assert basis_info["U"] is not None, f"{module_name} has no U matrix."
-                    basis_vecs = basis_info["U"].to(dtype=dtype, device=device)
+                    assert isinstance(basis_info, Eigenvectors)
+                    assert basis_info.U is not None, f"{module_name} has no U matrix."
+                    basis_vecs = basis_info.U.to(dtype=dtype, device=device)
                     # Pseudoinverse of an orthonormal matrix is its transpose
                     basis_vecs_pinv = basis_vecs.T.detach().clone()
                 basis_matrices.append((basis_vecs, basis_vecs_pinv))

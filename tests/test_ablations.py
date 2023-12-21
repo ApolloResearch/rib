@@ -104,16 +104,16 @@ def test_run_mnist_ablations(ablation_type):
     ```
     import torch
     from pathlib import Path
-    from rib.utils import REPO_ROOT
+    from rib.settings import REPO_ROOT
     rib_graph = torch.load("rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
     mlp_path = Path(rib_graph['config']['mlp_path'])
     rib_graph['config']['mlp_path'] = str(mlp_path.relative_to(REPO_ROOT))
     torch.save(rib_graph, "rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
     ```
     """
-    rib_graph = torch.load("rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
-    model_path = Path(rib_graph["config"]["mlp_path"])
-    assert not model_path.is_absolute(), "must be relative to run in ci, see docstring"
+    graph_path = Path("rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
+    mlp_path = Path(torch.load(graph_path)["config"]["mlp_path"])
+    assert not mlp_path.is_absolute(), "must be relative to run in ci, see docstring"
 
     config_str = f"""
     exp_name: "test_ablation_mnist"

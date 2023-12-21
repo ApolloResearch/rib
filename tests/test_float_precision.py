@@ -10,7 +10,7 @@ import yaml
 
 from rib.ablations import AblationConfig, load_bases_and_ablate
 from rib.log import logger
-from rib.rib_builder import RIBConfig, rib_build
+from rib.rib_builder import RibBuildConfig, rib_build
 
 
 @pytest.mark.slow
@@ -65,7 +65,7 @@ class TestPythiaFloatingPointErrors:
             logger.info(
                 ("Running RIB build with batch size", rib_config["batch_size"], "for", dtype)
             )
-            rib_build(RIBConfig(**rib_config))
+            rib_build(RibBuildConfig(**rib_config))
             basis_matrices = torch.load(
                 f"{temp_dir}/float-precision-test-pythia-14m-{dtype}_rib_Cs.pt"
             )

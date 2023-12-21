@@ -136,7 +136,7 @@ def test_pythia_attn_causal_mask():
     batch_size = 2
     n_ctx = 2048
 
-    seq_model, _ = load_sequential_transformer(
+    seq_model = load_sequential_transformer(
         node_layers=[module_id],
         last_pos_module_type=None,
         tlens_pretrained="pythia-14m",

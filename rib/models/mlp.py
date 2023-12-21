@@ -1,7 +1,7 @@
 """
 Defines a generic MLP to be used for rib.
 """
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import torch
 from fancy_einsum import einsum
@@ -15,6 +15,7 @@ from rib.types import TorchDtype
 
 class MLPConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+    config_type: Literal["MLP"] = "MLP"
     hidden_sizes: Optional[list[int]] = Field(
         None,
         description="A list of integers specifying the sizes of the hidden layers. If None, "
@@ -55,12 +56,13 @@ class MLP(nn.Module):
             but will append a 1 to intermediate activations between layers.
     """
 
-    def __init__(self, config: MLPConfig):
+    def __init__(self, cfg: MLPConfig):
         super().__init__()
 
-        self.hidden_sizes = config.hidden_sizes if config.hidden_sizes is not None else []
-        self.input_size = config.input_size
-        self.output_size = config.output_size
+        self.cfg = cfg
+        self.hidden_sizes = cfg.hidden_sizes if cfg.hidden_sizes is not None else []
+        self.input_size = cfg.input_size
+        self.output_size = cfg.output_size
 
         # Size of each layer (including input and output)
         sizes = [self.input_size] + self.hidden_sizes + [self.output_size]
@@ -69,19 +71,19 @@ class MLP(nn.Module):
         for i in range(len(sizes) - 1):
             final_layer = i == len(sizes) - 2
             # No activation for final layer
-            layer_act = config.activation_fn if not final_layer else None
+            layer_act = cfg.activation_fn if not final_layer else None
             self.layers.append(
                 MLPLayer(
                     in_features=sizes[i],
                     out_features=sizes[i + 1],
                     activation_fn=layer_act,
-                    use_bias=config.bias,
-                    dtype=config.dtype,
+                    use_bias=cfg.bias,
+                    dtype=cfg.dtype,
                 )
             )
 
         self.has_folded_bias = False
-        if config.fold_bias:
+        if cfg.fold_bias:
             self.fold_bias()
 
     def forward(self, x: Float[Tensor, "batch ..."]) -> Float[Tensor, "batch outdim"]:

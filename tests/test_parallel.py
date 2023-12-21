@@ -6,9 +6,9 @@ import yaml
 from mpi4py import MPI
 from torch.utils.data import ConcatDataset, TensorDataset
 
+from rib.edge_combiner import combine_edges
 from rib.loader import get_dataset_chunk
-from rib.rib_builder import RIBConfig, rib_build
-from rib.utils import combine_edges
+from rib.rib_builder import RibBuildConfig, rib_build
 from rib_scripts.rib_build.run_distributed_edges import main as run_edges
 
 
@@ -49,7 +49,7 @@ class TestDistributed:
             calculate_edges=True,
             interaction_matrices_path=f"{tmpdir}/compute_cs_rib_Cs.pt",
         )
-        return rib_build(RIBConfig(**single_config_dict))["edges"]
+        return rib_build(RibBuildConfig(**single_config_dict)).edges
 
     def get_double_edges(self, tmpdir):
         double_config_path = f"{tmpdir}/double_config.yaml"
@@ -68,13 +68,13 @@ class TestDistributed:
         MPI.Finalize()
         run_edges(double_config_path, n_pods=1, pod_rank=0, n_processes=2)
         combine_edges(double_outdir_path)
-        results = torch.load(f"{double_outdir_path}/test_double_rib_graph_combined.pt")
-        return results["edges"]
+        edges = torch.load(f"{double_outdir_path}/test_double_rib_graph_combined.pt")["edges"]
+        return edges
 
     def test_edges_are_same(self, tmpdir):
         # first we compute the cs. we do this separately as there are occasional reproducibility
         # issues with computing them.
-        cs_config = RIBConfig(
+        cs_config = RibBuildConfig(
             **self.make_config_dict("compute_cs", out_dir=tmpdir, calculate_edges=False)
         )
         rib_build(cs_config)

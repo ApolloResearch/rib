@@ -9,7 +9,7 @@ Example usage with a directory:
 """
 import fire
 
-from rib.utils import combine_edges
+from rib.edge_combiner import combine_edges
 
 if __name__ == "__main__":
     fire.Fire(combine_edges)

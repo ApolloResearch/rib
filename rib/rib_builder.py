@@ -26,11 +26,10 @@ To enable this, just preface the command with `mpirun -n [num_processes]`. These
 distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data
 and output it as a single file.
 """
-import json
 import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 import torch
 import yaml
@@ -50,7 +49,12 @@ from rib.data_accumulator import (
     collect_gram_matrices,
     collect_interaction_edges,
 )
-from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
+from rib.distributed_utils import (
+    DistributedInfo,
+    adjust_logger_dist,
+    get_device_mpi,
+    get_dist_info,
+)
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
     Eigenvectors,
@@ -70,8 +74,10 @@ from rib.models import (
     ModularMLP,
     ModularMLPConfig,
     SequentialTransformer,
+    SequentialTransformerConfig,
 )
-from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
+from rib.settings import REPO_ROOT
+from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
@@ -81,11 +87,11 @@ from rib.utils import (
 )
 
 
-class RIBConfig(BaseModel):
+class RibBuildConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str = Field(..., description="The name of the experiment")
     out_dir: Optional[RootPath] = Field(
-        Path(__file__).parent / "out",
+        REPO_ROOT / "rib_scripts/rib_build/out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
@@ -184,7 +190,7 @@ class RIBConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def verify_model_info(self) -> "RIBConfig":
+    def verify_model_info(self) -> "RibBuildConfig":
         """Exactly one of tlens_pretrained, tlens_model_path, mlp_path, modular_mlp_config must be
         set.
 
@@ -207,7 +213,38 @@ class RIBConfig(BaseModel):
         return self
 
 
-def _verify_compatible_configs(config: RIBConfig, loaded_config: RIBConfig) -> None:
+class RibBuildResults(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+    exp_name: str = Field(..., description="The name of the experiment")
+    gram_matrices: dict[str, torch.Tensor] = Field(description="Gram matrices at each node layer.")
+    # TODO: Use the raw interaction rotations
+    interaction_rotations: list[dict[str, Any]] = Field(
+        description="Interaction rotations at each node layer."
+    )
+    # TODO: Use the raw eigenvector objects
+    eigenvectors: list[dict[str, Any]] = Field(description="Eigenvectors at each node layer.")
+
+    edges: list[tuple[str, torch.Tensor]] = Field(description="The edges between each node layer.")
+    dist_info: DistributedInfo = Field(
+        description="Information about the parallelisation setup used for the run."
+    )
+    contains_all_edges: bool = Field(
+        description="True if there is no parallelisation or if the edges have been combined (as is "
+        "done in rib.utils.combine_edges)."
+    )
+    config: RibBuildConfig = Field(description="The config used to build the graph.")
+    ml_model_config: Union[MLPConfig, ModularMLPConfig, SequentialTransformerConfig] = Field(
+        discriminator="config_type", description="The config of the model used to build the graph."
+    )
+    calc_C_time: Optional[str] = Field(
+        None, description="The time taken to calculate the interaction rotations."
+    )
+    calc_edges_time: Optional[str] = Field(
+        None, description="The time taken to calculate the edges."
+    )
+
+
+def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildConfig) -> None:
     """Ensure that the config for calculating edges is compatible with that used to calculate Cs.
 
     TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
@@ -257,7 +294,7 @@ def _verify_compatible_configs(config: RIBConfig, loaded_config: RIBConfig) -> N
 
 
 def load_interaction_rotations(
-    config: RIBConfig,
+    config: RibBuildConfig,
 ) -> tuple[
     dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]
 ]:
@@ -281,7 +318,7 @@ def load_interaction_rotations(
                 f" {loaded_key}"
             )
 
-    loaded_config = RIBConfig(**loaded_config_dict)
+    loaded_config = RibBuildConfig(**loaded_config_dict)
     _verify_compatible_configs(config, loaded_config)
 
     Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
@@ -290,7 +327,7 @@ def load_interaction_rotations(
 
 
 def rib_build(
-    config_path_or_obj: Union[str, RIBConfig],
+    config_path_or_obj: Union[str, RibBuildConfig],
     force: bool = False,
     n_pods: int = 1,
     pod_rank: int = 0,
@@ -314,7 +351,7 @@ def rib_build(
     Returns:
         Results of the graph build
     """
-    config = load_config(config_path_or_obj, config_model=RIBConfig)
+    config = load_config(config_path_or_obj, config_model=RibBuildConfig)
     set_seed(config.seed)
 
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
@@ -323,6 +360,7 @@ def rib_build(
     device = get_device_mpi(dist_info)
     dtype = TORCH_DTYPES[config.dtype]
 
+    out_file: Optional[Path] = None
     if config.out_dir is not None:
         config.out_dir.mkdir(parents=True, exist_ok=True)
         obj_name = "graph" if config.calculate_edges else "Cs"
@@ -343,19 +381,18 @@ def rib_build(
         mlp_config: Union[MLPConfig, ModularMLPConfig]
         if config.mlp_path is not None:
             with open(config.mlp_path.parent / "config.yaml", "r") as f:
-                model_config_dict = yaml.safe_load(f)
-            mlp_config = MLPConfig(**model_config_dict["model"])
+                raw_model_config_dict = yaml.safe_load(f)
+            mlp_config = MLPConfig(**raw_model_config_dict["model"])
         else:
             assert config.modular_mlp_config is not None
             mlp_config = config.modular_mlp_config
 
         model = load_mlp(
             mlp_config, mlp_path=config.mlp_path, fold_bias=True, device=device, seed=config.seed
-        ).to(device=device, dtype=dtype)
+        ).to(device=torch.device(device), dtype=dtype)
         assert model.has_folded_bias, "MLP must have folded bias to run RIB"
-        model_config_dict = mlp_config.model_dump()
     else:
-        model, model_config_dict = load_sequential_transformer(
+        model = load_sequential_transformer(
             node_layers=config.node_layers,
             last_pos_module_type=config.last_pos_module_type,
             tlens_pretrained=config.tlens_pretrained,
@@ -504,22 +541,23 @@ def rib_build(
 
     eigenvectors = [asdict(U_info) for U_info in Us]
 
-    results: RibBuildResults = {
-        "exp_name": config.exp_name,
-        "gram_matrices": {k: v.cpu() for k, v in gram_matrices.items()},
-        "interaction_rotations": interaction_rotations,
-        "eigenvectors": eigenvectors,
-        "edges": [(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
-        "dist_info": dist_info.to_dict(),
-        "config": json.loads(config.model_dump_json()),
-        "model_config_dict": model_config_dict,
-        "calc_C_time": calc_C_time,
-        "calc_edges_time": calc_edges_time,
-    }
+    results = RibBuildResults(
+        exp_name=config.exp_name,
+        gram_matrices={k: v.cpu() for k, v in gram_matrices.items()},
+        interaction_rotations=interaction_rotations,
+        eigenvectors=eigenvectors,
+        edges=[(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
+        dist_info=dist_info,
+        contains_all_edges=dist_info.global_size == 1,  # True if no parallelisation
+        config=config,
+        ml_model_config=model.cfg,
+        calc_C_time=calc_C_time,
+        calc_edges_time=calc_edges_time,
+    )
 
-    if config.out_dir is not None:
+    if out_file is not None:
         # Save the results (which include torch tensors) to file
-        torch.save(results, out_file)
+        torch.save(results.model_dump(), out_file)
         logger.info("Saved results to %s", out_file)
 
     return results

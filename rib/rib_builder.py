@@ -71,7 +71,6 @@ from rib.log import logger
 from rib.models import (
     MLP,
     MLPConfig,
-    ModularMLP,
     ModularMLPConfig,
     SequentialTransformer,
     SequentialTransformerConfig,
@@ -104,8 +103,8 @@ class RibBuildConfig(BaseModel):
     )
     mlp_path: Optional[RootPath] = Field(
         None,
-        description="Path to the saved MLP model. If None, we expect the MLP class to not be "
-        "randomly initialized (e.g. like in the ModularMLP class).",
+        description="Path to the saved MLP model. If None, we expect the MLP class to be "
+        "initialized with manual weights (such as in the case of a modular MLP).",
     )
     modular_mlp_config: Optional[ModularMLPConfig] = Field(
         None,
@@ -376,7 +375,7 @@ def rib_build(
     calc_edges_time = None
 
     # Load model
-    model: Union[SequentialTransformer, MLP, ModularMLP]
+    model: Union[SequentialTransformer, MLP]
     if config.mlp_path is not None or config.modular_mlp_config is not None:
         mlp_config: Union[MLPConfig, ModularMLPConfig]
         if config.mlp_path is not None:

@@ -478,7 +478,7 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
 def test_modular_mlp_rotate_final_layer_invariance(
     basis_formula, edge_formula, rtol=1e-7, atol=1e-8
 ):
-    """Test that the non-final edges are the same for ModularMLP whether or not we rotate the final layer."""
+    """Test that non-final edges are the same for modular MLP irrespective of final layer rotation."""
     config = get_build_config_modular_mlp(
         basis_formula=basis_formula, edge_formula=edge_formula, dtype_str="float64"
     )

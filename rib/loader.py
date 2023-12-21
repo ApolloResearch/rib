@@ -25,7 +25,7 @@ from rib.data import (
 )
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.mlp import MLP, MLPConfig
-from rib.models.modular_mlp import ModularMLP, ModularMLPConfig
+from rib.models.modular_mlp import ModularMLPConfig, create_modular_mlp
 from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.settings import REPO_ROOT
 from rib.utils import get_data_subset, train_test_split
@@ -123,10 +123,10 @@ def load_mlp(
     device: str,
     fold_bias: bool = True,
     seed: Optional[int] = None,
-) -> Union[MLP, ModularMLP]:
-    mlp: Union[MLP, ModularMLP]
+) -> MLP:
+    mlp: MLP
     if isinstance(config, ModularMLPConfig):
-        mlp = ModularMLP(config, seed=seed)
+        mlp = create_modular_mlp(config, seed=seed)
         mlp.to(device)
     else:
         assert isinstance(config, MLPConfig)
@@ -454,7 +454,7 @@ def load_model_and_dataset_from_rib_results(
         assert (
             results.ml_model_config.config_type == "MLP"
             and results.config.modular_mlp_config is None
-        ), "This function only works with MLPs, not ModularMLPs (which have no labels)."
+        ), "This function is not compatible with modular MLPs (which have no labels)."
         model = load_mlp(
             config=results.ml_model_config,
             mlp_path=results.config.mlp_path,

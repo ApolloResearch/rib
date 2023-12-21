@@ -352,20 +352,20 @@ def put_into_submatrix_(
     For example,
     >>> full = torch.zeros(4, 4)
     >>> new_sub_matrix = torch.ones(3, 3)
-    >>> row_mask = torch.tensor([0, 1])
-    >>> col_mask = torch.tensor([0, 1, 2])
-    >>> put_into_submatrix(full, new_sub_matrix, row_mask, col_mask)
+    >>> row_idxs = torch.tensor([0, 1])
+    >>> col_idxs = torch.tensor([0, 1, 2])
+    >>> put_into_submatrix(full, new_sub_matrix, row_idxs, col_idxs)
     tensor([[1., 1., 1., 0.],
             [1., 1., 1., 0.],
             [0., 0., 0., 0.],
             [0., 0., 0., 0.]])
 
     This is not to be confused with:
-    >>> full[row_mask, col_mask] = new_sub_matrix
-    which errors as row_mask and col_mask are not broadcastable.
+    >>> full[row_idxs, col_idxs] = new_sub_matrix
+    which errors as row_idxs and col_idxs are not broadcastable.
     Or
-    >>> full[row_mask, :][:, col_mask] = new_sub_matrix
-    which doesn't change full at all, as the first full[row_mask, :] creates a copy of full instead
+    >>> full[row_idxs, :][:, col_idxs] = new_sub_matrix
+    which doesn't change full at all, as the first full[row_idxs, :] creates a copy of full instead
     of an in-place view. Pytorch avoids this for single indexing in assignemtns but not for double
     indexing in assignments!
     """

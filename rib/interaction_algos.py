@@ -23,9 +23,9 @@ class InteractionRotation:
 
     node_layer_name: str
     out_dim: int  # Equal to d_hidden_extra_trunc if C is not None and d_hidden otherwise
-    C: Optional[Float[Tensor, "d_hidden d_hidden_extra_trunc"]] = None
+    C: Optional[Float[Tensor, "orig_coords rib_dir_idx"]] = None
     # pseudoinverse of C, not needed for the output node layer
-    C_pinv: Optional[Float[Tensor, "d_hidden_extra_trunc d_hidden"]] = None
+    C_pinv: Optional[Float[Tensor, "rib_dir_idx orig_coords"]] = None
 
     def __post_init__(self):
         if self.C is not None:

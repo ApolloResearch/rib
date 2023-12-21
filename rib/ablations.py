@@ -22,6 +22,7 @@ from rib.linalg import calc_rotation_matrix
 from rib.loader import load_model_and_dataset_from_rib_results
 from rib.log import logger
 from rib.models import MLP, SequentialTransformer
+from rib.rib_builder import RibBuildResults
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     calc_exponential_ablation_schedule,
@@ -243,7 +244,7 @@ def ablate_node_layers_and_eval(
 
 
 def load_basis_matrices(
-    interaction_graph_info: dict,
+    interaction_graph_info: RibBuildResults,
     ablation_node_layers: list[str],
     ablation_type: Literal["rib", "orthogonal"],
     dtype: torch.dtype,
@@ -264,7 +265,7 @@ def load_basis_matrices(
     # Get the basis vecs and their pseudoinverses using the module_names as keys
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
     for module_name in ablation_node_layers:
-        for basis_info in interaction_graph_info[basis_matrix_key]:
+        for basis_info in getattr(interaction_graph_info, basis_matrix_key):
             if basis_info["node_layer_name"] == module_name:
                 if ablation_type == "rib":
                     assert basis_info["C"] is not None, f"{module_name} has no C matrix."
@@ -320,10 +321,10 @@ def load_bases_and_ablate(
             raise FileExistsError("Not overwriting output file")
 
     set_seed(config.seed)
-    interaction_graph_info = torch.load(config.interaction_graph_path)
+    interaction_graph_info = RibBuildResults(**torch.load(config.interaction_graph_path))
 
     assert set(config.ablation_node_layers) <= set(
-        interaction_graph_info["config"]["node_layers"]
+        interaction_graph_info.config.node_layers
     ), "The node layers in the config must be a subset of the node layers in the interaction graph."
 
     assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."

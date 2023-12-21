@@ -5,6 +5,7 @@ from typing import Any, Iterable, Literal, Optional, Union, cast
 import fire
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import Dataset
@@ -34,14 +35,9 @@ from rib.interaction_algos import (
     calculate_interaction_rotations,
 )
 from rib.log import logger
-from rib.mpi_utils import (
-    adjust_logger_mpi,
-    check_sizes_mpi,
-    get_device_mpi,
-    get_mpi_info,
-)
+from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
 from rib.linalg import eigendecompose
-from rib.loader import create_data_loader, load_dataset, load_sequential_transformer
+from rib.loader import get_dataset_chunk, load_dataset, load_sequential_transformer
 from rib.models.utils import get_model_attr, get_model_weight
 from rib.types import TORCH_DTYPES
 from rib.utils import (
@@ -111,12 +107,7 @@ def get_Cs(
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
-        gram_train_loader = create_data_loader(
-            dataset,
-            shuffle=False,
-            batch_size=config.gram_batch_size or config.batch_size,
-            seed=config.seed,
-        )
+        gram_train_loader = DataLoader(dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False)
 
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
         gram_matrices = collect_gram_matrices(
@@ -129,9 +120,7 @@ def get_Cs(
             hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
         )
 
-        graph_train_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed)
-
-        logger.info("Calculating interaction rotations (Cs).")
+        graph_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
         # Calls on collect_M_dash_and_Lambda_dash
         # Builds sqrt sorted Lambda matrix and its inverse
         Cs, Us, Lambda_abs_sqrts, Lambda_abs_sqrt_pinvs, U_D_sqrt_pinv_Vs, U_D_sqrt_Vs, Lambda_dashes = calculate_interaction_rotations(
@@ -149,7 +138,6 @@ def get_Cs(
     else:
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
 
-    # C_info may be None for final (output) layer if rotate_output_logits=False
     C_list = [C_info.C for C_info in Cs if C_info is not None]
     C_pinv_list = [C_info.C_pinv for C_info in Cs if C_info is not None]
 
@@ -169,7 +157,7 @@ def get_relu_similarities(
     hooked_model: HookedModel,
     Cs_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
     graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
     relu_similarities: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
@@ -201,7 +189,7 @@ def get_cluster_grams(
     hooked_model: HookedModel,
     all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
 ) -> dict[str, list[Float[Tensor, "d_cluster d_cluster"]]]:
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
 
     cluster_grams = collect_cluster_grams(
         hooked_model=hooked_model,
@@ -229,7 +217,7 @@ def get_cluster_fns(
     hooked_model: HookedModel,
     all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
 ) -> dict[str, list[Float[Tensor, "d_cluster"]]]:
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size, drop_last=True)
+    graph_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
 
     cluster_fns = collect_cluster_fns(
         hooked_model=hooked_model,
@@ -272,50 +260,49 @@ def check_and_open_file(
 
 # ============================================================================
 
-def transformer_relu_main(config_path_or_obj: Union[str, LMConfig], force: bool = False):
+def main(config_path_or_obj: Union[str, LMConfig], force: bool = False, n_pods: int = 1, pod_rank: int = 0):
     """Build the interaction graph and store it on disk."""
     config = load_config(config_path_or_obj, config_model=LMConfig)
     set_seed(config.seed)
+
+    dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
+    adjust_logger_dist(dist_info)
+    device = get_device_mpi(dist_info)
 
     relu_matrices_save_file = Path(__file__).parent / f"similarity_metric_{config.relu_metric_type}_pythia"
     Cs_save_file = Path(__file__).parent / "Cs_pythia"
     cluster_gram_save_file = Path(__file__).parent / "cluster_gram_pythia"
 
-    mpi_info = get_mpi_info()
-    adjust_logger_mpi(logger)
-    device = get_device_mpi(logger)
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        obj_name = "graph" if config.calculate_edges else "Cs"
+        global_rank_suffix = (
+            f"_global_rank{dist_info.global_rank}" if dist_info.global_size > 1 else ""
+        )
+        f_name = f"{config.exp_name}_rib_{obj_name}{global_rank_suffix}.pt"
+        out_file = config.out_dir / f_name
+        if not check_outfile_overwrite(out_file, force):
+            dist_info.local_comm.Abort()  # stop this and other processes
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     out_dir = Path(__file__).parent / f"out_pythia_relu / type_{config.relu_metric_type}"
     out_dir.mkdir(parents=True, exist_ok=True)
-    if config.calculate_edges:
-        out_file = out_dir / f"{config.exp_name}_rib_graph.pt"
-    else:
-        out_file = out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if mpi_info.is_main_process and not check_outfile_overwrite(
-        out_file, config.force_overwrite_output or force, logger=logger
-    ):
-        mpi_info.comm.Abort()  # stop this and other processes
-        return None  # this is unreachable as Abort will terminate
 
     dtype = TORCH_DTYPES[config.dtype]
-    calc_C_time = None
-    calc_edges_time = None
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Time each stage
-    load_model_data_start_time = time.time()
     seq_model, tlens_cfg_dict = load_sequential_transformer(
         node_layers=config.node_layers,
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
-        eps=config.eps,
+        fold_bias=True,
         dtype=dtype,
         device=device,
     )
     seq_model.eval()
     seq_model.to(device=torch.device(device), dtype=dtype)
-    print_all_modules(seq_model)
     hooked_model = HookedModel(seq_model)
 
     return_set = cast(Literal["train", "test", "all"], config.dataset.return_set)
@@ -323,8 +310,9 @@ def transformer_relu_main(config_path_or_obj: Union[str, LMConfig], force: bool 
         dataset_config=config.dataset,
         return_set=return_set,
         tlens_model_path=config.tlens_model_path,
+        model_n_ctx=seq_model.cfg.n_ctx,
     )
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
     gram_matrices, Cs, Us = load_interaction_rotations(config=config)
     edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
 
@@ -404,4 +392,4 @@ def transformer_relu_main(config_path_or_obj: Union[str, LMConfig], force: bool 
 
 
 if __name__ == "__main__":
-    fire.Fire(transformer_relu_main)
+    fire.Fire(main)

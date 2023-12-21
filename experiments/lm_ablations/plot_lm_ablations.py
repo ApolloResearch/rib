@@ -60,7 +60,7 @@ def main(*results_files: str, force: bool = False) -> None:
         eval_type=eval_type,
         ablation_types=ablation_types,
         log_scale=False,
-        xlim=(0.0, 20.0) if eval_type == "accuracy" else None,
+        xlim=(0.0, 40.0) if eval_type == "accuracy" else None,
         ylim=(0.0, 1.0) if eval_type == "accuracy" else (3.2, 5),
     )
 

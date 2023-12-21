@@ -891,7 +891,8 @@ def collect_hessian(
     weight_module_names: list[str],
     copy_seq_model: nn.Module,
     C_list: list[Float[Tensor, "out_hidden_trunc in_hidden"]],
-    use_residual_stream: Optional[bool] = False
+    rotate: bool = False,
+    trunc_idx: int = None,
 ) -> list[float]:
     """Calculate denominator for ReLU similarity metrics as l2 norm of function sizes in layer l+1.
 
@@ -903,6 +904,7 @@ def collect_hessian(
         weight_module_names: Names of sections to form Hessian from i.e. these are the weight
             parameters the derivatives will be taken with respect to.
     """
+    dataset_size = len(data_loader.dataset)
     input_act_hook = Hook(
         name=input_module_name,
         data_key="hessian",
@@ -912,18 +914,21 @@ def collect_hessian(
             "weight_module_names": weight_module_names,
             "copy_seq_model": copy_seq_model,
             "C_list": C_list,
-            "use_residual_stream": use_residual_stream,
+            "rotate": rotate,
+            "trunc_idx": trunc_idx,
         }
     )
 
     run_dataset_through_model(hooked_model, data_loader, hooks=[input_act_hook], dtype=dtype, device=device)
-    H1 = hooked_model.hooked_data[input_module_name][f"H1 {input_module_name}"]
-    H2 = hooked_model.hooked_data[input_module_name][f"H2 {input_module_name}"]
-    M12 = hooked_model.hooked_data[input_module_name][f"M12 {input_module_name}"]
+    H1 = torch.div(hooked_model.hooked_data[input_module_name][f"H1 {input_module_name}"], dataset_size)
+    H2 = torch.div(hooked_model.hooked_data[input_module_name][f"H2 {input_module_name}"], dataset_size) # [513, 513, d_trunc_1, d_trunc_1]
+    M12 = torch.div(hooked_model.hooked_data[input_module_name][f"M12 {input_module_name}"], dataset_size) # [129, 513, d_trunc_1, d_trunc_2]
     hooked_model.clear_hooked_data()
 
-    H2_flat = rearrange(H2, 'a b c d -> (a c) (b d)')
-    M12_flat = rearrange(M12, 'a b c d -> (a d) (b c)')
+    # We need to be careful to note how H was constructed re: unrolling of weight derivative into a vector
+    # See Overleaf on more comments on unrolling and how this affects our guess eigenvector tests
+    H2_flat = rearrange(H2, 'a b c d -> (c a) (d b)') # out1 out1 in1 in1
+    M12_flat = rearrange(M12, 'a b c d -> (a d) (c b)') # out2 out1 in1 in2
     top_row = torch.cat((H1, M12_flat), dim=1)
     bottom_row = torch.cat((M12_flat.T, H2_flat), dim=1)
     H = torch.cat((top_row, bottom_row), dim=0)

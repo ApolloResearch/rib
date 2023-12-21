@@ -82,6 +82,11 @@ class MLPConfig(BaseModel):
 class LMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exp_name: str = Field(..., description="The name of the experiment")
+    out_dir: Optional[RootPath] = Field(
+        Path(__file__).parent / "out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
+    )
     seed: int = Field(...,
                       description="The random seed value for reproducibility")
     tlens_pretrained: Optional[Literal["gpt2", "pythia-14m"]] = Field(

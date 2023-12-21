@@ -933,14 +933,16 @@ def collect_hessian_forward_hook_fn(
     weight_module_names: list[str],
     copy_seq_model: nn.Module,
     C_list: list[Float[Tensor, "out_hidden_trunc in_hidden"]],
-    use_residual_stream: bool,
-    output_dim: int = 129,
+    rotate: bool,
+    trunc_idx: int,
 ) -> None:
     """Hook function for collecting output activations and passing into Jacobian.
     This hook function finds the Jacobian for all weight_modules and forms the Hessian from that.
+    Hooks input and activation layer, such that outputs are fn_2 and inputs are fn_1.
+    Residual stream always ignored.
 
     Args:
-        module: Module that the hook is attached to (not used).
+        module: Module that the hook is attached to.
         inputs: Inputs to the module (not used).
         output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
             and positional indices. If no positional indices, assumes one output.
@@ -952,26 +954,23 @@ def collect_hessian_forward_hook_fn(
     """
     module_dict = {name: get_model_attr(copy_seq_model, name) for name in weight_module_names}
     module = _remove_hooks(module)
-    DATASET_SIZE = 60000
 
     is_lm = True if inputs[0].dim() == 3 else False
     outputs = output if isinstance(output, tuple) else (output,)
-    resid_stream_size = inputs[0].shape[-1]
-    mlp_layer_size = inputs[1].shape[-1]
     # Calculate pre-activations
     for child in module.named_children():
-        if child[0] == '0':
-            preactivations = child[1].forward(*inputs)
+        if child[0] == '0': # Very brittle naming method - be careful as this line may need to change in future
+            preactivations = child[1].forward(*inputs) # Preactivations always tuple
+
+    resid_stream_size = preactivations[0].shape[-1] # e.g. 129
+    mlp_layer_size = preactivations[1].shape[-1] # MLP layer width, equal to number of ReLU activations
 
     lm_einops_pattern = "b p d_hidden_combined -> (b p) d_hidden_combined"
-    if is_lm and not use_residual_stream:
+    if is_lm:
         inputs = rearrange(inputs[1], lm_einops_pattern)
         outputs = rearrange(outputs[1], lm_einops_pattern)
         preactivations = rearrange(preactivations[1], lm_einops_pattern)
         C_0, C_1 = C_list[0][resid_stream_size:,:], C_list[1][resid_stream_size:,:]
-    elif is_lm and use_residual_stream:
-        inputs = rearrange(torch.cat([x for x in inputs], dim=-1), lm_einops_pattern)
-        outputs = rearrange(torch.cat([x for x in outputs], dim=-1), lm_einops_pattern)
     else:  # Inputs always tuple, and in this case we don't have LM
         inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
         outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
@@ -981,16 +980,25 @@ def collect_hessian_forward_hook_fn(
     for name, param in module_dict["sections.section_1.0"].named_parameters():
         if "W" in name: w_out = param
 
-    rotated_fn_1 = inputs @ C_0
-    rotated_fn_2 = (operator * preactivations) @ C_1
-
-    ## Calculate H1
-    h1_unit = calc_gram_matrix(rotated_fn_2, DATASET_SIZE)
-    H1 = torch.block_diag(*([h1_unit]*mlp_layer_size))
-    ## Calculate H2 - 4-tensor needs flattening later
-    H2 = torch.div(torch.einsum('ij,bi,bj,bk,bl -> ijkl', w_out @ w_out.T, operator, operator, rotated_fn_1, rotated_fn_1), DATASET_SIZE)
-    ## Calculate M12 - 4-tensor needs flattening later
-    M12 = torch.div(torch.einsum('ij,bj,bk,bl -> ijkl', w_out.T, operator, rotated_fn_1, rotated_fn_2), DATASET_SIZE)
+    if rotate:
+        fn_1 = inputs @ C_0.to(inputs.dtype).to(inputs.device)
+        fn_2 = outputs @ C_1.to(inputs.dtype).to(preactivations.device)
+        ## Calculate H1, derivative wrt layer 2
+        h1_unit = torch.einsum('bi,bj -> ij', fn_2, fn_2)
+        H1 = torch.block_diag(*([h1_unit] * resid_stream_size))
+        ## Calculate H2, derivative wrt layer 1 - 4-tensor needs flattening later
+        H2 = torch.einsum('ij,bi,bj,bk,bl -> ijkl', w_out @ w_out.T, operator, operator, fn_1, fn_1)
+        ## Calculate M12 - 4-tensor needs flattening later
+        M12 = torch.einsum('ij,bj,bk,bl -> ijkl', w_out.T, operator, fn_1, fn_2)
+    else: # Truncate MLP layer to trunc_idx (NOT input layer - the information from all input nodes goes to output)
+        fn_1, fn_2_trunc = inputs, outputs[:,:trunc_idx] # Retain only first few nodes of MLP neurons
+        h1_unit = torch.einsum('bi,bj -> ij', fn_2_trunc, fn_2_trunc)
+        H1 = torch.block_diag(*([h1_unit] * resid_stream_size))
+        w_out_trunc = w_out[:trunc_idx, :] # w_out natively has dimensions [513,129] so we want to truncate in the 513 dimension
+        operator_trunc = operator[:, :trunc_idx]
+        H2 = torch.einsum('ij,bi,bj,bk,bl -> ijkl', w_out_trunc @ w_out_trunc.T, operator_trunc, operator_trunc, fn_1, fn_1)
+        M12 = torch.einsum('ij,bj,bk,bl -> ijkl', w_out_trunc.T, operator_trunc, fn_1, fn_2_trunc)
+        assert torch.isclose(M12[0,1,2,3], w_out_trunc.T[0,1] * torch.sum(operator_trunc[:,1] * fn_1[:,2] * fn_2_trunc[:,3], dim=0)), "Error calculating M12"
 
     torch.cuda.empty_cache()
     gc.collect()

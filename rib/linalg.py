@@ -6,6 +6,7 @@ from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
+import gc
 
 from rib.types import TORCH_DTYPES, StrDtype
 
@@ -13,8 +14,8 @@ from rib.types import TORCH_DTYPES, StrDtype
 def lanczos(H: Float[Tensor, "d d"]):
     vg = torch.rand((H.shape[1]))
 
-    Lv = torch.zeros((len(vg), len(vg)), dtype=torch.float32)  # Lanczos vectors
-    Hk = torch.zeros((len(vg), len(vg)), dtype=torch.float32)  # Hamiltonian in Krylov subspace
+    Lv = torch.zeros((len(vg), len(vg)), dtype=torch.float64)  # Lanczos vectors
+    Hk = torch.zeros((len(vg), len(vg)), dtype=torch.float64)  # Hamiltonian in Krylov subspace
     Lv[0] = vg / torch.norm(vg)  # First Lanczos vector as the normalized guess vector vg
 
     # First iteration step of the Lanczos algorithm
@@ -37,7 +38,9 @@ def lanczos(H: Float[Tensor, "d d"]):
         Hk[j - 1, j] = b
         Hk[j, j - 1] = torch.conj(b)
 
-    return Hk, Lv
+    torch.cuda.empty_cache()
+    gc.collect()
+    return Hk
 
 
 def eigendecompose(

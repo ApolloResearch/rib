@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Any, Iterable, Literal, Optional, Union, cast
+from typing import Any, Iterable, Optional, Union
 
 import fire
 import matplotlib.pyplot as plt
@@ -10,6 +10,7 @@ import torch.nn as nn
 from jaxtyping import Float, Int
 from torch import Tensor
 from torch.utils.data import Dataset
+from einops import rearrange
 
 from experiments.relu_interactions.config_schemas import (
     LMConfig,
@@ -55,10 +56,7 @@ from rib.utils import (
 
 def load_interaction_rotations(
     config: LMConfig,
-) -> tuple[
-    dict[str, Float[Tensor, "d_hidden d_hidden"]
-         ], list[InteractionRotation], list[Eigenvectors]
-]:
+) -> tuple[dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]]:
     logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
     assert config.interaction_matrices_path is not None
     matrices_info = torch.load(config.interaction_matrices_path)
@@ -123,12 +121,7 @@ def get_Cs(
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
-        gram_train_loader = create_data_loader(
-            dataset,
-            shuffle=False,
-            batch_size=config.gram_batch_size or config.batch_size,
-            seed=config.seed,
-        )
+        gram_train_loader = DataLoader(dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False)
 
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
         gram_matrices = collect_gram_matrices(
@@ -141,7 +134,9 @@ def get_Cs(
             hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
         )
 
-        graph_train_loader = create_data_loader(dataset, shuffle=False, batch_size=config.batch_size, seed=config.seed)
+        graph_train_loader = DataLoader(
+            dataset=dataset, batch_size=config.batch_size, shuffle=False
+        )
 
         logger.info("Calculating interaction rotations (Cs).")
         # Calls on collect_M_dash_and_Lambda_dash
@@ -188,7 +183,7 @@ def get_relu_similarities(
     hooked_model: HookedModel,
     Cs_list: list[Float[Tensor, "d_hidden1 d_hidden2"]],
 ) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
     graph_section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
     relu_similarities: dict[str, Float[Tensor, "d_hidden d_hidden"]] = collect_relu_interactions(
@@ -267,7 +262,7 @@ def get_cluster_grams(
     hooked_model: HookedModel,
     all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
 ) -> dict[str, list[Float[Tensor, "d_cluster d_cluster"]]]:
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size)
+    graph_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False)
 
     cluster_grams = collect_cluster_grams(
         hooked_model=hooked_model,
@@ -295,7 +290,7 @@ def get_cluster_fns(
     hooked_model: HookedModel,
     all_cluster_idxs: list[list[Int[Tensor, "d_cluster"]]],
 ) -> dict[str, list[Float[Tensor, "d_cluster"]]]:
-    graph_train_loader = create_data_loader(dataset, shuffle=True, batch_size=config.batch_size, drop_last=True)
+    graph_train_loader = DataLoader(dataset=dataset, batch_size=config.batch_size, shuffle=False, drop_last=True)
 
     cluster_fns = collect_cluster_fns(
         hooked_model=hooked_model,
@@ -338,9 +333,7 @@ def check_and_open_file(
 
 # ============================================================================
 
-def main(
-    config_path_or_obj: Union[str, LMConfig], force: bool = False, n_pods: int = 1, pod_rank: int = 0
-):
+def main(config_path_or_obj: Union[str, LMConfig], force: bool = False, n_pods: int = 1, pod_rank: int = 0):
     """Build the interaction graph and store it on disk."""
     config = load_config(config_path_or_obj, config_model=LMConfig)
     set_seed(config.seed)
@@ -372,7 +365,7 @@ def main(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     dtype = TORCH_DTYPES[config.dtype]
-    device = "cpu" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     seq_model, tlens_cfg_dict = load_sequential_transformer(
         node_layers=config.node_layers,
@@ -501,10 +494,10 @@ def hessian_main(config_path_str: str):
     config = load_config(config_path, config_model=LMConfig)
     set_seed(config.seed)
 
-    Cs_save_file = Path(__file__).parent / "Cs_for_hessian"
-    Lanczos_save_file = Path(__file__).parent / "hessian_krylov"
-    hessian_eig_save_file = Path(__file__).parent / "hessian_eig"
-    out_dir = Path(__file__).parent / f"out_transformer_relu"
+    Cs_save_file = Path(__file__).parent / f"Cs_for_hessian_{config.truncation_threshold}"
+    Lanczos_save_file = Path(__file__).parent / f"hessian_krylov_{config.truncation_threshold}"
+    hessian_eig_save_file = Path(__file__).parent / f"hessian_eig_{config.truncation_threshold}"
+    out_dir = Path(__file__).parent / "out_transformer_relu"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     dtype = TORCH_DTYPES[config.dtype]
@@ -529,7 +522,7 @@ def hessian_main(config_path_str: str):
         last_pos_module_type=config.last_pos_module_type,
         tlens_pretrained=config.tlens_pretrained,
         tlens_model_path=config.tlens_model_path,
-        eps=config.eps,
+        fold_bias=True,
         dtype=dtype,
         device=device,
     )
@@ -554,26 +547,110 @@ def hessian_main(config_path_str: str):
         device=device,
         hooked_model=hooked_model,
     )
-    C_list = Cs_and_Lambdas["C"]
+    C_list, C_pinv_list = Cs_and_Lambdas["C"], Cs_and_Lambdas["C_pinv"]
+
+    weight_module_names = ["sections.section_0.0", "sections.section_1.0"]
+    module_dict = {name: get_model_attr(copy_seq_model, name) for name in weight_module_names}
+    weights = []
+    for name, param in module_dict["sections.section_0.0"].named_parameters():
+        if "W" in name:
+            w_in = param # 129, 513
+            weights.append(w_in)
+    for name, param in module_dict["sections.section_1.0"].named_parameters():
+        if "W" in name:
+            w_out = param # 513, 129
+            weights.append(w_out)
+
+    residual_stream_size, mlp_layer_size = w_in.shape[0], w_in.shape[1]
+    d_trunc_0, d_trunc_1 = C_list[0].shape[1], C_list[1].shape[1]
+
+    rotated_weights = []
+    for weight, C_pinv in zip(weights, C_pinv_list):
+        rotated_weights.append(C_pinv[:, residual_stream_size:].to(dtype).to(device) @ weight)
+
+    # ## UNROTATED HESSIAN CHECK ==========================================================
+    # trunc_idx = 100
+
+    # unrot_H = collect_hessian(
+    #     hooked_model=hooked_model,
+    #     input_module_name="sections.section_0",
+    #     data_loader=graph_train_loader,
+    #     dtype=dtype,
+    #     device=device,
+    #     weight_module_names=weight_module_names,
+    #     copy_seq_model=copy_seq_model,
+    #     C_list=C_list,
+    #     rotate=False,
+    #     trunc_idx=trunc_idx,
+    # )
+    # unrot_H = unrot_H.to(device)
+
+    # guess_unrot_eigvec = torch.zeros((trunc_idx * residual_stream_size * 2), dtype=dtype, device=device)
+    # guess_unrot_eigvec[:trunc_idx * residual_stream_size] = rearrange(-weights[1][:trunc_idx, :], 'i j -> (j i)')
+    # assert torch.allclose(guess_unrot_eigvec[:trunc_idx], -weights[1][:trunc_idx, 0])
+    # guess_unrot_eigvec[trunc_idx * residual_stream_size:] = rearrange(weights[0][:, :trunc_idx], 'i j -> (i j)')
+    # assert torch.allclose(guess_unrot_eigvec[trunc_idx * residual_stream_size:trunc_idx * (residual_stream_size+1)], weights[0][0, :trunc_idx])
+    # H_times_vec = torch.matmul(unrot_H, guess_unrot_eigvec)
+    # norm_H_times_vec = H_times_vec / torch.norm(H_times_vec)
+    # norm_guess_eigvec = guess_unrot_eigvec / torch.norm(guess_unrot_eigvec)
+
+    # mean, std = torch.mean(guess_unrot_eigvec).item(), torch.std(guess_unrot_eigvec).item()
+    # random_eigvec = torch.normal(0, std, size=(guess_unrot_eigvec.shape[0],), dtype=dtype, device=device)
+    # H_times_random_vec = torch.matmul(unrot_H, random_eigvec)
+    # norm_H_times_random_vec = H_times_random_vec / torch.norm(H_times_random_vec)
+    # norm_random_eigvec = random_eigvec / torch.norm(random_eigvec)
+
+    # if torch.allclose(norm_H_times_vec, norm_guess_eigvec, atol=1e-3) or torch.allclose(norm_H_times_vec, -norm_guess_eigvec, atol=1e-3):
+    #     print("guess_eigvec is an eigenvector of H")
+    # else:
+    #     print("guess_eigvec is not an eigenvector of H")
+    #     print(torch.norm(norm_H_times_vec - norm_guess_eigvec), torch.norm(H_times_vec))
+    #     print(torch.norm(norm_H_times_random_vec + norm_random_eigvec), torch.norm(H_times_random_vec))
+
+    ## ==================================================
 
     if Lanczos_save_file.exists():
         with Lanczos_save_file.open("rb") as f:
             Hk = torch.load(f, map_location="cpu")
     else:
         # Has to be in order of passing through model AND has to match C_list order
-        weight_module_names = ["sections.section_0.0", "sections.section_1.0"]
         H = collect_hessian(
             hooked_model=hooked_model,
-            input_module_name="sections.section_0",
+            input_module_name="sections.section_0", # Pass in input and ReLU (does not contain unembed)
             data_loader=graph_train_loader,
             dtype=dtype,
             device=device,
             weight_module_names=weight_module_names,
             copy_seq_model=copy_seq_model,
             C_list=C_list,
-            use_residual_stream=config.use_residual_stream,
+            rotate=True,
         )
-        Hk, Lv = lanczos(H)
+        H = H.to(device)
+
+        ## ROTATED HESSIAN CHECK ==============================================
+        guess_eigvec = torch.zeros((mlp_layer_size * d_trunc_0 + residual_stream_size * d_trunc_1), dtype=dtype, device=device)
+        # Transpose for convention of [output, input]
+        guess_eigvec[:d_trunc_1 * residual_stream_size] = rearrange(-rotated_weights[1], 'i j -> (j i)')
+        assert torch.allclose(guess_eigvec[:d_trunc_1], -rotated_weights[1][:, 0])
+        guess_eigvec[d_trunc_1 * residual_stream_size:] = rearrange(rotated_weights[0], 'i j -> (i j)')
+        H_times_vec = torch.matmul(H, guess_eigvec)
+        norm_H_times_vec = H_times_vec / torch.norm(H_times_vec)
+        norm_guess_eigvec = guess_eigvec / torch.norm(guess_eigvec)
+
+        mean, std = torch.mean(guess_eigvec).item(), torch.std(guess_eigvec).item()
+        random_eigvec = torch.normal(mean, std, size=(guess_eigvec.shape[0],), dtype=dtype, device=device)
+        H_times_random_vec = torch.matmul(H, random_eigvec)
+        norm_H_times_random_vec = H_times_random_vec / torch.norm(H_times_random_vec)
+        norm_random_eigvec = random_eigvec / torch.norm(random_eigvec)
+
+        if torch.allclose(norm_H_times_vec, norm_guess_eigvec, atol=1e-4) or torch.allclose(norm_H_times_vec, -norm_guess_eigvec, atol=1e-4):
+            print("guess_eigvec is an eigenvector of H")
+        else:
+            print("guess_eigvec is not an eigenvector of H")
+            print(torch.norm(norm_H_times_vec - norm_guess_eigvec), torch.norm(H_times_vec))
+            print(torch.norm(norm_H_times_random_vec + norm_random_eigvec), torch.norm(H_times_random_vec))
+
+        Hk = lanczos(H)
         with open(Lanczos_save_file, "wb") as f:
             torch.save(Hk, f)
 
@@ -587,8 +664,7 @@ def hessian_main(config_path_str: str):
         with open(hessian_eig_save_file, "wb") as f:
             torch.save({"vals": sorted_eigenvalues, "vecs": sorted_eigenvectors}, f)
 
-    print(len(sorted_eigenvalues[sorted_eigenvalues < 5]))
-    plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"Hessian MLP")
+        plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"Hessian MLP")
 
 
 if __name__ == "__main__":

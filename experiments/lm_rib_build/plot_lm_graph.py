@@ -12,6 +12,7 @@ from typing import Optional, Union
 import fire
 import torch
 
+from rib.log import logger
 from rib.plotting import plot_interaction_graph
 from rib.utils import check_outfile_overwrite
 
@@ -54,7 +55,7 @@ def main(
         node_labels=node_labels,
     )
 
-    print(f"Saved plot to {out_file}")
+    logger.info(f"Saved plot to {out_file}")
 
 
 if __name__ == "__main__":

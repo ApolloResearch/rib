@@ -2,6 +2,7 @@ import logging
 from logging.config import dictConfig
 from pathlib import Path
 
+logging.captureWarnings(True)
 DEFAULT_LOGFILE = Path(__file__).resolve().parent.parent / "logs" / "logs.log"
 
 

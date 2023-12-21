@@ -12,6 +12,7 @@ from experiments.lm_ablations.run_lm_ablations import Config as AblationConfig
 from experiments.lm_ablations.run_lm_ablations import main as ablation_main
 from experiments.lm_rib_build.run_lm_rib_build import Config as RibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as rib_main
+from rib.log import logger
 
 
 @pytest.mark.slow
@@ -63,7 +64,9 @@ class TestPythiaFloatingPointErrors:
                 # Try to reduce memory usage for CI
                 rib_config["batch_size"] = 1
                 rib_config["gram_batch_size"] = 1
-            print("Running RIB build with batch size", rib_config["batch_size"], "for", dtype)
+            logger.info(
+                ("Running RIB build with batch size", rib_config["batch_size"], "for", dtype)
+            )
             rib_main(RibConfig(**rib_config))
             basis_matrices = torch.load(
                 f"{temp_dir}/float-precision-test-pythia-14m-{dtype}_rib_Cs.pt"
@@ -171,7 +174,9 @@ class TestPythiaFloatingPointErrors:
             if not torch.cuda.is_available():
                 # Try to reduce memory usage for CI
                 ablation_config["batch_size"] = 1
-            print("Running ablations with batch size", ablation_config["batch_size"], "for", dtype)
+            logger.info(
+                ("Running ablations with batch size", ablation_config["batch_size"], "for", dtype)
+            )
             ablation_main(AblationConfig(**ablation_config))
             ablation_result = json.load(open(f"{temp_dir}/{exp_name}_ablation_results.json"))[
                 "results"

@@ -1,4 +1,4 @@
-from typing import Any, Iterable
+from typing import Iterable
 
 import torch
 from jaxtyping import Float
@@ -10,9 +10,9 @@ from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import InteractionRotation
 
 
-def parse_c_infos(c_infos: list[dict[str, Any]]) -> dict[str, InteractionRotation]:
+def parse_c_infos(c_infos: list[InteractionRotation]) -> dict[str, InteractionRotation]:
     """Converts the list of dicts from loading rib results into a dict of InteractionRotations."""
-    return {c_info["node_layer_name"]: InteractionRotation(**c_info) for c_info in c_infos}
+    return {c_info.node_layer_name: c_info for c_info in c_infos}
 
 
 def get_rib_acts(

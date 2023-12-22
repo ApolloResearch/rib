@@ -1,14 +1,21 @@
 """This module contains algorithms related to interaction rotations
 """
 
-from dataclasses import dataclass
 from typing import Literal, Optional
 
 import torch
 from jaxtyping import Float, Int
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    PlainSerializer,
+    ValidationInfo,
+)
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from typing_extensions import Annotated
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
@@ -16,33 +23,49 @@ from rib.linalg import eigendecompose, pinv_diag, shift_matrix
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.transformer import SequentialTransformer
 
+UType = Float[Tensor, "d_hidden d_hidden_trunc"]
+CType = Float[Tensor, "d_hidden d_hidden_extra_trunc"]
+C_pinvType = Float[Tensor, "d_hidden_extra_trunc d_hidden"]
 
-@dataclass
-class InteractionRotation:
-    """Dataclass storing the interaction rotation matrix and its inverse for a node layer."""
 
+def check_second_dim_is_out_dim(
+    X: Optional[torch.Tensor], info: ValidationInfo
+) -> Optional[torch.Tensor]:
+    if X is not None:
+        assert (
+            X.shape[1] == info.data["out_dim"]
+        ), f"Expected tensor to have shape (_, {info.data['out_dim']}). Got {X.shape}."
+    return X
+
+
+def cast_to_cpu(X: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+    if X is not None:
+        return X.cpu()
+    return X
+
+
+class InteractionRotation(BaseModel):
+    """Stores an interaction rotation matrix and its pseudo-inverse for a node layer."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     node_layer_name: str
     out_dim: int  # Equal to d_hidden_extra_trunc if C is not None and d_hidden otherwise
-    C: Optional[Float[Tensor, "d_hidden d_hidden_extra_trunc"]] = None
+    C: Annotated[
+        Optional[CType], AfterValidator(check_second_dim_is_out_dim), PlainSerializer(cast_to_cpu)
+    ] = None
     # pseudoinverse of C, not needed for the output node layer
-    C_pinv: Optional[Float[Tensor, "d_hidden_extra_trunc d_hidden"]] = None
-
-    def __post_init__(self):
-        if self.C is not None:
-            assert self.C.shape[1] == self.out_dim, f"Expected C to have shape (_, {self.out_dim})"
+    C_pinv: Annotated[Optional[C_pinvType], PlainSerializer(cast_to_cpu)] = None
 
 
-@dataclass
-class Eigenvectors:
-    """Dataclass storing the eigenvectors of a node layer."""
+class Eigenvectors(BaseModel):
+    """Stores eigenvectors of a node layer."""
 
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     node_layer_name: str
     out_dim: int  # Equal to d_hidden_trunc if U is not None and d_hidden otherwise
-    U: Optional[Float[Tensor, "d_hidden d_hidden_trunc"]] = None
-
-    def __post_init__(self):
-        if self.U is not None:
-            assert self.U.shape[1] == self.out_dim, f"Expected U to have shape (_, {self.out_dim})"
+    U: Annotated[
+        Optional[UType], AfterValidator(check_second_dim_is_out_dim), PlainSerializer(cast_to_cpu)
+    ] = None
 
 
 def build_sorted_lambda_matrices(
@@ -339,12 +362,8 @@ def calculate_interaction_rotations(
             Lambda_abs, truncation_threshold
         )
 
-        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
-            (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
-        )
-        C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
-            (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
-        )
+        C: CType = (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
+        C_pinv: C_pinvType = (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
         Cs.append(
             InteractionRotation(node_layer_name=node_layer, out_dim=C.shape[1], C=C, C_pinv=C_pinv)
         )

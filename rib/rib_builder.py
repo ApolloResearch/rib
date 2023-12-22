@@ -27,9 +27,8 @@ distribute as evenly as possible across all availible GPUs. The rank-0 process w
 and output it as a single file.
 """
 import time
-from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Literal, Optional, Union
+from typing import Literal, Optional, Union
 
 import torch
 import yaml
@@ -154,15 +153,12 @@ class RibBuildConfig(BaseModel):
         description="Module type in which to only output the last position index. For modular"
         "arithmetic only.",
     )
-
     n_intervals: int = Field(
         ...,
         description="The number of intervals to use for the integrated gradient approximation."
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
-
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
-
     calculate_edges: bool = Field(
         True,
         description="Whether to calculate the edges of the interaction graph.",
@@ -216,13 +212,10 @@ class RibBuildResults(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     exp_name: str = Field(..., description="The name of the experiment")
     gram_matrices: dict[str, torch.Tensor] = Field(description="Gram matrices at each node layer.")
-    # TODO: Use the raw interaction rotations
-    interaction_rotations: list[dict[str, Any]] = Field(
-        description="Interaction rotations at each node layer."
+    interaction_rotations: list[InteractionRotation] = Field(
+        description="Interaction rotations (Cs) at each node layer."
     )
-    # TODO: Use the raw eigenvector objects
-    eigenvectors: list[dict[str, Any]] = Field(description="Eigenvectors at each node layer.")
-
+    eigenvectors: list[Eigenvectors] = Field(description="Eigenvectors at each node layer.")
     edges: list[tuple[str, torch.Tensor]] = Field(description="The edges between each node layer.")
     dist_info: DistributedInfo = Field(
         description="Information about the parallelisation setup used for the run."
@@ -530,21 +523,11 @@ def rib_build(
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
         logger.info("Time to calculate edges: %s", calc_edges_time)
 
-    # Move interaction matrices to the cpu and store in dict
-    interaction_rotations = []
-    for C_info in Cs:
-        info_dict = asdict(C_info)
-        info_dict["C"] = info_dict["C"].cpu() if info_dict["C"] is not None else None
-        info_dict["C_pinv"] = info_dict["C_pinv"].cpu() if info_dict["C_pinv"] is not None else None
-        interaction_rotations.append(info_dict)
-
-    eigenvectors = [asdict(U_info) for U_info in Us]
-
     results = RibBuildResults(
         exp_name=config.exp_name,
         gram_matrices={k: v.cpu() for k, v in gram_matrices.items()},
-        interaction_rotations=interaction_rotations,
-        eigenvectors=eigenvectors,
+        interaction_rotations=Cs,
+        eigenvectors=Us,
         edges=[(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
         dist_info=dist_info,
         contains_all_edges=dist_info.global_size == 1,  # True if no parallelisation

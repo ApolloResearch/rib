@@ -26,7 +26,6 @@ from rib.data import (
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.mlp import MLP, MLPConfig
 from rib.models.modular_mlp import ModularMLPConfig, create_modular_mlp
-from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.settings import REPO_ROOT
 from rib.utils import get_data_subset, train_test_split
 
@@ -99,12 +98,9 @@ def load_sequential_transformer(
     )
 
     # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(
-        seq_model=seq_model,
-        tlens_model=tlens_model,
-        positional_embedding_type=seq_cfg.positional_embedding_type,
+    seq_model.load_tlens_weights(
+        tlens_model, positional_embedding_type=seq_cfg.positional_embedding_type
     )
-    seq_model.load_state_dict(state_dict)
 
     if fold_bias:
         seq_model.fold_bias()

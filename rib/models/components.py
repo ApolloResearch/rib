@@ -1,5 +1,5 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import Callable, Union, cast
+from typing import TYPE_CHECKING, Callable, Union, cast
 
 import einops
 import numpy as np
@@ -9,12 +9,24 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from rib.models import SequentialTransformerConfig
+if TYPE_CHECKING:
+    from rib.models import SequentialTransformerConfig
+
 from rib.models.utils import gelu_new, layer_norm
 
 
+class MultiSequential(nn.Sequential):
+    """Sequential module where containing modules that may have multiple inputs and outputs."""
+
+    def forward(self, *inputs):
+        for module in self._modules.values():
+            inputs = inputs if isinstance(inputs, tuple) else (inputs,)
+            inputs = module(*inputs)
+        return inputs
+
+
 class Embed(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig, return_tokens: bool = True):
+    def __init__(self, cfg: "SequentialTransformerConfig", return_tokens: bool = True):
         super().__init__()
         self.cfg = cfg
         self.W_E: Float[Tensor, "d_vocab d_model"] = nn.Parameter(
@@ -50,7 +62,7 @@ class Embed(nn.Module):
 
 
 class PosEmbed(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
         self.cfg = cfg
         self.W_pos = nn.Parameter(torch.empty(self.cfg.n_ctx, self.cfg.d_model, dtype=cfg.dtype))
@@ -80,7 +92,7 @@ class PosEmbed(nn.Module):
 
 
 class Unembed(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig, last_pos_only: bool = False):
+    def __init__(self, cfg: "SequentialTransformerConfig", last_pos_only: bool = False):
         super().__init__()
         self.cfg = cfg
         self.last_pos_only = last_pos_only
@@ -123,7 +135,7 @@ class Add(nn.Module):
 
     def __init__(
         self,
-        cfg: SequentialTransformerConfig,
+        cfg: "SequentialTransformerConfig",
         last_pos_only: bool = False,
         return_residual: bool = False,
     ):
@@ -157,7 +169,7 @@ class Add(nn.Module):
 class AttentionIn(nn.Module):
     def __init__(
         self,
-        cfg: SequentialTransformerConfig,
+        cfg: "SequentialTransformerConfig",
     ):
         """Attention Block part 1 (computes q, k, v) - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
@@ -170,7 +182,7 @@ class AttentionIn(nn.Module):
         https://github.com/neelnanda-io/TransformerLens/blob/main/transformer_lens/components.py
 
         Args:
-            cfg (SequentialTransformerConfig): Config
+            cfg ("SequentialTransformerConfig"): Config
         """
         super().__init__()
         self.cfg = cfg
@@ -446,7 +458,7 @@ class AttentionScores(nn.Module):
 
 
 class AttentionOut(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig, use_local_attn: bool = False):
+    def __init__(self, cfg: "SequentialTransformerConfig", use_local_attn: bool = False):
         """Attention Block part 2 (takes q, k, v; computes out) - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
         Convention: All attention pattern-style matrices have shape [..., head_index, query_pos,
@@ -458,7 +470,7 @@ class AttentionOut(nn.Module):
         https://github.com/neelnanda-io/TransformerLens/blob/main/transformer_lens/components.py
 
         Args:
-            cfg (SequentialTransformerConfig): Config
+            cfg ("SequentialTransformerConfig"): Config
         """
         super().__init__()
         self.cfg = cfg
@@ -540,7 +552,7 @@ class AttentionOut(nn.Module):
 
 
 class MLPIn(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
         self.cfg = cfg
         self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
@@ -556,7 +568,7 @@ class MLPIn(nn.Module):
 
 
 class MLPAct(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
         self.cfg = cfg
 
@@ -581,7 +593,7 @@ class MLPAct(nn.Module):
 
 
 class MLPOut(nn.Module):
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
         self.cfg = cfg
         self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
@@ -609,7 +621,7 @@ class LayerNormPre(torch.nn.Module):
     A standard LayerNorm without the element-wise affine parameters.
     """
 
-    def __init__(self, cfg: SequentialTransformerConfig, return_residual: bool = False):
+    def __init__(self, cfg: "SequentialTransformerConfig", return_residual: bool = False):
         super().__init__()
         self.cfg = cfg
         self.return_residual = return_residual
@@ -635,7 +647,7 @@ class DualLayerNormPre(torch.nn.Module):
     that use parallel attention and mlp blocks.
     """
 
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
         self.cfg = cfg
 
@@ -662,7 +674,7 @@ class DualLayerNormPre(torch.nn.Module):
 class LayerNormPreFolded(torch.nn.Module):
     """A version of LayerNormPre where we assume the input has a constant final dimension."""
 
-    def __init__(self, cfg: SequentialTransformerConfig, return_residual: bool = False):
+    def __init__(self, cfg: "SequentialTransformerConfig", return_residual: bool = False):
         super().__init__()
         self.cfg = cfg
         self.return_residual = return_residual
@@ -687,7 +699,7 @@ class LayerNormPreFolded(torch.nn.Module):
 class DualLayerNormPreFolded(torch.nn.Module):
     """A version of LayerNormPreFolded that handles two inputs."""
 
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
         self.cfg = cfg
 
@@ -717,7 +729,7 @@ class DualLayerNormPreFolded(torch.nn.Module):
 class IdentitySplit(torch.nn.Module):
     """Identity that splits the input into two outputs."""
 
-    def __init__(self, cfg: SequentialTransformerConfig):
+    def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
         self.cfg = cfg
 

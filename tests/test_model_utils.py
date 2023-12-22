@@ -6,7 +6,7 @@ import torch
 from rib.hook_manager import HookedModel
 from rib.loader import load_sequential_transformer
 from rib.models import SequentialTransformer, SequentialTransformerConfig
-from rib.models.sequential_transformer.transformer import MultiSequential
+from rib.models.components import MultiSequential
 from rib.models.utils import create_list_partitions
 from rib.utils import set_seed
 

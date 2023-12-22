@@ -22,8 +22,7 @@ from rib.linalg import (
     calc_gram_matrix,
     integrated_gradient_trapezoidal_norm,
 )
-from rib.models.sequential_transformer.components import AttentionOut
-from rib.models.sequential_transformer.transformer import MultiSequential
+from rib.models.components import AttentionOut, MultiSequential
 
 
 def _add_to_hooked_matrix(

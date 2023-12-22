@@ -9,7 +9,6 @@ from transformer_lens import HookedTransformer, HookedTransformerConfig
 from rib.hook_fns import acts_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.models import SequentialTransformer, SequentialTransformerConfig
-from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.utils import set_seed
 
 
@@ -83,13 +82,10 @@ def test_modular_arithmetic_conversion() -> None:
     seq_model_raw = SequentialTransformer(cfg, node_layers)
     assert seq_model_raw.cfg.dtype == dtype
     seq_model_raw.eval()
-    # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(
-        seq_model=seq_model_raw,
-        tlens_model=tlens_model,
-        positional_embedding_type=cfg.positional_embedding_type,
+    seq_model_raw.load_tlens_weights(
+        tlens_model, positional_embedding_type=cfg.positional_embedding_type
     )
-    seq_model_raw.load_state_dict(state_dict)
+
     seq_model = HookedModel(seq_model_raw)
 
     input_ids = torch.randint(0, tlens_model.cfg.d_vocab, size=(1, tlens_model.cfg.n_ctx))
@@ -141,13 +137,9 @@ def pretrained_lm_comparison(hf_model_str: str, mappings: dict[str, dict[str, st
     assert seq_model_raw.cfg.dtype == dtype
     seq_model_raw.eval()
 
-    # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(
-        seq_model=seq_model_raw,
-        tlens_model=tlens_model,
-        positional_embedding_type=seq_cfg.positional_embedding_type,
+    seq_model_raw.load_tlens_weights(
+        tlens_model, positional_embedding_type=seq_cfg.positional_embedding_type
     )
-    seq_model_raw.load_state_dict(state_dict)
     seq_model = HookedModel(seq_model_raw)
 
     input_ids = torch.randint(0, tlens_model.cfg.d_vocab, size=(1, tlens_model.cfg.n_ctx))

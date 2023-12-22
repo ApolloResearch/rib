@@ -21,7 +21,7 @@ from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
 from rib.linalg import eigendecompose, pinv_diag, shift_matrix
 from rib.models.mlp import MLP
-from rib.models.sequential_transformer.transformer import SequentialTransformer
+from rib.models.transformer import SequentialTransformer
 
 UType = Float[Tensor, "d_hidden d_hidden_trunc"]
 CType = Float[Tensor, "d_hidden d_hidden_extra_trunc"]

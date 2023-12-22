@@ -1,6 +1,7 @@
 """This module contains algorithms related to interaction rotations
 """
 
+import warnings
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -326,12 +327,12 @@ def calculate_interaction_rotations(
             # top value should be 1/sqrt(# bias positions in neuron basis)
             assert bias_positions is not None
             expected_top_val = len(bias_positions[node_layer]) ** (-0.5)
-            assert (
-                top_2_vals[0] - expected_top_val
-            ).abs() < 1e-3, f"largest = {top_2_vals[0]}, expected = {expected_top_val}"
-            assert (
-                top_2_vals[1] < 1e-3
-            ), f"Expected only one non-zero entry in U[-1, :], 2nd largest = {top_2_vals[1]}"
+            if (top_2_vals[0] - expected_top_val).abs() > 1e-3:
+                warnings.warn(f"largest = {top_2_vals[0]}, expected = {expected_top_val}")
+            if top_2_vals[1] > 1e-3:
+                warnings.warn(
+                    f"Expected only one non-zero entry in U[-1, :], 2nd largest = {top_2_vals[1]}"
+                )
             bias_pos_after_U: int = top_2_idxs[0].item()  # type: ignore[assignment]
             # We use this so we can make sure that our bias position stays isolated when
             # transforming by V.

@@ -1,5 +1,6 @@
 """Defines components to be used in a sequential transformer architecture."""
-from typing import TYPE_CHECKING, Callable, Union, cast
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Callable, Type, Union, cast
 
 import einops
 import numpy as np
@@ -25,12 +26,22 @@ class MultiSequential(nn.Sequential):
         return inputs
 
 
-class Embed(nn.Module):
+class SequentialComponent(ABC, nn.Module):
+    """Abstract base class for all components of a sequential model."""
+
+    def __init__(self):
+        super().__init__()
+
+    @abstractmethod
+    def forward(self, *args, **kwargs):
+        raise NotImplementedError
+
+
+class Embed(SequentialComponent):
     def __init__(self, cfg: "SequentialTransformerConfig", return_tokens: bool = True):
         super().__init__()
-        self.cfg = cfg
         self.W_E: Float[Tensor, "d_vocab d_model"] = nn.Parameter(
-            torch.empty(self.cfg.d_vocab, self.cfg.d_model, dtype=cfg.dtype)
+            torch.empty(cfg.d_vocab, cfg.d_model, dtype=cfg.dtype)
         )
         self.return_tokens = return_tokens
 
@@ -61,11 +72,10 @@ class Embed(nn.Module):
             return token_embeddings
 
 
-class PosEmbed(nn.Module):
+class PosEmbed(SequentialComponent):
     def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
-        self.cfg = cfg
-        self.W_pos = nn.Parameter(torch.empty(self.cfg.n_ctx, self.cfg.d_model, dtype=cfg.dtype))
+        self.W_pos = nn.Parameter(torch.empty(cfg.n_ctx, cfg.d_model, dtype=cfg.dtype))
 
     def forward(
         self, tokens: Int[Tensor, "... pos"], token_embed: Float[Tensor, "... pos d_model"]
@@ -91,17 +101,14 @@ class PosEmbed(nn.Module):
         return pos_embed, token_embed
 
 
-class Unembed(nn.Module):
+class Unembed(SequentialComponent):
     def __init__(self, cfg: "SequentialTransformerConfig", last_pos_only: bool = False):
         super().__init__()
-        self.cfg = cfg
         self.last_pos_only = last_pos_only
         self.W_U: Float[Tensor, "d_model d_vocab"] = nn.Parameter(
-            torch.empty(self.cfg.d_model, self.cfg.d_vocab, dtype=cfg.dtype)
+            torch.empty(cfg.d_model, cfg.d_vocab, dtype=cfg.dtype)
         )
-        self.b_U: Float[Tensor, "d_vocab"] = nn.Parameter(
-            torch.zeros(self.cfg.d_vocab, dtype=cfg.dtype)
-        )
+        self.b_U: Float[Tensor, "d_vocab"] = nn.Parameter(torch.zeros(cfg.d_vocab, dtype=cfg.dtype))
 
     def forward(
         self, residual: Float[Tensor, "... pos d_model"]
@@ -124,7 +131,7 @@ class Unembed(nn.Module):
         )
 
 
-class Add(nn.Module):
+class Add(SequentialComponent):
     """Add the residual stream to the output stream of the previous module.
 
     If last_pos_only is True, only the last position index is returned.
@@ -140,7 +147,6 @@ class Add(nn.Module):
         return_residual: bool = False,
     ):
         super().__init__()
-        self.cfg = cfg
         self.last_pos_only = last_pos_only
         self.return_residual = return_residual
 
@@ -166,7 +172,10 @@ class Add(nn.Module):
             return summed
 
 
-class AttentionIn(nn.Module):
+class AttentionIn(SequentialComponent):
+    rotary_sin: Float[torch.Tensor, "n_ctx rotary_dim"]
+    rotary_cos: Float[torch.Tensor, "n_ctx rotary_dim"]
+
     def __init__(
         self,
         cfg: "SequentialTransformerConfig",
@@ -186,27 +195,18 @@ class AttentionIn(nn.Module):
         """
         super().__init__()
         self.cfg = cfg
-        self.W_Q = nn.Parameter(
-            torch.empty(self.cfg.n_heads, self.cfg.d_model, self.cfg.d_head, dtype=cfg.dtype)
-        )
-        self.W_K = nn.Parameter(
-            torch.empty(self.cfg.n_heads, self.cfg.d_model, self.cfg.d_head, dtype=cfg.dtype)
-        )
-        self.W_V = nn.Parameter(
-            torch.empty(self.cfg.n_heads, self.cfg.d_model, self.cfg.d_head, dtype=cfg.dtype)
-        )
-        self.b_Q = nn.Parameter(torch.zeros(self.cfg.n_heads, self.cfg.d_head, dtype=cfg.dtype))
-        self.b_K = nn.Parameter(torch.zeros(self.cfg.n_heads, self.cfg.d_head, dtype=cfg.dtype))
-        self.b_V = nn.Parameter(torch.zeros(self.cfg.n_heads, self.cfg.d_head, dtype=cfg.dtype))
 
-        if self.cfg.positional_embedding_type == "rotary":
-            assert (
-                self.cfg.rotary_dim is not None
-            ), "rotary_dim must be specified for rotary attention"
+        self.W_Q = nn.Parameter(torch.empty(cfg.n_heads, cfg.d_model, cfg.d_head, dtype=cfg.dtype))
+        self.W_K = nn.Parameter(torch.empty(cfg.n_heads, cfg.d_model, cfg.d_head, dtype=cfg.dtype))
+        self.W_V = nn.Parameter(torch.empty(cfg.n_heads, cfg.d_model, cfg.d_head, dtype=cfg.dtype))
+        self.b_Q = nn.Parameter(torch.zeros(cfg.n_heads, cfg.d_head, dtype=cfg.dtype))
+        self.b_K = nn.Parameter(torch.zeros(cfg.n_heads, cfg.d_head, dtype=cfg.dtype))
+        self.b_V = nn.Parameter(torch.zeros(cfg.n_heads, cfg.d_head, dtype=cfg.dtype))
+
+        if cfg.positional_embedding_type == "rotary":
+            assert cfg.rotary_dim is not None, "rotary_dim must be specified for rotary attention"
             # Applies a rotation to each two-element chunk of keys and queries pre dot producting to bake in relative position. See HookedTransformerConfig for details
-            sin, cos = self.calculate_sin_cos_rotary(
-                self.cfg.rotary_dim, self.cfg.n_ctx, dtype=self.cfg.dtype
-            )
+            sin, cos = self.calculate_sin_cos_rotary(cfg.rotary_dim, cfg.n_ctx, dtype=cfg.dtype)
             self.register_buffer("rotary_sin", sin)
             self.register_buffer("rotary_cos", cos)
 
@@ -380,18 +380,18 @@ class AttentionIn(nn.Module):
         return torch.cat([x_rotated, x_pass], dim=-1)
 
 
-class AttentionScores(nn.Module):
-    def __init__(self, cfg, use_local_attn: bool) -> None:
+class AttentionScores(SequentialComponent):
+    mask: Bool[Tensor, "pos pos"]
+    IGNORE: Float[Tensor, ""]
+
+    def __init__(self, cfg: "SequentialTransformerConfig", use_local_attn: bool) -> None:
         """Compute the attention scores. This module exists purely so that we can hook the attention scores (and pattern). Note that unlike the other modules, does not return a tuple but just a single tensor."""
         super().__init__()
-        self.cfg = cfg
         # Create a max_ctx x max_ctx mask, with True iff that query position
         # can attend to that key position (query is first axis, key is second axis)
-        causal_mask: Bool[Tensor, "pos pos"] = torch.tril(
-            torch.ones((self.cfg.n_ctx, self.cfg.n_ctx)).bool()
-        )
+        causal_mask: Bool[Tensor, "pos pos"] = torch.tril(torch.ones((cfg.n_ctx, cfg.n_ctx)).bool())
         if use_local_attn:
-            assert self.cfg.original_architecture == "GPTNeoForCausalLM"
+            assert cfg.original_architecture == "GPTNeoForCausalLM"
             # Only attend to the previous window_size positions
             # so mask true iff query - window_size < key <= query
             # we fix window_size to 256 (the default for GPTNeo) instead of putting into config
@@ -404,8 +404,8 @@ class AttentionScores(nn.Module):
         # attn_scale is a constant that we divide the attention scores by pre-softmax.
         # I'm not entirely sure why it matters, but it's probably a mix of softmax not being
         # scale invariant and numerical stability?
-        if self.cfg.use_attn_scale:
-            self.attn_scale = np.sqrt(self.cfg.d_head)
+        if cfg.use_attn_scale:
+            self.attn_scale = np.sqrt(cfg.d_head)
         else:
             self.attn_scale = 1.0
 
@@ -457,7 +457,7 @@ class AttentionScores(nn.Module):
         )
 
 
-class AttentionOut(nn.Module):
+class AttentionOut(SequentialComponent):
     def __init__(self, cfg: "SequentialTransformerConfig", use_local_attn: bool = False):
         """Attention Block part 2 (takes q, k, v; computes out) - params have shape [head_index, d_model, d_head] (or [head_index, d_head, d_model] for W_O) and multiply on the right. attn_scores refers to query key dot product immediately before attention softmax
 
@@ -473,12 +473,10 @@ class AttentionOut(nn.Module):
             cfg ("SequentialTransformerConfig"): Config
         """
         super().__init__()
-        self.cfg = cfg
+        self.n_heads = cfg.n_heads
         self.attention_scores = AttentionScores(cfg, use_local_attn=use_local_attn)
-        self.W_O = nn.Parameter(
-            torch.empty(self.cfg.n_heads, self.cfg.d_head, self.cfg.d_model, dtype=cfg.dtype)
-        )
-        self.b_O = nn.Parameter(torch.zeros(self.cfg.d_model, dtype=cfg.dtype))
+        self.W_O = nn.Parameter(torch.empty(cfg.n_heads, cfg.d_head, cfg.d_model, dtype=cfg.dtype))
+        self.b_O = nn.Parameter(torch.zeros(cfg.d_model, dtype=cfg.dtype))
 
     def forward(
         self,
@@ -504,17 +502,17 @@ class AttentionOut(nn.Module):
         q = einops.rearrange(
             q,
             "... pos (head_index d_head) -> ... pos head_index d_head",
-            head_index=self.cfg.n_heads,
+            head_index=self.n_heads,
         )
         k = einops.rearrange(
             k,
             "... pos (head_index d_head) -> ... pos head_index d_head",
-            head_index=self.cfg.n_heads,
+            head_index=self.n_heads,
         )
         v = einops.rearrange(
             v,
             "... pos (head_index d_head_v) -> ... pos head_index d_head_v",
-            head_index=self.cfg.n_heads,
+            head_index=self.n_heads,
         )
 
         in_dtype = v.dtype
@@ -551,12 +549,11 @@ class AttentionOut(nn.Module):
         return residual, out
 
 
-class MLPIn(nn.Module):
+class MLPIn(SequentialComponent):
     def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
-        self.cfg = cfg
-        self.W_in = nn.Parameter(torch.empty(self.cfg.d_model, self.cfg.d_mlp, dtype=cfg.dtype))
-        self.b_in = nn.Parameter(torch.zeros(self.cfg.d_mlp, dtype=cfg.dtype))
+        self.W_in = nn.Parameter(torch.empty(cfg.d_model, cfg.d_mlp, dtype=cfg.dtype))
+        self.b_in = nn.Parameter(torch.zeros(cfg.d_mlp, dtype=cfg.dtype))
 
     def forward(
         self,
@@ -567,20 +564,19 @@ class MLPIn(nn.Module):
         return residual, pre_act
 
 
-class MLPAct(nn.Module):
+class MLPAct(SequentialComponent):
     def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
-        self.cfg = cfg
 
         self.act_fn: Callable[[Float[Tensor, "... d_model"]], Tensor]
-        if self.cfg.act_fn == "relu":
+        if cfg.act_fn == "relu":
             self.act_fn = F.relu
-        elif self.cfg.act_fn == "gelu":
+        elif cfg.act_fn == "gelu":
             self.act_fn = F.gelu
-        elif self.cfg.act_fn == "gelu_new":
+        elif cfg.act_fn == "gelu_new":
             self.act_fn = gelu_new
         else:
-            raise ValueError(f"Invalid activation function name: {self.cfg.act_fn}")
+            raise ValueError(f"Invalid activation function name: {cfg.act_fn}")
 
     def forward(
         self,
@@ -592,12 +588,11 @@ class MLPAct(nn.Module):
         return residual, post_act
 
 
-class MLPOut(nn.Module):
+class MLPOut(SequentialComponent):
     def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
-        self.cfg = cfg
-        self.W_out = nn.Parameter(torch.empty(self.cfg.d_mlp, self.cfg.d_model, dtype=cfg.dtype))
-        self.b_out = nn.Parameter(torch.zeros(self.cfg.d_model, dtype=cfg.dtype))
+        self.W_out = nn.Parameter(torch.empty(cfg.d_mlp, cfg.d_model, dtype=cfg.dtype))
+        self.b_out = nn.Parameter(torch.zeros(cfg.d_model, dtype=cfg.dtype))
 
     def forward(
         self,
@@ -615,7 +610,7 @@ class MLPOut(nn.Module):
         return residual, out
 
 
-class LayerNormPre(torch.nn.Module):
+class LayerNormPre(SequentialComponent):
     """Sequential version of transformer-lens' LayerNormPre.
 
     A standard LayerNorm without the element-wise affine parameters.
@@ -623,7 +618,7 @@ class LayerNormPre(torch.nn.Module):
 
     def __init__(self, cfg: "SequentialTransformerConfig", return_residual: bool = False):
         super().__init__()
-        self.cfg = cfg
+        self.eps = cfg.eps
         self.return_residual = return_residual
 
     def forward(
@@ -633,14 +628,14 @@ class LayerNormPre(torch.nn.Module):
         Float[Tensor, "... d_model"],
         tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]],
     ]:
-        out = layer_norm(residual.clone(), self.cfg.eps)
+        out = layer_norm(residual.clone(), self.eps)
         if self.return_residual:
             return residual, out
         else:
             return out
 
 
-class DualLayerNormPre(torch.nn.Module):
+class DualLayerNormPre(SequentialComponent):
     """A version of LayerNormPre that handles two inputs.
 
     Simply passes through the second input as the new residual. This is used for models like pythia
@@ -649,7 +644,7 @@ class DualLayerNormPre(torch.nn.Module):
 
     def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
-        self.cfg = cfg
+        self.eps = cfg.eps
 
     def forward(
         self,
@@ -667,16 +662,16 @@ class DualLayerNormPre(torch.nn.Module):
                 "new" residual stream in the subsequent (MLP) layers.
             - The application of layer norm to the raw residual stream.
         """
-        out = layer_norm(residual.clone(), self.cfg.eps)
+        out = layer_norm(residual.clone(), self.eps)
         return attn_resid, out
 
 
-class LayerNormPreFolded(torch.nn.Module):
+class LayerNormPreFolded(SequentialComponent):
     """A version of LayerNormPre where we assume the input has a constant final dimension."""
 
     def __init__(self, cfg: "SequentialTransformerConfig", return_residual: bool = False):
         super().__init__()
-        self.cfg = cfg
+        self.eps = cfg.eps
         self.return_residual = return_residual
 
     def forward(
@@ -688,7 +683,7 @@ class LayerNormPreFolded(torch.nn.Module):
     ]:
         x0 = residual[..., :-1].clone()  # [..., length-1]
 
-        x0_out = layer_norm(x0, self.cfg.eps)
+        x0_out = layer_norm(x0, self.eps)
         out = torch.cat([x0_out, residual[..., -1:]], dim=-1)  # [..., length]
         if self.return_residual:
             return residual, out
@@ -696,12 +691,12 @@ class LayerNormPreFolded(torch.nn.Module):
             return out
 
 
-class DualLayerNormPreFolded(torch.nn.Module):
+class DualLayerNormPreFolded(SequentialComponent):
     """A version of LayerNormPreFolded that handles two inputs."""
 
     def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
-        self.cfg = cfg
+        self.eps = cfg.eps
 
     def forward(
         self,
@@ -721,17 +716,16 @@ class DualLayerNormPreFolded(torch.nn.Module):
         """
         x0 = residual[..., :-1].clone()  # [..., length-1]
 
-        x0_out = layer_norm(x0, self.cfg.eps)
+        x0_out = layer_norm(x0, self.eps)
         out = torch.cat([x0_out, residual[..., -1:]], dim=-1)
         return attn_resid, out
 
 
-class IdentitySplit(torch.nn.Module):
+class IdentitySplit(SequentialComponent):
     """Identity that splits the input into two outputs."""
 
     def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
-        self.cfg = cfg
 
     def forward(
         self,
@@ -741,7 +735,7 @@ class IdentitySplit(torch.nn.Module):
 
 
 # Map from module names in SequentialTransformer to the corresponding component modules
-SEQUENTIAL_COMPONENT_REGISTRY = {
+SEQUENTIAL_COMPONENT_REGISTRY: dict[str, Type[SequentialComponent]] = {
     "embed": Embed,
     "pos_embed": PosEmbed,
     "add_embed": Add,

@@ -9,6 +9,7 @@ from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor, nn
 
+from rib.models.components import SequentialComponent
 from rib.models.utils import ACTIVATION_MAP, fold_mlp_in
 from rib.types import TorchDtype
 
@@ -112,7 +113,7 @@ class MLP(nn.Module):
         self.has_folded_bias = True
 
 
-class MLPLayer(nn.Module):
+class MLPLayer(SequentialComponent):
     """
     Neural network layer consisting of a linear layer followed by an optional activation function.
 

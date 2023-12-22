@@ -4,7 +4,7 @@ Defines a Transformer made from a sequence of modules, allowing for calculation 
 
 import warnings
 from functools import partial
-from typing import Callable, Literal, Optional, Type, Union
+from typing import Callable, Literal, Optional, Type, Union, cast
 
 import torch
 from jaxtyping import Int
@@ -16,10 +16,12 @@ from rib.models.components import (
     SEQUENTIAL_COMPONENT_REGISTRY,
     DualLayerNormPre,
     DualLayerNormPreFolded,
+    Identity,
     IdentitySplit,
     LayerNormPre,
     LayerNormPreFolded,
     MultiSequential,
+    SequentialComponent,
 )
 from rib.models.utils import (
     concat_ones,
@@ -288,10 +290,7 @@ class SequentialTransformer(nn.Module):
             )
             module_id_idx = node_layer_idx
 
-    def create_sections(
-        self,
-        module_ids: list[str],
-    ) -> nn.ModuleDict:
+    def create_sections(self, module_ids: list[str]) -> nn.ModuleDict:
         """Create ordered sections of module_ids.
 
         Each section spans the start-end of an edge in a RIB graph.
@@ -311,16 +310,19 @@ class SequentialTransformer(nn.Module):
         node_layers_no_output = [layer for layer in self.node_layers if layer != "output"]
         paritioned_module_ids = create_list_partitions(module_ids, node_layers_no_output)
 
+        previous_module_out_dims: Optional[tuple[int, ...]] = None
+        previous_section_out_dims: Optional[tuple[int, ...]] = None
+
         sections: dict[str, MultiSequential] = {}
         # We need to start at -1 because the first section is the pre-section which should not be
         # part of the graph
-        for i, module_names in enumerate(paritioned_module_ids, -1):
-            section_name = "pre" if i == -1 else f"section_{i}"
+        for section_idx, module_names in enumerate(paritioned_module_ids, -1):
+            section_name = "pre" if section_idx == -1 else f"section_{section_idx}"
 
-            module_section: list[nn.Module] = []
+            module_section: list[SequentialComponent] = []
             for module_name in module_names:
                 module_type = module_name.split(".")[0]
-                module_class: Type[nn.Module]
+                module_class: Type[SequentialComponent]
                 kwargs = {}
                 if module_type == self.last_pos_module_type:
                     # Used for modular addition where we only care about the last position index
@@ -342,12 +344,20 @@ class SequentialTransformer(nn.Module):
                             # ln1 and ln2 need to output both the residual and normed residual
                             kwargs["return_residual"] = module_type in ["ln1", "ln2"]
                     else:
-                        module_class = nn.Identity if module_type == "ln_final" else IdentitySplit
+                        module_class = cast(
+                            Type[SequentialComponent],
+                            Identity if module_type == "ln_final" else IdentitySplit,
+                        )
                 else:
                     module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
-                module = module_class(self.cfg, **kwargs)
+                module = module_class(self.cfg, in_dims=previous_module_out_dims, **kwargs)
                 module_section.append(module)
-            sections[section_name] = MultiSequential(*module_section)
+                previous_module_out_dims = module.out_dims
+
+            sections[section_name] = MultiSequential(
+                *module_section, in_dims=previous_section_out_dims
+            )
+            previous_section_out_dims = sections[section_name].out_dims
 
         return nn.ModuleDict(sections)
 
@@ -407,11 +417,13 @@ class SequentialTransformer(nn.Module):
             for module_idx, module in enumerate(section):  # type: ignore
                 if isinstance(module, LayerNormPre):
                     self.sections[section_name][module_idx] = LayerNormPreFolded(
-                        lnpre_folded_cfg, return_residual=module.return_residual
+                        lnpre_folded_cfg,
+                        in_dims=cast(tuple[int], module.in_dims),
+                        return_residual=module.return_residual,
                     )
                 elif isinstance(module, DualLayerNormPre):
                     self.sections[section_name][module_idx] = DualLayerNormPreFolded(
-                        lnpre_folded_cfg
+                        lnpre_folded_cfg, in_dims=cast(tuple[int, int], module.in_dims)
                     )
 
         self.has_folded_bias = True

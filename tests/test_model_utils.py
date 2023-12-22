@@ -299,7 +299,9 @@ def test_n_ctx_pythia():
     seq_model.eval()
 
     # We only care about the first module in section_0, so remove the rest
-    seq_model.sections.section_0 = MultiSequential(seq_model.sections.section_0[0])
+    seq_model.sections.section_0 = MultiSequential(
+        seq_model.sections.section_0[0], in_dims=seq_model.sections.section_0.in_dims
+    )
 
     hooked_model = HookedModel(seq_model)
 

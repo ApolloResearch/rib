@@ -136,7 +136,7 @@ class MLPLayer(SequentialComponent):
         use_bias: bool = True,
         dtype: torch.dtype = torch.float32,
     ):
-        super().__init__()
+        super().__init__(in_dims=(in_features,))
 
         self.in_features = in_features
         self.out_features = out_features
@@ -155,6 +155,10 @@ class MLPLayer(SequentialComponent):
             self.activation = ACTIVATION_MAP[activation_fn]()
 
         self.has_folded_bias = False
+
+    @property
+    def out_dims(self) -> tuple[int]:
+        return (self.W.shape[-1],)
 
     def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
         x = einsum("... d_in, d_in d_out -> ... d_out", x, self.W)

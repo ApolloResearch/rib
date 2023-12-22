@@ -222,7 +222,7 @@ def calculate_interaction_rotations(
     if node_layers[-1] not in gram_matrices:
         # Technically we don't actually need the final node layer to be in gram_matrices if we're
         # not rotating it, but for now, our implementation assumes that it always is unless
-        # final_node_layer is the logits (i.e. ="output").
+        # last node_layer is "output".
         assert (
             node_layers[-1] == "output"
         ), f"Final node layer {node_layers[-1]} not in gram matrices."

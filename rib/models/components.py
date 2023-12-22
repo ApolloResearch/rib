@@ -37,16 +37,14 @@ class SequentialComponent(ABC, nn.Module):
         raise NotImplementedError
 
 
-class MultiSequential(nn.Sequential):
-    """Sequential module where containing modules that may have multiple inputs and outputs."""
+class MultiSequential(SequentialComponent, nn.Sequential):
+    """Sequential module where containing modules may have multiple inputs and outputs."""
 
-    def __init__(self, *args: SequentialComponent, in_dims: Optional[tuple[int, ...]]):
-        super().__init__(*args)
-        self._in_dims = in_dims
-
-    @property
-    def in_dims(self) -> Optional[tuple[int, ...]]:
-        return self._in_dims
+    def __init__(
+        self, *components: SequentialComponent, in_dims: Optional[tuple[int, ...]], **kwargs
+    ):
+        SequentialComponent.__init__(self, in_dims=in_dims, **kwargs)
+        nn.Sequential.__init__(self, *components)
 
     @property
     def out_dims(self) -> Optional[tuple[int, ...]]:

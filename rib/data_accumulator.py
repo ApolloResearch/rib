@@ -20,6 +20,7 @@ from rib.hook_fns import (
 from rib.hook_manager import Hook, HookedModel
 from rib.linalg import module_hat
 from rib.log import logger
+from rib.models.components import SequentialComponent
 from rib.models.utils import get_model_attr
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
@@ -363,9 +364,10 @@ def collect_interaction_edges(
         if C_out is not None:
             C_out = C_out.to(device=device)
 
+        module: SequentialComponent = get_model_attr(hooked_model.model, module_name)
         module_hat_partial = partial(
             module_hat,
-            module=get_model_attr(hooked_model.model, module_name),
+            module=module,
             C_in_pinv=C_info.C_pinv.to(device=device),
             C_out=C_out,
         )
@@ -386,8 +388,10 @@ def collect_interaction_edges(
         )
         # Initialise the edge matrices to zeros to (out_dim, in_dim). These get added to in the
         # forward hook.
+        out_dim = Cs[idx + 1].C.shape[-1] if Cs[idx + 1].C is not None else sum(module.out_dims)
+        in_dim = sum(module.in_dims)
         hooked_model.hooked_data[C_info.node_layer_name] = {
-            "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.out_dim, dtype=dtype, device=device)
+            "edge": torch.zeros(out_dim, in_dim, dtype=dtype, device=device)
         }
 
     run_dataset_through_model(

@@ -11,11 +11,16 @@ import gc
 from rib.types import TORCH_DTYPES, StrDtype
 
 
-def lanczos(H: Float[Tensor, "d d"]):
-    vg = torch.rand((H.shape[1]))
+def lanczos(
+    H: Float[Tensor, "d d"],
+    dtype: torch.dtype,
+    device: str
+) -> Float[Tensor, "d d"]:
+    """Implement Lanczos algorithm for efficient eigenvalue finding."""
+    vg = torch.rand((H.shape[1]), dtype=dtype, device=device)
 
-    Lv = torch.zeros((len(vg), len(vg)), dtype=torch.float64)  # Lanczos vectors
-    Hk = torch.zeros((len(vg), len(vg)), dtype=torch.float64)  # Hamiltonian in Krylov subspace
+    Lv = torch.zeros((len(vg), len(vg)), dtype=dtype, device=device)  # Lanczos vectors
+    Hk = torch.zeros((len(vg), len(vg)), dtype=dtype, device=device)  # Hamiltonian in Krylov subspace
     Lv[0] = vg / torch.norm(vg)  # First Lanczos vector as the normalized guess vector vg
 
     # First iteration step of the Lanczos algorithm

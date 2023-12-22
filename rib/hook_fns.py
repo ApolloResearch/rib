@@ -712,8 +712,6 @@ def test_edges_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
-
-    TODO: needs refactor
     """
     module = _remove_hooks(module)
 
@@ -792,19 +790,20 @@ def cluster_gram_forward_hook_fn(
     is_lm = True if inputs[0].dim() == 3 else False
     outputs = output if isinstance(output, tuple) else (output,)
 
-    # Once again, fold in token dimension into batch
+    lm_einops_pattern = "b p d_hidden_combined -> (b p) d_hidden_combined"
     if is_lm and not use_residual_stream:
-        inputs = rearrange(inputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
-        outputs = rearrange(outputs[1], "b p d_hidden_combined -> (b p) d_hidden_combined")
+        inputs = rearrange(inputs[1], lm_einops_pattern)
+        outputs = rearrange(outputs[1], lm_einops_pattern)
     elif is_lm and use_residual_stream:
-        inputs = rearrange(torch.cat([x for x in inputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
-        outputs = rearrange(torch.cat([x for x in outputs], dim=-1), "b p d_hidden_combined -> (b p) d_hidden_combined")
+        inputs = rearrange(torch.cat([x for x in inputs], dim=-1), lm_einops_pattern)
+        outputs = rearrange(torch.cat([x for x in outputs], dim=-1), lm_einops_pattern)
     else:  # Inputs always tuple, and in this case we don't have LM
         inputs = torch.cat([x.detach().clone() for x in inputs], dim=-1)
         outputs = torch.cat([x.detach().clone() for x in outputs], dim=-1)
 
     # Every cluster has its own gram matrix, which can be differentiated with `data_key` which tells
     # you the cluster number (the element of cluster_idxs it was taken from)
+    # The output gram matrix is purely to check how similar the gram matrix is from just the output.
     for cluster_num, idxs in enumerate(cluster_idxs):
         cluster_inputs = inputs[..., idxs]
         cluster_outputs = outputs[..., idxs]
@@ -836,7 +835,7 @@ def cluster_gram_forward_hook_fn(
 #     cluster_idxs: list[Int[Tensor, "d_hidden"]],
 #     use_residual_stream: bool,
 # ) -> None:
-#     """Status: temporary research function.
+#     """Status: temporary research function. This is the check for functions being multiples of each other.
 
 #     Calculate gram matrix of each cluster, where cluster replacement has already been tested for
 #     100% accuracy retention.
@@ -963,7 +962,6 @@ def collect_hessian_forward_hook_fn(
             preactivations = child[1].forward(*inputs) # Preactivations always tuple
 
     resid_stream_size = preactivations[0].shape[-1] # e.g. 129
-    mlp_layer_size = preactivations[1].shape[-1] # MLP layer width, equal to number of ReLU activations
 
     lm_einops_pattern = "b p d_hidden_combined -> (b p) d_hidden_combined"
     if is_lm:
@@ -977,6 +975,7 @@ def collect_hessian_forward_hook_fn(
 
     operator: Float[Tensor, "batch d_hidden"] = torch.div(outputs, preactivations)
 
+    # Brittle naming, be careful - this code will need to be changed if you want a diff weight matrix
     for name, param in module_dict["sections.section_1.0"].named_parameters():
         if "W" in name: w_out = param
 

@@ -565,11 +565,12 @@ def hessian_main(config_path_str: str):
     d_trunc_0, d_trunc_1 = C_list[0].shape[1], C_list[1].shape[1]
 
     rotated_weights = []
-    for weight, C_pinv in zip(weights, C_pinv_list):
-        rotated_weights.append(C_pinv[:, residual_stream_size:].to(dtype).to(device) @ weight)
+    for weight, C_mat in zip(weights, C_list):
+        rotated_weights.append(C_mat[residual_stream_size:, :].to(dtype).to(device).T @ weight)
 
     # ## UNROTATED HESSIAN CHECK ==========================================================
-    # trunc_idx = 100
+    # In this section, we check the unrotated Hessian. I manually truncate the neuron basis because otherwise it takes too much GPU RAM to compute and store the einops multiplication in the 4-tensors (see relevant hook function, at bottom of hooks.py)
+    # trunc_idx = 100 # How many neurons do you want to keep in the MLP layer? The total size is 513.
 
     # unrot_H = collect_hessian(
     #     hooked_model=hooked_model,
@@ -591,22 +592,17 @@ def hessian_main(config_path_str: str):
     # guess_unrot_eigvec[trunc_idx * residual_stream_size:] = rearrange(weights[0][:, :trunc_idx], 'i j -> (i j)')
     # assert torch.allclose(guess_unrot_eigvec[trunc_idx * residual_stream_size:trunc_idx * (residual_stream_size+1)], weights[0][0, :trunc_idx])
     # H_times_vec = torch.matmul(unrot_H, guess_unrot_eigvec)
-    # norm_H_times_vec = H_times_vec / torch.norm(H_times_vec)
-    # norm_guess_eigvec = guess_unrot_eigvec / torch.norm(guess_unrot_eigvec)
 
     # mean, std = torch.mean(guess_unrot_eigvec).item(), torch.std(guess_unrot_eigvec).item()
     # random_eigvec = torch.normal(0, std, size=(guess_unrot_eigvec.shape[0],), dtype=dtype, device=device)
     # H_times_random_vec = torch.matmul(unrot_H, random_eigvec)
-    # norm_H_times_random_vec = H_times_random_vec / torch.norm(H_times_random_vec)
-    # norm_random_eigvec = random_eigvec / torch.norm(random_eigvec)
 
-    # if torch.allclose(norm_H_times_vec, norm_guess_eigvec, atol=1e-3) or torch.allclose(norm_H_times_vec, -norm_guess_eigvec, atol=1e-3):
+    # if torch.isclose(torch.norm(H_times_vec), torch.tensor(0, dtype=dtype, device=device), atol=1e-8): # If our guess eigenvector matches with H, then H @ v should be pretty close to zero.
     #     print("guess_eigvec is an eigenvector of H")
     # else:
     #     print("guess_eigvec is not an eigenvector of H")
-    #     print(torch.norm(norm_H_times_vec - norm_guess_eigvec), torch.norm(H_times_vec))
-    #     print(torch.norm(norm_H_times_random_vec + norm_random_eigvec), torch.norm(H_times_random_vec))
-
+    #     print(torch.norm(H_times_vec))
+    #     print(torch.norm(torch.norm(H_times_random_vec))
     ## ==================================================
 
     if Lanczos_save_file.exists():
@@ -634,26 +630,24 @@ def hessian_main(config_path_str: str):
         assert torch.allclose(guess_eigvec[:d_trunc_1], -rotated_weights[1][:, 0])
         guess_eigvec[d_trunc_1 * residual_stream_size:] = rearrange(rotated_weights[0], 'i j -> (i j)')
         H_times_vec = torch.matmul(H, guess_eigvec)
-        norm_H_times_vec = H_times_vec / torch.norm(H_times_vec)
-        norm_guess_eigvec = guess_eigvec / torch.norm(guess_eigvec)
 
         mean, std = torch.mean(guess_eigvec).item(), torch.std(guess_eigvec).item()
         random_eigvec = torch.normal(mean, std, size=(guess_eigvec.shape[0],), dtype=dtype, device=device)
         H_times_random_vec = torch.matmul(H, random_eigvec)
-        norm_H_times_random_vec = H_times_random_vec / torch.norm(H_times_random_vec)
-        norm_random_eigvec = random_eigvec / torch.norm(random_eigvec)
 
-        if torch.allclose(norm_H_times_vec, norm_guess_eigvec, atol=1e-4) or torch.allclose(norm_H_times_vec, -norm_guess_eigvec, atol=1e-4):
+        if torch.isclose(torch.norm(H_times_vec), torch.tensor(0, dtype=dtype, device=device), atol=1e-8):
             print("guess_eigvec is an eigenvector of H")
         else:
             print("guess_eigvec is not an eigenvector of H")
-            print(torch.norm(norm_H_times_vec - norm_guess_eigvec), torch.norm(H_times_vec))
-            print(torch.norm(norm_H_times_random_vec + norm_random_eigvec), torch.norm(H_times_random_vec))
+        print(torch.norm(H_times_vec))
+        print(torch.norm(H_times_random_vec))
+        ## ==============================================
 
-        Hk = lanczos(H)
+        Hk = lanczos(H=H, dtype=dtype, device=device)
         with open(Lanczos_save_file, "wb") as f:
             torch.save(Hk, f)
 
+    ## Calulate and plot eigenvalues: warning first time pass of Lanczos can take on order of 15 mins
     if hessian_eig_save_file.exists():
         with hessian_eig_save_file.open("rb") as f:
             eigs = torch.load(f, map_location="cpu")
@@ -663,7 +657,6 @@ def hessian_main(config_path_str: str):
         sorted_eigenvalues, sorted_eigenvectors = eigendecompose(Hk)
         with open(hessian_eig_save_file, "wb") as f:
             torch.save({"vals": sorted_eigenvalues, "vecs": sorted_eigenvectors}, f)
-
         plot_eigenvalues(sorted_eigenvalues, out_dir, title=f"Hessian MLP")
 
 
@@ -671,7 +664,10 @@ if __name__ == "__main__":
     # fire.Fire(transformer_relu_main)
     fire.Fire(hessian_main)
 
-    # def get_P_matrices(
+# This is old code intended to do the edge simplification calculation - i.e. simplify the edge connection and stare at it (section in writeup).
+# This was abandoned, but more work could be done in future.
+
+# def get_P_matrices(
 #     model: nn.Module,
 #     config: LMConfig,
 #     file_path: Path,

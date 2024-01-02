@@ -333,3 +333,9 @@ def get_data_subset(
         return Subset(dataset, selected_indices)
     else:
         return dataset
+
+
+def cast_to_cpu(X: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+    if X is not None:
+        return X.cpu()
+    return X

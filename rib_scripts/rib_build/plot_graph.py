@@ -40,7 +40,6 @@ def main(
         return
 
     assert results.edges, "The results file does not contain any edges."
-
     # Add labels if provided
     if labels_file is not None:
         with open(labels_file, "r", newline="") as file:
@@ -49,9 +48,17 @@ def main(
     else:
         node_labels = None
 
+    edge_layers = [edges.in_node_layer_name for edges in results.edges] + [
+        results.edges[-1].out_node_layer_name
+    ]
+    assert edge_layers == results.config.node_layers, (
+        "The layers of the edges do not match the layers of the nodes. "
+        f"Edge layers: {edge_layers}, node layers: {results.config.node_layers}"
+        "Something must have gone wrong when building the graph."
+    )
     plot_rib_graph(
-        raw_edges=results.edges,
-        layer_names=results.config.node_layers,
+        raw_edges=[edges.E_hat for edges in results.edges],
+        layer_names=edge_layers,
         exp_name=results.exp_name,
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,

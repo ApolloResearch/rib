@@ -1,10 +1,11 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
 from functools import partial
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Annotated, Literal, Optional, Union
 
 import torch
 from jaxtyping import Float, Int
+from pydantic import BaseModel, ConfigDict, PlainSerializer
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -21,9 +22,19 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import module_hat
 from rib.log import logger
 from rib.models.utils import get_model_attr
+from rib.utils import cast_to_cpu
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
+
+
+class Edges(BaseModel):
+    """Stores a matrix of edges of shape (out_dim, in_dim) between two node layers."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+    in_node_layer_name: str
+    out_node_layer_name: str
+    E_hat: Annotated[Float[Tensor, "out_extra_trunc in_extra_trunc"], PlainSerializer(cast_to_cpu)]
 
 
 def run_dataset_through_model(
@@ -323,7 +334,7 @@ def collect_interaction_edges(
     device: str,
     data_set_size: Optional[int] = None,
     edge_formula: Literal["functional", "squared"] = "functional",
-) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
+) -> list["Edges"]:
     """Collect interaction edges between each node layer in Cs.
 
     Note that there is no edge weight that uses the position of the final interaction matrix as a
@@ -345,8 +356,7 @@ def collect_interaction_edges(
             (November) version.
 
     Returns:
-        A dictionary of interaction edge matrices, keyed by the module name which the edge passes
-        through.
+        A list of Edges objects, which contain a matrix of edges between two node layers.
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
 
@@ -394,17 +404,21 @@ def collect_interaction_edges(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {
-        node_layer_name: hooked_model.hooked_data[node_layer_name]["edge"]
-        for node_layer_name in hooked_model.hooked_data
-    }
+    all_edges: list[Edges] = []
+    for node_layer_idx in range(len(Cs) - 1):
+        edges = hooked_model.hooked_data[Cs[node_layer_idx].node_layer_name]["edge"]
+        if torch.all(edges == 0.0):
+            logger.warning(
+                "Edges for node layer %s are still zero, must be an error somewhere.",
+                Cs[node_layer_idx].node_layer_name,
+            )
+        all_edges.append(
+            Edges(
+                in_node_layer_name=Cs[node_layer_idx].node_layer_name,
+                out_node_layer_name=Cs[node_layer_idx + 1].node_layer_name,
+                E_hat=edges,
+            )
+        )
     hooked_model.clear_hooked_data()
 
-    # Ensure that the keys of the edges dict are the same as the node layer names without `output`
-    if set(edges.keys()) != set([C.node_layer_name for C in Cs[:-1]]):
-        logger.warning(
-            "Edge keys not the same as node layer names. " "Expected: %s, got: %s",
-            set([C.node_layer_name for C in Cs[:-1]]),
-            set(edges.keys()),
-        )
-    return edges
+    return all_edges

@@ -380,7 +380,12 @@ def rib_build(
             mlp_config = config.modular_mlp_config
 
         model = load_mlp(
-            mlp_config, mlp_path=config.mlp_path, fold_bias=True, device=device, seed=config.seed
+            mlp_config,
+            node_layers=config.node_layers,
+            mlp_path=config.mlp_path,
+            fold_bias=True,
+            device=device,
+            seed=config.seed,
         ).to(device=torch.device(device), dtype=dtype)
         assert model.has_folded_bias, "MLP must have folded bias to run RIB"
     else:

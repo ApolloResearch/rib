@@ -550,7 +550,7 @@ def test_mnist_build_graph_invalid_node_layers():
     config_dict = yaml.safe_load(config_str)
     config = RibBuildConfig(**config_dict)
 
-    with pytest.raises(AssertionError, match="act_size not equal to Lambdas for layers.0"):
+    with pytest.raises(AssertionError, match="is not a subsequence of all_node_layers:"):
         graph_build_test(config=config, atol=0)
 
 

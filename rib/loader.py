@@ -115,11 +115,25 @@ def load_sequential_transformer(
 
 def load_mlp(
     config: Union[MLPConfig, ModularMLPConfig],
+    node_layers: list[str],
     mlp_path: Optional[Path],
     device: str,
     fold_bias: bool = True,
     seed: Optional[int] = None,
 ) -> MLP:
+    """Load an MLP model and check that node_layers is valid for this mlp.
+
+    Args:
+        config (Union[MLPConfig, ModularMLPConfig]): The MLP config.
+        node_layers (list[str]): The node layers to use for the model.
+        mlp_path (Optional[Path]): The path to the MLP weights.
+        device (str): The device to use for the model.
+        fold_bias (bool): Whether to fold the bias into the weights. Defaults to True.
+        seed (Optional[int]): The seed to use for the model.
+
+    Returns:
+        The MLP model.
+    """
     mlp: MLP
     if isinstance(config, ModularMLPConfig):
         mlp = create_modular_mlp(config, seed=seed)
@@ -131,6 +145,12 @@ def load_mlp(
         mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
     if fold_bias:
         mlp.fold_bias()
+
+    all_node_layers = [f"layers.{i}" for i in range(len(mlp.layers))] + ["output"]
+    assert len(node_layers) > 0 and "-".join(node_layers) in "-".join(all_node_layers), (
+        f"Provided node_layers: {node_layers} is not a subsequence of all_node_layers: "
+        f"{all_node_layers}. This must be the case to build a valid RIB graph."
+    )
     return mlp
 
 
@@ -453,6 +473,7 @@ def load_model_and_dataset_from_rib_results(
         ), "This function is not compatible with modular MLPs (which have no labels)."
         model = load_mlp(
             config=results.ml_model_config,
+            node_layers=node_layers or results.config.node_layers,
             mlp_path=results.config.mlp_path,
             fold_bias=True,
             device=device,

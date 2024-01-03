@@ -273,7 +273,8 @@ def main(
         f_name = f"{config.exp_name}_rib_{obj_name}{global_rank_suffix}.pt"
         out_file = config.out_dir / f_name
         if not check_outfile_overwrite(out_file, force):
-            dist_info.local_comm.Abort()  # stop this and other processes
+            return
+            # dist_info.local_comm.Abort()  # stop this and other processes
 
     dtype = TORCH_DTYPES[config.dtype]
     calc_C_time = None

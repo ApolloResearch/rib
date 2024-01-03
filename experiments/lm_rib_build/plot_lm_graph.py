@@ -23,6 +23,8 @@ def main(
     labels_file: Optional[str] = None,
     out_file: Optional[Union[str, Path]] = None,
     force: bool = False,
+    ignored_nodes: Optional[list[int]] = None,
+    lowest_hidden_node: int = 0,
 ) -> None:
     """Plot an interaction graph given a results file contain the graph edges."""
     results = torch.load(results_file)
@@ -53,6 +55,8 @@ def main(
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,
         node_labels=node_labels,
+        ignored_nodes=ignored_nodes,
+        lowest_hidden_node=lowest_hidden_node,
     )
 
     logger.info(f"Saved plot to {out_file}")

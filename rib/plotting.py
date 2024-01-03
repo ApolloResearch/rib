@@ -70,6 +70,7 @@ def _add_edges_to_graph(
 def _prepare_edges_for_plotting(
     raw_edges: list[tuple[str, torch.Tensor]],
     nodes_per_layer: list[int],
+    lowest_hidden_node: int = 0,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
@@ -90,7 +91,16 @@ def _prepare_edges_for_plotting(
         # Only keep the desired number of nodes in each layer
         in_nodes = nodes_per_layer[i]
         out_nodes = nodes_per_layer[i + 1]
-        edges.append(weight_matrix[:out_nodes, :in_nodes])
+        if lowest_hidden_node == 0 or i == 0 or i == len(raw_edges) - 1:
+            edges.append(weight_matrix[:out_nodes, :in_nodes])
+        else:
+            lowest_node = lowest_hidden_node
+            if weight_matrix.shape[0] > 130:
+                edges.append(weight_matrix[lowest_node : out_nodes + lowest_node, :in_nodes])
+            elif weight_matrix.shape[0] > 120:
+                edges.append(weight_matrix[:out_nodes, lowest_node : in_nodes + lowest_node])
+            else:
+                edges.append(weight_matrix[:out_nodes, :in_nodes])
     return edges
 
 
@@ -101,6 +111,8 @@ def plot_interaction_graph(
     nodes_per_layer: Union[int, list[int]],
     out_file: Path,
     node_labels: Optional[list[list[str]]] = None,
+    ignored_nodes: Optional[list[int]] = None,
+    lowest_hidden_node: int = 0,
 ) -> None:
     """Plot the interaction graph for the given edges.
 
@@ -122,8 +134,6 @@ def plot_interaction_graph(
 
     max_layer_height = max(nodes_per_layer)
 
-    edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
-
     # Verify that the layer names match the edge names
     edge_names = [edge_info[0] for edge_info in raw_edges]
     if len(edge_names) != len(layer_names) - 1:
@@ -133,10 +143,25 @@ def plot_interaction_graph(
     for edge_name, layer_name in zip(edge_names, layer_names[:-1]):
         assert edge_name == layer_name, "The layer names must match the edge names."
 
+    edges = _prepare_edges_for_plotting(
+        raw_edges, nodes_per_layer, lowest_hidden_node=lowest_hidden_node
+    )
+
+    if ignored_nodes is not None:
+        for layer, ignored_nodes_per_layer in enumerate(ignored_nodes):
+            for ignored_node in ignored_nodes_per_layer:
+                # Set edges *outgoing* from this node to zero (edges.shape ~ l+1, l)
+                edges[layer][:, ignored_node] = 0
+                # Set edges *incoming* to this node to zero (edges.shape ~ l+1, l)
+                if layer > 0:
+                    edges[layer - 1][ignored_node, :] = 0
+            # Renormalize: TODO Note that this can make e.g. non-centered RIB look more sparse than it is!
+            edges[layer] /= torch.sum(torch.abs(edges[layer]))
+
     # Create the undirected graph
     graph = nx.Graph()
 
-    fig, ax = plt.subplots(1, 1, figsize=(20, 10))
+    fig, ax = plt.subplots(1, 1, figsize=(18, 14))
 
     layers = _create_node_layers(edges)
     # Add nodes to the graph object
@@ -149,7 +174,7 @@ def plot_interaction_graph(
     pos: dict[int, tuple[int, Union[int, float]]] = {}
     for i, layer in enumerate(layers):
         # Add extra spacing for nodes that have fewer nodes than the biggest layer
-        spacing = 1 if i == 0 else max_layer_height / len(layer)
+        spacing = max_layer_height / len(layer)
         for j, node in enumerate(layer):
             pos[node] = (i, j * spacing)
 

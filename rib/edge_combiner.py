@@ -92,14 +92,12 @@ def combine_edges(*inputs: str) -> None:
         assert (
             len(set(edges.out_node_layer_name for edges in node_layer_edges)) == 1
         ), f"out_node_layer_names are not all the same across edges: {node_layer_edges}"
-        E_hat_combined = torch.stack([e.E_hat for e in node_layer_edges], dim=0).sum(dim=0)
-        in_node_layer_name = node_layer_edges[0].in_node_layer_name
-        out_node_layer_name = node_layer_edges[0].out_node_layer_name
+
         combined_edges.append(
             Edges(
-                in_node_layer_name=in_node_layer_name,
-                out_node_layer_name=out_node_layer_name,
-                E_hat=E_hat_combined,
+                in_node_layer_name=node_layer_edges[0].in_node_layer_name,
+                out_node_layer_name=node_layer_edges[0].out_node_layer_name,
+                E_hat=torch.stack([e.E_hat for e in node_layer_edges], dim=0).sum(dim=0),
             )
         )
 

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import torch
 
+from rib.data_accumulator import Edges
 from rib.log import logger
 from rib.rib_builder import RibBuildConfig, RibBuildResults
 
@@ -45,7 +46,7 @@ def combine_edges(*inputs: str) -> None:
     assert not out_file.exists(), f"Output file {out_file} already exists."
 
     # Read in the results
-    edges: list[list[tuple[str, torch.Tensor]]] = []
+    all_edges: list[list[Edges]] = []
     configs: list[RibBuildConfig] = []
     global_ranks: list[int] = []
     global_sizes: list[int] = []
@@ -57,7 +58,7 @@ def combine_edges(*inputs: str) -> None:
         )
         if not results.edges:
             raise ValueError(f"Results file {results_file} has no edges.")
-        edges.append(results.edges)
+        all_edges.append(results.edges)
         configs.append(results.config)
         global_ranks.append(results.dist_info.global_rank)
         global_sizes.append(results.dist_info.global_size)
@@ -78,20 +79,32 @@ def combine_edges(*inputs: str) -> None:
     # Check that all configs are identical
     assert len(set(map(str, configs))) == 1, f"configs are not all the same: {configs}"
 
-    # Add together the edges
+    # Concat edges together
     combined_edges = []
-    for edge in zip(*edges):
-        edge_names = [e[0] for e in edge]
-        # Check that all edge names are the same
-        assert len(set(edge_names)) == 1, f"edge names are not all the same: {edge_names}"
-        edge_weights = torch.stack([e[1] for e in edge], dim=0).sum(dim=0)
-        combined_edges.append((edge_names[0], edge_weights))
+    for node_layer_edges in zip(*all_edges):
+        assert all(
+            isinstance(edges, Edges) for edges in node_layer_edges
+        ), f"node_layer_edges is not a tuple of Edges: {node_layer_edges}"
+        assert (
+            len(set(edges.in_node_layer_name for edges in node_layer_edges)) == 1
+        ), f"in_node_layer_names are not all the same across edges: {node_layer_edges}"
 
-    # Make a deep copy of the first results file
-    out_results_raw = torch.load(result_file_paths[0])
-    out_results_raw["edges"] = combined_edges
-    out_results_raw["contains_all_edges"] = True
-    out_results = RibBuildResults(**out_results_raw)
+        assert (
+            len(set(edges.out_node_layer_name for edges in node_layer_edges)) == 1
+        ), f"out_node_layer_names are not all the same across edges: {node_layer_edges}"
+
+        combined_edges.append(
+            Edges(
+                in_node_layer_name=node_layer_edges[0].in_node_layer_name,
+                out_node_layer_name=node_layer_edges[0].out_node_layer_name,
+                E_hat=torch.stack([e.E_hat for e in node_layer_edges], dim=0).sum(dim=0),
+            )
+        )
+
+    # Copy and alter the first results file
+    out_results = RibBuildResults(**torch.load(result_file_paths[0]))
+    out_results.edges = combined_edges
+    out_results.contains_all_edges = True
 
     torch.save(out_results.model_dump(), out_file)
     result_file_strs = "\n".join(map(str, result_file_paths))

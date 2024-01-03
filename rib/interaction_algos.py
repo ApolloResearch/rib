@@ -5,13 +5,7 @@ from typing import Literal, Optional
 
 import torch
 from jaxtyping import Float, Int
-from pydantic import (
-    AfterValidator,
-    BaseModel,
-    ConfigDict,
-    PlainSerializer,
-    ValidationInfo,
-)
+from pydantic import AfterValidator, BaseModel, ConfigDict, ValidationInfo
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -22,8 +16,8 @@ from rib.hook_manager import HookedModel
 from rib.linalg import eigendecompose, pinv_diag, shift_matrix
 from rib.models.mlp import MLP
 from rib.models.transformer import SequentialTransformer
+from rib.utils import check_device_is_cpu
 
-UType = Float[Tensor, "d_hidden d_hidden_trunc"]
 CType = Float[Tensor, "d_hidden d_hidden_extra_trunc"]
 C_pinvType = Float[Tensor, "d_hidden_extra_trunc d_hidden"]
 
@@ -38,12 +32,6 @@ def check_second_dim_is_out_dim(
     return X
 
 
-def cast_to_cpu(X: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
-    if X is not None:
-        return X.cpu()
-    return X
-
-
 class InteractionRotation(BaseModel):
     """Stores an interaction rotation matrix and its pseudo-inverse for a node layer."""
 
@@ -51,10 +39,12 @@ class InteractionRotation(BaseModel):
     node_layer_name: str
     out_dim: int  # Equal to d_hidden_extra_trunc if C is not None and d_hidden otherwise
     C: Annotated[
-        Optional[CType], AfterValidator(check_second_dim_is_out_dim), PlainSerializer(cast_to_cpu)
+        Optional[CType],
+        AfterValidator(check_second_dim_is_out_dim),
+        AfterValidator(check_device_is_cpu),
     ] = None
     # pseudoinverse of C, not needed for the output node layer
-    C_pinv: Annotated[Optional[C_pinvType], PlainSerializer(cast_to_cpu)] = None
+    C_pinv: Annotated[Optional[C_pinvType], AfterValidator(check_device_is_cpu)] = None
 
 
 class Eigenvectors(BaseModel):
@@ -64,7 +54,9 @@ class Eigenvectors(BaseModel):
     node_layer_name: str
     out_dim: int  # Equal to d_hidden_trunc if U is not None and d_hidden otherwise
     U: Annotated[
-        Optional[UType], AfterValidator(check_second_dim_is_out_dim), PlainSerializer(cast_to_cpu)
+        Optional[Float[Tensor, "d_hidden d_hidden_trunc"]],
+        AfterValidator(check_second_dim_is_out_dim),
+        AfterValidator(check_device_is_cpu),
     ] = None
 
 

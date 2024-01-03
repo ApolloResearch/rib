@@ -14,12 +14,20 @@ Supports passing a path to a config yaml file or a RibConfig object. This config
 `node_layers` field, which describes the sections of the graph that will be built. It contains a
 list of module_ids. A graph layer will be built on the inputs to each specified node layer, as well
 as the output of the final node layer. For example, if `node_layers` is
-["attn.0", "mlp_act.0", "output"], this script will build the following graph layers:
+["attn.0", "mlp_act.0", "output"] for a SequentialTransformer, this script will build the following
+graph layers:
 - One on the inputs to the "attn.0" node layer. This will include the residual stream concatenated
     with the output of ln1.0.
 - One on the input to "mlp_act.0". This will include the residual stream concatenated with the
     output of "mlp_in.0".
 - One on the output of the model. This is a special keyword that does not correspond to a module_id.
+
+For the above node layers, the "section_ids" of the model will be:
+- sections.pre (containing everything up to but not including attn.0)
+- sections.section_0 (containing attn.0 and all layers up to but not including mlp_act.0)
+- sections.section_1 (containing mlp_act.0 and the rest of the model)
+For calculating the Cs and edges, we ignore the "sections.pre" section since it won't be part of the
+graph.
 
 This file also support parallelization to compute edge values across multiple processes using mpi.
 To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will

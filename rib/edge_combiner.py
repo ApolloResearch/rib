@@ -11,7 +11,7 @@ def combine_edges(*inputs: str) -> None:
     """Combine the edges from a directory or list of files and save the result to a new file.
 
     After checking that the configs are the same, it adds together the edges and saves the result
-    to a new file .
+    to a new file.
 
     The output file is named the same as the first file in the input without a `global_rankN` suffix
     and with `_combined` appended.

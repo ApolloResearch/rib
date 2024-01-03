@@ -398,7 +398,7 @@ def interaction_edge_pre_forward_hook_fn(
     dataset_size: int,
     edge_formula: Literal["functional", "squared"] = "functional",
 ) -> None:
-    """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
+    """Hook function for accumulating the edges (denoted E_hat) of the RIB graph.
 
     For calculating the Jacobian, we need to run the inputs through the module. Unfortunately,
     this causes an infinite recursion because the module has a hook which runs this function. To

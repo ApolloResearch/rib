@@ -1,4 +1,4 @@
-"""Test various properties of an lm and mnist interaction graph.
+"""Test various properties of an lm and mnist RIB graph.
 
 Properties tested:
 1. The size of the sum of activations in the interaction basis (calculated with

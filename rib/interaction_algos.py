@@ -1,5 +1,4 @@
-"""This module contains algorithms related to interaction rotations
-"""
+"""This module contains algorithms related to interaction rotations."""
 
 from typing import Literal, Optional
 
@@ -17,9 +16,6 @@ from rib.linalg import eigendecompose, pinv_diag, shift_matrix
 from rib.models.mlp import MLP
 from rib.models.transformer import SequentialTransformer
 from rib.utils import check_device_is_cpu
-
-CType = Float[Tensor, "d_hidden d_hidden_extra_trunc"]
-C_pinvType = Float[Tensor, "d_hidden_extra_trunc d_hidden"]
 
 
 def check_second_dim_is_out_dim(
@@ -39,12 +35,15 @@ class InteractionRotation(BaseModel):
     node_layer_name: str
     out_dim: int  # Equal to d_hidden_extra_trunc if C is not None and d_hidden otherwise
     C: Annotated[
-        Optional[CType],
+        Optional[Float[Tensor, "d_hidden d_hidden_extra_trunc"]],
         AfterValidator(check_second_dim_is_out_dim),
         AfterValidator(check_device_is_cpu),
     ] = None
     # pseudoinverse of C, not needed for the output node layer
-    C_pinv: Annotated[Optional[C_pinvType], AfterValidator(check_device_is_cpu)] = None
+    C_pinv: Annotated[
+        Optional[Float[Tensor, "d_hidden_extra_trunc d_hidden"]],
+        AfterValidator(check_device_is_cpu),
+    ] = None
 
 
 class Eigenvectors(BaseModel):
@@ -159,23 +158,21 @@ def calculate_interaction_rotations(
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
-        basis_formula: The formula to use for the integrated gradient. Must be one of
-            "(1-alpha)^2", "(1-0)*alpha", "neuron", or "svd".
-             - "(1-alpha)^2" is the old (October) version based on the functional edge formula.
-             - "(1-0)*alpha" is the new (November) version based on the squared edge formula. This
+        basis_formula: The formula to use for the integrated gradient.
+            - "(1-alpha)^2" is the old (October) version based on the functional edge formula.
+            - "(1-0)*alpha" is the new (November) version based on the squared edge formula. This
                 is the default, and generally the best option.
-             - "neuron" performs no rotation.
-             - "svd" only decomposes the gram matrix and uses that as the basis. It is a good
+            - "neuron" performs no rotation.
+            - "svd" only decomposes the gram matrix and uses that as the basis. It is a good
                 baseline. If `center=true` this becomes the "pca" basis.
         center: Whether to center the activations while computing the desired basis. Only supported
             for the "svd" basis formula.
         means: The means of the activations for each node layer. Only used if `center=true`.
         bias_positions: The positions of the biases for each node layer. Only used if `center=true`.
     Returns:
-        - A list of objects containing the interaction rotation matrices and their pseudoinverses,
-        ordered by node layer appearance in model.
-        - A list of objects containing the eigenvectors of each node layer, ordered by node layer
-        appearance in model.
+        - A list of objects containing the interaction rotation matrices and their pseudoinverses
+            for each node layer.
+        - A list of objects containing the eigenvectors of each node layer
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate Cs."
     assert len(section_names) > 0, "No sections specified."
@@ -213,44 +210,39 @@ def calculate_interaction_rotations(
 
     if node_layers[-1] not in gram_matrices:
         # Technically we don't actually need the final node layer to be in gram_matrices if we're
-        # not rotating it, but for now, our implementation assumes that it always is unless
-        # final_node_layer is the logits (i.e. ="output").
+        # not rotating it, but for now, our implementation assumes that it always is unless the
+        # final node_layer "output".
         assert (
             node_layers[-1] == "output"
         ), f"Final node layer {node_layers[-1]} not in gram matrices."
 
-        inner_model = hooked_model.model
-        if isinstance(inner_model, MLP):
-            final_node_dim = inner_model.output_size
+        if isinstance(hooked_model.model, MLP):
+            out_dim = hooked_model.model.output_size
         else:
-            assert isinstance(inner_model, SequentialTransformer)
-            final_node_dim = inner_model.cfg.d_vocab
+            assert isinstance(hooked_model.model, SequentialTransformer)
+            out_dim = hooked_model.model.cfg.d_vocab
     else:
-        final_node_dim = gram_matrices[node_layers[-1]].shape[0]
+        out_dim = gram_matrices[node_layers[-1]].shape[0]
 
     Us.append(
         Eigenvectors(
             node_layer_name=node_layers[-1],
-            out_dim=final_node_dim,
+            out_dim=out_dim,
             U=U_output,
         )
     )
     Cs.append(
         InteractionRotation(
             node_layer_name=node_layers[-1],
-            out_dim=final_node_dim,
+            out_dim=out_dim,
             C=C_output,
         )
     )
     if U_output is not None:
-        assert U_output is not None
         assert C_output is not None
-        assert (
-            C_output.shape[1] == final_node_dim
-        ), f"Expected C_output to have shape (_, {final_node_dim}). Got {C_output.shape}."
-        assert (
-            U_output.shape[1] == final_node_dim
-        ), f"Expected U_output to have shape (_, {final_node_dim}). Got {U_output.shape}."
+        out_shape = (out_dim, out_dim)
+        assert C_output.shape == out_shape, f"Expected shape {out_shape}. Got {C_output.shape}."
+        assert U_output.shape == out_shape, f"Expected shape {out_shape}. Got {U_output.shape}."
 
     # We only need to calculate C for the final section if there is no output node layer
     section_names_to_calculate = (
@@ -292,7 +284,7 @@ def calculate_interaction_rotations(
         )
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
 
-        # currently only used for svd basis, but will be used more in text PR
+        # currently only used for svd basis
         if center:
             assert means is not None
             assert bias_positions is not None
@@ -354,8 +346,12 @@ def calculate_interaction_rotations(
             Lambda_abs, truncation_threshold
         )
 
-        C: CType = (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
-        C_pinv: C_pinvType = (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
+        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
+            (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
+        )
+        C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
+            (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
+        )
         Cs.append(
             InteractionRotation(node_layer_name=node_layer, out_dim=C.shape[1], C=C, C_pinv=C_pinv)
         )

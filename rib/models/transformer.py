@@ -161,7 +161,7 @@ class SequentialTransformer(nn.Module):
 
     The node_layers list may end in an `output` layer, meaning that the outputs of the model will
     be the first basis in our RIB graph. We ignore this `output` layer when partitioning the
-    model into sections.
+    model into sections. Since `output` is a valid node layer, we say that it is also a `module_id`.
 
     A SequentialTransformer contains a fold_bias method which modifies the weights of the model
     to fold in the bias parameters. If called, beware that the dimensions of the weight matrices

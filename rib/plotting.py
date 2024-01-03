@@ -177,7 +177,7 @@ def plot_rib_graph(
     out_file: Path,
     node_labels: Optional[list[list[str]]] = None,
 ) -> None:
-    """Plot the interaction graph for the given edges.
+    """Plot the RIB graph for the given edges.
 
     Args:
         raw_edges (list[torch.Tensor]): List of edges with shape (n_nodes_in_l+1, n_nodes_in_l)

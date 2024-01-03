@@ -165,10 +165,10 @@ class TestPythiaFloatingPointErrors:
         for dtype in ["float32", "float64"]:
             exp_name = f"float-precision-test-pythia-14m-{dtype}"
             # Note that ablation_config["dtype"] does not matter much, but whether the file in
-            # ablation_config["interaction_graph_path"] is float32 or float64 does matter a lot.
+            # ablation_config["rib_results_path"] is float32 or float64 does matter a lot.
             ablation_config["dtype"] = dtype
             ablation_config["exp_name"] = exp_name
-            ablation_config["interaction_graph_path"] = f"{temp_dir}/{exp_name}_rib_Cs.pt"
+            ablation_config["rib_results_path"] = f"{temp_dir}/{exp_name}_rib_Cs.pt"
             if not torch.cuda.is_available():
                 # Try to reduce memory usage for CI
                 ablation_config["batch_size"] = 1

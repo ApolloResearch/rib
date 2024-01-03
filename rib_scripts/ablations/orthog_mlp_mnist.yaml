@@ -1,6 +1,6 @@
 exp_name: orthog_4-node-layers
 ablation_type: orthogonal
-interaction_graph_path: rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
+rib_results_path: rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
 schedule:
   schedule_type: exponential
   early_stopping_threshold: null

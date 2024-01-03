@@ -5,8 +5,8 @@
 3. There are accuracies for all ablated vectors.
 4. The accuracies are sorted roughly in descending order of the number of ablated vectors.
 
-This is currently quite hacky. In particular, we mock torch.load to return an interaction graph
-with an updated MLP path. This is necessary because the interaction graph is saved with an
+This is currently quite hacky. In particular, we mock torch.load to return an RIB graph
+with an updated MLP path. This is necessary because the RIB graph is saved with an
 absolute path to the MLP, and a github action will not have access to the same absolute path.
 """
 
@@ -99,7 +99,7 @@ def check_accuracies(
 def test_run_mnist_ablations(ablation_type):
     """Test various ablation result properties for ablations on MNIST.
 
-    The ablation rib_scripts load model from the config of the interaction graph. To run on ci
+    The ablation rib_scripts load model from the config of the RIB graph. To run on ci
     we need this path to be local. If that isn't the case you can manually fix this with:
     ```
     import torch
@@ -118,7 +118,7 @@ def test_run_mnist_ablations(ablation_type):
     config_str = f"""
     exp_name: "test_ablation_mnist"
     ablation_type: {ablation_type}
-    interaction_graph_path: rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
+    rib_results_path: rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
     schedule:
         schedule_type: exponential
         early_stopping_threshold: 0.05
@@ -147,7 +147,7 @@ def test_run_mnist_ablations(ablation_type):
 def test_run_modular_arithmetic_rib_ablations(ablation_type):
     """Test various ablation result properties on modular arithmetic.
 
-    The ablation rib_scripts load model from the config of the interaction graph. To run on ci
+    The ablation rib_scripts load model from the config of the RIB graph. To run on ci
     we need this path to be local. If that isn't the case you can manually fix this with:
     ```
     import torch
@@ -165,7 +165,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     config_str = f"""
     exp_name: "test_ablation_mod_add"
     ablation_type: {ablation_type}
-    interaction_graph_path: rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
+    rib_results_path: rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
     schedule:
         schedule_type: exponential
         early_stopping_threshold: 0.2

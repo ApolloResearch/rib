@@ -28,7 +28,7 @@ def main(
     out_file: Optional[Union[str, Path]] = None,
     force: bool = False,
 ) -> None:
-    """Plot an interaction graph given a results file contain the graph edges."""
+    """Plot an RIB graph given a results file contain the graph edges."""
     results = RibBuildResults(**torch.load(results_file))
     out_dir = Path(__file__).parent / "out"
     if out_file is None:

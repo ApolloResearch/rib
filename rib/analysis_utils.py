@@ -24,7 +24,8 @@ def get_rib_acts(
 ) -> dict[str, Float[torch.Tensor, "batch ... rotated"]]:
     """Returns the activations in rib space when the model is run on the dataset.
 
-    Will be (cpu) memory intensive if the dataset is large."""
+    Will be (cpu) memory intensive if the dataset is large.
+    """
 
     def get_module_name(m_name):
         if hasattr(hooked_model.model, "module_id_to_section_id"):

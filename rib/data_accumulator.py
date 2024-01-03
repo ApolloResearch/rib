@@ -251,7 +251,7 @@ def collect_gram_matrices(
 
 
 def collect_M_dash_and_Lambda_dash(
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden"]],
+    C_out: Optional[Float[Tensor, "out_hidden_extra_trunc out_hidden_extra_trunc"]],
     hooked_model: HookedModel,
     n_intervals: int,
     data_loader: DataLoader,
@@ -396,7 +396,7 @@ def collect_interaction_edges(
                 },
             )
         )
-        # Initialise the edge matrices to zeros to (out_dim, in_dim). These get added to in the
+        # Initialise the edge matrices to zeros(out_dim, in_dim). These get accumulated in the
         # forward hook.
         hooked_model.hooked_data[C_info.node_layer_name] = {
             "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.out_dim, dtype=dtype, device=device)

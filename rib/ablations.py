@@ -81,7 +81,7 @@ class AblationConfig(BaseModel):
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     ablation_type: Literal["rib", "orthogonal"]
-    interaction_graph_path: RootPath
+    rib_results_path: RootPath
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
         ...,
         discriminator="schedule_type",
@@ -181,7 +181,7 @@ def ablate_node_layers_and_eval(
     ):
         ablation_schedule = get_ablation_schedule(schedule_config, n_vecs=basis_vecs.shape[0])
 
-        base_result: Optional[float] = None
+        base_score: Optional[float] = None
 
         # Track the results for the case when there is no ablation. There may be many of these, so we
         # store them to avoid recomputing.
@@ -224,28 +224,25 @@ def ablate_node_layers_and_eval(
                 fn_kwargs={"rotation_matrix": rotation_matrix},
             )
 
-            node_layer_score = eval_fn(
+            score = eval_fn(
                 hooked_model, data_loader, hooks=[rotation_hook], dtype=dtype, device=device
             )
-            results[ablation_node_layer][n_vecs_remaining] = node_layer_score
+            results[ablation_node_layer][n_vecs_remaining] = score
 
             if schedule_config.early_stopping_threshold is not None:
                 if i == 0:
-                    base_result = node_layer_score
+                    base_score = score
                 else:
-                    # If the result is more than `early_stopping_threshold` different than the base result,
+                    # If the score is more than `early_stopping_threshold` away from the base result,
                     # then we stop ablating vectors.
-                    if (
-                        abs(node_layer_score - base_result)
-                        > schedule_config.early_stopping_threshold
-                    ):
+                    if abs(score - base_score) > schedule_config.early_stopping_threshold:
                         break
 
     return results
 
 
 def load_basis_matrices(
-    interaction_graph_info: RibBuildResults,
+    rib_results: RibBuildResults,
     ablation_node_layers: list[str],
     ablation_type: Literal["rib", "orthogonal"],
     dtype: torch.dtype,
@@ -266,7 +263,7 @@ def load_basis_matrices(
     # Get the basis vecs and their pseudoinverses using the module_names as keys
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
     for module_name in ablation_node_layers:
-        for basis_info in getattr(interaction_graph_info, basis_matrix_key):
+        for basis_info in getattr(rib_results, basis_matrix_key):
             if basis_info.node_layer_name == module_name:
                 if ablation_type == "rib":
                     assert isinstance(basis_info, InteractionRotation)
@@ -282,9 +279,7 @@ def load_basis_matrices(
                     basis_vecs_pinv = basis_vecs.T.detach().clone()
                 basis_matrices.append((basis_vecs, basis_vecs_pinv))
                 break
-    assert len(basis_matrices) == len(
-        ablation_node_layers
-    ), f"Could not find all node_layer modules in the interaction graph config."
+    assert len(basis_matrices) == len(ablation_node_layers), f"node_layers not all in rib_results"
     return basis_matrices
 
 
@@ -324,11 +319,11 @@ def load_bases_and_ablate(
             raise FileExistsError("Not overwriting output file")
 
     set_seed(config.seed)
-    interaction_graph_info = RibBuildResults(**torch.load(config.interaction_graph_path))
+    rib_results = RibBuildResults(**torch.load(config.rib_results_path))
 
     assert set(config.ablation_node_layers) <= set(
-        interaction_graph_info.config.node_layers
-    ), "The node layers in the config must be a subset of the node layers in the interaction graph."
+        rib_results.config.node_layers
+    ), "The node layers in the config must be a subset of the node layers in the RIB graph."
 
     assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
@@ -336,7 +331,7 @@ def load_bases_and_ablate(
     dtype = TORCH_DTYPES[config.dtype]
 
     basis_matrices = load_basis_matrices(
-        interaction_graph_info=interaction_graph_info,
+        rib_results=rib_results,
         ablation_node_layers=config.ablation_node_layers,
         ablation_type=config.ablation_type,
         dtype=dtype,
@@ -344,7 +339,7 @@ def load_bases_and_ablate(
     )
 
     model, dataset = load_model_and_dataset_from_rib_results(
-        interaction_graph_info,
+        rib_results,
         device=device,
         dtype=dtype,
         node_layers=config.ablation_node_layers,

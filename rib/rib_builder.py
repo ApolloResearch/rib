@@ -8,13 +8,13 @@ Steps to build the graph:
 5. Calculate the interaction basis matrices (labelled C in the paper) for each node layer, starting
     from the final node layer and working backwards. If interaction_matrices_path is provided, we
     load the pre-saved matrices instead of calculating them (only supported for transformer models).
-6. Calculate the edges of the interaction graph between each node layer.
+6. Calculate the edges of the RIB graph between each node layer.
 
-Supports passing a path to a config.yaml or a RibConfig object. This config should contain the
-`node_layers` field. This describes the sections of the graph that will be built: A graph layer will
-be built on the inputs to each specified node layer, as well as the output of the final node layer.
-For example, if `node_layers` is ["attn.0", "mlp_act.0", "output"], this script will build the
-following graph layers:
+Supports passing a path to a config yaml file or a RibConfig object. This config should contain the
+`node_layers` field, which describes the sections of the graph that will be built. It contains a
+list of module_ids. A graph layer will be built on the inputs to each specified node layer, as well
+as the output of the final node layer. For example, if `node_layers` is
+["attn.0", "mlp_act.0", "output"], this script will build the following graph layers:
 - One on the inputs to the "attn.0" node layer. This will include the residual stream concatenated
     with the output of ln1.0.
 - One on the input to "mlp_act.0". This will include the residual stream concatenated with the
@@ -162,7 +162,7 @@ class RibBuildConfig(BaseModel):
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
     calculate_edges: bool = Field(
         True,
-        description="Whether to calculate the edges of the interaction graph.",
+        description="Whether to calculate the edges of the RIB graph.",
     )
     eval_type: Optional[Literal["accuracy", "ce_loss"]] = Field(
         None,
@@ -291,7 +291,14 @@ def load_interaction_rotations(
 ) -> tuple[
     dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]
 ]:
-    """Load pre-saved C matrices from file. Useful for just calculating edges on large models."""
+    """Load pre-saved C matrices from file. Useful for just calculating edges on large models.
+
+    Args:
+        config: The config used to calculate the C matrices.
+
+    Returns:
+        The gram matrices, Cs, and Us.
+    """
     logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
     assert config.interaction_matrices_path is not None
     matrices_info = torch.load(config.interaction_matrices_path)
@@ -325,7 +332,7 @@ def rib_build(
     n_pods: int = 1,
     pod_rank: int = 0,
 ) -> RibBuildResults:
-    """Build the interaction graph and store it on disk.
+    """Build the RIB graph and store it on disk.
 
     Note that we may be calculating the Cs and E_hats (edges) in different scripts. When calculating
     E_hats using pre-saved Cs, we need to ensure, among other things, that the pre-saved Cs were
@@ -403,11 +410,10 @@ def rib_build(
     hooked_model = HookedModel(model)
 
     # Load dataset
-    model_n_ctx = model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None
     dataset = load_dataset(
         dataset_config=config.dataset,
         return_set=config.dataset.return_set,
-        model_n_ctx=model_n_ctx,
+        model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
         tlens_model_path=config.tlens_model_path,
     )
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
@@ -424,18 +430,19 @@ def rib_build(
             logger.info("Model per-token loss on dataset: %.2f", loss)
 
     # Run RIB
-    # Don't build the graph for the section of the model before the first node layer
     if isinstance(model, SequentialTransformer):
+        # Don't build the graph for the section of the model before the first node layer
         section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
     else:
+        # MLP "sections" are simply the model layers specified in config.node_layers
         section_names = [layer for layer in config.node_layers if layer != "output"]
 
     if config.interaction_matrices_path is None:
-        # Only need gram matrix for output if we're rotating the final node layer
-        collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
         gram_train_loader = DataLoader(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
+        # Only need gram matrix for output if we're rotating the final node layer
+        collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
         means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
         bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
@@ -502,6 +509,7 @@ def rib_build(
         logger.info("Skipping edge calculation.")
         E_hats = []
     else:
+        logger.info("Calculating edges.")
         full_dataset_len = len(dataset)  # type: ignore
         # no-op if only 1 process
         data_subset = get_dataset_chunk(
@@ -512,7 +520,6 @@ def rib_build(
             data_subset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
         )
 
-        logger.info("Calculating edges.")
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
             Cs=edge_Cs,
@@ -544,7 +551,6 @@ def rib_build(
     )
 
     if out_file is not None:
-        # Save the results (which include torch tensors) to file
         torch.save(results.model_dump(), out_file)
         logger.info("Saved results to %s", out_file)
 

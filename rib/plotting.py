@@ -7,7 +7,6 @@ plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
-import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional, Union
@@ -68,21 +67,20 @@ def _add_edges_to_graph(
 
 
 def _prepare_edges_for_plotting(
-    raw_edges: list[tuple[str, torch.Tensor]],
+    raw_edges: list[torch.Tensor],
     nodes_per_layer: list[int],
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
     Args:
-        raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
-            (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
+        raw_edges (list[torch.Tensor]): List of edges of shape (n_nodes_in_l+1, n_nodes_in_l)
         nodes_per_layer (list[int]): The number of nodes in each layer.
 
     Returns:
         list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
     """
     edges: list[torch.Tensor] = []
-    for i, (_, weight_matrix) in enumerate(raw_edges):
+    for i, weight_matrix in enumerate(raw_edges):
         # Convert edges to float32 (bfloat16 will cause errors and we don't need higher precision)
         weight_matrix = weight_matrix.float()
         # Normalize the edge weights by the sum of the absolute values of the weights
@@ -172,7 +170,7 @@ def plot_ablation_results(
 
 
 def plot_rib_graph(
-    raw_edges: list[tuple[str, torch.Tensor]],
+    raw_edges: list[torch.Tensor],
     layer_names: list[str],
     exp_name: str,
     nodes_per_layer: Union[int, list[int]],
@@ -182,10 +180,9 @@ def plot_rib_graph(
     """Plot the interaction graph for the given edges.
 
     Args:
-        raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
-            (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
-        layer_names (list[str]): The names of the layers. These should correspond to the first
-            element of each tuple in raw_edges, but also include a name for the final node_layer.
+        raw_edges (list[torch.Tensor]): List of edges with shape (n_nodes_in_l+1, n_nodes_in_l)
+        layer_names (list[str]): The names of the layers. These correspond to the first dimension
+            of each tensor in raw_edges, and also includes a name for the final node_layer.
         exp_name (str): The name of the experiment.
         nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
             all layers have the same number of nodes. If list, then the number of nodes in each
@@ -199,17 +196,6 @@ def plot_rib_graph(
     max_layer_height = max(nodes_per_layer)
 
     edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
-
-    # Verify that the layer names match the edge names
-    edge_names = [edge_info[0] for edge_info in raw_edges]
-    if len(edge_names) != len(layer_names) - 1:
-        warnings.warn(
-            f"len(edge_names) != len(layer_names) - 1. edge_names={edge_names},"
-            f"layer_names={layer_names}. This will probably cause the last layer in the plot to"
-            f"have no nodes. Are you using an old file?"
-        )
-    for edge_name, layer_name in zip(edge_names, layer_names[:-1]):
-        assert edge_name == layer_name, "The layer names must match the edge names."
 
     # Create the undirected graph
     graph = nx.Graph()
@@ -251,7 +237,6 @@ def plot_rib_graph(
 
     # Draw edges
     width_factor = 15
-    # for edge in graph.edges(data=True):
     nx.draw_networkx_edges(
         graph,
         pos,

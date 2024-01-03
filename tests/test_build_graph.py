@@ -64,7 +64,7 @@ def graph_build_test(config: RibBuildConfig, atol: float):
 
     grams = results.gram_matrices
     Cs = results.interaction_rotations
-    E_hats = results.edges
+    edges = results.edges
 
     # The output interaction matrix should be None if rotate_final_node_layer is False
     if not config.rotate_final_node_layer:
@@ -77,16 +77,15 @@ def graph_build_test(config: RibBuildConfig, atol: float):
     for i, module_name in enumerate(comparison_layers):
         # Get the module names from the grams
         act_size = (Cs[i].C.T @ grams[module_name] @ Cs[i].C).diag()
-        if E_hats:
-            # E_hats[i] is a tuple (name, tensor)
+        if edges:
             if config.edge_formula == "squared":
-                assert (E_hats[i][1] >= 0).all(), f"edges not >= 0 for {module_name}"
-            assert (E_hats[i][1] != 0).any(), f"edges all zero for {module_name}"
+                assert (edges[i].E_hat >= 0).all(), f"edges not >= 0 for {module_name}"
+            assert (edges[i].E_hat != 0).any(), f"edges all zero for {module_name}"
             if config.edge_formula == "functional" and config.basis_formula == "(1-alpha)^2":
                 # Check that the size of the sum of activations in the interaction basis is equal
                 # to the outgoing edges of a node. The relation should hold only in this one config
                 # case.
-                edge_size = E_hats[i][1].sum(0).abs()
+                edge_size = edges[i].E_hat.sum(0).abs()
                 assert (
                     act_size.shape == edge_size.shape
                 ), f"act_size and edge_size not same shape for {module_name}"
@@ -721,7 +720,7 @@ def test_modular_mlp_diagonal_edges_when_linear(
     for node_layer_idx in range(len(rotated_node_layers)):
         # assert that all off diagonal entries agree within rtol of 0. Deal appropriately with the
         # case that matrices are not square
-        edge_val = edges[node_layer_idx][1]
+        edge_val = edges[node_layer_idx].E_hat
         diag_target = torch.zeros_like(edge_val)
         min_dim = min(edge_val.shape)
         diag_target[:min_dim, :min_dim] = torch.diag(torch.diag(edge_val))

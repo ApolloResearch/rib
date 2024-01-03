@@ -333,3 +333,9 @@ def get_data_subset(
         return Subset(dataset, selected_indices)
     else:
         return dataset
+
+
+def check_device_is_cpu(X: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+    if X is not None:
+        assert X.device == torch.device("cpu"), "X must be on the CPU."
+    return X

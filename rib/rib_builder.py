@@ -44,6 +44,7 @@ from rib.data import (
     VisionDatasetConfig,
 )
 from rib.data_accumulator import (
+    Edges,
     collect_dataset_means,
     collect_gram_matrices,
     collect_interaction_edges,
@@ -209,14 +210,14 @@ class RibBuildConfig(BaseModel):
 
 
 class RibBuildResults(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
     exp_name: str = Field(..., description="The name of the experiment")
     gram_matrices: dict[str, torch.Tensor] = Field(description="Gram matrices at each node layer.")
     interaction_rotations: list[InteractionRotation] = Field(
         description="Interaction rotations (Cs) at each node layer."
     )
     eigenvectors: list[Eigenvectors] = Field(description="Eigenvectors at each node layer.")
-    edges: list[tuple[str, torch.Tensor]] = Field(description="The edges between each node layer.")
+    edges: list[Edges] = Field(description="The edges between each node layer.")
     dist_info: DistributedInfo = Field(
         description="Information about the parallelisation setup used for the run."
     )
@@ -499,7 +500,7 @@ def rib_build(
 
     if not config.calculate_edges:
         logger.info("Skipping edge calculation.")
-        E_hats = {}
+        E_hats = []
     else:
         full_dataset_len = len(dataset)  # type: ignore
         # no-op if only 1 process
@@ -533,7 +534,7 @@ def rib_build(
         gram_matrices={k: v.cpu() for k, v in gram_matrices.items()},
         interaction_rotations=Cs,
         eigenvectors=Us,
-        edges=[(node_layer, E_hats[node_layer].cpu()) for node_layer in E_hats],
+        edges=E_hats,
         dist_info=dist_info,
         contains_all_edges=dist_info.global_size == 1,  # True if no parallelisation
         config=config,

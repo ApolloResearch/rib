@@ -8,7 +8,7 @@ from torch.utils.data import ConcatDataset, TensorDataset
 
 from rib.edge_combiner import combine_edges
 from rib.loader import get_dataset_chunk
-from rib.rib_builder import RibBuildConfig, rib_build
+from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 from rib_scripts.rib_build.run_distributed_edges import main as run_edges
 
 
@@ -68,7 +68,9 @@ class TestDistributed:
         MPI.Finalize()
         run_edges(double_config_path, n_pods=1, pod_rank=0, n_processes=2)
         combine_edges(double_outdir_path)
-        edges = torch.load(f"{double_outdir_path}/test_double_rib_graph_combined.pt")["edges"]
+        edges = RibBuildResults(
+            **torch.load(f"{double_outdir_path}/test_double_rib_graph_combined.pt")
+        ).edges
         return edges
 
     def test_edges_are_same(self, tmpdir):
@@ -79,15 +81,16 @@ class TestDistributed:
         )
         rib_build(cs_config)
         # not using fixtures as we need to compute Cs first
-        single_edges = self.get_single_edges(tmpdir)
-        double_edges = self.get_double_edges(tmpdir)
-        for (module, s_edges), (_, d_edges) in zip(single_edges, double_edges):
+        all_single_edges = self.get_single_edges(tmpdir)
+        all_double_edges = self.get_double_edges(tmpdir)
+
+        for s_edges, d_edges in zip(all_single_edges, all_double_edges):
             assert (
-                s_edges.shape == d_edges.shape
-            ), f"mismatching shape for {module}, {s_edges.shape}!={d_edges.shape}"
+                s_edges.E_hat.shape == d_edges.E_hat.shape
+            ), f"mismatching shape for {s_edges.in_node_layer_name}, {s_edges.shape}!={d_edges.shape}"
             assert torch.allclose(
-                s_edges, d_edges, atol=1e-9
-            ), f"on {module} mean error {(s_edges-d_edges).abs().mean().item()}"
+                s_edges.E_hat, d_edges.E_hat, atol=1e-9
+            ), f"on {s_edges.in_node_layer_name} mean error {(s_edges.E_hat-d_edges.E_hat).abs().mean().item()}"
 
 
 @pytest.mark.parametrize("num_chunks", [1, 3, 5, 7, 10])

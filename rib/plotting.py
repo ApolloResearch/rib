@@ -212,6 +212,7 @@ def plot_interaction_graph(
     plt.tight_layout()
     ax.axis("off")
     plt.savefig(out_file)
+    plt.close()
 
 
 def plot_ablation_results(
@@ -262,6 +263,9 @@ def plot_ablation_results(
                 axs[i].set_xlim(*xlim)
             if ylim is not None:
                 axs[i].set_ylim(*ylim)
+
+            xticks = n_vecs_remaining[1:] if n_vecs_remaining[0] == 0 else n_vecs_remaining
+            axs[i].set_xticks(xticks)
 
             if log_scale:
                 axs[i].set_xscale("log")

@@ -77,15 +77,22 @@ class Config(BaseModel):
     )
 
 
-def main(config_path_or_obj: Union[str, Config], force: bool = False) -> AblationAccuracies:
+def main(
+    config_path_or_obj: Union[str, Config],
+    force: bool = False,
+    out_file: Optional[Union[str, Path]] = None,
+) -> AblationAccuracies:
     start_time = time.time()
     config = load_config(config_path_or_obj, config_model=Config)
 
-    if config.out_dir is not None:
+    if out_file is None and config.out_dir is not None:  # broken?
         config.out_dir.mkdir(parents=True, exist_ok=True)
         out_file = config.out_dir / f"{config.exp_name}_ablation_results.json"
-        if not check_outfile_overwrite(out_file, force):
-            raise FileExistsError("Not overwriting output file")
+    else:
+        out_file = Path(out_file)
+
+    if not check_outfile_overwrite(out_file, force):
+        raise FileExistsError("Not overwriting output file")
 
     set_seed(config.seed)
     interaction_graph_info = torch.load(config.interaction_graph_path)

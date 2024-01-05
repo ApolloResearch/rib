@@ -324,6 +324,8 @@ def calculate_interaction_rotations(
             # standard basis vector e_i. Thus we want the single non-zero entry of U[-1, :] as -1
             # is a bias position in the neuron basis.
             top_2_vals, top_2_idxs = torch.topk(U[-1, :].abs(), k=2)
+            # We do top2 because this should be an argmax but we want to double check 2nd one is
+            # really zero
             # top value should be 1/sqrt(# bias positions in neuron basis)
             assert bias_positions is not None
             expected_top_val = len(bias_positions[node_layer]) ** (-0.5)

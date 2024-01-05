@@ -12,6 +12,7 @@ Usage:
 """
 import json
 from pathlib import Path
+from typing import Optional, Union
 
 import fire
 
@@ -20,7 +21,12 @@ from rib.plotting import plot_ablation_results
 from rib.utils import check_outfile_overwrite
 
 
-def main(*results_files: str, force: bool = False) -> None:
+def main(
+    *results_files: str,
+    force: bool = False,
+    out_file: Optional[Union[str, Path]] = None,
+    logscale: bool = False,
+) -> None:
     results_list = []
     exp_names = []
     ablation_types = []
@@ -47,8 +53,11 @@ def main(*results_files: str, force: bool = False) -> None:
 
     assert eval_type is not None, "Eval type should have been set by now."
 
-    out_filename = "_".join(exp_names)
-    out_file = Path(__file__).parent / "out" / f"{out_filename}_{eval_type}_vs_ablated_vecs.png"
+    if out_file is None:
+        out_filename = "_".join(exp_names)
+        out_file = Path(__file__).parent / "out" / f"{out_filename}_{eval_type}_vs_ablated_vecs.png"
+    else:
+        out_file = Path(out_file)
 
     if not check_outfile_overwrite(out_file, force):
         return
@@ -59,7 +68,7 @@ def main(*results_files: str, force: bool = False) -> None:
         exp_names=[f"{exp_name} LM" for exp_name in exp_names],
         eval_type=eval_type,
         ablation_types=ablation_types,
-        log_scale=False,
+        log_scale=logscale,
         xlim=(0.0, 20.0) if eval_type == "accuracy" else None,
         ylim=(0.0, 1.0) if eval_type == "accuracy" else (3.2, 5),
     )

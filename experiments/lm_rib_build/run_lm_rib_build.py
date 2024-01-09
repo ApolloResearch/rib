@@ -414,7 +414,7 @@ def main(
         )
 
         logger.info(
-            "Calculating edges for %s for %d batches.", config.node_layers, len(data_subset)  # type: ignore
+            "Calculating edges for %s for %d batches.", config.node_layers, len(edge_train_loader)
         )
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(

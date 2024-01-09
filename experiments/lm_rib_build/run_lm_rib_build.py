@@ -369,7 +369,11 @@ def main(
         )
 
         c_start_time = time.time()
-        logger.info("Calculating interaction rotations (Cs).")
+        logger.info(
+            "Calculating interaction rotations (Cs) for %s for %d batches.",
+            config.node_layers,
+            len(graph_train_loader),
+        )
         Cs, Us = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
             section_names=section_names,
@@ -409,7 +413,9 @@ def main(
             data_subset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
         )
 
-        logger.info("Calculating edges.")
+        logger.info(
+            "Calculating edges for %s for %d batches.", config.node_layers, len(data_subset)  # type: ignore
+        )
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
             Cs=edge_Cs,

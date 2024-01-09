@@ -444,6 +444,7 @@ def interaction_edge_pre_forward_hook_fn(
     f_hat = in_acts @ C_in
     edge = hooked_data[hook_name][data_key]
 
+    tqdm_desc = f"Integration steps (alphas) for {hook_name}"
     if edge_formula == "functional":
         calc_edge_functional(
             module_hat=module_hat,
@@ -452,6 +453,7 @@ def interaction_edge_pre_forward_hook_fn(
             edge=edge,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
+            tqdm_desc=tqdm_desc,
         )
     elif edge_formula == "squared":
         calc_edge_squared(
@@ -461,6 +463,7 @@ def interaction_edge_pre_forward_hook_fn(
             edge=edge,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
+            tqdm_desc=tqdm_desc,
         )
     elif edge_formula == "stochastic":
         assert n_stochastic_sources is not None, "n_stochastic_sources must be specified."
@@ -473,6 +476,7 @@ def interaction_edge_pre_forward_hook_fn(
             dataset_size=dataset_size,
             n_intervals=n_intervals,
             n_stochastic_sources=n_stochastic_sources,
+            tqdm_desc=tqdm_desc,
         )
     else:
         raise ValueError(

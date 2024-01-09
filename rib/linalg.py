@@ -220,6 +220,7 @@ def calc_edge_functional(
     edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
+    tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the functional method.
 
@@ -234,6 +235,7 @@ def calc_edge_functional(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        tqdm_desc: The description to use for the tqdm progress bar.
     """
     has_pos = f_in_hat.ndim == 3
 
@@ -250,9 +252,7 @@ def calc_edge_functional(
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
     # Integration with the trapzoidal rule
-    for alpha_idx, alpha in tqdm(
-        enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
-    ):
+    for alpha_idx, alpha in tqdm(enumerate(alphas), total=len(alphas), desc=tqdm_desc, leave=False):
         # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
         # alpha=0.5) and multiply by the interval size.
         if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
@@ -278,7 +278,7 @@ def calc_edge_functional(
         for i in tqdm(
             range(len(f_out_hat_norm)),
             total=len(f_out_hat_norm),
-            desc="Output idxs",
+            desc="Iteration over output dims",
             leave=False,
         ):
             # Get the derivative of the ith output element w.r.t alpha_f_in_hat
@@ -303,6 +303,7 @@ def calc_edge_squared(
     edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
+    tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the squared method.
 
@@ -317,6 +318,7 @@ def calc_edge_squared(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        tqdm_desc: The description to use for the tqdm progress bar.
     """
     has_pos = f_in_hat.ndim == 3
 
@@ -354,9 +356,7 @@ def calc_edge_squared(
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
     # Integration with the trapzoidal rule
-    for alpha_idx, alpha in tqdm(
-        enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
-    ):
+    for alpha_idx, alpha in tqdm(enumerate(alphas), total=len(alphas), desc=tqdm_desc, leave=False):
         # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
         # alpha=0.5) and multiply by the interval size.
         if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
@@ -372,7 +372,7 @@ def calc_edge_squared(
         for out_dim in tqdm(
             range(out_hidden_size_comb_trunc),
             total=out_hidden_size_comb_trunc,
-            desc="Output dims",
+            desc="Iteration over output dims",
             leave=False,
         ):
             if has_pos:
@@ -422,6 +422,7 @@ def calc_edge_stochastic(
     dataset_size: int,
     n_intervals: int,
     n_stochastic_sources: int,
+    tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the stochastic method.
 
@@ -439,6 +440,7 @@ def calc_edge_stochastic(
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
         n_stochastic_sources: The number of stochastic sources to add to each input.
+        tqdm_desc: The description to use for the tqdm progress bar.
     """
 
     f_in_hat.requires_grad_(True)
@@ -472,9 +474,7 @@ def calc_edge_stochastic(
     normalization_factor = f_in_hat.shape[1] * dataset_size * n_stochastic_sources
 
     # Integration with the trapzoidal rule
-    for alpha_idx, alpha in tqdm(
-        enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
-    ):
+    for alpha_idx, alpha in tqdm(enumerate(alphas), total=len(alphas), desc=tqdm_desc, leave=False):
         # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
         # alpha=0.5) and multiply by the interval size.
         if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):

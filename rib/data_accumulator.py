@@ -33,12 +33,14 @@ def run_dataset_through_model(
     dtype: torch.dtype,
     device: str = "cuda",
     use_tqdm: bool = False,
+    tqdm_desc: Optional[str] = None,
 ) -> None:
     """Simply pass all batches through a hooked model."""
     assert len(hooks) > 0, "Hooks have not been applied to this model."
     loader: Union[tqdm, DataLoader]
     if use_tqdm:
-        loader = tqdm(dataloader, total=len(dataloader), desc="Batches through entire model")
+        desc = "Batches through entire model" if tqdm_desc is None else tqdm_desc
+        loader = tqdm(dataloader, total=len(dataloader), desc=desc)
     else:
         loader = dataloader
 
@@ -304,6 +306,7 @@ def collect_M_dash_and_Lambda_dash(
         dtype=dtype,
         device=device,
         use_tqdm=True,
+        tqdm_desc=f"Batches through model for {hook_name}",
     )
 
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
@@ -357,7 +360,6 @@ def collect_interaction_edges(
     edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
     assert len(edge_modules) == len(Cs) - 1, "Number of edge modules not the same as Cs - 1."
 
-    logger.info("Collecting edges for node layers: %s", [C.node_layer_name for C in Cs[:-1]])
     edge_hooks: list[Hook] = []
     for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
         # C from the next node layer

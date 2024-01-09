@@ -495,7 +495,12 @@ def calc_edge_stochastic(
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
-        for out_dim in range(out_hidden_size_comb_trunc):
+        for out_dim in tqdm(
+            range(out_hidden_size_comb_trunc),
+            total=out_hidden_size_comb_trunc,
+            desc="Iteration over output dims",
+            leave=False,
+        ):
             for r in range(n_stochastic_sources):
                 # autograd gives us the derivative w.r.t. in_batch, in_pos, in_dim.
                 # The sum over the out_batch dim before passing to autograd is just a trick

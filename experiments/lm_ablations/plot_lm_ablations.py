@@ -26,9 +26,13 @@ def main(
     force: bool = False,
     out_file: Optional[Union[str, Path]] = None,
     logscale: bool = False,
+    exp_names: Optional[list[str]] = None,
+    x_shift: Optional[dict[str, float]] = None,
+    line_style: Optional[dict[str, str]] = None,
+    colors: Optional[dict[str, str]] = None,
 ) -> None:
     results_list = []
-    exp_names = []
+    exp_names = exp_names or []
     ablation_types = []
     eval_type = None
 
@@ -65,12 +69,15 @@ def main(
     plot_ablation_results(
         results=results_list,
         out_file=out_file,
-        exp_names=[f"{exp_name} LM" for exp_name in exp_names],
+        exp_names=[f"{exp_name}" for exp_name in exp_names],
         eval_type=eval_type,
         ablation_types=ablation_types,
         log_scale=logscale,
         xlim=(0.0, 20.0) if eval_type == "accuracy" else None,
         ylim=(0.0, 1.0) if eval_type == "accuracy" else (3.2, 5),
+        x_shift=x_shift,
+        line_style=line_style,
+        colors=colors,
     )
 
     logger.info(f"Saved plot to {out_file}")

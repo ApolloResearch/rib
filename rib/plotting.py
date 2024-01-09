@@ -113,6 +113,7 @@ def plot_interaction_graph(
     node_labels: Optional[list[list[str]]] = None,
     ignored_nodes: Optional[list[int]] = None,
     lowest_hidden_node: int = 0,
+    figsize=(18, 22),
 ) -> None:
     """Plot the interaction graph for the given edges.
 
@@ -161,7 +162,7 @@ def plot_interaction_graph(
     # Create the undirected graph
     graph = nx.Graph()
 
-    fig, ax = plt.subplots(1, 1, figsize=(18, 14))
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
 
     layers = _create_node_layers(edges)
     # Add nodes to the graph object
@@ -181,20 +182,51 @@ def plot_interaction_graph(
     # Draw nodes
     colors = ["black", "green", "orange", "purple"]  # Add more colors if you have more layers
     options = {"edgecolors": "tab:gray", "node_size": 100, "alpha": 0.3}
-    for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
+    layer_names_plot = ["embedding", "resid_mid", "mlp_post", "resid_post"]
+    transition_names = ["Attention", "MLP (W_in+ReLU)", "W_out", "Unembed"]
+    for i, (layer_name, layer) in enumerate(zip(layer_names_plot, layers)):
         nx.draw_networkx_nodes(
             graph, pos, nodelist=layer, node_color=colors[i % len(colors)], **options
         )
         # Add layer label above the nodes
-        plt.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+        plt.text(i, max_layer_height + 1, layer_name, ha="center", va="center", fontsize=16)
+        label_options = {"ec": "none", "fc": "blue", "alpha": 0.30}
+        plt.text(
+            i + 0.5,
+            max_layer_height - 1,
+            transition_names[i],
+            ha="center",
+            va="center",
+            fontsize=16,
+            bbox=label_options,
+        )
+    plt.text(
+        len(layers) - 1,
+        max_layer_height + 1,
+        "Logits",
+        ha="center",
+        va="center",
+        fontsize=16,
+    )
 
     # Label nodes if node_labels is provided
     if node_labels is not None:
-        node_label_dict = {}
+        node_label_dict_large = {}
+        node_label_dict_small = {}
+        node_label_dict_output = {}
         for i, layer in enumerate(layers):
             for j, node in enumerate(layer):
-                node_label_dict[node] = node_labels[i][j].replace("|", "\n")
-        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8)
+                # Count number of |: If more than 3, then use small font
+                if "output_" in node_labels[i][j]:
+                    node_label_dict_output[node] = node_labels[i][j].replace("|", "\n")
+                elif node_labels[i][j].count("|") > 3:
+                    node_label_dict_small[node] = node_labels[i][j].replace("|", "\n")
+                else:
+                    node_label_dict_large[node] = node_labels[i][j].replace("|", "\n")
+        label_options = {"ec": "k", "fc": "white", "alpha": 0.70, "boxstyle": "round,pad=0.2"}
+        nx.draw_networkx_labels(graph, pos, node_label_dict_large, font_size=12, bbox=label_options)
+        nx.draw_networkx_labels(graph, pos, node_label_dict_small, font_size=8, bbox=label_options)
+        nx.draw_networkx_labels(graph, pos, node_label_dict_output, font_size=10)
 
     # Draw edges
     width_factor = 15
@@ -211,7 +243,8 @@ def plot_interaction_graph(
     plt.suptitle(exp_name)
     plt.tight_layout()
     ax.axis("off")
-    plt.savefig(out_file)
+    plt.savefig(out_file.with_suffix(".svg"))
+    plt.savefig(out_file.with_suffix(".png"), dpi=300)
     plt.close()
 
 
@@ -224,6 +257,9 @@ def plot_ablation_results(
     log_scale: bool = False,
     xlim: Optional[tuple[float, float]] = None,
     ylim: Optional[tuple[float, float]] = None,
+    x_shift: Optional[dict[str, float]] = None,
+    line_style: Optional[dict[str, str]] = None,
+    colors: Optional[dict[str, str]] = None,
 ) -> None:
     """Plot accuracy/loss vs number of remaining basis vectors.
 
@@ -254,11 +290,38 @@ def plot_ablation_results(
         for exp_name, ablation_type, exp_results in zip(exp_names, ablation_types, results):
             n_vecs_remaining = sorted(list(int(k) for k in exp_results[node_layer]))
             y_values = [exp_results[node_layer][str(i)] for i in n_vecs_remaining]
-            axs[i].plot(n_vecs_remaining, y_values, "-o", label=exp_name)
+            x_shift = x_shift or {exp_name: 0.0}
+            axs[i].plot(
+                np.array(n_vecs_remaining) + x_shift[exp_name],
+                y_values,
+                line_style[exp_name],
+                color=colors[exp_name],
+            )
+            # For the label without marker
+            ls_legend = ""
+            if "--" in line_style[exp_name]:
+                ls_legend = "--"
+            elif ":" in line_style[exp_name]:
+                ls_legend = ":"
+            elif "-." in line_style[exp_name]:
+                ls_legend = "-."
+            else:
+                ls_legend = "-"
+            axs[i].plot(
+                [],
+                [],
+                ls_legend,
+                color=colors[exp_name],
+                label=exp_name,
+            )
 
-            axs[i].set_title(f"{eval_type} vs n_remaining_basis_vecs for input to {node_layer}")
-            axs[i].set_xlabel("Number of remaining basis vecs")
-            axs[i].set_ylabel(eval_type)
+            # axs[i].set_title(
+            #     f"{eval_type} vs n_remaining_basis_vecs for input to {node_layer}", fontsize=14
+            # )
+            title = ["embedding", "resid_mid", "mlp_post", "resid_post"][i]
+            axs[i].set_title(title, fontsize=14)
+            axs[i].set_xlabel("Number of remaining basis vecs", fontsize=14)
+            axs[i].set_ylabel(eval_type, fontsize=14)
             if xlim is not None:
                 axs[i].set_xlim(*xlim)
             if ylim is not None:
@@ -271,7 +334,7 @@ def plot_ablation_results(
                 axs[i].set_xscale("log")
 
             axs[i].grid(True)
-            axs[i].legend()
+            axs[i].legend(fontsize=14, loc="lower right")
 
     date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     plt.text(
@@ -287,7 +350,7 @@ def plot_ablation_results(
     )
 
     # Make a title for the entire figure
-    plt.suptitle("_".join(exp_names))
+    # plt.suptitle("_".join(exp_names))
 
     # Adjust the spacing between subplots
     plt.subplots_adjust(hspace=0.4)

@@ -399,7 +399,7 @@ def interaction_edge_pre_forward_hook_fn(
     n_intervals: int,
     dataset_size: int,
     edge_formula: Literal["functional", "squared", "stochastic"] = "functional",
-    stochastic_noise_dim: Optional[int] = None,
+    n_stochastic_sources: Optional[int] = None,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -427,7 +427,7 @@ def interaction_edge_pre_forward_hook_fn(
             - "functional" is the old (October 23) functional version
             - "squared" is the version which iterates over the output dim and output pos dim
             - "stochastic" is the version which iteratates over output dim and stochastic noise dim
-        stochastic_noise_dim: The dimension of the stochastic noise. Only used if
+        n_stochastic_sources: The dimension of the stochastic noise. Only used if
             edge_formula == "stochastic". Defaults to None.
     """
     assert isinstance(data_key, str), "data_key must be a string."
@@ -463,7 +463,7 @@ def interaction_edge_pre_forward_hook_fn(
             n_intervals=n_intervals,
         )
     elif edge_formula == "stochastic":
-        assert stochastic_noise_dim is not None, "stochastic_noise_dim must be specified."
+        assert n_stochastic_sources is not None, "n_stochastic_sources must be specified."
         assert f_hat.dim() == 3, "f_hat must have a position dimension to use stochastic noise."
         calc_edge_stochastic(
             module_hat=module_hat,
@@ -472,7 +472,7 @@ def interaction_edge_pre_forward_hook_fn(
             edge=edge,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
-            stochastic_noise_dim=stochastic_noise_dim,
+            n_stochastic_sources=n_stochastic_sources,
         )
     else:
         raise ValueError(

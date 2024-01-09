@@ -756,15 +756,15 @@ def test_stochastic_source_modadd():
     out_dir: null
     basis_formula: (1-0)*alpha
     edge_formula: {edge_formula}
-    stochastic_noise_dim: {stochastic_noise_dim}
+    n_stochastic_sources: {n_stochastic_sources}
     """
     # Calc squared edges
-    config_squared_str = config_str.format(edge_formula="squared", stochastic_noise_dim="null")
+    config_squared_str = config_str.format(edge_formula="squared", n_stochastic_sources="null")
     config_squared = LMRibConfig(**yaml.safe_load(config_squared_str))
     squared_edges = lm_build_graph_main(config_squared)["edges"][0][1]
 
     # Calc stochastic edges
-    config_stochastic_str = config_str.format(edge_formula="stochastic", stochastic_noise_dim=1)
+    config_stochastic_str = config_str.format(edge_formula="stochastic", n_stochastic_sources=1)
     config_stochastic = LMRibConfig(**yaml.safe_load(config_stochastic_str))
     stochastic_edges = lm_build_graph_main(config_stochastic)["edges"][0][1]
 

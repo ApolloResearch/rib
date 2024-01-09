@@ -421,7 +421,7 @@ def calc_edge_stochastic(
     edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
-    stochastic_noise_dim: int,
+    n_stochastic_sources: int,
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the stochastic method.
 
@@ -438,7 +438,7 @@ def calc_edge_stochastic(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        stochastic_noise_dim: The dimension of the stochastic noise to add to the inputs.
+        n_stochastic_sources: The number of stochastic sources to add to each input.
     """
 
     f_in_hat.requires_grad_(True)
@@ -457,19 +457,19 @@ def calc_edge_stochastic(
     # We store values because we need to square the integral result before summing.
     J_hat = torch.zeros(
         batch_size,
-        stochastic_noise_dim,
+        n_stochastic_sources,
         out_hidden_size_comb_trunc,
         in_hidden_size_comb_trunc,
         device=f_in_hat.device,
     )
 
     # Create phis that are -1 or 1 with equal probability
-    phi_shape = (batch_size, stochastic_noise_dim, out_pos_size)
+    phi_shape = (batch_size, n_stochastic_sources, out_pos_size)
     phi = torch.where(
         torch.randn(phi_shape) < 0.0, -1 * torch.ones(phi_shape), torch.ones(phi_shape)
     ).to(dtype=f_in_hat.dtype, device=f_in_hat.device)
 
-    normalization_factor = f_in_hat.shape[1] * dataset_size * stochastic_noise_dim
+    normalization_factor = f_in_hat.shape[1] * dataset_size * n_stochastic_sources
 
     # Integration with the trapzoidal rule
     for alpha_idx, alpha in tqdm(
@@ -488,7 +488,7 @@ def calc_edge_stochastic(
 
         # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
         for out_dim in range(out_hidden_size_comb_trunc):
-            for r in range(stochastic_noise_dim):
+            for r in range(n_stochastic_sources):
                 # autograd gives us the derivative w.r.t. b (batch dim), p (input pos) and
                 # j (input dim).
                 # The sum over the batch dimension before passing to autograd is just a trick

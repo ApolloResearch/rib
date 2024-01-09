@@ -147,10 +147,9 @@ class Config(BaseModel):
         "functional",
         description="The attribution method to use to calculate the edges.",
     )
-    stochastic_noise_dim: Optional[int] = Field(
+    n_stochastic_sources: Optional[int] = Field(
         None,
-        description="The dimensionality of the noise vector to use when calculating stochastic"
-        "edges.",
+        description="The number of stochastic sources to use when calculating stochastic edges.",
     )
     center: bool = Field(
         False,
@@ -167,13 +166,13 @@ class Config(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def verify_stochastic_noise_dim(self) -> "Config":
-        if self.edge_formula != "stochastic" and self.stochastic_noise_dim is not None:
+    def verify_n_stochastic_sources(self) -> "Config":
+        if self.edge_formula != "stochastic" and self.n_stochastic_sources is not None:
             raise ValueError(
-                "stochastic_noise_dim should only be set when edge_formula is stochastic"
+                "n_stochastic_sources should only be set when edge_formula is stochastic"
             )
-        if self.edge_formula == "stochastic" and self.stochastic_noise_dim is None:
-            raise ValueError("stochastic_noise_dim must be set when edge_formula is stochastic")
+        if self.edge_formula == "stochastic" and self.n_stochastic_sources is None:
+            raise ValueError("n_stochastic_sources must be set when edge_formula is stochastic")
         return self
 
 
@@ -422,7 +421,7 @@ def main(
             device=device,
             data_set_size=full_dataset_len,  # includes data for other processes
             edge_formula=config.edge_formula,
-            stochastic_noise_dim=config.stochastic_noise_dim,
+            n_stochastic_sources=config.n_stochastic_sources,
         )
 
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"

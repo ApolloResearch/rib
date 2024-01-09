@@ -141,7 +141,7 @@ class Config(BaseModel):
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
         "use Us as Cs, giving the eigendecomposition of the gram matrix. If 'neuron', will use "
-        "the neuron-basis.",
+        "the neuron-basis. Defaults to '(1-0)*alpha'",
     )
     edge_formula: Literal["functional", "squared", "stochastic"] = Field(
         "functional",

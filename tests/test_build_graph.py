@@ -11,7 +11,7 @@ various scales. This is because combining atol and rtol does not work particular
 that have a small set of large numbers and a large set of small numbers.
 """
 
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 from unittest.mock import patch
 
 import einops
@@ -211,35 +211,43 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
 
 
 def get_modular_arithmetic_config(
-    basis_formula: str, edge_formula: str, dtype_str: str
+    return_set_n_samples: int = 10,
+    batch_size: int = 6,
+    basis_formula: str = "(1-0)*alpha",
+    edge_formula: str = "squared",
+    dtype_str: str = "float64",
+    node_layers: Optional[list[str]] = None,
+    last_pos_module_type: str = "add_resid1",
+    n_stochastic_sources: Optional[int] = None,
 ) -> LMRibConfig:
+    if node_layers is None:
+        # Default node layers
+        node_layers = ["ln1.0", "mlp_in.0", "unembed", "output"]
+
     config_str = f"""
     exp_name: test
     seed: 0
     tlens_pretrained: null
     tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-    node_layers:
-        - ln1.0
-        - mlp_in.0
-        - unembed
-        - output
     dataset:
         source: custom
         name: modular_arithmetic
         return_set: train
-        return_set_n_samples: 10
-    batch_size: 6
+        return_set_n_samples: {return_set_n_samples}
+    batch_size: {batch_size}
     truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
-    last_pos_module_type: add_resid1
+    last_pos_module_type: {last_pos_module_type}
     n_intervals: 0
     dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null
-    basis_formula: "{basis_formula}"
-    edge_formula: "{edge_formula}"
+    basis_formula: {basis_formula}
+    edge_formula: {edge_formula}
+    n_stochastic_sources: {"null" if n_stochastic_sources is None else n_stochastic_sources}
     """
     config_dict = yaml.safe_load(config_str)
+    config_dict["node_layers"] = node_layers
     return LMRibConfig(**config_dict)
 
 
@@ -536,7 +544,9 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
     between 1e3 and 1e5 large.
     """
     rotate_final_layer_invariance(
-        config_not_rotated=get_modular_arithmetic_config(basis_formula, edge_formula, dtype_str),
+        config_not_rotated=get_modular_arithmetic_config(
+            basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
+        ),
         build_graph_main_fn=lm_build_graph_main,
         rtol=rtol,
         atol=atol,
@@ -723,49 +733,83 @@ def test_modular_mlp_diagonal_edges_when_linear(
 
 
 @pytest.mark.slow
-def test_stochastic_source_modadd():
-    """Show that modadd after add_resid1 only needs a single stochastic source.
+def test_stochastic_source_single_pos_modadd():
+    """Show that modadd after only needs a single stochastic source when using a single position.
 
-    Since there is only a single position dimension after add_resid1 in modadd, and since our
-    stochastic sources are either -1 or 1 and are then squared in the edge formula, we should only
-    need a single source to get exactly the same edges as edge_formula=squared.
+    Since there is only a single position dimension after add_resid1 in modadd when setting
+    last_pos_module_type='add_resid1', and since our stochastic sources are either -1 or 1 and are
+    then squared in the edge formula, we should only need a single source to get exactly the same
+    edges as edge_formula=squared.
     """
-    config_str = """
-    exp_name: test
-    seed: 0
-    tlens_pretrained: null
-    tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-    dataset:
-        source: custom
-        name: modular_arithmetic
-        return_set: train
-        return_set_frac: null
-        return_set_n_samples: 10  # full dataset is 3830 samples
-    node_layers:
-        - mlp_in.0
-        - mlp_out.0
-    batch_size: 6
-    gram_batch_size: 6
-    edge_batch_size: 6
-    truncation_threshold: 1e-15
-    rotate_final_node_layer: true  # Gets overridden by rotate_final_layer_invariance
-    last_pos_module_type: add_resid1
-    n_intervals: 0
-    dtype: float64
-    eval_type: accuracy
-    out_dir: null
-    basis_formula: (1-0)*alpha
-    edge_formula: {edge_formula}
-    n_stochastic_sources: {n_stochastic_sources}
-    """
+    node_layers = ["mlp_in.0", "mlp_out.0"]
     # Calc squared edges
-    config_squared_str = config_str.format(edge_formula="squared", n_stochastic_sources="null")
-    config_squared = LMRibConfig(**yaml.safe_load(config_squared_str))
+    config_squared = get_modular_arithmetic_config(
+        edge_formula="squared",
+        node_layers=node_layers,
+        last_pos_module_type="add_resid1",
+        n_stochastic_sources=None,
+    )
     squared_edges = lm_build_graph_main(config_squared)["edges"][0][1]
 
     # Calc stochastic edges
-    config_stochastic_str = config_str.format(edge_formula="stochastic", n_stochastic_sources=1)
-    config_stochastic = LMRibConfig(**yaml.safe_load(config_stochastic_str))
+    config_stochastic = get_modular_arithmetic_config(
+        edge_formula="stochastic",
+        node_layers=node_layers,
+        last_pos_module_type="add_resid1",
+        n_stochastic_sources=1,
+    )
     stochastic_edges = lm_build_graph_main(config_stochastic)["edges"][0][1]
 
     assert_is_close(squared_edges, stochastic_edges, atol=0, rtol=0)
+
+
+@pytest.mark.slow
+def test_stochastic_source_modadd_convergence():
+    """Show that modadd after converges to squared edges as n_stochastic_sources increases.
+
+    We measure the mean absolute difference between the squared edges and the stochastic edges as
+    n_stochastic_sources increases. We expect this to decrease monotonically.
+
+    Here, we set last_pos_module_type='unembed' so that we have multiple position dimensions in the
+    mlp layer.
+
+    NOTE: This is quite a weak test, but the runs a slow so we're taking a hit on the test quality.
+    """
+    node_layers = ["mlp_in.0", "mlp_out.0"]
+    return_set_n_samples = 3
+    batch_size = 3
+
+    # Calc squared edges
+    config_squared = get_modular_arithmetic_config(
+        return_set_n_samples=return_set_n_samples,
+        batch_size=batch_size,
+        edge_formula="squared",
+        node_layers=node_layers,
+        last_pos_module_type="unembed",
+        n_stochastic_sources=None,
+    )
+    squared_edges = lm_build_graph_main(config_squared)["edges"][0][1]
+
+    # Calc stochastic edges
+    all_stochastic_edges = []
+    abs_diffs = []
+    # Ideally we'd use more sources, but that is very slow
+    for n_stochastic_sources in [1, 3, 7]:
+        config_stochastic = get_modular_arithmetic_config(
+            return_set_n_samples=return_set_n_samples,
+            batch_size=batch_size,
+            edge_formula="stochastic",
+            node_layers=node_layers,
+            last_pos_module_type="unembed",
+            n_stochastic_sources=n_stochastic_sources,
+        )
+        stochastic_edges = lm_build_graph_main(config_stochastic)["edges"][0][1]
+        all_stochastic_edges.append(stochastic_edges)
+        abs_diffs.append(torch.abs(stochastic_edges - squared_edges).mean())
+
+    # Check that the mean absolute differences decrease as n_stochastic_sources increases.
+    assert (
+        torch.diff(torch.tensor(abs_diffs)) <= 0
+    ).all(), "abs_diffs is not monotonically decreasing"
+    # Check that the final relative and absolute differences are small.
+    assert_is_close(all_stochastic_edges[-1], squared_edges, atol=1e1, rtol=1e-5)

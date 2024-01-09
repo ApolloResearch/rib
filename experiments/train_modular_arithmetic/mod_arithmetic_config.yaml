@@ -20,7 +20,7 @@ train:
   batch_size: 10000
   epochs: 60000
   eval_every_n_epochs: 1000
-  save_dir: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic/
+  save_dir: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/
   save_every_n_epochs: 20000
 wandb:
   project: transformer-modular-arithmetic

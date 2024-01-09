@@ -21,7 +21,7 @@ train:
   epochs: 60000
   eval_every_n_epochs: 1000
   learning_rate: 0.001
-  save_dir: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic
+  save_dir: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic
   save_every_n_epochs: 20000
 wandb:
   entity: null

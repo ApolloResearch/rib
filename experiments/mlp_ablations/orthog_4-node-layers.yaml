@@ -1,6 +1,6 @@
 exp_name: orthog_4-node-layers
 ablation_type: orthogonal
-interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/mlp_rib_build/out/4-node-layers_rib_graph.pt
+interaction_graph_path: /mnt/ssd-interp/dan/RIB/rib/experiments/mlp_rib_build/out/4-node-layers_rib_graph.pt
 schedule:
   schedule_type: exponential
   early_stopping_threshold: null

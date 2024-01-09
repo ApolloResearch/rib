@@ -2,7 +2,7 @@ exp_name: pythia-14m
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
-interaction_matrices_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/pythia-14m_rib_Cs.pt
+interaction_matrices_path: /mnt/ssd-interp/dan/RIB/rib/experiments/lm_rib_build/out/pythia-14m_rib_Cs.pt
 dataset:
   source: huggingface
   name: NeelNanda/pile-10k

@@ -3,6 +3,7 @@ from typing import Callable, Literal, Optional, Union
 import numpy as np
 import torch
 from einops import rearrange
+from fancy_einsum import einsum
 from jaxtyping import Float, Int
 from torch import Tensor
 from tqdm import tqdm
@@ -241,7 +242,10 @@ def calc_edge_functional(
 
     f_in_hat.requires_grad_(True)
 
-    einsum_pattern = "bpj,bpj->j" if f_in_hat.ndim == 3 else "bj,bj->j"
+    if has_pos:
+        einsum_pattern = "batch in_pos in_dim, batch in_pos in_dim -> in_dim"
+    else:
+        einsum_pattern = "batch in_dim, batch in_dim -> in_dim"
 
     alphas, interval_size = _calc_integration_intervals(n_intervals)
 
@@ -288,7 +292,7 @@ def calc_edge_functional(
                 * trapezoidal_scaler
             )
             with torch.inference_mode():
-                E = torch.einsum(einsum_pattern, i_grad, f_in_hat)
+                E = einsum(einsum_pattern, i_grad, f_in_hat)
                 # Note that edge is initialised to zeros in
                 # `rib.data_accumulator.collect_interaction_edges`
                 edge[i] -= E
@@ -392,8 +396,10 @@ def calc_edge_squared(
 
                     with torch.inference_mode():
                         # Element-wise multiply with f_in_hat and sum over the input pos
-                        J_hat[:, output_pos_idx, out_dim, :] -= torch.einsum(
-                            "bpj,bpj->bj", i_grad, f_in_hat
+                        J_hat[:, output_pos_idx, out_dim, :] -= einsum(
+                            "batch in_pos in_dim, batch in_pos in_dim -> batch in_dim",
+                            i_grad,
+                            f_in_hat,
                         )
             else:
                 i_grad = (
@@ -406,7 +412,9 @@ def calc_edge_squared(
                 )
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat
-                    J_hat[:, out_dim, :] -= torch.einsum("bj,bj->bj", i_grad, f_in_hat)
+                    J_hat[:, out_dim, :] -= einsum(
+                        "batch in_dim, batch in_dim -> batch in_dim", i_grad, f_in_hat
+                    )
 
     # Square, and sum over batch size and output pos (if applicable)
     edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1) if has_pos else 0)
@@ -489,12 +497,13 @@ def calc_edge_stochastic(
         # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
         for out_dim in range(out_hidden_size_comb_trunc):
             for r in range(n_stochastic_sources):
-                # autograd gives us the derivative w.r.t. b (batch dim), p (input pos) and
-                # j (input dim).
-                # The sum over the batch dimension before passing to autograd is just a trick
+                # autograd gives us the derivative w.r.t. in_batch, in_pos, in_dim.
+                # The sum over the out_batch dim before passing to autograd is just a trick
                 # to get the grad for every batch index vectorized.
-                phi_f_out_alpha_hat = torch.einsum(
-                    "bp,bp->", phi[:, r, :], f_out_alpha_hat[:, :, out_dim]
+                phi_f_out_alpha_hat = einsum(
+                    "out_batch out_pos, out_batch out_pos ->",
+                    phi[:, r, :],
+                    f_out_alpha_hat[:, :, out_dim],
                 )
                 i_grad = (
                     torch.autograd.grad(phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True)[0]
@@ -503,7 +512,11 @@ def calc_edge_stochastic(
 
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat and sum over the input pos
-                    J_hat[:, r, out_dim, :] -= torch.einsum("bpj,bpj->bj", i_grad, f_in_hat)
+                    J_hat[:, r, out_dim, :] -= einsum(
+                        "in_batch in_pos in_dim, in_batch in_pos in_dim -> in_batch in_dim",
+                        i_grad,
+                        f_in_hat,
+                    )
 
     # Square, and sum over batch size and output pos
     J_hat = J_hat**2 / normalization_factor

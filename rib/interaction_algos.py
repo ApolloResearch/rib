@@ -12,12 +12,7 @@ from tqdm import tqdm
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import (
-    eigendecompose,
-    move_const_dir_first,
-    pinv_diag,
-    shift_matrix,
-)
+from rib.linalg import eigendecompose, move_const_dir_first, pinv_diag, shift_matrix
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.transformer import SequentialTransformer
 

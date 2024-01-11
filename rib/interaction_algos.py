@@ -66,16 +66,13 @@ def build_sorted_lambda_matrices(
         - The pseudoinverse of the sqrt sorted Lambda matrix
 
     """
-    # Get the sort indices in descending order but ignore_first_index
-
+    # Get the sort indices in descending order
     if not ignore_first_index:
         idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(Lambda_abs, descending=True)
     else:
-        idxs = torch.argsort(Lambda_abs[1:], descending=True)
-        idxs += 1
-        idxs: Int[Tensor, "d_hidden_trunc"] = torch.cat(
-            [torch.tensor([0], device=idxs.device), idxs]
-        )
+        idxs_excl_first = torch.argsort(Lambda_abs[1:], descending=True) + 1
+        zero = torch.tensor([0], device=idxs_excl_first.device)
+        idxs: Int[Tensor, "d_hidden_trunc"] = torch.cat([zero, idxs_excl_first])
 
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
@@ -341,14 +338,11 @@ def calculate_interaction_rotations(
             # this constant direction is in the 0th position, so we eigendecompose the submatrix
             # excluding this direction
             sub_eigenvalues, sub_V = eigendecompose(M[1:, 1:])
-            # TODO: Check whether changing Lambda_dash[0] does nothing
-            # Append a 1 at the beginnign of sub_eigenvalues
-            eigenvalues = torch.cat(
-                [
-                    torch.ones(1, dtype=sub_eigenvalues.dtype, device=sub_eigenvalues.device),
-                    sub_eigenvalues,
-                ]
-            )
+            # Set the Lambda corresponding to the constant direction to 1. This is an arbitrary
+            # choice, 1 is decent for numerics. There does exist a "correct" value if we cared
+            # about the edge strengths connecting to the constant direction, but we mostly do not.
+            one = torch.ones(1, dtype=sub_eigenvalues.dtype, device=sub_eigenvalues.device)
+            eigenvalues = torch.cat([one, sub_eigenvalues])
             V = torch.zeros_like(M)
             V[0, 0] = 1
             V[1:, 1:] = sub_V
@@ -366,7 +360,9 @@ def calculate_interaction_rotations(
             (Vt_Dsqrt_Ut_Yinv @ Lambda_dash @ Y_U_Dsqrtpinv_V).diag().abs()
         )
 
-        Lambda_abs = eigenvalues
+        # Lambdas for jacobian basis are the eigenvalues of the jacobian-basis-M
+        if basis_formula == "jacobian":
+            Lambda_abs = eigenvalues
 
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
             Lambda_abs, truncation_threshold, ignore_first_index=True

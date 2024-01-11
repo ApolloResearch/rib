@@ -49,6 +49,7 @@ class Eigenvectors:
 def build_sorted_lambda_matrices(
     Lambda_abs: Float[Tensor, "d_hidden_trunc"],
     truncation_threshold: float,
+    ignore_first_index: bool = False,
 ) -> tuple[
     Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"],
     Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"],
@@ -65,8 +66,16 @@ def build_sorted_lambda_matrices(
         - The pseudoinverse of the sqrt sorted Lambda matrix
 
     """
-    # Get the sort indices in descending order
-    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(Lambda_abs, descending=True)
+    # Get the sort indices in descending order but ignore_first_index
+
+    if not ignore_first_index:
+        idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(Lambda_abs, descending=True)
+    else:
+        idxs = torch.argsort(Lambda_abs[1:], descending=True)
+        idxs += 1
+        idxs: Int[Tensor, "d_hidden_trunc"] = torch.cat(
+            [torch.tensor([0], device=idxs.device), idxs]
+        )
 
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
@@ -360,7 +369,7 @@ def calculate_interaction_rotations(
         Lambda_abs = eigenvalues
 
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
-            Lambda_abs, truncation_threshold
+            Lambda_abs, truncation_threshold, ignore_first_index=True
         )
 
         C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (

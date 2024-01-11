@@ -1,6 +1,6 @@
 exp_name: orthog_pythia-14m
 ablation_type: orthogonal
-interaction_graph_path: /mnt/ssd-apollo/dan/RIB/rib/experiments/lm_rib_build/out/pythia-14m_rib_Cs.pt
+interaction_graph_path: /mnt/ssd-interp/dan/RIB/rib/experiments/lm_rib_build/out/pythia-14m_rib_Cs.pt
 schedule:
   schedule_type: linear
   early_stopping_threshold: 1.5

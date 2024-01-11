@@ -12,10 +12,9 @@ from experiments.lm_ablations.run_lm_ablations import Config as AblationConfig
 from experiments.lm_ablations.run_lm_ablations import main as ablation_main
 from experiments.lm_rib_build.run_lm_rib_build import Config as RibConfig
 from experiments.lm_rib_build.run_lm_rib_build import main as rib_main
+from rib.log import logger
 
 
-# Skipped because slow (5 and 10 mins for RIB build and ablations, respectively)
-@pytest.mark.skip_ci
 @pytest.mark.slow
 class TestPythiaFloatingPointErrors:
     @pytest.fixture(scope="class")
@@ -65,7 +64,9 @@ class TestPythiaFloatingPointErrors:
                 # Try to reduce memory usage for CI
                 rib_config["batch_size"] = 1
                 rib_config["gram_batch_size"] = 1
-            print("Running RIB build with batch size", rib_config["batch_size"], "for", dtype)
+            logger.info(
+                ("Running RIB build with batch size", rib_config["batch_size"], "for", dtype)
+            )
             rib_main(RibConfig(**rib_config))
             basis_matrices = torch.load(
                 f"{temp_dir}/float-precision-test-pythia-14m-{dtype}_rib_Cs.pt"
@@ -173,7 +174,9 @@ class TestPythiaFloatingPointErrors:
             if not torch.cuda.is_available():
                 # Try to reduce memory usage for CI
                 ablation_config["batch_size"] = 1
-            print("Running ablations with batch size", ablation_config["batch_size"], "for", dtype)
+            logger.info(
+                ("Running ablations with batch size", ablation_config["batch_size"], "for", dtype)
+            )
             ablation_main(AblationConfig(**ablation_config))
             ablation_result = json.load(open(f"{temp_dir}/{exp_name}_ablation_results.json"))[
                 "results"
@@ -186,8 +189,6 @@ class TestPythiaFloatingPointErrors:
 
         return ablation_results
 
-    # Skip because broken on CI (but works on devboxes)
-    @pytest.mark.skip_ci
     def test_ablation_result_float_precision(self, ablation_results: dict) -> None:
         # ln2.3 (and others) are broken (https://github.com/ApolloResearch/rib/issues/212)
         # ln1.- are broken. ln1.0 seemed fine on GPU (a6000) but broken on CPU
@@ -203,8 +204,6 @@ class TestPythiaFloatingPointErrors:
                     atol=1e-3,
                 ), f"Float difference {node_layer} {n_vecs_ablated}: {float32_ablation_result} (float32) != {float64_ablation_result} (float64), full results: {ablation_results['float32'][node_layer]} (float32) != {ablation_results['float64'][node_layer]} (float64)"
 
-    # Skip because broken on CI (but works on devboxes)
-    @pytest.mark.skip_ci
     @pytest.mark.parametrize("dtype", ["float32", "float64"])
     def test_ablation_result_flatness(self, ablation_results: dict, dtype: str) -> None:
         for node_layer in ablation_results["float32"].keys():

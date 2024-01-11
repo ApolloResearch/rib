@@ -37,13 +37,17 @@ from typing import Literal, Optional, Union
 
 import fire
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 from rib.data import HFDatasetConfig, ModularArithmeticDatasetConfig
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.data_accumulator import (
+    collect_dataset_means,
+    collect_gram_matrices,
+    collect_interaction_edges,
+)
 from rib.distributed_utils import adjust_logger_dist, get_device_mpi, get_dist_info
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import (
@@ -133,14 +137,24 @@ class Config(BaseModel):
         description="The type of evaluation to perform on the model before building the graph."
         "If None, skip evaluation.",
     )
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "jacobian"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron", "jacobian"] = Field(
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
-        "use Us as Cs, giving the eigendecomposition of the gram matrix.",
+        "use Us as Cs, giving the eigendecomposition of the gram matrix. If 'neuron', will use "
+        "the neuron-basis. Defaults to '(1-0)*alpha'",
     )
-    edge_formula: Literal["functional", "squared"] = Field(
+    edge_formula: Literal["functional", "squared", "stochastic"] = Field(
         "functional",
         description="The attribution method to use to calculate the edges.",
+    )
+    n_stochastic_sources: Optional[int] = Field(
+        None,
+        description="The number of stochastic sources to use when calculating stochastic edges.",
+    )
+    center: bool = Field(
+        False,
+        description="Whether to center the activations before performing rib. Currently only"
+        "supported for basis_formula='svd', which gives the 'pca' basis.",
     )
 
     @model_validator(mode="after")
@@ -149,6 +163,16 @@ class Config(BaseModel):
             raise ValueError(
                 "Exactly one of [tlens_pretrained, tlens_model_path] must be specified"
             )
+        return self
+
+    @model_validator(mode="after")
+    def verify_n_stochastic_sources(self) -> "Config":
+        if self.edge_formula != "stochastic" and self.n_stochastic_sources is not None:
+            raise ValueError(
+                "n_stochastic_sources should only be set when edge_formula is stochastic"
+            )
+        if self.edge_formula == "stochastic" and self.n_stochastic_sources is None:
+            raise ValueError("n_stochastic_sources must be set when edge_formula is stochastic")
         return self
 
 
@@ -310,8 +334,23 @@ def main(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
 
+        means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
+        bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
+        if config.center:
+            logger.info("Collecting dataset means")
+            means, bias_positions = collect_dataset_means(
+                hooked_model=hooked_model,
+                module_names=section_names,
+                data_loader=gram_train_loader,
+                dtype=dtype,
+                device=device,
+                collect_output_dataset_means=collect_output_gram,
+                hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
+            )
+
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
+
         gram_matrices = collect_gram_matrices(
             hooked_model=hooked_model,
             module_names=section_names,
@@ -319,7 +358,9 @@ def main(
             dtype=dtype,
             device=device,
             collect_output_gram=collect_output_gram,
-            hook_names=[layer_name for layer_name in config.node_layers if layer_name != "output"],
+            hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
+            means=means,
+            bias_positions=bias_positions,
         )
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
@@ -328,7 +369,11 @@ def main(
         )
 
         c_start_time = time.time()
-        logger.info("Calculating interaction rotations (Cs).")
+        logger.info(
+            "Calculating interaction rotations (Cs) for %s for %d batches.",
+            config.node_layers,
+            len(graph_train_loader),
+        )
         Cs, Us = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
             section_names=section_names,
@@ -341,6 +386,9 @@ def main(
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
+            center=config.center,
+            means=means,
+            bias_positions=bias_positions,
         )
         # Cs used to calculate edges
         edge_Cs = Cs
@@ -365,7 +413,9 @@ def main(
             data_subset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
         )
 
-        logger.info("Calculating edges.")
+        logger.info(
+            "Calculating edges for %s for %d batches.", config.node_layers, len(edge_train_loader)
+        )
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
             Cs=edge_Cs,
@@ -377,6 +427,7 @@ def main(
             device=device,
             data_set_size=full_dataset_len,  # includes data for other processes
             edge_formula=config.edge_formula,
+            n_stochastic_sources=config.n_stochastic_sources,
         )
 
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"

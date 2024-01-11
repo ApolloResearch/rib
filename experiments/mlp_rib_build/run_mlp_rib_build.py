@@ -14,7 +14,6 @@ Usage:
 
 """
 
-import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal, Optional, Union
@@ -22,16 +21,23 @@ from typing import Literal, Optional, Union
 import fire
 import torch
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from jaxtyping import Float, Int
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from torch import Tensor
 from torch.utils.data import DataLoader
 
-from rib.data import VisionDatasetConfig
-from rib.data_accumulator import collect_gram_matrices, collect_interaction_edges
+from rib.data import BlockVectorDatasetConfig, VisionDatasetConfig
+from rib.data_accumulator import (
+    collect_dataset_means,
+    collect_gram_matrices,
+    collect_interaction_edges,
+)
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import calculate_interaction_rotations
 from rib.loader import load_dataset, load_mlp
 from rib.log import logger
 from rib.models.mlp import MLPConfig
+from rib.models.modular_mlp import ModularMLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults, RootPath, StrDtype
 from rib.utils import check_outfile_overwrite, load_config, set_seed
 
@@ -39,7 +45,11 @@ from rib.utils import check_outfile_overwrite, load_config, set_seed
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str
-    mlp_path: RootPath
+    mlp_path: Optional[RootPath] = Field(
+        None,
+        description="Path to the saved MLP model. If None, we expect the MLP class to not be "
+        "randomly initialized (e.g. like in the ModularMLP class).",
+    )
     batch_size: int
     seed: Optional[int] = 0
     truncation_threshold: float  # Remove eigenvectors with eigenvalues below this threshold.
@@ -47,9 +57,11 @@ class Config(BaseModel):
     n_intervals: int  # The number of intervals to use for integrated gradients.
     dtype: StrDtype  # Data type of all tensors (except those overriden in certain functions).
     node_layers: list[str]
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = Field(
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = Field(
         "(1-0)*alpha",
-        description="The integrated gradient formula to use to calculate the basis.",
+        description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
+        "use Us as Cs, giving the eigendecomposition of the gram matrix. If 'neuron', will use "
+        "the neuron-basis.",
     )
     edge_formula: Literal["functional", "squared"] = Field(
         "functional",
@@ -60,7 +72,26 @@ class Config(BaseModel):
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
-    dataset: VisionDatasetConfig = VisionDatasetConfig()
+    center: bool = Field(
+        False,
+        description="Whether to center the activations before performing rib. Currently only"
+        "supported for basis_formula='svd', which gives the 'pca' basis.",
+    )
+    dataset: Union[VisionDatasetConfig, BlockVectorDatasetConfig] = Field(
+        VisionDatasetConfig(),
+        description="The dataset to use to build the graph.",
+    )
+    modular_mlp_config: Optional[ModularMLPConfig] = Field(
+        None,
+        description="The model to use. If None, we expect mlp_path to be set.",
+    )
+
+    @model_validator(mode="after")
+    def verify_model_config(self) -> "Config":
+        """Verify that model_config is set if modular_mlp_config is not."""
+        if self.mlp_path is None and self.modular_mlp_config is None:
+            raise ValueError("model must be set if modular_mlp_config is not.")
+        return self
 
 
 def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuildResults:
@@ -68,19 +99,26 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     config = load_config(config_path_or_obj, config_model=Config)
     set_seed(config.seed)
 
-    with open(config.mlp_path.parent / "config.yaml", "r") as f:
-        model_config_dict = yaml.safe_load(f)
-
     if config.out_dir is not None:
         config.out_dir.mkdir(parents=True, exist_ok=True)
         out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
         if not check_outfile_overwrite(out_file, force):
             raise FileExistsError("Not overwriting output file")
 
+    mlp_config: Union[MLPConfig, ModularMLPConfig]
+    if config.mlp_path is not None:
+        with open(config.mlp_path.parent / "config.yaml", "r") as f:
+            model_config_dict = yaml.safe_load(f)
+        mlp_config = MLPConfig(**model_config_dict["model"])
+    else:
+        assert config.modular_mlp_config is not None
+        mlp_config = config.modular_mlp_config
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
-    mlp_config = MLPConfig(**model_config_dict["model"])
-    mlp = load_mlp(mlp_config, config.mlp_path, fold_bias=True, device=device)
+    mlp = load_mlp(
+        mlp_config, mlp_path=config.mlp_path, fold_bias=True, device=device, seed=config.seed
+    )
     assert mlp.has_folded_bias, "MLP must have folded bias to run RIB"
 
     all_possible_node_layers = [f"layers.{i}" for i in range(len(mlp.layers))] + ["output"]
@@ -101,6 +139,19 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     # Only need gram matrix for logits if we're rotating the final node layer
     collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
+    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
+    bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
+    if config.center:
+        logger.info("Collecting dataset means")
+        means, bias_positions = collect_dataset_means(
+            hooked_model=hooked_mlp,
+            module_names=non_output_node_layers,
+            data_loader=train_loader,
+            dtype=dtype,
+            device=device,
+            collect_output_dataset_means=collect_output_gram,
+        )
+
     gram_matrices = collect_gram_matrices(
         hooked_model=hooked_mlp,
         module_names=non_output_node_layers,
@@ -108,6 +159,8 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         dtype=dtype,
         device=device,
         collect_output_gram=collect_output_gram,
+        means=means,
+        bias_positions=bias_positions,
     )
 
     Cs, Us = calculate_interaction_rotations(
@@ -122,6 +175,9 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         truncation_threshold=config.truncation_threshold,
         rotate_final_node_layer=config.rotate_final_node_layer,
         basis_formula=config.basis_formula,
+        center=config.center,
+        means=means,
+        bias_positions=bias_positions,
     )
 
     E_hats = collect_interaction_edges(
@@ -151,8 +207,8 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         "interaction_rotations": interaction_rotations,
         "eigenvectors": eigenvectors,
         "edges": [(module, E_hats[module].cpu()) for module in E_hats],
-        "config": json.loads(config.model_dump_json()),
-        "model_config_dict": model_config_dict,
+        "config": config.model_dump(),
+        "model_config_dict": mlp_config.model_dump(),
     }
 
     # Save the results (which include torch tensors) to file

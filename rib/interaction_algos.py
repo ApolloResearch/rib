@@ -182,18 +182,20 @@ def calculate_interaction_rotations(
     U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
     C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
     if rotate_final_node_layer:
-        # TODO: move bias pos to first pos
-        U_output = eigendecompose(gram_matrices[node_layers[-1]])[1].detach()
+        # We don't use D_output except in finding the index of the const_dir in U
+        D_output, U_output = eigendecompose(gram_matrices[node_layers[-1]])
         assert U_output is not None
         if center:
             assert means is not None
             assert bias_positions is not None
             assert node_layers[-1] in means
+            D_output, U_output = move_const_dir_first(D_output, U_output)
             Y = shift_matrix(-means[node_layers[-1]], bias_positions[node_layers[-1]])
-            C_output = (Y @ U_output).detach().cpu()
+            C_output = Y @ U_output
         else:
-            C_output = U_output.detach().cpu()
-        U_output = U_output.cpu()
+            C_output = U_output
+        C_output = C_output.detach().cpu()
+        U_output = U_output.detach().cpu()
 
     if node_layers[-1] not in gram_matrices:
         # Technically we don't actually need the final node layer to be in gram_matrices if we're

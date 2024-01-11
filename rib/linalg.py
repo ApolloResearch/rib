@@ -60,6 +60,9 @@ def move_const_dir_first(
     it's thus convenient to ensure it's first in our basis.
 
     This function finds that direction, asserts it's unique, and rearranges U, D to put it first.
+
+    We use the eigenvalues as sometimes there are directions with non-zero bias component but
+    very small eigenvalues. We don't want these to trigger the assert.
     """
     # we expect the const dir to have non-zero component in the bias dir and nonzero eigenvalue
     threshold = 1e-6

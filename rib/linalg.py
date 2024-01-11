@@ -3,6 +3,7 @@ from typing import Callable, Literal, Optional, Union
 import numpy as np
 import torch
 from einops import rearrange
+from fancy_einsum import einsum
 from jaxtyping import Float, Int
 from torch import Tensor
 from tqdm import tqdm
@@ -260,10 +261,11 @@ def calc_edge_functional(
     edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
+    tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
-    """Calculate the interaction attribution (edge) for module_hat with inputs f_in_hat.
+    """Calculate the interaction attribution (edge) for module_hat using the functional method.
 
-    Updates the edge in-place.
+    Uses the trapezoidal rule for integration. Updates the edge in-place.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
@@ -274,12 +276,16 @@ def calc_edge_functional(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        tqdm_desc: The description to use for the tqdm progress bar.
     """
     has_pos = f_in_hat.ndim == 3
 
     f_in_hat.requires_grad_(True)
 
-    einsum_pattern = "bpj,bpj->j" if f_in_hat.ndim == 3 else "bj,bj->j"
+    if has_pos:
+        einsum_pattern = "batch in_pos in_dim, batch in_pos in_dim -> in_dim"
+    else:
+        einsum_pattern = "batch in_dim, batch in_dim -> in_dim"
 
     alphas, interval_size = _calc_integration_intervals(n_intervals)
 
@@ -289,12 +295,11 @@ def calc_edge_functional(
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
-    for alpha_index, alpha in tqdm(
-        enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
-    ):
+    # Integration with the trapzoidal rule
+    for alpha_idx, alpha in tqdm(enumerate(alphas), total=len(alphas), desc=tqdm_desc, leave=False):
         # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
         # alpha=0.5) and multiply by the interval size.
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
             trapezoidal_scaler = 0.5 * interval_size
         else:
             trapezoidal_scaler = interval_size
@@ -317,7 +322,7 @@ def calc_edge_functional(
         for i in tqdm(
             range(len(f_out_hat_norm)),
             total=len(f_out_hat_norm),
-            desc="Output idxs",
+            desc="Iteration over output dims",
             leave=False,
         ):
             # Get the derivative of the ith output element w.r.t alpha_f_in_hat
@@ -327,7 +332,7 @@ def calc_edge_functional(
                 * trapezoidal_scaler
             )
             with torch.inference_mode():
-                E = torch.einsum(einsum_pattern, i_grad, f_in_hat)
+                E = einsum(einsum_pattern, i_grad, f_in_hat)
                 # Note that edge is initialised to zeros in
                 # `rib.data_accumulator.collect_interaction_edges`
                 edge[i] -= E
@@ -342,10 +347,11 @@ def calc_edge_squared(
     edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
     dataset_size: int,
     n_intervals: int,
+    tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
-    """Calculate the interaction attribution (edge) for module_hat with inputs f_in_hat.
+    """Calculate the interaction attribution (edge) for module_hat using the squared method.
 
-    Updates the edge in-place.
+    Uses the trapezoidal rule for integration. Updates the edge in-place.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
@@ -356,6 +362,7 @@ def calc_edge_squared(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        tqdm_desc: The description to use for the tqdm progress bar.
     """
     has_pos = f_in_hat.ndim == 3
 
@@ -373,7 +380,6 @@ def calc_edge_squared(
 
     # Accumulate integral results for all x (batch) and t (out position) values.
     # We store values because we need to square the integral result before summing.
-    # This term is the content of the brackets before the square, i.e. the sum over tprime.
     J_hat = (
         torch.zeros(
             batch_size,
@@ -393,13 +399,11 @@ def calc_edge_squared(
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
-    # Integral
-    for alpha_index, alpha in tqdm(
-        enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
-    ):
+    # Integration with the trapzoidal rule
+    for alpha_idx, alpha in tqdm(enumerate(alphas), total=len(alphas), desc=tqdm_desc, leave=False):
         # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
         # alpha=0.5) and multiply by the interval size.
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
             trapezoidal_scaler = 0.5 * interval_size
         else:
             trapezoidal_scaler = interval_size
@@ -409,7 +413,12 @@ def calc_edge_squared(
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output.
-        for out_dim in range(out_hidden_size_comb_trunc):
+        for out_dim in tqdm(
+            range(out_hidden_size_comb_trunc),
+            total=out_hidden_size_comb_trunc,
+            desc="Iteration over output dims",
+            leave=False,
+        ):
             if has_pos:
                 for output_pos_idx in range(out_pos_size):
                     # autograd gives us the derivative w.r.t. b (batch dim), p (input pos) and
@@ -427,8 +436,10 @@ def calc_edge_squared(
 
                     with torch.inference_mode():
                         # Element-wise multiply with f_in_hat and sum over the input pos
-                        J_hat[:, output_pos_idx, out_dim, :] -= torch.einsum(
-                            "bpj,bpj->bj", i_grad, f_in_hat
+                        J_hat[:, output_pos_idx, out_dim, :] -= einsum(
+                            "batch in_pos in_dim, batch in_pos in_dim -> batch in_dim",
+                            i_grad,
+                            f_in_hat,
                         )
             else:
                 i_grad = (
@@ -441,10 +452,120 @@ def calc_edge_squared(
                 )
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat
-                    J_hat[:, out_dim, :] -= torch.einsum("bj,bj->bj", i_grad, f_in_hat)
+                    J_hat[:, out_dim, :] -= einsum(
+                        "batch in_dim, batch in_dim -> batch in_dim", i_grad, f_in_hat
+                    )
 
     # Square, and sum over batch size and output pos (if applicable)
     edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1) if has_pos else 0)
+
+
+def calc_edge_stochastic(
+    module_hat: Callable[
+        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
+    ],
+    f_in_hat: Float[Tensor, "... pos out_hidden_combined_trunc"],
+    in_tuple_dims: list[int],
+    edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    dataset_size: int,
+    n_intervals: int,
+    n_stochastic_sources: int,
+    tqdm_desc: str = "Integration steps (alphas)",
+) -> None:
+    """Calculate the interaction attribution (edge) for module_hat using the stochastic method.
+
+    Note that this method can only be run with models that have a position dimension.
+
+    Uses the trapezoidal rule for integration. Updates the edge in-place.
+
+    Args:
+        module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
+            in_tuple_dims as arguments and calculates f_hat^{l} --> f_hat^{l+1}.
+        f_in_hat: The inputs to the module. May or may not include a position dimension.
+        in_tuple_dims: The final dimensions of the inputs to the module.
+        edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
+        dataset_size: The size of the dataset. Used for normalizing the gradients.
+        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
+            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        n_stochastic_sources: The number of stochastic sources to add to each input.
+        tqdm_desc: The description to use for the tqdm progress bar.
+    """
+
+    f_in_hat.requires_grad_(True)
+
+    alphas, interval_size = _calc_integration_intervals(n_intervals)
+
+    # Get sizes for intermediate result storage
+    batch_size = f_in_hat.shape[0]
+    out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = edge.shape
+
+    # Just run the model to see what the output pos size is
+    with torch.inference_mode():
+        out_pos_size = module_hat(f_in_hat, in_tuple_dims).shape[1]
+
+    # Accumulate integral results for all x (batch) and r (stochastic dim) values.
+    # We store values because we need to square the integral result before summing.
+    J_hat = torch.zeros(
+        batch_size,
+        n_stochastic_sources,
+        out_hidden_size_comb_trunc,
+        in_hidden_size_comb_trunc,
+        device=f_in_hat.device,
+    )
+
+    # Create phis that are -1 or 1 with equal probability
+    phi_shape = (batch_size, n_stochastic_sources, out_pos_size)
+    phi = torch.where(
+        torch.randn(phi_shape) < 0.0, -1 * torch.ones(phi_shape), torch.ones(phi_shape)
+    ).to(dtype=f_in_hat.dtype, device=f_in_hat.device)
+
+    normalization_factor = f_in_hat.shape[1] * dataset_size * n_stochastic_sources
+
+    # Integration with the trapzoidal rule
+    for alpha_idx, alpha in tqdm(enumerate(alphas), total=len(alphas), desc=tqdm_desc, leave=False):
+        # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
+        # alpha=0.5) and multiply by the interval size.
+        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
+            trapezoidal_scaler = 0.5 * interval_size
+        else:
+            trapezoidal_scaler = interval_size
+
+        # We have to compute inputs from f_hat to make autograd work
+        alpha_f_in_hat = alpha * f_in_hat
+        f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
+
+        # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
+        for out_dim in tqdm(
+            range(out_hidden_size_comb_trunc),
+            total=out_hidden_size_comb_trunc,
+            desc="Iteration over output dims",
+            leave=False,
+        ):
+            for r in range(n_stochastic_sources):
+                # autograd gives us the derivative w.r.t. in_batch, in_pos, in_dim.
+                # The sum over the out_batch dim before passing to autograd is just a trick
+                # to get the grad for every batch index vectorized.
+                phi_f_out_alpha_hat = einsum(
+                    "out_batch out_pos, out_batch out_pos ->",
+                    phi[:, r, :],
+                    f_out_alpha_hat[:, :, out_dim],
+                )
+                i_grad = (
+                    torch.autograd.grad(phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True)[0]
+                    * trapezoidal_scaler
+                )
+
+                with torch.inference_mode():
+                    # Element-wise multiply with f_in_hat and sum over the input pos
+                    J_hat[:, r, out_dim, :] -= einsum(
+                        "in_batch in_pos in_dim, in_batch in_pos in_dim -> in_batch in_dim",
+                        i_grad,
+                        f_in_hat,
+                    )
+
+    # Square, and sum over batch size and output pos
+    J_hat = J_hat**2 / normalization_factor
+    edge += J_hat.sum(dim=(0, 1))
 
 
 def integrated_gradient_trapezoidal_norm(
@@ -505,7 +626,7 @@ def integrated_gradient_trapezoidal_norm(
 
     alphas, interval_size = _calc_integration_intervals(n_intervals)
 
-    for alpha_index, alpha in enumerate(alphas):
+    for alpha_idx, alpha in enumerate(alphas):
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
@@ -548,7 +669,7 @@ def integrated_gradient_trapezoidal_norm(
         alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
         # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
         # estimate at alpha=0.5)
-        if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
             alpha_in_grads = 0.5 * alpha_in_grads
 
         in_grads += alpha_in_grads * interval_size

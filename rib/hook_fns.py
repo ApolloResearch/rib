@@ -19,6 +19,7 @@ from torch import Tensor
 from rib.linalg import (
     calc_edge_functional,
     calc_edge_squared,
+    calc_edge_stochastic,
     calc_gram_matrix,
     integrated_gradient_trapezoidal_norm,
 )
@@ -312,7 +313,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -396,7 +397,8 @@ def interaction_edge_pre_forward_hook_fn(
     ],
     n_intervals: int,
     dataset_size: int,
-    edge_formula: Literal["functional", "squared"] = "functional",
+    edge_formula: Literal["functional", "squared", "stochastic"] = "functional",
+    n_stochastic_sources: Optional[int] = None,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the interaction graph.
 
@@ -420,9 +422,12 @@ def interaction_edge_pre_forward_hook_fn(
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
-        edge_formula: The formula to use for the attribution. Must be one of "functional" or
-            "squared". The former is the old (October) functional version, the latter is a new
-            (November) version.
+        edge_formula: The formula to use for the attribution.
+            - "functional" is the old (October 23) functional version
+            - "squared" is the version which iterates over the output dim and output pos dim
+            - "stochastic" is the version which iteratates over output dim and stochastic noise dim
+        n_stochastic_sources: The dimension of the stochastic noise. Only used if
+            edge_formula == "stochastic". Defaults to None.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -438,6 +443,7 @@ def interaction_edge_pre_forward_hook_fn(
     f_hat = in_acts @ C_in
     edge = hooked_data[hook_name][data_key]
 
+    tqdm_desc = f"Integration steps (alphas) for {hook_name}"
     if edge_formula == "functional":
         calc_edge_functional(
             module_hat=module_hat,
@@ -446,6 +452,7 @@ def interaction_edge_pre_forward_hook_fn(
             edge=edge,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
+            tqdm_desc=tqdm_desc,
         )
     elif edge_formula == "squared":
         calc_edge_squared(
@@ -455,6 +462,20 @@ def interaction_edge_pre_forward_hook_fn(
             edge=edge,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
+            tqdm_desc=tqdm_desc,
+        )
+    elif edge_formula == "stochastic":
+        assert n_stochastic_sources is not None, "n_stochastic_sources must be specified."
+        assert f_hat.dim() == 3, "f_hat must have a position dimension to use stochastic noise."
+        calc_edge_stochastic(
+            module_hat=module_hat,
+            f_in_hat=f_hat,
+            in_tuple_dims=in_tuple_dims,
+            edge=edge,
+            dataset_size=dataset_size,
+            n_intervals=n_intervals,
+            n_stochastic_sources=n_stochastic_sources,
+            tqdm_desc=tqdm_desc,
         )
     else:
         raise ValueError(

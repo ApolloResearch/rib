@@ -70,6 +70,7 @@ def _add_edges_to_graph(
 def _prepare_edges_for_plotting(
     raw_edges: list[tuple[str, torch.Tensor]],
     nodes_per_layer: list[int],
+    ignored_nodes: Optional[list[list[int]]] = None,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
@@ -101,6 +102,7 @@ def plot_interaction_graph(
     nodes_per_layer: Union[int, list[int]],
     out_file: Path,
     node_labels: Optional[list[list[str]]] = None,
+    hide_const_edges: bool = False,
 ) -> None:
     """Plot the interaction graph for the given edges.
 
@@ -123,6 +125,17 @@ def plot_interaction_graph(
     max_layer_height = max(nodes_per_layer)
 
     edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
+
+    if hide_const_edges:
+        for layer in range(len(edges)):
+            const_node_index = 0
+            # Set edges *outgoing* from this node to zero (edges.shape ~ l+1, l)
+            edges[layer][:, const_node_index] = 0
+            # Set edges *incoming* to this node to zero (edges.shape ~ l+1, l)
+            if layer > 0:
+                edges[layer - 1][const_node_index, :] = 0
+            # Normalize edges again as done in _prepare_edges_for_plotting
+            edges[layer] /= torch.sum(torch.abs(edges[layer]))
 
     # Verify that the layer names match the edge names
     edge_names = [edge_info[0] for edge_info in raw_edges]

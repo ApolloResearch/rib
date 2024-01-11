@@ -580,24 +580,27 @@ def test_svd_basis():
             assert torch.allclose(C, U, atol=0)
 
 
-def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
+def centred_rib_test(results: RibBuildResults, atol=1e-6):
     """
-    Test that the 'pca' basis (aka svd with center=true) works as expected.
+    Test that centred rib (and pca, aka centred svd) works as expected.
 
     In particular:
-    1. We collect the rib activations
-    2. We collect the means, checking that the mean == 1 exactly at the bias positions
-    3. We expect there to be a single rib direction encoding the bias and means activation.
-        We call this `bias_dir` and expect it's value to be the mean activation at non-bias
-        positions, and equal to 1/sqrt(# bias positions) at bias positions. C_inv gives us all
-        rib directions in the original coordinate system, so we compute the expected direction and
-        compare cosine similarities with rows of C_inv.
-    4. We assert the `bias_dir` does match what we expect
-    5. We assert that all other rib directions have no bias component (in the original coordinates)
-    6. We assert the rib activation of `bias_dir` is always 1
-    7. We assert the mean rib activation of all other directions is 0 (they are centered)
+    - We collect the rib activations
+    - We collect the means, checking that the mean == 1 exactly at the bias positions
+    - We expect there to be a single rib direction (the 'constant' direction or 'const_dir') in
+        which the activations is constant for all inputs. This is always returned as the 0th rib
+        dir. When written in the neuron basis this direciton will equal to the mean-activation at
+        non bias positions and 1/sqrt(# bias positions) at bias positions. C_inv gives us all
+        rib directions in the original coordinate system, so we compare C_inv[0] with this expected
+        direction. There's also various scaling factors.
+
+    We then check 4 properties:
+    1. We assert the `const_dir` written in the original coords matches what we expect
+    2. We assert that all other rib directions have no bias component (in the original coordinates)
+    3. We assert the rib activation of `const_dir` is always 1
+    4. We assert the mean rib activation of all other directions is 0 (they are centered)
     """
-    # 1 and 2: collect C_inv, rib acts, means, bias positions
+    # collect C_inv, rib acts, means, bias positions
     all_rib_acts = get_rib_acts_test(results, atol=1e-6)
     all_mean_acts, all_bias_pos = get_means_test(results, atol=atol)
     C_infos = parse_c_infos(results["interaction_rotations"])
@@ -611,14 +614,14 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
         mean_acts = all_mean_acts[m_name].cpu()  # [emb_pos]
         rib_acts = all_rib_acts[m_name]  # [batch, (seqpos?), rib_dir]
 
-        # 3) compute the expected bias direction
-        expected_bias_dir = mean_acts.clone()  # [emb]
-        expected_bias_dir[bias_positions] = 1
+        # compute the expected bias direction
+        expected_const_dir = mean_acts.clone()  # [emb]
+        expected_const_dir[bias_positions] = 1
 
         # we can't directly compare, as there's some scale factor. This involves:
-        # ±1, as rib is allowed to find the opposite direction
-        # a factor 1/sqrt(# bias positions) from compressing the bias directions
-        # scale factors from D and lambda when basis != svd
+        # - ±1, as rib is allowed to find the opposite direction
+        # - a factor 1/sqrt(# bias positions) from compressing the bias directions
+        # - scale factors from D and lambda when basis != svd
         if results["config"]["basis_formula"] == "svd":
             bias_dir_sign = torch.sign(C_inv[0, -1])
             scale_factor = bias_dir_sign / len(bias_positions) ** 0.5
@@ -626,18 +629,20 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
             # in the non-svd case we just get the scale factor from comparing one component
             # with what we expect.
             scale_factor = C_inv[0, -1]
-        expected_bias_dir *= scale_factor
-        # and assert it's close to the actual bias direction
-        assert_is_close(C_inv[0, :], expected_bias_dir, atol=atol, rtol=0, m_name=m_name)
 
-        # 5) no other rib dir point in the bias dir
+        expected_const_dir *= scale_factor
+
+        # Check 1: Assert this is close to the actual const direction
+        assert_is_close(C_inv[0, :], expected_const_dir, atol=atol, rtol=0, m_name=m_name)
+
+        # Check 2: no other rib dir has non-zero component at bias positions
         assert_is_zeros(C_inv[1:][:, bias_positions], atol=atol, m_name=m_name)
 
-        # 6) bias dir rib act is always the same, the correct amount to scale back to the mean +
-        # bias in original coordinates
+        # Check 3: rib act in the constant direction is actually constant.
+        # in particualar it's the inverse of the scaling factor above
         assert_is_close(rib_acts[..., 0], 1 / scale_factor, atol=atol, rtol=0, m_name=m_name)
 
-        # 7) all other rib acts are centered (mean zero)
+        # Check 4: all other rib acts are have mean zero across the dataset
         mean_rib_acts = einops.reduce(rib_acts, "... ribdir -> ribdir", "mean")
         assert_is_zeros(mean_rib_acts[1:], atol=atol, m_name=m_name)
 
@@ -648,7 +653,7 @@ def test_pca_basis_mnist():
     config = get_mnist_config(basis_formula="svd", edge_formula="functional", dtype_str="float64")
     config = config.model_copy(update={"center": True})
     results = mlp_build_graph_main(config)
-    pca_rib_acts_test(results, atol=1e-4)
+    centred_rib_test(results, atol=1e-4)
 
 
 @pytest.mark.slow
@@ -658,7 +663,7 @@ def test_pca_basis_pythia():
     config = get_pythia_config(dtype_str=dtype_str, basis_formula="svd")
     config = config.model_copy(update={"center": True, "rotate_final_node_layer": True})
     results = lm_build_graph_main(config)
-    pca_rib_acts_test(results, atol=1e-6)
+    centred_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow
@@ -670,7 +675,7 @@ def test_centered_rib_mnist(basis_formula):
     )
     config = config.model_copy(update={"center": True})
     results = mlp_build_graph_main(config)
-    pca_rib_acts_test(results, atol=1e-6)
+    centred_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow
@@ -680,7 +685,7 @@ def test_centered_rib_pythia():
     config = get_pythia_config(dtype_str=dtype_str, basis_formula="(1-0)*alpha")
     config = config.model_copy(update={"center": True})
     results = lm_build_graph_main(config)
-    pca_rib_acts_test(results, atol=1e-6)
+    centred_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow
@@ -692,7 +697,7 @@ def test_centered_rib_modadd():
     )
     config = config.model_copy(update={"center": True})
     results = lm_build_graph_main(config)
-    pca_rib_acts_test(results, atol=1e-6)
+    centred_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow

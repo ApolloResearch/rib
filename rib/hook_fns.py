@@ -202,7 +202,9 @@ def gram_forward_hook_fn(
 
     Args:
         module: Module that the hook is attached to (not used).
-        inputs: Tuple of inputs to the module.
+        inputs: Inputs to the module (not used).
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.

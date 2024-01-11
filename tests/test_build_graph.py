@@ -219,20 +219,17 @@ def get_modular_arithmetic_config(
     tlens_pretrained: null
     tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
     node_layers:
-        - ln1.0
-        - mlp_in.0
+        - attn_in.0
         - unembed
-        - output
     dataset:
         source: custom
         name: modular_arithmetic
         return_set: train
-        return_set_n_samples: 10
-    batch_size: 6
-    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
+    batch_size: 9999999
+    truncation_threshold: 1e-12  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
     last_pos_module_type: add_resid1
-    n_intervals: 0
+    n_intervals: 5
     dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null
@@ -258,6 +255,7 @@ def get_pythia_config(basis_formula: str, dtype_str: str) -> LMRibConfig:
       return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
       return_set_portion: first
     node_layers:
+        - ln1.0
         - ln2.1
         - unembed
     batch_size: 2
@@ -623,11 +621,12 @@ def centred_rib_test(results: RibBuildResults, atol=1e-6):
         # - a factor 1/sqrt(# bias positions) from compressing the bias directions
         # - scale factors from D and lambda when basis != svd
         if results["config"]["basis_formula"] == "svd":
-            bias_dir_sign = torch.sign(C_inv[0, -1])
-            scale_factor = bias_dir_sign / len(bias_positions) ** 0.5
+            bias_component_sign = torch.sign(C_inv[0, -1])
+            scale_factor = bias_component_sign / len(bias_positions) ** 0.5
         else:
             # in the non-svd case we just get the scale factor from comparing one component
             # with what we expect.
+            # this is less strong as a check, but it's hard to compute D and lambda
             scale_factor = C_inv[0, -1]
 
         expected_const_dir *= scale_factor

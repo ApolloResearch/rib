@@ -23,6 +23,7 @@ class InteractionRotation:
 
     node_layer_name: str
     out_dim: int  # Equal to d_hidden_extra_trunc if C is not None and d_hidden otherwise
+    # if centering was used, C[:, 0] is the constant direction
     C: Optional[Float[Tensor, "orig_coords rib_dir_idx"]] = None
     # pseudoinverse of C, not needed for the output node layer
     C_pinv: Optional[Float[Tensor, "rib_dir_idx orig_coords"]] = None
@@ -189,8 +190,9 @@ def calculate_interaction_rotations(
             assert means is not None
             assert bias_positions is not None
             assert node_layers[-1] in means
-            D_output, U_output = move_const_dir_first(D_output, U_output)
-            Y = shift_matrix(-means[node_layers[-1]], bias_positions[node_layers[-1]])
+            output_bias_positions = bias_positions[node_layers[-1]]
+            D_output, U_output = move_const_dir_first(D_output, U_output, output_bias_positions)
+            Y = shift_matrix(-means[node_layers[-1]], output_bias_positions)
             C_output = Y @ U_output
         else:
             C_output = U_output
@@ -266,7 +268,8 @@ def calculate_interaction_rotations(
 
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
         if center:
-            D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
+            assert bias_positions is not None
+            D_dash, U_dash = move_const_dir_first(D_dash, U_dash, bias_positions[node_layer])
 
         # we trucate all directions with eigenvalues smaller than some threshold
         mask = D_dash > truncation_threshold  # true if we keep the direction

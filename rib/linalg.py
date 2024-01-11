@@ -50,7 +50,9 @@ def eigendecompose(
 
 
 def move_const_dir_first(
-    D_dash: Float[Tensor, "d_hidden"], U_dash: Float[Tensor, "d_hidden d_hidden"]
+    D_dash: Float[Tensor, "d_hidden"],
+    U_dash: Float[Tensor, "d_hidden d_hidden"],
+    bias_positions: Int[Tensor, "positions"],
 ) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """
     Finds the constant direction in D and U and moves it to the first position.
@@ -63,12 +65,18 @@ def move_const_dir_first(
 
     We use the eigenvalues as sometimes there are directions with non-zero bias component but
     very small eigenvalues. We don't want these to trigger the assert.
+
+    Args:
+        D_dash: Eigenvalues of gram matrix.
+        U_dash: Eigenvectors of gram matrix.
+        bias_positions: The positions of the folded-bias in the original coordinates.
     """
     # we expect the const dir to have non-zero component in the bias dir and nonzero eigenvalue
     threshold = 1e-6
-    nonzero_in_bias_dir = U_dash[-1, :].abs() > threshold
+    bias_pos_in_neuron_basis = bias_positions[0].item()
+    nonzero_in_bias_component = U_dash[bias_pos_in_neuron_basis, :].abs() > threshold
     nonzero_eigenval = D_dash.abs() > threshold
-    is_const_dir = nonzero_in_bias_dir & nonzero_eigenval
+    is_const_dir = nonzero_in_bias_component & nonzero_eigenval
     assert is_const_dir.any(), "No const direction found"
     assert is_const_dir.sum() == 1, "More than one const direction found"
     const_dir_idx = is_const_dir.nonzero()[0, 0].item()

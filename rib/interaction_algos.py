@@ -12,7 +12,12 @@ from tqdm import tqdm
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import eigendecompose, masked_eigendecompose, pinv_diag, shift_matrix
+from rib.linalg import (
+    eigendecompose,
+    move_const_dir_first,
+    pinv_diag,
+    shift_matrix,
+)
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.transformer import SequentialTransformer
 
@@ -182,6 +187,7 @@ def calculate_interaction_rotations(
     U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
     C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
     if rotate_final_node_layer:
+        # TODO: move bias pos to first pos
         U_output = eigendecompose(gram_matrices[node_layers[-1]])[1].detach()
         assert U_output is not None
         if center:
@@ -260,7 +266,10 @@ def calculate_interaction_rotations(
                 InteractionRotation(node_layer_name=node_layer, out_dim=width, C=Id, C_pinv=Id)
             )
             continue
+
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
+        if center:
+            D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
 
         # we trucate all directions with eigenvalues smaller than some threshold
         mask = D_dash > truncation_threshold  # true if we keep the direction
@@ -316,27 +325,14 @@ def calculate_interaction_rotations(
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
             Yinv_U_Dsqrt.T.to(M_dtype) @ M_dash @ Yinv_U_Dsqrt.to(M_dtype)
         )
-        # todo: ignore index positions
         if center:
-            # there will be one direction pointing in a bias direction, but the position of this
-            # direction is permuted by U. The i_th row of U is the direction it maps the ith
-            # standard basis vector e_i. Thus we want the single non-zero entry of U[-1, :] as -1
-            # is a bias position in the neuron basis.
-            top_2_vals, top_2_idxs = torch.topk(U[-1, :].abs(), k=2)
-            # top value should be 1/sqrt(# bias positions in neuron basis)
-            assert bias_positions is not None
-            expected_top_val = len(bias_positions[node_layer]) ** (-0.5)
-            assert (
-                top_2_vals[0] - expected_top_val
-            ).abs() < 1e-3, f"largest = {top_2_vals[0]}, expected = {expected_top_val}"
-            assert (
-                top_2_vals[1] < 1e-3
-            ), f"Expected only one non-zero entry in U[-1, :], 2nd largest = {top_2_vals[1]}"
-            bias_pos_after_U: int = top_2_idxs[0].item()  # type: ignore[assignment]
-            # We use this so we can make sure that our bias position stays isolated when
-            # transforming by V.
-            # V = eigendecompose(M)[1]
-            V = masked_eigendecompose(M, [bias_pos_after_U])[1]
+            # we want to preserve having a unique constant direction in the RIB basis.
+            # this constant direction is in the 0th position, so we eigendecompose the submatrix
+            # excluding this direction
+            sub_V = eigendecompose(M[1:, 1:])[1]
+            V = torch.zeros_like(M)
+            V[0, 0] = 1
+            V[1:, 1:] = sub_V
         else:
             V = eigendecompose(M)[1]
         V = V.to(dtype)  # V has size (d_hidden_trunc, d_hidden_trunc)

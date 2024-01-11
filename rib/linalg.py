@@ -11,57 +11,6 @@ from rib.types import TORCH_DTYPES, StrDtype
 from rib.utils import put_into_submatrix_
 
 
-def masked_eigendecompose(
-    x: Float[Tensor, "d_hidden d_hidden"],
-    mask_positions: list[int],
-    descending: bool = True,
-    dtype: StrDtype = "float64",
-) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
-    """Eigendecompose a matrix ignoring certain rows/columns.
-
-    This means the eigenvectors will be a coordinate transform that preserves the masked components.
-    These coordinates will each have eigenvector of some basis vector e_i and eigenvalue 1.
-
-    If decending = True we sort after these masked components.
-
-    Args:
-        x: A matrix to eigendecompose
-        mask_positions: A tensor of indexes to mask when eigendecomposing. Masks both rows and cols.
-
-    Returns:
-        eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues
-        eigenvectors: Matrix whose columns are the eigenvectors.
-    """
-    d_full = x.shape[0]
-    assert x.shape == (d_full, d_full), "x must be a square matrix"
-
-    # Calculate the eigenvectors of the unmasked matrix
-    is_not_masked = ~torch.isin(torch.arange(d_full), torch.tensor(mask_positions))
-    is_not_masked = is_not_masked.to(device=x.device)
-    submatrix = x[is_not_masked, :][:, is_not_masked]
-    # decending = False, we will sort later.
-    eigenvalues, eigenvectors = eigendecompose(submatrix, descending=False, dtype=dtype)
-
-    eigenvalues_full = torch.ones(d_full, dtype=eigenvalues.dtype, device=eigenvalues.device)
-    eigenvalues_full[is_not_masked] = eigenvalues
-
-    # Create a matrix with the eigenvectors in the correct positions
-    eigenvectors_full = torch.eye(d_full, dtype=eigenvectors.dtype, device=eigenvectors.device)
-    put_into_submatrix_(
-        full=eigenvectors_full,
-        new_sub_matrix=eigenvectors,
-        row_idxs=torch.arange(d_full)[is_not_masked.cpu()],
-        col_idxs=torch.arange(d_full)[is_not_masked.cpu()],
-    )
-
-    if descending:
-        idx = torch.argsort(eigenvalues, descending=True)
-        eigenvalues = eigenvalues[idx]
-        eigenvectors = eigenvectors[:, idx]
-
-    return eigenvalues_full, eigenvectors_full
-
-
 def eigendecompose(
     x: Float[Tensor, "d_hidden d_hidden"],
     descending: bool = True,
@@ -99,6 +48,35 @@ def eigendecompose(
         eigenvalues = eigenvalues[idx]
         eigenvectors = eigenvectors[:, idx]
     return eigenvalues, eigenvectors
+
+
+def move_const_dir_first(
+    D_dash: Float[Tensor, "d_hidden"], U_dash: Float[Tensor, "d_hidden d_hidden"]
+) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
+    """
+    Finds the constant direction in D and U and moves it to the first position.
+
+    When performing centered RIB we expect there to be a unique direction with constant activation
+    that encodes the mean activation. We special-handle this RIB direction in various places and
+    it's thus convenient to ensure it's first in our basis.
+
+    This function finds that direction, asserts it's unique, and rearranges U, D to put it first.
+    """
+    # we expect the const dir to have non-zero component in the bias dir and nonzero eigenvalue
+    threshold = 1e-6
+    nonzero_in_bias_dir = U_dash[-1, :] > threshold
+    nonzero_eigenval = D_dash > threshold
+    is_const_dir = nonzero_in_bias_dir & nonzero_eigenval
+    assert is_const_dir.any(), "No const direction found"
+    assert is_const_dir.sum() == 1, "More than one const direction found"
+    const_dir_idx = is_const_dir.nonzero()[0, 0].item()
+    # move the const dir to the first position
+    order = torch.tensor(
+        [const_dir_idx] + [i for i in range(D_dash.shape[0]) if i != const_dir_idx]
+    )
+    D_dash = D_dash[order]
+    U_dash = U_dash[:, order]
+    return D_dash, U_dash
 
 
 def calc_rotation_matrix(

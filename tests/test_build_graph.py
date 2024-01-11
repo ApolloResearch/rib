@@ -611,10 +611,6 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
         mean_acts = all_mean_acts[m_name].cpu()  # [emb_pos]
         rib_acts = all_rib_acts[m_name]  # [batch, (seqpos?), rib_dir]
 
-        # find the bias direction. This should be the only dir with non-zero magnitude
-        # in the bias_positions directions
-        bias_dir_idx = C_inv[:, bias_positions[0]].abs().argmax()
-
         # 3) compute the expected bias direction
         expected_bias_dir = mean_acts.clone()  # [emb]
         expected_bias_dir[bias_positions] = 1
@@ -624,32 +620,26 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
         # a factor 1/sqrt(# bias positions) from compressing the bias directions
         # scale factors from D and lambda when basis != svd
         if results["config"]["basis_formula"] == "svd":
-            bias_dir_sign = torch.sign(C_inv[bias_dir_idx, bias_positions[0]])
+            bias_dir_sign = torch.sign(C_inv[0, -1])
             scale_factor = bias_dir_sign / len(bias_positions) ** 0.5
         else:
             # in the non-svd case we just get the scale factor from comparing one component
             # with what we expect.
-            scale_factor = C_inv[bias_dir_idx, bias_positions[0]]
+            scale_factor = C_inv[0, -1]
         expected_bias_dir *= scale_factor
         # and assert it's close to the actual bias direction
-        assert_is_close(C_inv[bias_dir_idx, :], expected_bias_dir, atol=atol, rtol=0, m_name=m_name)
-
-        # mask over rib dir. True everywhere except the bias dir
-        non_bias_dir_mask = torch.ones(C_inv.shape[0]).bool()  # [rib_dir]
-        non_bias_dir_mask[bias_dir_idx] = False
+        assert_is_close(C_inv[0, :], expected_bias_dir, atol=atol, rtol=0, m_name=m_name)
 
         # 5) no other rib dir point in the bias dir
-        assert_is_zeros(C_inv[non_bias_dir_mask][:, bias_positions], atol=atol, m_name=m_name)
+        assert_is_zeros(C_inv[1:][:, bias_positions], atol=atol, m_name=m_name)
 
         # 6) bias dir rib act is always the same, the correct amount to scale back to the mean +
         # bias in original coordinates
-        assert_is_close(
-            rib_acts[..., bias_dir_idx], 1 / scale_factor, atol=atol, rtol=0, m_name=m_name
-        )
+        assert_is_close(rib_acts[..., 0], 1 / scale_factor, atol=atol, rtol=0, m_name=m_name)
 
         # 7) all other rib acts are centered (mean zero)
         mean_rib_acts = einops.reduce(rib_acts, "... ribdir -> ribdir", "mean")
-        assert_is_zeros(mean_rib_acts[non_bias_dir_mask], atol=atol, m_name=m_name)
+        assert_is_zeros(mean_rib_acts[1:], atol=atol, m_name=m_name)
 
 
 @pytest.mark.slow
@@ -673,7 +663,7 @@ def test_pca_basis_pythia():
 
 @pytest.mark.slow
 @pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
-def test_centerd_rib_mnist(basis_formula):
+def test_centered_rib_mnist(basis_formula):
     """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
     config = get_mnist_config(
         basis_formula=basis_formula, edge_formula="functional", dtype_str="float64"
@@ -684,10 +674,22 @@ def test_centerd_rib_mnist(basis_formula):
 
 
 @pytest.mark.slow
-def test_centerd_rib_pythia():
+def test_centered_rib_pythia():
     """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
     dtype_str = "float64"
     config = get_pythia_config(dtype_str=dtype_str, basis_formula="(1-0)*alpha")
+    config = config.model_copy(update={"center": True})
+    results = lm_build_graph_main(config)
+    pca_rib_acts_test(results, atol=1e-6)
+
+
+@pytest.mark.slow
+def test_centered_rib_modadd():
+    """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
+    dtype_str = "float64"
+    config = get_modular_arithmetic_config(
+        dtype_str=dtype_str, basis_formula="svd", edge_formula="squared"
+    )
     config = config.model_copy(update={"center": True})
     results = lm_build_graph_main(config)
     pca_rib_acts_test(results, atol=1e-6)

@@ -448,7 +448,7 @@ def load_model_and_dataset_from_rib_results(
             fold_bias=True,
             device=device,
         )
-        model.to(device)
+        model.to(device=torch.device(device), dtype=dtype)
         data_config = VisionDatasetConfig(**results["config"]["dataset"])
         model_n_ctx, tlens_model_path = None, None
 

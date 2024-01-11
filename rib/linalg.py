@@ -34,7 +34,7 @@ def eigendecompose(
         dtype: The precision in which to perform the eigendecomposition.
             Values below torch.float64 tend to be very unstable.
     Returns:
-        eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
+        eigenvalues: Vector of the eigenvalues of x.
         eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
     in_dtype = x.dtype
@@ -48,6 +48,46 @@ def eigendecompose(
         eigenvalues = eigenvalues[idx]
         eigenvectors = eigenvectors[:, idx]
     return eigenvalues, eigenvectors
+
+
+def move_const_dir_first(
+    D_dash: Float[Tensor, "d_hidden"],
+    U_dash: Float[Tensor, "d_hidden d_hidden"],
+    bias_positions: Int[Tensor, "positions"],
+) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
+    """
+    Finds the constant direction in D and U and moves it to the first position.
+
+    When performing centered RIB we expect there to be a unique direction with constant activation
+    that encodes the mean activation. We special-handle this RIB direction in various places and
+    it's thus convenient to ensure it's first in our basis.
+
+    This function finds that direction, asserts it's unique, and rearranges U, D to put it first.
+
+    We use the eigenvalues as sometimes there are directions with non-zero bias component but
+    very small eigenvalues. We don't want these to trigger the assert.
+
+    Args:
+        D_dash: Eigenvalues of gram matrix.
+        U_dash: Eigenvectors of gram matrix.
+        bias_positions: The positions of the folded-bias in the original coordinates.
+    """
+    # we expect the const dir to have non-zero component in the bias dir and nonzero eigenvalue
+    threshold = 1e-6
+    bias_pos_in_neuron_basis = bias_positions[0].item()
+    nonzero_in_bias_component = U_dash[bias_pos_in_neuron_basis, :].abs() > threshold
+    nonzero_eigenval = D_dash.abs() > threshold
+    is_const_dir = nonzero_in_bias_component & nonzero_eigenval
+    assert is_const_dir.any(), "No const direction found"
+    assert is_const_dir.sum() == 1, "More than one const direction found"
+    const_dir_idx = is_const_dir.nonzero()[0, 0].item()
+    # move the const dir to the first position
+    order = torch.tensor(
+        [const_dir_idx] + [i for i in range(D_dash.shape[0]) if i != const_dir_idx]
+    )
+    D_dash = D_dash[order]
+    U_dash = U_dash[:, order]
+    return D_dash, U_dash
 
 
 def calc_rotation_matrix(
@@ -787,7 +827,7 @@ def shift_matrix(
     assert shift.ndim == 1, "shift must be 1d"
     n = shift.shape[0]
     S = torch.eye(n, dtype=shift.dtype, device=shift.device)
-    assert (n - 1) in bias_positions
+    assert len(bias_positions) > 0
     shift = shift / len(bias_positions)  # we'll spread the shift out across bias pos
     shift[bias_positions] = 0  # we don't shift at bias positions
     S[bias_positions, :] += shift[None, :]

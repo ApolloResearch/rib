@@ -27,7 +27,10 @@ as well as the output of the final node layer. For example, if `node_layers` is 
     output of "mlp_in.0".
 - (If logits_node_layer is True:) One on the output of the model, i.e. the logits.
 
-This file also support parallelization to compute edge values across multiple processes using mpi. To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data and output it as a single file.
+This file also support parallelization to compute edge values across multiple processes using mpi.
+To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will
+distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data
+and output it as a single file.
 """
 import json
 import time
@@ -153,8 +156,7 @@ class Config(BaseModel):
     )
     center: bool = Field(
         False,
-        description="Whether to center the activations before performing rib. Currently only"
-        "supported for basis_formula='svd', which gives the 'pca' basis.",
+        description="Whether to center the activations before performing rib.",
     )
 
     @model_validator(mode="after")

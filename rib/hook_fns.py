@@ -222,7 +222,6 @@ def gram_forward_hook_fn(
         out_acts += shift
 
     gram_matrix = calc_gram_matrix(out_acts, dataset_size=dataset_size)
-
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 

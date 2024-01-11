@@ -74,8 +74,7 @@ class Config(BaseModel):
     )
     center: bool = Field(
         False,
-        description="Whether to center the activations before performing rib. Currently only"
-        "supported for basis_formula='svd', which gives the 'pca' basis.",
+        description="Whether to center the activations before performing rib.",
     )
     dataset: Union[VisionDatasetConfig, BlockVectorDatasetConfig] = Field(
         VisionDatasetConfig(),

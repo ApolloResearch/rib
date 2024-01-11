@@ -38,7 +38,7 @@ def get_rib_acts(
             data_key=c_info.node_layer_name,
             fn=rotate_pre_forward_hook_fn,
             module_name=get_module_name(c_info.node_layer_name),
-            fn_kwargs={"rotation_matrix": c_info.C.to(device), "mode": "cache"},
+            fn_kwargs={"rotation_matrix": c_info.C.to(device=device, dtype=dtype), "mode": "cache"},
         )
         for c_info in c_infos
         if c_info.C is not None
@@ -55,7 +55,7 @@ def get_rib_acts(
         )
 
     rib_acts = {
-        m_name: torch.concatenate(act_list, dim=0)
+        m_name: torch.concatenate(act_list, dim=0).cpu()
         for m_name, act_list in hooked_model.hooked_data["rotated_acts"].items()
     }
     hooked_model.clear_hooked_data()

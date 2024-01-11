@@ -127,15 +127,15 @@ def plot_interaction_graph(
     edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
 
     if hide_const_edges:
-        for layer in range(len(edges)):
+        for layer_index in range(len(edges)):
             const_node_index = 0
             # Set edges *outgoing* from this node to zero (edges.shape ~ l+1, l)
-            edges[layer][:, const_node_index] = 0
+            edges[layer_index][:, const_node_index] = 0
             # Set edges *incoming* to this node to zero (edges.shape ~ l+1, l)
-            if layer > 0:
-                edges[layer - 1][const_node_index, :] = 0
+            if layer_index > 0:
+                edges[layer_index - 1][const_node_index, :] = 0
             # Normalize edges again as done in _prepare_edges_for_plotting
-            edges[layer] /= torch.sum(torch.abs(edges[layer]))
+            edges[layer_index] /= torch.sum(torch.abs(edges[layer_index]))
 
     # Verify that the layer names match the edge names
     edge_names = [edge_info[0] for edge_info in raw_edges]

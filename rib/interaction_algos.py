@@ -331,12 +331,21 @@ def calculate_interaction_rotations(
             # we want to preserve having a unique constant direction in the RIB basis.
             # this constant direction is in the 0th position, so we eigendecompose the submatrix
             # excluding this direction
-            sub_V = eigendecompose(M[1:, 1:])[1]
+            sub_eigenvalues, sub_V = eigendecompose(M[1:, 1:])
+            # TODO: Check whether changing Lambda_dash[0] does nothing
+            # Append a 1 at the beginnign of sub_eigenvalues
+            eigenvalues = torch.cat(
+                [
+                    torch.ones(1, dtype=sub_eigenvalues.dtype, device=sub_eigenvalues.device),
+                    sub_eigenvalues,
+                ]
+            )
             V = torch.zeros_like(M)
             V[0, 0] = 1
             V[1:, 1:] = sub_V
         else:
-            V = eigendecompose(M)[1]
+            eigenvalues, V = eigendecompose(M)
+
         V = V.to(dtype)  # V has size (d_hidden_trunc, d_hidden_trunc)
 
         # left transform for lambda dash, first transform for C_pinv
@@ -347,6 +356,8 @@ def calculate_interaction_rotations(
         Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
             (Vt_Dsqrt_Ut_Yinv @ Lambda_dash @ Y_U_Dsqrtpinv_V).diag().abs()
         )
+
+        Lambda_abs = eigenvalues
 
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
             Lambda_abs, truncation_threshold

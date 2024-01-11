@@ -8,7 +8,6 @@ from torch import Tensor
 from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES, StrDtype
-from rib.utils import put_into_submatrix_
 
 
 def eigendecompose(
@@ -64,8 +63,8 @@ def move_const_dir_first(
     """
     # we expect the const dir to have non-zero component in the bias dir and nonzero eigenvalue
     threshold = 1e-6
-    nonzero_in_bias_dir = U_dash[-1, :] > threshold
-    nonzero_eigenval = D_dash > threshold
+    nonzero_in_bias_dir = U_dash[-1, :].abs() > threshold
+    nonzero_eigenval = D_dash.abs() > threshold
     is_const_dir = nonzero_in_bias_dir & nonzero_eigenval
     assert is_const_dir.any(), "No const direction found"
     assert is_const_dir.sum() == 1, "More than one const direction found"

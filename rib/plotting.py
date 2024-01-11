@@ -70,6 +70,7 @@ def _add_edges_to_graph(
 def _prepare_edges_for_plotting(
     raw_edges: list[tuple[str, torch.Tensor]],
     nodes_per_layer: list[int],
+    norm_factor: Optional[float] = None,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
@@ -86,7 +87,10 @@ def _prepare_edges_for_plotting(
         # Convert edges to float32 (bfloat16 will cause errors and we don't need higher precision)
         weight_matrix = weight_matrix.float()
         # Normalize the edge weights by the sum of the absolute values of the weights
-        weight_matrix /= torch.sum(torch.abs(weight_matrix))
+        norm_factor = (
+            torch.sum(torch.abs(weight_matrix)).item() if norm_factor is None else norm_factor
+        )
+        weight_matrix /= norm_factor
         # Only keep the desired number of nodes in each layer
         in_nodes = nodes_per_layer[i]
         out_nodes = nodes_per_layer[i + 1]
@@ -101,6 +105,7 @@ def plot_interaction_graph(
     nodes_per_layer: Union[int, list[int]],
     out_file: Path,
     node_labels: Optional[list[list[str]]] = None,
+    norm_factor: Optional[float] = None,
 ) -> None:
     """Plot the interaction graph for the given edges.
 
@@ -122,7 +127,7 @@ def plot_interaction_graph(
 
     max_layer_height = max(nodes_per_layer)
 
-    edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
+    edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer, norm_factor=norm_factor)
 
     # Verify that the layer names match the edge names
     edge_names = [edge_info[0] for edge_info in raw_edges]
@@ -136,7 +141,7 @@ def plot_interaction_graph(
     # Create the undirected graph
     graph = nx.Graph()
 
-    fig, ax = plt.subplots(1, 1, figsize=(20, 10))
+    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 
     layers = _create_node_layers(edges)
     # Add nodes to the graph object
@@ -149,7 +154,7 @@ def plot_interaction_graph(
     pos: dict[int, tuple[int, Union[int, float]]] = {}
     for i, layer in enumerate(layers):
         # Add extra spacing for nodes that have fewer nodes than the biggest layer
-        spacing = 1 if i == 0 else max_layer_height / len(layer)
+        spacing = max_layer_height / len(layer)
         for j, node in enumerate(layer):
             pos[node] = (i, j * spacing)
 
@@ -169,10 +174,12 @@ def plot_interaction_graph(
         for i, layer in enumerate(layers):
             for j, node in enumerate(layer):
                 node_label_dict[node] = node_labels[i][j].replace("|", "\n")
-        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8)
+
+        label_options = {"ec": "k", "fc": "white", "alpha": 0.75}
+        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=9, bbox=label_options)
 
     # Draw edges
-    width_factor = 15
+    width_factor = 25
     # for edge in graph.edges(data=True):
     nx.draw_networkx_edges(
         graph,

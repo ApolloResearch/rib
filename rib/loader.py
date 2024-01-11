@@ -130,6 +130,7 @@ def load_mlp(
         assert isinstance(config, MLPConfig)
         assert mlp_path is not None, "mlp_path must be provided for MLPConfig"
         mlp = MLP(config)
+        mlp_path = Path(str(mlp_path).replace("ssd-apollo", "ssd-interp"))
         mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
     if fold_bias:
         mlp.fold_bias()

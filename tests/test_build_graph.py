@@ -235,7 +235,7 @@ def get_modular_arithmetic_config(
         return_set: train
         return_set_n_samples: {return_set_n_samples}
     batch_size: {batch_size}
-    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
+    truncation_threshold: 1e-10  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
     last_pos_module_type: {last_pos_module_type}
     n_intervals: 0

@@ -219,17 +219,20 @@ def get_modular_arithmetic_config(
     tlens_pretrained: null
     tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
     node_layers:
-        - attn_in.0
+        - ln1.0
+        - mlp_in.0
         - unembed
+        - output
     dataset:
         source: custom
         name: modular_arithmetic
         return_set: train
-    batch_size: 9999999
-    truncation_threshold: 1e-12  # we've been using 1e-6 previously but this increases needed atol
+        return_set_n_samples: 10
+    batch_size: 6
+    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
     last_pos_module_type: add_resid1
-    n_intervals: 5
+    n_intervals: 0
     dtype: {dtype_str}
     eval_type: accuracy
     out_dir: null

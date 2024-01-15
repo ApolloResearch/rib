@@ -72,7 +72,7 @@ def build_sorted_lambda_matrices(
     else:
         idxs_excl_first = torch.argsort(Lambda_abs[1:], descending=True) + 1
         zero = torch.tensor([0], device=idxs_excl_first.device)
-        idxs: Int[Tensor, "d_hidden_trunc"] = torch.cat([zero, idxs_excl_first])
+        idxs = torch.cat([zero, idxs_excl_first])
 
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
@@ -338,14 +338,13 @@ def calculate_interaction_rotations(
             # this constant direction is in the 0th position, so we eigendecompose the submatrix
             # excluding this direction
             sub_eigenvalues, sub_V = eigendecompose(M[1:, 1:])
-            # Set the Lambda corresponding to the constant direction to 1. This is an arbitrary
-            # choice, 1 is decent for numerics. There does exist a "correct" value if we cared
-            # about the edge strengths connecting to the constant direction, but we mostly do not.
-            one = torch.ones(1, dtype=sub_eigenvalues.dtype, device=sub_eigenvalues.device)
-            eigenvalues = torch.cat([one, sub_eigenvalues])
             V = torch.zeros_like(M)
             V[0, 0] = 1
             V[1:, 1:] = sub_V
+            # The eigenvalues are used in the jacobian basis to set the correct Lambdas.
+            # For the constant direction set Lambda to M[0,0], though it should not affect
+            # the result for all edges except those connecting to the const direction.
+            eigenvalues = torch.cat([M[0, 0].unsqueeze(0), sub_eigenvalues])
         else:
             eigenvalues, V = eigendecompose(M)
 

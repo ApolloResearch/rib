@@ -122,7 +122,7 @@ def calculate_interaction_rotations(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-alpha)^2",
+    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-0)*alpha",
     center: bool = False,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
@@ -158,13 +158,14 @@ def calculate_interaction_rotations(
         truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
         rotate_final_node_layer: Whether to rotate the final layer to its eigenbasis (which is
             equivalent to its interaction basis). Defaults to True.
-        basis_formula: The formula to use for the integrated gradient.
-            - "(1-alpha)^2" is the old (October) version based on the functional edge formula.
-            - "(1-0)*alpha" is the new (November) version based on the squared edge formula. This
-                is the default, and generally the best option.
-            - "neuron" performs no rotation.
-            - "svd" only decomposes the gram matrix and uses that as the basis. It is a good
-                baseline. If `center=true` this becomes the "pca" basis.
+        basis_formula: The formula to use for the integrated gradient. Must be one of
+            ["(1-alpha)^2","(1-0)*alpha", "neuron", "svd"]. Defaults to "(1-0)*alpha".
+                - "(1-alpha)^2" is the old (October) version based on the functional edge formula.
+                - "(1-0)*alpha" is the new (November) version based on the squared edge formula.
+                    This is the default, and generally the best option.
+                - "neuron" performs no rotation.
+                - "svd" only decomposes the gram matrix and uses that as the basis. It is a good
+                    baseline. If `center=true` this becomes the "pca" basis.
         center: Whether to center the activations while computing the desired basis. Only supported
             for the "svd" basis formula.
         means: The means of the activations for each node layer. Only used if `center=true`.

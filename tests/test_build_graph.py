@@ -11,7 +11,7 @@ various scales. This is because combining atol and rtol does not work particular
 that have a small set of large numbers and a large set of small numbers.
 """
 
-from typing import Callable, Optional, Union
+from typing import Callable, Union
 from unittest.mock import patch
 
 import einops
@@ -210,20 +210,7 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
     return means, bias_positions
 
 
-def get_modular_arithmetic_config(
-    return_set_n_samples: int = 10,
-    batch_size: int = 6,
-    basis_formula: str = "(1-0)*alpha",
-    edge_formula: str = "squared",
-    dtype_str: str = "float64",
-    node_layers: Optional[list[str]] = None,
-    last_pos_module_type: str = "add_resid1",
-    n_stochastic_sources: Optional[int] = None,
-) -> LMRibConfig:
-    if node_layers is None:
-        # Default node layers
-        node_layers = ["ln1.0", "mlp_in.0", "unembed", "output"]
-
+def get_modular_arithmetic_config(**kwargs) -> LMRibConfig:
     config_str = f"""
     exp_name: test
     seed: 0
@@ -233,38 +220,45 @@ def get_modular_arithmetic_config(
         source: custom
         name: modular_arithmetic
         return_set: train
-        return_set_n_samples: {return_set_n_samples}
-    batch_size: {batch_size}
+        return_set_n_samples: 10
+    node_layers:
+        - ln1.0
+        - mlp_in.0
+        - unembed
+        - output
+    batch_size: 6
     truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
-    last_pos_module_type: {last_pos_module_type}
+    last_pos_module_type: add_resid1
     n_intervals: 0
-    dtype: {dtype_str}
+    dtype: float64
     eval_type: accuracy
     out_dir: null
-    basis_formula: {basis_formula}
-    edge_formula: {edge_formula}
-    n_stochastic_sources: {"null" if n_stochastic_sources is None else n_stochastic_sources}
+    basis_formula: (1-0)*alpha
+    edge_formula: squared
+    n_stochastic_sources: null
     """
     config_dict = yaml.safe_load(config_str)
-    config_dict["node_layers"] = node_layers
+    # allow changing dataset config with kwargs
+    config_dict.update({k: v for k, v in kwargs.items() if k not in config_dict["dataset"]})
+    config_dict["dataset"].update({k: v for k, v in kwargs.items() if k in config_dict["dataset"]})
     return LMRibConfig(**config_dict)
 
 
-def get_pythia_config(basis_formula: str, dtype_str: str) -> LMRibConfig:
+def get_pythia_config(**kwargs) -> LMRibConfig:
     config_str = f"""
     exp_name: test
     seed: 0
     tlens_pretrained: pythia-14m
     tlens_model_path: null
     dataset:
-      source: huggingface
-      name: NeelNanda/pile-10k
-      tokenizer_name: EleutherAI/pythia-14m
-      return_set: train
-      return_set_frac: null
-      return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
-      return_set_portion: first
+        source: huggingface
+        name: NeelNanda/pile-10k
+        tokenizer_name: EleutherAI/pythia-14m
+        return_set: train
+        return_set_frac: null
+        return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
+        return_set_portion: first
     node_layers:
         - ln2.1
         - unembed
@@ -272,17 +266,18 @@ def get_pythia_config(basis_formula: str, dtype_str: str) -> LMRibConfig:
     truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
     n_intervals: 0
-    dtype: {dtype_str}
+    dtype: float64
     calculate_edges: false
     eval_type: ce_loss
     out_dir: null
-    basis_formula: {basis_formula}
+    basis_formula: (1-0)*alpha
     """
     config_dict = yaml.safe_load(config_str)
+    config_dict.update(kwargs)
     return LMRibConfig(**config_dict)
 
 
-def get_mnist_config(basis_formula: str, edge_formula: str, dtype_str: str) -> MlpRibConfig:
+def get_mnist_config(**kwargs) -> MlpRibConfig:
     config_str = f"""
     exp_name: test
     mlp_path: "experiments/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
@@ -291,7 +286,7 @@ def get_mnist_config(basis_formula: str, edge_formula: str, dtype_str: str) -> M
     truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
     rotate_final_node_layer: false
     n_intervals: 0
-    dtype: {dtype_str}
+    dtype: float64
     node_layers:
         - layers.0
         - layers.1
@@ -300,16 +295,15 @@ def get_mnist_config(basis_formula: str, edge_formula: str, dtype_str: str) -> M
     dataset:
         return_set_frac: 0.01  # 3 batches (with batch_size=256)
     out_dir: null
-    basis_formula: "{basis_formula}"
-    edge_formula: "{edge_formula}"
+    basis_formula: (1-0)*alpha
+    edge_formula: squared
     """
     config_dict = yaml.safe_load(config_str)
+    config_dict.update(kwargs)
     return MlpRibConfig(**config_dict)
 
 
-def get_modular_mlp_config(
-    basis_formula: str, edge_formula: str, dtype_str: str
-) -> ModularMLPConfig:
+def get_modular_mlp_config(**kwargs) -> ModularMLPConfig:
     config_str = f"""
     exp_name: test
     out_dir: null
@@ -335,12 +329,13 @@ def get_modular_mlp_config(
     batch_size: 256
     n_intervals: 0
     truncation_threshold: 1e-15
-    dtype: {dtype_str}
+    dtype: float64
     rotate_final_node_layer: false
-    basis_formula: {basis_formula}
-    edge_formula: {edge_formula}
+    basis_formula: (1-0)*alpha
+    edge_formula: squared
     """
     config_dict = yaml.safe_load(config_str)
+    config_dict.update(kwargs)
     config = MlpRibConfig(**config_dict)
     return config
 
@@ -356,20 +351,16 @@ def get_modular_mlp_config(
     ],
 )
 def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
-    dtype_str = "float64"
     atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
-    config = get_modular_arithmetic_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
-    )
+    config = get_modular_arithmetic_config(basis_formula=basis_formula, edge_formula=edge_formula)
     results = graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
     get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
 
 
 @pytest.mark.slow
 def test_pythia_14m_build_graph():
-    dtype_str = "float64"
     atol = 0  # Works with 1e-7 for float32 and 0 for float64
-    config = get_pythia_config(dtype_str=dtype_str, basis_formula="(1-0)*alpha")
+    config = get_pythia_config()
     results = graph_build_test(
         config=config,
         build_graph_main_fn=lm_build_graph_main,
@@ -393,7 +384,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
     # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64
     atol = 1e-5
     config = get_mnist_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
+        basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
     )
     results = graph_build_test(
         config=config,
@@ -426,7 +417,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
 )
 def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
     config = get_modular_mlp_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
+        basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
     )
     graph_build_test(config=config, build_graph_main_fn=mlp_build_graph_main, atol=atol)
 
@@ -475,7 +466,7 @@ def rotate_final_layer_invariance(
 def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1e-7, atol=1e-8):
     """Test that the non-final edges are the same for MNIST whether or not we rotate the final layer."""
     not_rotated_config = get_mnist_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype_str="float64"
+        basis_formula=basis_formula, edge_formula=edge_formula, dtype="float64"
     )
     # TODO: this fails for layers.0 but shouldn't (afaik)
     not_rotated_config = not_rotated_config.model_copy(
@@ -504,9 +495,7 @@ def test_modular_mlp_rotate_final_layer_invariance(
     basis_formula, edge_formula, rtol=1e-7, atol=1e-8
 ):
     """Test that the non-final edges are the same for ModularMLP whether or not we rotate the final layer."""
-    config = get_modular_mlp_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype_str="float64"
-    )
+    config = get_modular_mlp_config(basis_formula=basis_formula, edge_formula=edge_formula)
     rotate_final_layer_invariance(
         config_not_rotated=config,
         build_graph_main_fn=mlp_build_graph_main,
@@ -545,7 +534,7 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
     """
     rotate_final_layer_invariance(
         config_not_rotated=get_modular_arithmetic_config(
-            basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
+            basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
         ),
         build_graph_main_fn=lm_build_graph_main,
         rtol=rtol,
@@ -579,8 +568,7 @@ def test_mnist_build_graph_invalid_node_layers():
 
 @pytest.mark.slow
 def test_svd_basis():
-    dtype_str = "float64"
-    config = get_pythia_config(basis_formula="svd", dtype_str=dtype_str)
+    config = get_pythia_config(basis_formula="svd")
     results = lm_build_graph_main(config)
     for c_info, u_info in zip(results["interaction_rotations"], results["eigenvectors"]):
         C = c_info["C"]
@@ -656,7 +644,7 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
 @pytest.mark.slow
 def test_pca_basis_mnist():
     """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
-    config = get_mnist_config(basis_formula="svd", edge_formula="functional", dtype_str="float64")
+    config = get_mnist_config(basis_formula="svd", edge_formula="functional")
     config = config.model_copy(update={"center": True})
     results = mlp_build_graph_main(config)
     pca_rib_acts_test(results, atol=1e-4)
@@ -665,8 +653,7 @@ def test_pca_basis_mnist():
 @pytest.mark.slow
 def test_pca_basis_pythia():
     """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
-    dtype_str = "float64"
-    config = get_pythia_config(dtype_str=dtype_str, basis_formula="svd")
+    config = get_pythia_config(basis_formula="svd")
     config = config.model_copy(update={"center": True, "rotate_final_node_layer": True})
     results = lm_build_graph_main(config)
     pca_rib_acts_test(results, atol=1e-6)
@@ -692,7 +679,7 @@ def test_modular_mlp_diagonal_edges_when_linear(
         gtol: The geometric mean and max column/row value scaling tolerance to use.
     """
     config = get_modular_mlp_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype_str=dtype_str
+        basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
     )
     new_mod_mlp_config = config.modular_mlp_config.model_copy(update={"activation_fn": "identity"})
     config = config.model_copy(

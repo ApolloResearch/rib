@@ -100,7 +100,6 @@ def test_collect_dataset_means_pythia():
     device = "cpu"
     batch_size = 10
     n_ctx = 40
-    atol = 1e-10
 
     node_layers = [
         "ln1.2",
@@ -139,4 +138,4 @@ def test_collect_dataset_means_pythia():
     )
 
     for m_name in node_layers:
-        assert torch.isclose(means[m_name][-1], torch.tensor(1.0))
+        assert torch.isclose(means[m_name][-1], torch.tensor(1.0, dtype=dtype), atol=0)

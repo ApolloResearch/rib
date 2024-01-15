@@ -484,18 +484,18 @@ def calc_basis_jacobian(
     batch_size = inputs[0].shape[0]
     in_pos_size = inputs[0].shape[1] if has_pos else None
     in_hidden_size = sum(x.shape[-1] for x in inputs)
-    if has_pos or C_out is None:
-        with torch.inference_mode():
-            f_out_dummy = module(*inputs)
-            f_out_dummy = (f_out_dummy,) if isinstance(f_out_dummy, torch.Tensor) else f_out_dummy
+    # Compute out sizes
+    with torch.inference_mode():
+        f_out_dummy = module(*inputs)
+        f_out_dummy = (f_out_dummy,) if isinstance(f_out_dummy, torch.Tensor) else f_out_dummy
 
-        out_hidden_size = sum(x.shape[-1] for x in f_out_dummy)
-        out_hat_hidden_size = out_hidden_size if C_out is None else C_out.shape[1]
-        out_pos_size = f_out_dummy[0].shape[1] if has_pos else None
-        # Asserts
-        if C_out is not None:
-            assert out_hidden_size == C_out.shape[0], "C_out has wrong shape"
-        assert batch_size == f_out_dummy[0].shape[0], "batch size mismatch"
+    out_hidden_size = sum(x.shape[-1] for x in f_out_dummy)
+    out_hat_hidden_size = out_hidden_size if C_out is None else C_out.shape[1]
+    out_pos_size = f_out_dummy[0].shape[1] if has_pos else None
+    # Asserts
+    if C_out is not None:
+        assert out_hidden_size == C_out.shape[0], "C_out has wrong shape"
+    assert batch_size == f_out_dummy[0].shape[0], "batch size mismatch"
 
     if has_pos:
         assert in_pos_size is not None  # needed for mypy
@@ -549,8 +549,52 @@ def calc_basis_jacobian(
                     # Contraction over batch, i, t, and tprime happens after the integral,
                     # but we cannot contract earlier because we have to finish the integral
     else:
-        raise NotImplementedError("No pos not implemented yet")
-        # TODO
+        # grads.shape: batch, i, j/jprime
+        grads = torch.zeros(
+            batch_size,
+            out_hat_hidden_size,
+            in_hidden_size,
+            dtype=inputs[0].dtype,
+            device=inputs[0].device,
+        )
+
+        # Old in_grads shape: batch j
+        # New in_grads shape: batch i j
+        for alpha_index, alpha in enumerate(alphas):
+            # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
+            # point estimate at alpha=0.5) and multiply by the interval size.
+            if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+                trapezoidal_scaler = 0.5 * interval_size
+            else:
+                trapezoidal_scaler = interval_size
+            # Compute f^{l+1}(f^l(alpha x))
+            f_in_alpha = tuple(alpha * x for x in inputs)
+            outputs_alpha = module(*f_in_alpha)
+            f_out_alpha = (
+                outputs_alpha
+                if isinstance(outputs_alpha, torch.Tensor)
+                else torch.cat(outputs_alpha, dim=-1)
+            )
+            f_out_hat_alpha = f_out_alpha @ C_out if C_out is not None else f_out_alpha
+            # f_out_hat_alpha.shape: batch i
+            # f_in_alpha: batch, j/jprime
+
+            # Calculate the grads, numerator index i
+            for i in range(out_hat_hidden_size):
+                # Sum over batch is a trick to get the grad for every batch index vectorized.
+                # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
+                # times (for each i in a for loop) aka we're doing a jacobian.
+                # Concatenate over the tuple dimension of the inputs.
+                alpha_in_grads = torch.cat(
+                    torch.autograd.grad(
+                        f_out_hat_alpha[:, i].sum(dim=0), f_in_alpha, retain_graph=True
+                    ),
+                    dim=-1,
+                )
+                # grads.shape: batch, i, j/jprime
+                grads[:, i] += alpha_in_grads * trapezoidal_scaler
+                # Contraction over batch and i happens after the integral,
+                # but we cannot contract earlier because we have to finish the integral
 
     return grads
 

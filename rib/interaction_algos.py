@@ -355,13 +355,13 @@ def calculate_interaction_rotations(
         # right transform for lambda dash, first transform for C
         Y_U_Dsqrtpinv_V = Y @ U @ pinv_diag(D.sqrt()) @ V
 
-        Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
-            (Vt_Dsqrt_Ut_Yinv @ Lambda_dash @ Y_U_Dsqrtpinv_V).diag().abs()
-        )
-
-        # Lambdas for jacobian basis are the eigenvalues of the jacobian-basis-M
         if basis_formula == "jacobian":
-            Lambda_abs = eigenvalues
+            # Lambdas for jacobian basis are the eigenvalues of the jacobian-basis-M
+            Lambda_abs = eigenvalues.to(dtype)
+        else:
+            Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
+                (Vt_Dsqrt_Ut_Yinv @ Lambda_dash @ Y_U_Dsqrtpinv_V).diag().abs()
+            )
 
         Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
             Lambda_abs, truncation_threshold, ignore_first_index=True

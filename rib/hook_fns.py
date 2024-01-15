@@ -393,15 +393,6 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             n_intervals=n_intervals,
         )  # shape:  batch, i, t (out_pos), tprime (in_pos), j/jprime
 
-        # FIXME temporarily using old basis to compute Lambdas
-        in_grads_old = calc_basis_integrated_gradient(
-            module=module,
-            inputs=inputs,
-            C_out=C_out,
-            n_intervals=n_intervals,
-            basis_formula="(1-0)*alpha",
-        )  # shape: batch pos j
-
         has_pos = inputs[0].dim() == 3
         einsum_pattern = (
             "batch i t tprime j, batch i t tprime jprime -> j jprime"
@@ -416,18 +407,14 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         # Old sum after product: batch pos
         # New sum after product: batch, i, t, tprime
         with torch.inference_mode():
-            M_dash = einops.einsum(in_grads / normalization_factor, in_grads, einsum_pattern)
+            M_dash = einops.einsum(
+                in_grads.to(M_dtype) / normalization_factor, in_grads.to(M_dtype), einsum_pattern
+            )
             # Concatenate the inputs over the hidden dimension
             in_acts = torch.cat(inputs, dim=-1)
 
-            einsum_pattern_old = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
-            Lambda_dash = torch.einsum(
-                einsum_pattern_old, in_grads_old / normalization_factor, in_acts
-            )
-
-            assert (
-                Lambda_dash.std() > 0
-            ), "Lambda_dash cannot be all zeros otherwise everything will be truncated"
+            # Placeholder that will get overwritten later
+            Lambda_dash = torch.tensor(torch.nan)
 
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)

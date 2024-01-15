@@ -35,7 +35,6 @@ from rib.loader import load_model_and_dataset_from_rib_results
 from rib.log import logger
 from rib.models.modular_mlp import ModularMLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults
-from rib.utils import find_bias_pos
 from tests.utils import assert_is_close, assert_is_zeros
 
 
@@ -175,7 +174,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     return rib_acts
 
 
-def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
+def get_means(results: RibBuildResults, atol: float, batch_size=16):
     """Takes the results of a graph build and runs collect_dataset_means."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results["config"]["dtype"]]
@@ -189,7 +188,7 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
         module_names = [model.module_id_to_section_id[m_name] for m_name in module_ids]
     else:
         module_names = module_ids
-    means = collect_dataset_means(
+    return collect_dataset_means(
         hooked_model=hooked_model,
         module_names=module_names,
         data_loader=data_loader,
@@ -198,10 +197,6 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
         collect_output_dataset_means=False,
         hook_names=module_ids,
     )
-    for m_name in module_ids:
-        # good to ensure this function works with the output
-        find_bias_pos(means[m_name])
-    return means
 
 
 def get_modular_arithmetic_config(**kwargs) -> LMRibConfig:
@@ -593,7 +588,7 @@ def centred_rib_test(results: RibBuildResults, atol=1e-6):
     """
     # collect C_inv, rib acts, means, bias positions
     all_rib_acts = get_rib_acts_test(results, atol=1e-6)
-    all_mean_acts = get_means_test(results, atol=atol)
+    all_mean_acts = get_means(results, atol=atol)
     C_infos = parse_c_infos(results["interaction_rotations"])
     # output and pre-unembed have no bias
     m_names = [m_name for m_name in results["config"]["node_layers"] if m_name not in ["output"]]
@@ -602,7 +597,6 @@ def centred_rib_test(results: RibBuildResults, atol=1e-6):
         if C_inv is None:  # this happens when rotate_final_layer is true
             continue
         mean_acts = all_mean_acts[m_name].cpu()  # [emb_pos]
-        bias_pos = find_bias_pos(mean_acts)
         rib_acts = all_rib_acts[m_name]  # [batch, (seqpos?), rib_dir]
 
         # compute the expected bias direction
@@ -623,8 +617,8 @@ def centred_rib_test(results: RibBuildResults, atol=1e-6):
         # Check 1: Assert this is close to the actual const direction
         assert_is_close(C_inv[0, :], expected_const_dir, atol=atol, rtol=0, m_name=m_name)
 
-        # Check 2: no other rib dir has non-zero component at bias positions
-        assert_is_zeros(C_inv[1:][:, bias_pos], atol=atol, m_name=m_name)
+        # Check 2: no other rib dir has non-zero component in the bias position
+        assert_is_zeros(C_inv[1:][:, -1], atol=atol, m_name=m_name)
 
         # Check 3: rib act in the constant direction is actually constant.
         # in particualar it's the inverse of the scaling factor above

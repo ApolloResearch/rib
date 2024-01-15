@@ -372,23 +372,3 @@ def put_into_submatrix_(
     row_idxs = torch.as_tensor(row_idxs, dtype=torch.long)
     col_idxs = torch.as_tensor(col_idxs, dtype=torch.long)
     full[row_idxs.unsqueeze(1), col_idxs.unsqueeze(0)] = new_sub_matrix
-
-
-def find_bias_pos(means: Float[Tensor, "emb"]) -> int:
-    """Find the a single position where the model's activations will be constantly ±1.
-
-    Requires that either:
-      - emb[-1] is a bias position
-      - emb can be split into two halfs, and the last position of the first one is a bias pos
-    """
-    d_emb = means.shape[-1]
-    tol = 1e-6
-    is_plus_minus_one = lambda x: (x.abs() - 1).abs() < tol
-
-    if is_plus_minus_one(means[-1]):
-        return d_emb - 1
-    else:
-        assert d_emb % 2 == 0
-        end_of_first_half = d_emb // 2 - 1
-        assert is_plus_minus_one(means[end_of_first_half]), means[end_of_first_half]
-        return end_of_first_half

@@ -187,7 +187,7 @@ def calculate_interaction_rotations(
         if center:
             assert means is not None and node_layers[-1] in means
             mean = means[node_layers[-1]]
-            D_output, U_output = move_const_dir_first(D_output, U_output, mean)
+            D_output, U_output = move_const_dir_first(D_output, U_output)
             Y = centering_matrix(mean)
             C_output = Y @ U_output
         else:
@@ -265,7 +265,7 @@ def calculate_interaction_rotations(
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
         if center:
             assert means is not None and node_layer in means
-            D_dash, U_dash = move_const_dir_first(D_dash, U_dash, means[node_layer])
+            D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
 
         # we trucate all directions with eigenvalues smaller than some threshold
         mask = D_dash > truncation_threshold  # true if we keep the direction
@@ -280,7 +280,7 @@ def calculate_interaction_rotations(
             # Y (or Gamma) is a matrix that shifts the activations to be mean zero
             # with the exception of the bias positions which are still 1
             Y = centering_matrix(means[node_layer])
-            Y_inv = centering_matrix(means[node_layer], invert=True)
+            Y_inv = centering_matrix(means[node_layer], inverse=True)
         else:
             # if not centering, we set Y to be the identity matrix
             Y = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)

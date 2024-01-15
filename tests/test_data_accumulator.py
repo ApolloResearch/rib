@@ -6,7 +6,7 @@ from rib.data_accumulator import collect_dataset_means, collect_gram_matrices
 from rib.hook_manager import HookedModel
 from rib.loader import load_sequential_transformer
 from rib.models.mlp import MLP, MLPConfig
-from rib.utils import find_bias_pos, set_seed
+from rib.utils import set_seed
 
 
 def test_collect_gram_matrices():
@@ -109,7 +109,7 @@ def test_collect_dataset_means_pythia():
         "add_resid1.2",
         "ln2.2",
         "mlp_in.2",
-        # "mlp_act.2",
+        "mlp_act.2",
         "mlp_out.2",
         "add_resid2.2",
     ]
@@ -139,6 +139,4 @@ def test_collect_dataset_means_pythia():
     )
 
     for m_name in node_layers:
-        print(m_name)
-        print(means[m_name])
-        find_bias_pos(means[m_name])
+        assert torch.isclose(means[m_name][-1], torch.tensor(1.0))

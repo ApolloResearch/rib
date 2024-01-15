@@ -21,7 +21,6 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import module_hat
 from rib.log import logger
 from rib.models.utils import get_model_attr
-from rib.utils import find_bias_pos
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -186,9 +185,8 @@ def collect_gram_matrices(
     for module_name, hook_name in zip(module_names, hook_names):
         shift: Optional[Float[Tensor, "d_hidden"]] = None
         if means is not None and hook_name in means:
-            bias_pos = find_bias_pos(means[hook_name])
             shift = -means[hook_name]
-            shift[bias_pos] = 0.0
+            shift[-1] = 0.0  # don't shift bias pos
         gram_hooks.append(
             Hook(
                 name=hook_name,

@@ -4,12 +4,11 @@ import numpy as np
 import torch
 from einops import rearrange
 from fancy_einsum import einsum
-from jaxtyping import Float, Int
+from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES, StrDtype
-from rib.utils import find_bias_pos
 
 
 def eigendecompose(
@@ -54,7 +53,6 @@ def eigendecompose(
 def move_const_dir_first(
     D_dash: Float[Tensor, "d_hidden"],
     U_dash: Float[Tensor, "d_hidden d_hidden"],
-    means: Int[Tensor, "positions"],
 ) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """
     Finds the constant direction in D and U and moves it to the first position.
@@ -71,12 +69,10 @@ def move_const_dir_first(
     Args:
         D_dash: Eigenvalues of gram matrix.
         U_dash: Eigenvectors of gram matrix.
-        bias_positions: The positions of the folded-bias in the original coordinates.
     """
     # we expect the const dir to have non-zero component in the bias dir and nonzero eigenvalue
     threshold = 1e-6
-    bias_pos = find_bias_pos(means)
-    nonzero_in_bias_component = U_dash[bias_pos, :].abs() > threshold
+    nonzero_in_bias_component = U_dash[-1, :].abs() > threshold
     nonzero_eigenval = D_dash.abs() > threshold
     is_const_dir = nonzero_in_bias_component & nonzero_eigenval
     assert is_const_dir.any(), "No const direction found"
@@ -716,29 +712,23 @@ def calc_gram_matrix(
 
 
 def centering_matrix(
-    means: Float[torch.Tensor, "emb"],
-    invert: bool = False,
+    mean: Float[torch.Tensor, "emb"],
+    inverse: bool = False,
 ) -> Float[torch.Tensor, "emb emb"]:
     """
-    Returns a matrix S such that `x @ S = shifted_x`, for when x has a 1 at the appropriate bias
-    position.
-    `shifted_x` is `x + shift` at all non bias positions, and still 1 at all bias positions. The value of `shift` at bias positions is ignored.
+    Returns a matrix S such that `x @ S = x - mean` (everywhere except the last position of x)
 
+    If inverse=True, instead returns the inverse (a matrix that adds the mean back to x)
     Example:
-        >>> means = torch.tensor([2., 2., 4., 1.])
-        >>> shift_matrix(means, invert=False)
+        >>> mean = torch.tensor([2., 2., 4., 1.])
+        >>> shift_matrix(mean, inverse=False)
         tensor([[1., 0., 0., 0.],
                 [0., 1., 0., 0.],
                 [0., 0., 1., 0.],
                 [-2., -2., -4., 1.]])
     """
-    assert means.ndim == 1, "shift must be 1d"
-    n = means.shape[0]
-    bias_pos = find_bias_pos(means)
-
-    S = torch.eye(n, dtype=means.dtype, device=means.device)
-    # by default the matrix subtracts the mean
-    shift = means.clone() if invert else -means.clone()
-    shift[bias_pos] = 0  # we don't shift at bias positions
-    S[bias_pos, :] += shift
+    assert mean.ndim == 1, "mean must be 1d"
+    S = torch.eye(mean.shape[0], dtype=mean.dtype, device=mean.device)
+    shift = mean.clone() if inverse else -mean.clone()
+    S[-1, :-1] = shift[:-1]  # don't shift the bias position
     return S

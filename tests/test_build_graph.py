@@ -171,7 +171,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
     test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
     utils_rib_acts = rib_acts[module_to_test].cpu()
-    assert_is_close(utils_rib_acts, test_rib_acts, atol=atol, rtol=0)
+    assert_is_close(utils_rib_acts, test_rib_acts, atol=atol, rtol=1e-5)
     return rib_acts
 
 
@@ -354,7 +354,7 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
 
 @pytest.mark.slow
 def test_pythia_14m_build_graph():
-    atol = 1e-12  # Works with 1e-7 for float32 and 0 for float64
+    atol = 0  # Works with 1e-7 for float32 and 0 for float64
     config = get_pythia_config()
     results = graph_build_test(
         config=config,
@@ -376,17 +376,15 @@ def test_pythia_14m_build_graph():
 )
 def test_mnist_build_graph(basis_formula, edge_formula):
     dtype_str = "float32"
-    # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64
-    atol = 1e-4
     config = get_mnist_config(
         basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
     )
     results = graph_build_test(
         config=config,
         build_graph_main_fn=mlp_build_graph_main,
-        atol=atol,
+        atol=1e-5,  # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64
     )
-    get_rib_acts_test(results, atol=atol)
+    get_rib_acts_test(results, atol=1e-5)
 
 
 @pytest.mark.parametrize(

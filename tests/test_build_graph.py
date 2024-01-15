@@ -614,9 +614,6 @@ def centred_rib_test(results: RibBuildResults, atol=1e-6):
         rib_acts = all_rib_acts[m_name]  # [batch, (seqpos?), rib_dir]
 
         # compute the expected bias direction
-        expected_const_dir = mean_acts.clone()  # [emb]
-        expected_const_dir[bias_positions] = 1
-
         # we can't directly compare, as there's some scale factor. This involves:
         # - ±1, as rib is allowed to find the opposite direction
         # - a factor 1/sqrt(# bias positions) from compressing the bias directions
@@ -630,7 +627,7 @@ def centred_rib_test(results: RibBuildResults, atol=1e-6):
             # this is less strong as a check, but it's hard to compute D and lambda
             scale_factor = C_inv[0, -1]
 
-        expected_const_dir *= scale_factor
+        expected_const_dir = mean_acts * scale_factor
 
         # Check 1: Assert this is close to the actual const direction
         assert_is_close(C_inv[0, :], expected_const_dir, atol=atol, rtol=0, m_name=m_name)
@@ -648,41 +645,19 @@ def centred_rib_test(results: RibBuildResults, atol=1e-6):
 
 
 @pytest.mark.slow
-def test_pca_basis_mnist():
-    """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
-    config = get_mnist_config(basis_formula="svd", edge_formula="functional")
-    config = config.model_copy(update={"center": True})
-    results = mlp_build_graph_main(config)
-    centred_rib_test(results, atol=1e-4)
-
-
-@pytest.mark.slow
-def test_pca_basis_pythia():
-    """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
-    config = get_pythia_config(basis_formula="svd")
-    config = config.model_copy(update={"center": True, "rotate_final_node_layer": True})
-    results = lm_build_graph_main(config)
-    centred_rib_test(results, atol=1e-6)
-
-
-@pytest.mark.slow
 @pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
 def test_centered_rib_mnist(basis_formula):
     """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
-    config = get_mnist_config(
-        basis_formula=basis_formula, edge_formula="functional", dtype_str="float64"
-    )
-    config = config.model_copy(update={"center": True})
+    config = get_mnist_config(basis_formula=basis_formula, edge_formula="functional", center=True)
     results = mlp_build_graph_main(config)
     centred_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow
-def test_centered_rib_pythia():
+@pytest.mark.parametrize("basis_formula", ["(1-0)*alpha", "svd"])
+def test_centered_rib_pythia(basis_formula):
     """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
-    dtype_str = "float64"
-    config = get_pythia_config(dtype_str=dtype_str, basis_formula="(1-0)*alpha")
-    config = config.model_copy(update={"center": True})
+    config = get_pythia_config(basis_formula=basis_formula, center=True)
     results = lm_build_graph_main(config)
     centred_rib_test(results, atol=1e-6)
 
@@ -690,11 +665,15 @@ def test_centered_rib_pythia():
 @pytest.mark.slow
 def test_centered_rib_modadd():
     """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
-    dtype_str = "float64"
+    # we set a lower truncation threshold as there are some directions w/ small eigenvals that
+    # violate our assumption. I think this is a precision error that shouldn't be a problem
+    # elsewhere. See https://apolloresearchhq.slack.com/archives/C06484S5UF9/p1704966880983049
     config = get_modular_arithmetic_config(
-        dtype_str=dtype_str, basis_formula="svd", edge_formula="squared"
+        basis_formula="svd",
+        edge_formula="squared",
+        center=True,
+        truncation_threshold=1e-10,
     )
-    config = config.model_copy(update={"center": True})
     results = lm_build_graph_main(config)
     centred_rib_test(results, atol=1e-6)
 

@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import eigendecompose, move_const_dir_first, pinv_diag, shift_matrix
+from rib.linalg import centering_matrix, eigendecompose, move_const_dir_first, pinv_diag
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.transformer import SequentialTransformer
 
@@ -112,7 +112,6 @@ def calculate_interaction_rotations(
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-0)*alpha",
     center: bool = False,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
-    bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -156,7 +155,6 @@ def calculate_interaction_rotations(
         center: Whether to center the activations while computing the desired basis. Only supported
             for the "svd" basis formula.
         means: The means of the activations for each node layer. Only used if `center=true`.
-        bias_positions: The positions of the biases for each node layer. Only used if `center=true`.
     Returns:
         - A list of objects containing the interaction rotation matrices and their pseudoinverses,
         ordered by node layer appearance in model.
@@ -187,12 +185,10 @@ def calculate_interaction_rotations(
         D_output, U_output = eigendecompose(gram_matrices[node_layers[-1]])
         assert U_output is not None
         if center:
-            assert means is not None
-            assert bias_positions is not None
-            assert node_layers[-1] in means
-            output_bias_positions = bias_positions[node_layers[-1]]
-            D_output, U_output = move_const_dir_first(D_output, U_output, output_bias_positions)
-            Y = shift_matrix(-means[node_layers[-1]], output_bias_positions)
+            assert means is not None and node_layers[-1] in means
+            mean = means[node_layers[-1]]
+            D_output, U_output = move_const_dir_first(D_output, U_output, mean)
+            Y = centering_matrix(mean)
             C_output = Y @ U_output
         else:
             C_output = U_output
@@ -268,8 +264,8 @@ def calculate_interaction_rotations(
 
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
         if center:
-            assert bias_positions is not None
-            D_dash, U_dash = move_const_dir_first(D_dash, U_dash, bias_positions[node_layer])
+            assert means is not None and node_layer in means
+            D_dash, U_dash = move_const_dir_first(D_dash, U_dash, means[node_layer])
 
         # we trucate all directions with eigenvalues smaller than some threshold
         mask = D_dash > truncation_threshold  # true if we keep the direction
@@ -281,11 +277,10 @@ def calculate_interaction_rotations(
         # currently only used for svd basis, but will be used more in text PR
         if center:
             assert means is not None
-            assert bias_positions is not None
             # Y (or Gamma) is a matrix that shifts the activations to be mean zero
             # with the exception of the bias positions which are still 1
-            Y = shift_matrix(-means[node_layer], bias_positions[node_layer])
-            Y_inv = shift_matrix(means[node_layer], bias_positions[node_layer])
+            Y = centering_matrix(means[node_layer])
+            Y_inv = centering_matrix(means[node_layer], invert=True)
         else:
             # if not centering, we set Y to be the identity matrix
             Y = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)

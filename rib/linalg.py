@@ -9,6 +9,7 @@ from torch import Tensor
 from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES, StrDtype
+from rib.utils import find_bias_pos
 
 
 def eigendecompose(
@@ -53,7 +54,7 @@ def eigendecompose(
 def move_const_dir_first(
     D_dash: Float[Tensor, "d_hidden"],
     U_dash: Float[Tensor, "d_hidden d_hidden"],
-    bias_positions: Int[Tensor, "positions"],
+    means: Int[Tensor, "positions"],
 ) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
     """
     Finds the constant direction in D and U and moves it to the first position.
@@ -74,8 +75,8 @@ def move_const_dir_first(
     """
     # we expect the const dir to have non-zero component in the bias dir and nonzero eigenvalue
     threshold = 1e-6
-    bias_pos_in_neuron_basis = bias_positions[0].item()
-    nonzero_in_bias_component = U_dash[bias_pos_in_neuron_basis, :].abs() > threshold
+    bias_pos = find_bias_pos(means)
+    nonzero_in_bias_component = U_dash[bias_pos, :].abs() > threshold
     nonzero_eigenval = D_dash.abs() > threshold
     is_const_dir = nonzero_in_bias_component & nonzero_eigenval
     assert is_const_dir.any(), "No const direction found"
@@ -714,27 +715,30 @@ def calc_gram_matrix(
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
 
 
-def shift_matrix(
-    shift: Float[torch.Tensor, "n"], bias_positions: Int[torch.Tensor, "sections"]
-) -> Float[torch.Tensor, "n n"]:
+def centering_matrix(
+    means: Float[torch.Tensor, "emb"],
+    invert: bool = False,
+) -> Float[torch.Tensor, "emb emb"]:
     """
-    Returns a matrix S such that `x @ S = shifted_x`, for x with `x[bias_positions] = 1`.
+    Returns a matrix S such that `x @ S = shifted_x`, for when x has a 1 at the appropriate bias
+    position.
     `shifted_x` is `x + shift` at all non bias positions, and still 1 at all bias positions. The value of `shift` at bias positions is ignored.
 
     Example:
-        >>> shift = torch.tensor([2., 2., 4., 4.])
-        >>> bias_positions = torch.tensor([1, 3])
-        >>> shift_matrix(shift, bias_positions)
+        >>> means = torch.tensor([2., 2., 4., 1.])
+        >>> shift_matrix(means, invert=False)
         tensor([[1., 0., 0., 0.],
-                [1., 1., 2., 0.],
+                [0., 1., 0., 0.],
                 [0., 0., 1., 0.],
-                [1., 0., 2., 1.]])
+                [-2., -2., -4., 1.]])
     """
-    assert shift.ndim == 1, "shift must be 1d"
-    n = shift.shape[0]
-    S = torch.eye(n, dtype=shift.dtype, device=shift.device)
-    assert len(bias_positions) > 0
-    shift = shift / len(bias_positions)  # we'll spread the shift out across bias pos
-    shift[bias_positions] = 0  # we don't shift at bias positions
-    S[bias_positions, :] += shift[None, :]
+    assert means.ndim == 1, "shift must be 1d"
+    n = means.shape[0]
+    bias_pos = find_bias_pos(means)
+
+    S = torch.eye(n, dtype=means.dtype, device=means.device)
+    # by default the matrix subtracts the mean
+    shift = means.clone() if invert else -means.clone()
+    shift[bias_pos] = 0  # we don't shift at bias positions
+    S[bias_pos, :] += shift
     return S

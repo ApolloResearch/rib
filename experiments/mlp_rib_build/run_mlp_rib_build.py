@@ -21,7 +21,7 @@ from typing import Literal, Optional, Union
 import fire
 import torch
 import yaml
-from jaxtyping import Float, Int
+from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -139,10 +139,9 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
     collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
-    bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
     if config.center:
         logger.info("Collecting dataset means")
-        means, bias_positions = collect_dataset_means(
+        means = collect_dataset_means(
             hooked_model=hooked_mlp,
             module_names=non_output_node_layers,
             data_loader=train_loader,
@@ -159,7 +158,6 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         device=device,
         collect_output_gram=collect_output_gram,
         means=means,
-        bias_positions=bias_positions,
     )
 
     Cs, Us = calculate_interaction_rotations(
@@ -176,7 +174,6 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> RibBuil
         basis_formula=config.basis_formula,
         center=config.center,
         means=means,
-        bias_positions=bias_positions,
     )
 
     E_hats = collect_interaction_edges(

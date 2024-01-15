@@ -340,8 +340,8 @@ def get_data_subset(
 
 
 def put_into_submatrix_(
-    full,
-    new_sub_matrix,
+    full: Float[Tensor, "n_rows n_cols"],
+    new_sub_matrix: Float[Tensor, "n_rows n_cols"],
     row_idxs: Int[Tensor, "n_rows"],
     col_idxs: Int[Tensor, "n_cols"],
 ) -> None:
@@ -369,6 +369,8 @@ def put_into_submatrix_(
     of an in-place view. Pytorch avoids this for single indexing in assignemtns but not for double
     indexing in assignments!
     """
+    assert new_sub_matrix.shape[0] <= len(row_idxs), "new_sub_matrix has too many rows."
+    assert new_sub_matrix.shape[1] <= len(col_idxs), "new_sub_matrix has too many cols."
     row_idxs = torch.as_tensor(row_idxs, dtype=torch.long)
     col_idxs = torch.as_tensor(col_idxs, dtype=torch.long)
     full[row_idxs.unsqueeze(1), col_idxs.unsqueeze(0)] = new_sub_matrix

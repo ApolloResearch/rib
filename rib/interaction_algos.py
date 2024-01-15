@@ -274,7 +274,6 @@ def calculate_interaction_rotations(
 
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
 
-        # currently only used for svd basis, but will be used more in text PR
         if center:
             assert means is not None
             # Y (or Gamma) is a matrix that shifts the activations to be mean zero

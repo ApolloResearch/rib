@@ -12,7 +12,7 @@ on:
   pull_request:
     branches:
       - main
-      - feature/centered-rib
+      - feature/centred-rib
     paths-ignore:
       - '.vscode/**'
       - '.gitignore'

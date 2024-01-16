@@ -264,7 +264,7 @@ def rotate_pre_forward_hook_fn(
     data_key: str,
     mode: Literal["modify", "cache"] = "modify",
 ) -> Optional[
-    Union[tuple[Float[Tensor, "batch out"], ...], tuple[Float[Tensor, "batch pos out"], ...]]
+    Union[tuple[Float[Tensor, "batch _"], ...], tuple[Float[Tensor, "batch pos _"], ...]]
 ]:
     """Hook function for rotating the input tensor to a module.
 

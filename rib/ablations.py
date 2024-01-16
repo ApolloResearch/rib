@@ -244,7 +244,6 @@ def ablate_node_layers_and_eval(
         # Track the results for the case when there is no ablation. There may be many of these, so we
         # store them to avoid recomputing.
         n_truncated_vecs = basis_vecs.shape[0] - basis_vecs.shape[1]
-        no_ablation_result: Optional[float] = None
 
         results[ablation_node_layer] = {}
         # Iterate through possible number of ablated vectors, starting from no ablated vectors
@@ -262,8 +261,9 @@ def ablate_node_layers_and_eval(
             # Count the n_ablated_vecs taking into account the truncation
             n_ablated_vecs_trunc = max(n_ablated_vecs - n_truncated_vecs, 0)
 
-            if n_ablated_vecs_trunc == 0 and no_ablation_result is not None:
-                results[ablation_node_layer][n_vecs_remaining] = no_ablation_result
+            if n_ablated_vecs_trunc == 0 and base_score is not None:
+                # We may have already calculated the score for the case when there is no ablation
+                results[ablation_node_layer][n_vecs_remaining] = base_score
                 continue
 
             basis_vecs = basis_vecs.to(device)

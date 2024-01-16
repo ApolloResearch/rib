@@ -1,3 +1,4 @@
+import subprocess
 from typing import Any
 
 import pytest
@@ -9,7 +10,7 @@ from torch.utils.data import ConcatDataset, TensorDataset
 from rib.edge_combiner import combine_edges
 from rib.loader import get_dataset_chunk
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
-from rib_scripts.rib_build.run_distributed_edges import main as run_edges
+from rib.settings import REPO_ROOT
 
 
 @pytest.mark.slow
@@ -51,6 +52,14 @@ class TestDistributed:
         )
         return rib_build(RibBuildConfig(**single_config_dict)).edges
 
+    def run_distributed_edges(self, config_path: str, n_pods: int, pod_rank: int, n_processes: int):
+        build_script_path = f"{REPO_ROOT}/rib_scripts/rib_build/run_rib_build.py"
+        mpi_command = (
+            f"mpirun -n {n_processes} python {build_script_path} {config_path} "
+            f"--n_pods={n_pods} --pod_rank={pod_rank}"
+        )
+        subprocess.run(mpi_command, shell=True, check=True)
+
     def get_double_edges(self, tmpdir):
         double_config_path = f"{tmpdir}/double_config.yaml"
         double_outdir_path = f"{tmpdir}/double_out/"
@@ -66,7 +75,7 @@ class TestDistributed:
 
         # mpi might be initialized which causes problems for running an mpiexec subcommand.
         MPI.Finalize()
-        run_edges(double_config_path, n_pods=1, pod_rank=0, n_processes=2)
+        self.run_distributed_edges(double_config_path, n_pods=1, pod_rank=0, n_processes=2)
         combine_edges(double_outdir_path)
         edges = RibBuildResults(
             **torch.load(f"{double_outdir_path}/test_double_rib_graph_combined.pt")

@@ -174,11 +174,15 @@ class RibBuildConfig(BaseModel):
         "(1-0)*alpha",
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
         "use Us as Cs, giving the eigendecomposition of the gram matrix. If 'neuron', will use "
-        "the neuron-basis.",
+        "the neuron-basis. Defaults to '(1-0)*alpha'",
     )
-    edge_formula: Literal["functional", "squared"] = Field(
+    edge_formula: Literal["functional", "squared", "stochastic"] = Field(
         "functional",
         description="The attribution method to use to calculate the edges.",
+    )
+    n_stochastic_sources: Optional[int] = Field(
+        None,
+        description="The number of stochastic sources to use when calculating stochastic edges.",
     )
     center: bool = Field(
         False,
@@ -207,6 +211,16 @@ class RibBuildConfig(BaseModel):
             assert (
                 self.mlp_path is None and self.modular_mlp_config is None
             ), "We don't support loading interaction matrices for mlp models"
+        return self
+
+    @model_validator(mode="after")
+    def verify_n_stochastic_sources(self) -> "RibBuildConfig":
+        if self.edge_formula != "stochastic" and self.n_stochastic_sources is not None:
+            raise ValueError(
+                "n_stochastic_sources should only be set when edge_formula is stochastic"
+            )
+        if self.edge_formula == "stochastic" and self.n_stochastic_sources is None:
+            raise ValueError("n_stochastic_sources must be set when edge_formula is stochastic")
         return self
 
 
@@ -451,7 +465,11 @@ def rib_build(
         )
 
         c_start_time = time.time()
-        logger.info("Calculating interaction rotations (Cs).")
+        logger.info(
+            "Calculating interaction rotations (Cs) for %s for %d batches.",
+            config.node_layers,
+            len(graph_train_loader),
+        )
         Cs, Us = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
             section_names=section_names,
@@ -492,6 +510,9 @@ def rib_build(
             data_subset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
         )
 
+        logger.info(
+            "Calculating edges for %s for %d batches.", config.node_layers, len(edge_train_loader)
+        )
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
             Cs=edge_Cs,
@@ -503,6 +524,7 @@ def rib_build(
             device=device,
             data_set_size=full_dataset_len,  # includes data for other processes
             edge_formula=config.edge_formula,
+            n_stochastic_sources=config.n_stochastic_sources,
         )
 
         calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"

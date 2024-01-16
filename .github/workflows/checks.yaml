@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feature/unify
     paths-ignore:
       - '.vscode/**'
       - '.gitignore'
@@ -13,12 +12,12 @@ on:
   pull_request:
     branches:
       - main
-      - feature/unify
     paths-ignore:
       - '.vscode/**'
       - '.gitignore'
       - 'README.md'
       - 'ACCESS.md'
+  workflow_dispatch:
 
 jobs:
   build:

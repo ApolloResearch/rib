@@ -7,7 +7,6 @@ from rib.hook_manager import HookedModel
 from rib.loader import load_sequential_transformer
 from rib.models.mlp import MLP, MLPConfig
 from rib.utils import set_seed
-from tests.utils import assert_is_ones
 
 
 def test_collect_gram_matrices():
@@ -79,7 +78,7 @@ def test_collect_dataset_means():
         collect_dataset_means(hooked_mlp, [], zero_data_loader, device=device, dtype=dtype)
 
     module_names = ["layers.0", "layers.1"]
-    means, index_pos = collect_dataset_means(
+    means = collect_dataset_means(
         hooked_mlp, module_names, zero_data_loader, device=device, dtype=dtype
     )
 
@@ -91,8 +90,6 @@ def test_collect_dataset_means():
     # The acts before layer 1 will be `relu(Wx + b)`. This is relu(b) since x is all zeros.
     mean_l1 = torch.concatenate([torch.clip(b0, min=0), torch.tensor([1.0])])
     assert torch.allclose(means["layers.1"], mean_l1)
-    assert index_pos["layers.0"] == torch.tensor([mlp.input_size])
-    assert index_pos["layers.1"] == torch.tensor([mlp.hidden_sizes[0]])
 
 
 @pytest.mark.slow
@@ -103,12 +100,11 @@ def test_collect_dataset_means_pythia():
     device = "cpu"
     batch_size = 10
     n_ctx = 40
-    atol = 1e-10
 
     node_layers = [
         "ln1.2",
         "attn_in.2",
-        # "attn_out.2",
+        "attn_out.2",
         "add_resid1.2",
         "ln2.2",
         "mlp_in.2",
@@ -132,7 +128,7 @@ def test_collect_dataset_means_pythia():
     random_data_loader = DataLoader(TensorDataset(input_ids, targets), batch_size=7)
 
     section_ids = [model.module_id_to_section_id[module_id] for module_id in node_layers]
-    means, bias_positions = collect_dataset_means(
+    means = collect_dataset_means(
         hooked_model,
         module_names=section_ids,
         data_loader=random_data_loader,
@@ -142,12 +138,4 @@ def test_collect_dataset_means_pythia():
     )
 
     for m_name in node_layers:
-        is_bias_mask = torch.zeros(means[m_name].shape[-1]).bool()
-        is_bias_mask[bias_positions[m_name]] = True
-        assert_is_ones(means[m_name][is_bias_mask], atol=atol, m_name=m_name)
-        # we want to check we didn't miss a bias position. We do this by checking that the other
-        # means aren't 1. This is a bit sketchy, as there's nothing guarenteeing they can't be 1.
-        mean_1_positions = (means[m_name][~is_bias_mask] - 1).abs() < atol
-        assert (
-            not mean_1_positions.any()
-        ), f"means at positions {mean_1_positions.nonzero()} are unexpectely 1"
+        assert torch.isclose(means[m_name][-1], torch.tensor(1.0, dtype=dtype), atol=0)

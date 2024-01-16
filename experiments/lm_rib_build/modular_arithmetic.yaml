@@ -1,4 +1,4 @@
-exp_name: modular_arithmetic_jacobian_new_lambdas_1e0
+exp_name: modular_arithmetic
 seed: 0
 tlens_pretrained: null
 tlens_model_path: experiments/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
@@ -14,14 +14,10 @@ node_layers:
   - unembed
   - output
 rotate_final_node_layer: false
-batch_size: 999999
-edge_batch_size: 999999
+batch_size: 256
 truncation_threshold: 1e-15
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
-n_intervals: 5
+n_intervals: 50
 dtype: float64
 calculate_edges: true
 eval_type: accuracy
-center: True
-basis_formula: jacobian
-edge_formula: squared

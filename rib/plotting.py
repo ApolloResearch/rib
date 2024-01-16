@@ -70,7 +70,6 @@ def _add_edges_to_graph(
 def _prepare_edges_for_plotting(
     raw_edges: list[tuple[str, torch.Tensor]],
     nodes_per_layer: list[int],
-    ignored_nodes: Optional[list[list[int]]] = None,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 

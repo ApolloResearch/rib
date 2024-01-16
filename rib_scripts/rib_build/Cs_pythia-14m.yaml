@@ -17,10 +17,8 @@ node_layers:
   - mlp_out.3
   - ln1.5
   - mlp_out.5
-  - output
-batch_size: 12
-gram_batch_size: 40
-edge_batch_size: 6
+batch_size: 6  # Based on 24GB a5000 GPU
+gram_batch_size: 10  # Based on 24GB a5000 GPU
 truncation_threshold: 1e-15
 rotate_final_node_layer: false
 n_intervals: 50

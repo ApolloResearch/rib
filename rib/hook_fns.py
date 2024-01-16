@@ -24,7 +24,6 @@ from rib.linalg import (
     calc_edge_squared,
     calc_edge_stochastic,
     calc_gram_matrix,
-    module_hat,
 )
 
 

@@ -6,9 +6,10 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from rib.ablations import ExponentialScheduleConfig
 from rib.models import MLP, MLPConfig, MLPLayer
 from rib.models.utils import gelu_new, get_model_attr
-from rib.utils import calc_exponential_ablation_schedule, eval_model_accuracy, find_root
+from rib.utils import eval_model_accuracy, find_root
 
 
 def test_get_model_attr() -> None:
@@ -96,9 +97,9 @@ def test_calc_exponential_ablation_schedule(
     n_eigenvecs: int,
     expected: list[int],
 ):
-    schedule = calc_exponential_ablation_schedule(
-        n_eigenvecs, exp_base=2.0, ablate_every_vec_cutoff=ablate_every_vec_cutoff
-    )
+    schedule = ExponentialScheduleConfig(
+        schedule_type="exponential", ablate_every_vec_cutoff=ablate_every_vec_cutoff
+    ).get_ablation_schedule(n_eigenvecs)
     assert schedule == expected
 
 

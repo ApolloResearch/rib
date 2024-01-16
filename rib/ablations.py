@@ -26,7 +26,6 @@ from rib.models import MLP, SequentialTransformer
 from rib.rib_builder import RibBuildResults
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
-    calc_exponential_ablation_schedule,
     check_outfile_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
@@ -53,6 +52,20 @@ class ScheduleConfig(BaseModel):
         "the default schedule.",
     )
 
+    def get_ablation_schedule(self, n_vecs: int) -> list[int]:
+        raise NotImplementedError("This method should be implemented in subclasses.")
+
+    def _add_specific_ablation_points(self, ablation_schedule: list[int], n_vecs: int) -> list[int]:
+        """Add each number of vecs remaining in self.specific_points to the ablation schedule."""
+        if self.specific_points is not None:
+            # Ignore the specific points that are greater than the number of vecs
+            specific_ablated_vecs = [n_vecs - x for x in self.specific_points if x <= n_vecs]
+            # Add our specific points for the number of vecs remaining to the ablation schedule
+            ablation_schedule = sorted(
+                list(set(ablation_schedule + specific_ablated_vecs)), reverse=True
+            )
+        return ablation_schedule
+
 
 class ExponentialScheduleConfig(ScheduleConfig):
     schedule_type: Literal["exponential"]
@@ -63,13 +76,97 @@ class ExponentialScheduleConfig(ScheduleConfig):
     )
     exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
 
+    def get_ablation_schedule(self, n_vecs: int) -> list[int]:
+        """Create an exponential schedule for the number of vectors to ablate.
+
+        The schedule is exponential with a base of 2, with the exception that from
+        `self.ablate_every_vec_cutoff` to `n_vecs` we ablate every vector. The schedule also
+        includes a run with no ablations as well as with the number of vecs remaining given in
+        `self.specific_points`.
+
+        Args:
+            n_vecs: Total number of vectors.
+
+        Returns:
+            The schedule for the number of vectors to ablate.
+
+        Examples:
+            >>> ExponentialScheduleConfig("exponential", None).get_ablation_schedule(12)
+            [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+            >>> ExponentialScheduleConfig("exponential", 0).get_ablation_schedule(12)
+            [12, 11, 9, 5, 0]  # Exponential schedule (2^x) from the beginning.
+            >>> ExponentialScheduleConfig("exponential", 1).get_ablation_schedule(12)
+            [12, 11, 10, 8, 4, 0]  # Exponential schedule (2^x) after the first 1 value
+            >>> ExponentialScheduleConfig("exponential", 3).get_ablation_schedule(12)
+            [12, 11, 10, 9, 8, 6, 2, 0]
+            >>> ExponentialScheduleConfig("exponential", 3).get_ablation_schedule(24)
+            [24, 23, 22, 21, 20, 18, 14, 6, 0]
+        """
+        cutoff = self.ablate_every_vec_cutoff
+        exp_base = self.exp_base if self.exp_base is not None else 2.0
+
+        if cutoff is None:
+            return list(range(n_vecs, -1, -1))
+
+        assert cutoff < n_vecs, "ablate_every_vec_cutoff must be smaller than n_vecs"
+        assert cutoff >= 0, "ablate_every_vec_cutoff must be positive"
+        # The section in which we ablate every vector.
+        ablate_every_vecs: list[int] = list(range(n_vecs, n_vecs - cutoff - 1, -1))
+        # The section in which we ablate according to 2^x.
+        ablate_exponential: list[int] = []
+        prev_val = ablate_every_vecs[-1]
+        for x in range(n_vecs):
+            exp_val = int(prev_val - exp_base**x)
+            if exp_val > 0:
+                ablate_exponential.append(exp_val)
+                prev_val = exp_val
+            else:
+                # No more values to append, just add the case for no ablation and exit
+                ablate_exponential.append(0)
+                break
+
+        # combine the two sections
+        ablation_schedule = ablate_every_vecs + ablate_exponential
+        assert ablation_schedule[0] == n_vecs, "The first element of the schedule must be n_vecs."
+        assert ablation_schedule[-1] == 0, "The last element of the schedule must be 0."
+
+        ablation_schedule = self._add_specific_ablation_points(ablation_schedule, n_vecs)
+        return ablation_schedule
+
 
 class LinearScheduleConfig(ScheduleConfig):
     schedule_type: Literal["linear"]
     n_points: int = Field(
         ...,
-        description="The number of points to use in the linear ablation schedule. Must be specified if schedule_type is linear and cannot be specified if schedule_type is exponential.",
+        description=(
+            "The number of points to use in the linear ablation schedule. Must be specified if "
+            "schedule_type is linear and cannot be specified if schedule_type is exponential."
+        ),
     )
+
+    def get_ablation_schedule(self, n_vecs: int) -> list[int]:
+        """Create a linear schedule for the number of vectors to ablate.
+
+        The points are evenly spaced between `n_vecs` and 0, including the endpoints and any points
+        in `self.specific_points` are also added.
+
+        Args:
+            n_vecs: Total number of vectors.
+
+        Returns:
+            The schedule for the number of vectors to ablate.
+
+        Examples:
+            >>> LinearScheduleConfig("linear", 3).get_ablation_schedule(12)
+            [12, 6, 0]
+        """
+        assert self.n_points >= 2, f"{self.n_points} must be at least 2."
+        assert self.n_points <= n_vecs, f"{self.n_points} must be <= {n_vecs}."
+
+        ablation_schedule = [int(a) for a in np.linspace(n_vecs, 0, self.n_points, dtype=int)]
+
+        ablation_schedule = self._add_specific_ablation_points(ablation_schedule, n_vecs)
+        return ablation_schedule
 
 
 class AblationConfig(BaseModel):
@@ -100,45 +197,6 @@ class AblationConfig(BaseModel):
         ...,
         description="The type of evaluation to perform on the model before building the graph.",
     )
-
-
-def get_ablation_schedule(schedule_config: ScheduleConfig, n_vecs: int) -> list[int]:
-    """Get the ablation schedule for a given number of basis vectors.
-
-    Args:
-        schedule_config: The config for the ablation schedule.
-        n_vecs: The number of basis vectors.
-
-    Returns:
-        A list of the number of vectors to ablate at each step.
-    """
-    if isinstance(schedule_config, ExponentialScheduleConfig):
-        ablation_schedule = calc_exponential_ablation_schedule(
-            n_vecs=n_vecs,
-            exp_base=schedule_config.exp_base,
-            ablate_every_vec_cutoff=schedule_config.ablate_every_vec_cutoff,
-        )
-    elif isinstance(schedule_config, LinearScheduleConfig):
-        assert schedule_config.n_points >= 2, f"{schedule_config.n_points} must be at least 2."
-        assert (
-            schedule_config.n_points <= n_vecs
-        ), f"{schedule_config.n_points} must be <= {n_vecs}."
-
-        ablation_schedule = [
-            int(a) for a in np.linspace(n_vecs, 0, schedule_config.n_points, dtype=int)
-        ]
-    else:
-        raise NotImplementedError(f"Schedule: {schedule_config.schedule_type} not supported.")
-
-    if schedule_config.specific_points is not None:
-        # Ignore the specific points that are greater than the number of vecs
-        specific_ablated_vecs = [n_vecs - x for x in schedule_config.specific_points if x <= n_vecs]
-        # Add our specific points for the number of vecs remaining to the ablation schedule
-        ablation_schedule = sorted(
-            list(set(ablation_schedule + specific_ablated_vecs)), reverse=True
-        )
-
-    return ablation_schedule
 
 
 @torch.inference_mode()
@@ -179,7 +237,7 @@ def ablate_node_layers_and_eval(
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
         ablation_node_layers, graph_module_names, basis_matrices
     ):
-        ablation_schedule = get_ablation_schedule(schedule_config, n_vecs=basis_vecs.shape[0])
+        ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=basis_vecs.shape[0])
 
         base_score: Optional[float] = None
 

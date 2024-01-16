@@ -250,4 +250,3 @@ def plot_rib_graph(
     plt.tight_layout()
     ax.axis("off")
     plt.savefig(out_file)
-    plt.clf()

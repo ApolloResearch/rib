@@ -38,7 +38,7 @@ from tests.utils import assert_is_close, assert_is_ones, assert_is_zeros
 
 def build_get_lambdas(
     config: RibBuildConfig,
-) -> tuple[RibBuildResults, list[Float[Tensor, "d_hidden_trunc"]]]:
+) -> tuple[RibBuildResults, list[Float[Tensor, "orig_trunc"]]]:
     """Build the graph but extracting the lambdas"""
     Lambda_abs: list[torch.Tensor] = []
 

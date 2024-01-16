@@ -30,7 +30,7 @@ def _add_to_hooked_matrix(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: str,
-    hooked_matrix: Float[Tensor, "d_hidden d_hidden"],
+    hooked_matrix: Float[Tensor, "orig orig"],
 ) -> None:
     """Update the hooked data matrix with the given matrix.
 
@@ -69,15 +69,15 @@ def _append_to_hooked_list(
 
 
 InputActType = Union[
-    tuple[Float[Tensor, "batch d_hidden"]],
-    tuple[Float[Tensor, "batch pos d_hidden"]],
-    tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    tuple[Float[Tensor, "batch orig"]],
+    tuple[Float[Tensor, "batch pos orig"]],
+    tuple[Float[Tensor, "batch pos orig1"], Float[Tensor, "batch pos orig2"]],
 ]
 
 OutputActType = Union[
-    Float[Tensor, "batch d_hidden"],
-    Float[Tensor, "batch pos d_hidden"],
-    tuple[Float[Tensor, "batch pos d_hidden1"], Float[Tensor, "batch pos d_hidden2"]],
+    Float[Tensor, "batch orig"],
+    Float[Tensor, "batch pos orig"],
+    tuple[Float[Tensor, "batch pos orig1"], Float[Tensor, "batch pos orig2"]],
 ]
 
 
@@ -131,7 +131,7 @@ def dataset_mean_forward_hook_fn(
     Args:
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module (not used).
-        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+        output: Output of the module. Handles modules with one or two outputs of varying origs
             and positional indices.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
@@ -194,16 +194,16 @@ def gram_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
-    shift: Optional[Float[Tensor, "d_hidden"]] = None,
+    shift: Optional[Float[Tensor, "orig"]] = None,
 ) -> None:
     """Hook function for calculating and updating the gram matrix.
 
-    The tuple of outputs is concatenated over the hidden dimension.
+    The tuple of outputs is concatenated over the final dimension.
 
     Args:
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module (not used).
-        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+        output: Output of the module. Handles modules with one or two outputs of varying origs
             and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
@@ -212,7 +212,7 @@ def gram_forward_hook_fn(
         shift: added to the activations before gram matrix calculation. Used to center the data.
     """
     assert isinstance(data_key, str), "data_key must be a string."
-    # Concat over the hidden dimension
+    # Concat over the final dimension
     out_acts = torch.cat([x.detach().clone() for x in _to_tuple(output)], dim=-1)
     if shift is not None:
         out_acts += shift
@@ -229,15 +229,15 @@ def gram_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
-    shift: Optional[Float[Tensor, "d_hidden"]] = None,
+    shift: Optional[Float[Tensor, "orig"]] = None,
 ) -> None:
     """Calculate the gram matrix for inputs with positional indices and add it to the global.
 
-    The tuple of inputs is concatenated over the hidden dimension.
+    The tuple of inputs is concatenated over the final dimension.
 
     Args:
         module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying origs
             and positional indices. If no positional indices, assumes one input.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
@@ -257,18 +257,18 @@ def gram_pre_forward_hook_fn(
 
 def rotate_pre_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch d_hidden"]],
-    rotation_matrix: Float[Tensor, "d_hidden d_hidden"],
+    inputs: tuple[Float[Tensor, "batch orig"]],
+    rotation_matrix: Float[Tensor, "orig orig"],
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: str,
     mode: Literal["modify", "cache"] = "modify",
-) -> Optional[tuple[Float[Tensor, "batch d_hidden"], ...]]:
+) -> Optional[tuple[Float[Tensor, "batch orig"], ...]]:
     """Hook function for rotating the input tensor to a module.
 
     The input is rotated by the specified rotation matrix.
 
-    Handles multiple inputs by concatenating over the hidden dimension and then splitting the
+    Handles multiple inputs by concatenating over the final dimension and then splitting the
     rotated tensor back into the original input sizes.
 
     Will either modify the activation within the forward pass (used for ablations) or cache the
@@ -286,8 +286,8 @@ def rotate_pre_forward_hook_fn(
     Returns:
         Rotated activations.
     """
-    # Concatenate over the hidden dimension
-    in_hidden_dims = [x.shape[-1] for x in inputs]
+    # Concatenate over the embedding dimension
+    in_emb_dims = [x.shape[-1] for x in inputs]
     in_acts = torch.cat(inputs, dim=-1)
     rotated = in_acts @ rotation_matrix
     if mode == "cache":
@@ -295,20 +295,20 @@ def rotate_pre_forward_hook_fn(
         return None
     else:
         assert mode == "modify"
-        adjusted_inputs = tuple(torch.split(rotated, in_hidden_dims, dim=-1))
+        adjusted_inputs = tuple(torch.split(rotated, in_emb_dims, dim=-1))
         return adjusted_inputs
 
 
 def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
-        tuple[Float[Tensor, "batch in_hidden"]],
-        tuple[Float[Tensor, "batch pos in_hidden"], ...],
+        tuple[Float[Tensor, "batch orig_in"]],
+        tuple[Float[Tensor, "batch pos orig_in"], ...],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    C_out: Optional[Float[Tensor, "out_hidden_combined out_hidden_combined_trunc"]],
+    C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     n_intervals: int,
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
@@ -319,7 +319,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
     Args:
         module: Module that the hook is attached to.
-        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying origs
             and positional indices. If no positional indices, assumes one input.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
@@ -365,7 +365,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             in_grads.to(M_dtype) / normalization_factor,
             in_grads.to(M_dtype),
         )
-        # Concatenate the inputs over the hidden dimension
+        # Concatenate the inputs over the final dimension
         in_acts = torch.cat(inputs, dim=-1)
         Lambda_dash = torch.einsum(
             einsum_pattern,
@@ -385,16 +385,14 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 def interaction_edge_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
-        tuple[Float[Tensor, "batch in_hidden"]],
-        tuple[Float[Tensor, "batch pos _"], ...],
+        tuple[Float[Tensor, "batch emb_in"]],
+        tuple[Float[Tensor, "batch pos emb_in"], ...],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
-    C_in: Float[Tensor, "in_hidden in_hidden_trunc"],
-    module_hat: Callable[
-        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
-    ],
+    C_in: Float[Tensor, "orig_in rib_in"],
+    module_hat: Callable[[Float[Tensor, "... rib_in"], list[int]], Float[Tensor, "... rib_out"]],
     n_intervals: int,
     dataset_size: int,
     edge_formula: Literal["functional", "squared", "stochastic"] = "functional",
@@ -411,7 +409,7 @@ def interaction_edge_pre_forward_hook_fn(
 
     Args:
         module: Module that the hook is attached to.
-        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying origs
             and positional indices. If no positional indices, assumes one input.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
@@ -437,7 +435,7 @@ def interaction_edge_pre_forward_hook_fn(
 
     in_tuple_dims = [x.shape[-1] for x in inputs]
 
-    # We first concatenate the inputs over the hidden dimension
+    # We first concatenate the inputs over the final dimension
     # For each integral step, we calculate derivatives w.r.t alpha * in_acts @ C_in
     in_acts = torch.cat(inputs, dim=-1)
     f_hat = in_acts @ C_in
@@ -496,7 +494,7 @@ def acts_forward_hook_fn(
     Args:
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module (not used).
-        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+        output: Output of the module. Handles modules with one or two outputs of varying origs
             and positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.

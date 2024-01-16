@@ -31,8 +31,8 @@ def test_eigendecompose(descending: bool) -> None:
     """
     torch.manual_seed(0)
     # Generate a random symmetric matrix
-    d_hidden = 20
-    x = torch.randn(d_hidden, d_hidden)
+    dim = 20
+    x = torch.randn(dim, dim)
     x = x @ x.T / x.shape[0]  # Ensure x is symmetric
 
     # Calculate eigenvalues and eigenvectors using eigendecompose
@@ -75,8 +75,8 @@ def test_calc_rotation_matrix(n_ablated_vecs: int) -> None:
     """
     torch.manual_seed(0)
     n_elements = 2
-    d_hidden = 10
-    dataset = torch.randn(n_elements, d_hidden, dtype=torch.float64)
+    orig = 10
+    dataset = torch.randn(n_elements, orig, dtype=torch.float64)
     gram = dataset.T @ dataset / n_elements
     _, vecs = eigendecompose(gram)
 
@@ -85,13 +85,13 @@ def test_calc_rotation_matrix(n_ablated_vecs: int) -> None:
     )
 
     # Check the dimensions of the rotation matrix
-    assert rotation_matrix.shape == (d_hidden, d_hidden)
+    assert rotation_matrix.shape == (orig, orig)
 
     # Check that the matrix is symmetric (a property of rotation matrices)
     assert torch.allclose(rotation_matrix, rotation_matrix.T, atol=1e-6)
 
     # Get a new set of activations
-    acts = torch.randn(n_elements, d_hidden, dtype=torch.float64)
+    acts = torch.randn(n_elements, orig, dtype=torch.float64)
 
     # Transform eigenvectors with the rotation matrix
     rotated_vecs = acts @ rotation_matrix
@@ -144,14 +144,14 @@ def test_intergrated_gradient_trapezoidal_norm_linear():
     """
     torch.manual_seed(0)
     batch_size = 3
-    in_hidden = 4
-    out_hidden = 6
-    out_hidden_trunc = 5
+    in_dim = 4
+    out_dim = 6
+    rib_dim = 5
 
-    C_out = torch.randn(out_hidden, out_hidden_trunc)
-    inputs = (torch.randn(batch_size, in_hidden),)
+    C_out = torch.randn(out_dim, rib_dim)
+    inputs = (torch.randn(batch_size, in_dim),)
 
-    linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+    linear = torch.nn.Linear(in_dim, out_dim, bias=False)
 
     result_point_estimate = integrated_gradient_trapezoidal_norm(
         module=linear, inputs=inputs, C_out=C_out, n_intervals=0
@@ -188,15 +188,15 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
 
     torch.manual_seed(0)
     batch_size = 2
-    hidden = 3
+    dim = 3
 
     poly_module = torch.nn.Module()
     poly_module.forward = lambda x: x**3
 
     # Let C_out be a square identity matrix to avoid issues with partial derivative dimensions
     # TODO: Handle non-identity C_out
-    C_out = torch.eye(hidden)
-    inputs = (torch.randn(batch_size, hidden),)
+    C_out = torch.eye(dim)
+    inputs = (torch.randn(batch_size, dim),)
 
     result_2 = integrated_gradient_trapezoidal_norm(
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=2
@@ -239,15 +239,15 @@ def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
 
     torch.manual_seed(0)
     batch_size = 2
-    hidden = 3
+    dim = 3
 
     poly_module = torch.nn.Module()
     poly_module.forward = lambda x: x**3 + 1
 
     # Let C_out be a square identity matrix to avoid issues with partial derivative dimensions
     # TODO: Handle non-identity C_out
-    C_out = torch.eye(hidden)
-    inputs = (torch.randn(batch_size, hidden),)
+    C_out = torch.eye(dim)
+    inputs = (torch.randn(batch_size, dim),)
 
     result_2 = integrated_gradient_trapezoidal_norm(
         module=poly_module, inputs=inputs, C_out=C_out, n_intervals=2
@@ -292,40 +292,40 @@ def test_calc_edge_n_intervals(edge_formula):
 
     torch.manual_seed(0)
     batch_size = 2
-    in_hidden = 3
-    out_hidden = 4
+    in_dim = 3
+    out_dim = 4
 
-    in_tensor = torch.randn(batch_size, in_hidden, requires_grad=True)
+    in_tensor = torch.randn(batch_size, in_dim, requires_grad=True)
 
-    linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+    linear = torch.nn.Linear(in_dim, out_dim, bias=False)
     # Need to account for module_hat taking both inputs and an in_tuple_dims argument
     linear_partial = lambda x, _: linear(x)
 
-    result_point_estimate: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
+    result_point_estimate: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_dim, in_dim)
 
     calc_edge(
         module_hat=linear_partial,
         f_in_hat=in_tensor,
-        in_tuple_dims=(in_hidden,),
+        in_tuple_dims=(in_dim,),
         n_intervals=0,
         edge=result_point_estimate,
         dataset_size=batch_size,
     )
-    result_1: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
+    result_1: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_dim, in_dim)
     calc_edge(
         module_hat=linear_partial,
         f_in_hat=in_tensor,
-        in_tuple_dims=(in_hidden,),
+        in_tuple_dims=(in_dim,),
         n_intervals=1,
         edge=result_1,
         dataset_size=batch_size,
     )
 
-    result_5: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
+    result_5: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_dim, in_dim)
     calc_edge(
         module_hat=linear_partial,
         f_in_hat=in_tensor,
-        in_tuple_dims=(in_hidden,),
+        in_tuple_dims=(in_dim,),
         n_intervals=5,
         edge=result_5,
         dataset_size=batch_size,
@@ -378,20 +378,20 @@ def test_calc_edge_jacrev(edge_formula):
 
     torch.manual_seed(0)
     batch_size = 2
-    in_hidden = 3
-    out_hidden = 4
+    in_dim = 3
+    out_dim = 4
 
-    in_tensor = torch.randn(batch_size, in_hidden, requires_grad=True)
+    in_tensor = torch.randn(batch_size, in_dim, requires_grad=True)
 
-    linear = torch.nn.Linear(in_hidden, out_hidden, bias=False)
+    linear = torch.nn.Linear(in_dim, out_dim, bias=False)
     # Need to account for module_hat taking both inputs and an in_tuple_dims argument
     linear_partial = lambda x, _: linear(x)
 
-    result_ours: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_hidden, in_hidden)
+    result_ours: Float[Tensor, "out_dim in_dim"] = torch.zeros(out_dim, in_dim)
     calc_edge(
         module_hat=linear_partial,
         f_in_hat=in_tensor,
-        in_tuple_dims=(in_hidden,),
+        in_tuple_dims=(in_dim,),
         n_intervals=5,
         edge=result_ours,
         dataset_size=batch_size,

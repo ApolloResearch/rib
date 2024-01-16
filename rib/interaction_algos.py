@@ -33,15 +33,15 @@ class InteractionRotation(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     node_layer_name: str
-    out_dim: int  # Equal to d_hidden_extra_trunc if C is not None and d_hidden otherwise
+    out_dim: int  # Equal to rib if C is not None and orig otherwise
     C: Annotated[
-        Optional[Float[Tensor, "d_hidden d_hidden_extra_trunc"]],
+        Optional[Float[Tensor, "orig rib"]],
         AfterValidator(check_second_dim_is_out_dim),
         AfterValidator(check_device_is_cpu),
     ] = None
     # pseudoinverse of C, not needed for the output node layer
     C_pinv: Annotated[
-        Optional[Float[Tensor, "d_hidden_extra_trunc d_hidden"]],
+        Optional[Float[Tensor, "rib orig"]],
         AfterValidator(check_device_is_cpu),
     ] = None
 
@@ -51,21 +51,18 @@ class Eigenvectors(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     node_layer_name: str
-    out_dim: int  # Equal to d_hidden_trunc if U is not None and d_hidden otherwise
+    out_dim: int  # Equal to orig_trunc if U is not None and orig otherwise
     U: Annotated[
-        Optional[Float[Tensor, "d_hidden d_hidden_trunc"]],
+        Optional[Float[Tensor, "orig orig_trunc"]],
         AfterValidator(check_second_dim_is_out_dim),
         AfterValidator(check_device_is_cpu),
     ] = None
 
 
 def build_sorted_lambda_matrices(
-    Lambda_abs: Float[Tensor, "d_hidden_trunc"],
+    Lambda_abs: Float[Tensor, "orig_trunc"],
     truncation_threshold: float,
-) -> tuple[
-    Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"],
-    Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"],
-]:
+) -> tuple[Float[Tensor, "orig_trunc rib"], Float[Tensor, "rib orig_trunc"],]:
     """Build the sqrt sorted Lambda matrix and its pseudoinverse.
 
     We truncate the Lambda matrix to remove small values.
@@ -79,28 +76,24 @@ def build_sorted_lambda_matrices(
 
     """
     # Get the sort indices in descending order
-    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(Lambda_abs, descending=True)
+    idxs: Int[Tensor, "orig_trunc"] = torch.argsort(Lambda_abs, descending=True)
 
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
 
-    truncated_idxs: Int[Tensor, "d_hidden_extra_trunc"] = (
-        idxs[:-n_small_lambdas] if n_small_lambdas > 0 else idxs
-    )
+    truncated_idxs: Int[Tensor, "rib"] = idxs[:-n_small_lambdas] if n_small_lambdas > 0 else idxs
 
-    Lambda_abs_sqrt: Float[Tensor, "d_hidden_trunc"] = Lambda_abs.sqrt()
+    Lambda_abs_sqrt: Float[Tensor, "orig_trunc"] = Lambda_abs.sqrt()
     # Create a matrix from lambda_vals with the sorted columns and removing n_small_lambdas cols
-    lambda_matrix: Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"] = torch.diag(
-        Lambda_abs_sqrt
-    )[:, truncated_idxs]
+    lambda_matrix: Float[Tensor, "orig_trunc rib"] = torch.diag(Lambda_abs_sqrt)[:, truncated_idxs]
     # We also need the pseudoinverse of this matrix. We sort and remove the n_small_lambdas rows
-    lambda_matrix_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"] = torch.diag(
-        Lambda_abs_sqrt.reciprocal()
-    )[truncated_idxs, :]
+    lambda_matrix_pinv: Float[Tensor, "rib orig_trunc"] = torch.diag(Lambda_abs_sqrt.reciprocal())[
+        truncated_idxs, :
+    ]
 
     assert not torch.any(torch.isnan(lambda_matrix_pinv)), "NaNs in the pseudoinverse."
-    # (lambda_matrix @ lambda_matrix_pinv).diag() should contain d_hidden_extra_trunc 1s and
-    # d_hidden_trunc - d_hidden_extra_trunc 0s
+    # (lambda_matrix @ lambda_matrix_pinv).diag() should contain rib 1s and
+    # orig_trunc - rib 0s
     assert torch.allclose(
         (lambda_matrix @ lambda_matrix_pinv).diag().sum(),
         torch.tensor(lambda_matrix.shape[0] - n_small_lambdas, dtype=lambda_matrix.dtype),
@@ -110,7 +103,7 @@ def build_sorted_lambda_matrices(
 
 
 def calculate_interaction_rotations(
-    gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]],
+    gram_matrices: dict[str, Float[Tensor, "orig orig"]],
     section_names: list[str],
     node_layers: list[str],
     hooked_model: HookedModel,
@@ -124,7 +117,7 @@ def calculate_interaction_rotations(
     rotate_final_node_layer: bool = True,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-0)*alpha",
     center: bool = False,
-    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
+    means: Optional[dict[str, Float[Tensor, "orig"]]] = None,
     bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
@@ -194,8 +187,8 @@ def calculate_interaction_rotations(
 
     # The C matrix for the final layer is either the eigenvectors U if rotate_final_node_layer is
     # True, and None otherwise
-    U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
-    C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
+    U_output: Optional[Float[Tensor, "orig orig"]] = None
+    C_output: Optional[Float[Tensor, "orig orig"]] = None
     if rotate_final_node_layer:
         U_output = eigendecompose(gram_matrices[node_layers[-1]])[1].detach()
         assert U_output is not None
@@ -274,13 +267,13 @@ def calculate_interaction_rotations(
 
         n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
         # Truncate the D matrix to remove small eigenvalues
-        D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
+        D: Float[Tensor, "orig_trunc orig_trunc"] = (
             torch.diag(D_dash)[:-n_small_eigenvals, :-n_small_eigenvals]
             if n_small_eigenvals > 0
             else torch.diag(D_dash)
         )
         # Truncate the columns of U to remove small eigenvalues
-        U: Float[Tensor, "d_hidden d_hidden_trunc"] = (
+        U: Float[Tensor, "orig orig_trunc"] = (
             U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
         )
         Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
@@ -326,20 +319,20 @@ def calculate_interaction_rotations(
             basis_formula=basis_formula,
         )
 
-        U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
+        U_D_sqrt: Float[Tensor, "orig orig_trunc"] = U @ D.sqrt()
 
         # Converts M to fp64
-        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
+        M: Float[Tensor, "orig_trunc orig_trunc"] = (
             U_D_sqrt.T.to(M_dtype) @ M_dash @ U_D_sqrt.to(M_dtype)
         )
-        V = eigendecompose(M)[1]  # V has size (d_hidden_trunc, d_hidden_trunc)
+        V = eigendecompose(M)[1]  # V has size (orig_trunc, orig_trunc)
         V = V.to(dtype)
 
         # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
-        U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
-        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
-        U_D_sqrt_pinv_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
-        Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
+        U_D_sqrt_V: Float[Tensor, "orig orig_trunc"] = U_D_sqrt @ V
+        D_sqrt_pinv: Float[Tensor, "orig_trunc orig_trunc"] = pinv_diag(D.sqrt())
+        U_D_sqrt_pinv_V: Float[Tensor, "orig orig_trunc"] = U @ D_sqrt_pinv @ V
+        Lambda_abs: Float[Tensor, "orig_trunc"] = (
             (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_V).diag().abs()
         )
 
@@ -347,10 +340,9 @@ def calculate_interaction_rotations(
             Lambda_abs, truncation_threshold
         )
 
-        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
-            (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
-        )
-        C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
+        # Note that the "rib" size is <= "orig_trunc" after truncation of the lambdas
+        C: Float[Tensor, "orig rib"] = (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
+        C_pinv: Float[Tensor, "rib orig"] = (
             (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
         )
         Cs.append(

@@ -17,6 +17,7 @@ on:
       - '.gitignore'
       - 'README.md'
       - 'ACCESS.md'
+  workflow_dispatch:
 
 jobs:
   build:

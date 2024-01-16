@@ -12,7 +12,7 @@ from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
 
 if TYPE_CHECKING:
-    from rib.rib_builder import RibBuildResults
+    from rib.rib_builder import RibBuildConfig
 
 from rib.data import (
     BlockVectorDataset,
@@ -424,14 +424,12 @@ def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Da
     return Subset(dataset, range(dataset_idx_start, dataset_idx_end))
 
 
-def load_model_and_dataset_from_rib_results(
-    results: "RibBuildResults",
+def load_model_from_rib_config(
+    rib_config: "RibBuildConfig",
     device: str,
     dtype: torch.dtype,
     node_layers: Optional[list[str]] = None,
-    dataset_config: Optional[DatasetConfig] = None,
-    return_set: Literal["train", "test", "all"] = "train",
-) -> tuple[Union[SequentialTransformer, MLP], Dataset]:
+) -> Union[SequentialTransformer, MLP]:
     """Loads the model and dataset used for a rib build from the results dictionary.
 
     Combines both model and dataset loading in one function as the dataset conditionally needs
@@ -442,50 +440,42 @@ def load_model_and_dataset_from_rib_results(
         device (str): The device to use for the model.
         dtype (torch.dtype): The dtype to use for the model.
         node_layers (Optional[list[str]]): The node layers to use for the model. If None, uses the
-            node layers from the config in the results. Note that changing the sections in the model
-            has no effect on the model computation, so we allow specifying any node_layers for the
+            node layers from the rib_config. Note that changing the sections in the model has no
+            effect on the model computation, so we allow specifying any node_layers for the
             convenience of hooking different sections of the model.
-        dataset_config (Optional[DatasetConfig]): The dataset config to use for the dataset. If
-            None, uses the dataset config from the results.
-        return_set (Literal["train", "test", "all"]): The dataset to return. Defaults to "train".
 
     Returns:
         tuple[Union[SequentialTransformer, MLP], Dataset]: The model and dataset.
     """
     model: Union[SequentialTransformer, MLP]
+    if rib_config.mlp_path is not None or rib_config.modular_mlp_config is not None:
+        mlp_config: Union[MLPConfig, ModularMLPConfig]
+        if rib_config.mlp_path is not None:
+            with open(rib_config.mlp_path.parent / "config.yaml", "r") as f:
+                raw_model_config_dict = yaml.safe_load(f)
+            mlp_config = MLPConfig(**raw_model_config_dict["model"])
+        else:
+            assert rib_config.modular_mlp_config is not None
+            mlp_config = rib_config.modular_mlp_config
 
-    if results.ml_model_config.config_type == "SequentialTransformer":
+        model = load_mlp(
+            mlp_config,
+            node_layers=node_layers or rib_config.node_layers,
+            mlp_path=rib_config.mlp_path,
+            fold_bias=True,
+            device=device,
+            seed=rib_config.seed,
+        ).to(device=torch.device(device), dtype=dtype)
+        assert model.has_folded_bias, "MLP must have folded bias to run RIB"
+    else:
         model = load_sequential_transformer(
-            node_layers=node_layers or results.config.node_layers,
-            last_pos_module_type=results.config.last_pos_module_type,
-            tlens_pretrained=results.config.tlens_pretrained,
-            tlens_model_path=results.config.tlens_model_path,
+            node_layers=node_layers or rib_config.node_layers,
+            last_pos_module_type=rib_config.last_pos_module_type,
+            tlens_pretrained=rib_config.tlens_pretrained,
+            tlens_model_path=rib_config.tlens_model_path,
             fold_bias=True,
             dtype=dtype,
             device=device,
         )
-        model_n_ctx = model.cfg.n_ctx
-
-    else:
-        assert (
-            results.ml_model_config.config_type == "MLP"
-            and results.config.modular_mlp_config is None
-        ), "This function is not compatible with modular MLPs (which have no labels)."
-        model = load_mlp(
-            config=results.ml_model_config,
-            node_layers=node_layers or results.config.node_layers,
-            mlp_path=results.config.mlp_path,
-            fold_bias=True,
-            device=device,
-        )
-        model.to(device)
-        model_n_ctx = None
-
-    dataset = load_dataset(
-        dataset_config or results.config.dataset,
-        return_set=return_set,
-        model_n_ctx=model_n_ctx,
-        tlens_model_path=results.config.tlens_model_path,
-    )
     model.eval()
-    return model, dataset
+    return model

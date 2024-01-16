@@ -28,7 +28,7 @@ from rib.data_accumulator import collect_dataset_means
 from rib.hook_fns import acts_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import build_sorted_lambda_matrices
-from rib.loader import load_model_and_dataset_from_rib_results
+from rib.loader import load_dataset, load_model_from_rib_config
 from rib.log import logger
 from rib.models import SequentialTransformer
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
@@ -121,7 +121,8 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results.config.dtype]
-    model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
+    model = load_model_from_rib_config(results.config)
+    dataset = load_dataset(results.config.dataset)
     model.to(device=torch.device(device), dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     hooked_model = HookedModel(model)
@@ -175,8 +176,8 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
     """Takes the results of a graph build and runs collect_dataset_means."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results.config.dtype]
-    model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
-    model.to(device=torch.device(device), dtype=dtype)
+    model = load_model_from_rib_config(results.config)
+    dataset = load_dataset(results.config.dataset)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     hooked_model = HookedModel(model)
 

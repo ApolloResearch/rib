@@ -499,7 +499,8 @@ def calc_edge_stochastic(
 def integrated_gradient_trapezoidal_norm(
     module: torch.nn.Module,
     inputs: Union[
-        tuple[Float[Tensor, "batch orig_in"]],
+        tuple[Float[Tensor, "batch emb_in"]],
+        tuple[Float[Tensor, "batch pos emb_in"]],
         tuple[Float[Tensor, "batch pos _"], ...],
     ],
     C_out: Optional[Float[Tensor, "orig_out rib_out"]],

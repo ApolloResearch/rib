@@ -30,7 +30,7 @@ def _add_to_hooked_matrix(
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: str,
-    hooked_matrix: Float[Tensor, "orig orig"],
+    hooked_matrix: Float[Tensor, "dim1 dim2"],
 ) -> None:
     """Update the hooked data matrix with the given matrix.
 
@@ -69,15 +69,15 @@ def _append_to_hooked_list(
 
 
 InputActType = Union[
-    tuple[Float[Tensor, "batch orig"]],
-    tuple[Float[Tensor, "batch pos orig"]],
-    tuple[Float[Tensor, "batch pos orig1"], Float[Tensor, "batch pos orig2"]],
+    tuple[Float[Tensor, "batch emb_in"]],
+    tuple[Float[Tensor, "batch pos emb_in"]],
+    tuple[Float[Tensor, "batch pos _"], ...],
 ]
 
 OutputActType = Union[
-    Float[Tensor, "batch orig"],
-    Float[Tensor, "batch pos orig"],
-    tuple[Float[Tensor, "batch pos orig1"], Float[Tensor, "batch pos orig2"]],
+    Float[Tensor, "batch emb_out"],
+    Float[Tensor, "batch pos emb_out"],
+    tuple[Float[Tensor, "batch pos _"], ...],
 ]
 
 
@@ -131,8 +131,8 @@ def dataset_mean_forward_hook_fn(
     Args:
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module (not used).
-        output: Output of the module. Handles modules with one or two outputs of varying origs
-            and positional indices.
+        output: Output of the module. Handles modules with one or two outputs of varying sizes
+            and with or without positional indices.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
@@ -203,8 +203,8 @@ def gram_forward_hook_fn(
     Args:
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module (not used).
-        output: Output of the module. Handles modules with one or two outputs of varying origs
-            and positional indices. If no positional indices, assumes one output.
+        output: Output of the module. Handles modules with one or two outputs of varying sizes
+            and with or without positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
@@ -237,8 +237,8 @@ def gram_pre_forward_hook_fn(
 
     Args:
         module: Module that the hook is attached to (not used).
-        inputs: Inputs to the module. Handles modules with one or two inputs of varying origs
-            and positional indices. If no positional indices, assumes one input.
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying sizes
+            and with or without positional indices. If no positional indices, assumes one input.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
@@ -257,13 +257,15 @@ def gram_pre_forward_hook_fn(
 
 def rotate_pre_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: tuple[Float[Tensor, "batch orig"]],
-    rotation_matrix: Float[Tensor, "orig orig"],
+    inputs: InputActType,
+    rotation_matrix: Float[Tensor, "orig out"],
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: str,
     mode: Literal["modify", "cache"] = "modify",
-) -> Optional[tuple[Float[Tensor, "batch orig"], ...]]:
+) -> Optional[
+    Union[tuple[Float[Tensor, "batch out"], ...], tuple[Float[Tensor, "batch pos out"], ...]]
+]:
     """Hook function for rotating the input tensor to a module.
 
     The input is rotated by the specified rotation matrix.
@@ -302,8 +304,8 @@ def rotate_pre_forward_hook_fn(
 def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: Union[
-        tuple[Float[Tensor, "batch orig_in"]],
-        tuple[Float[Tensor, "batch pos orig_in"], ...],
+        tuple[Float[Tensor, "batch emb_in"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
     ],
     hooked_data: dict[str, Any],
     hook_name: str,
@@ -384,10 +386,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
 def interaction_edge_pre_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: Union[
-        tuple[Float[Tensor, "batch emb_in"]],
-        tuple[Float[Tensor, "batch pos emb_in"], ...],
-    ],
+    inputs: InputActType,
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],
@@ -494,8 +493,8 @@ def acts_forward_hook_fn(
     Args:
         module: Module that the hook is attached to (not used).
         inputs: Inputs to the module (not used).
-        output: Output of the module. Handles modules with one or two outputs of varying origs
-            and positional indices. If no positional indices, assumes one output.
+        output: Output of the module. Handles modules with one or two outputs of varying sizes
+            and with or without positional indices. If no positional indices, assumes one output.
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.

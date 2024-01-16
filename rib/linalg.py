@@ -371,8 +371,8 @@ def calc_edge_squared(
     batch_size = f_in_hat.shape[0]
     out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = edge.shape
     if has_pos:
-        # Just run the model to see what the output pos size is
-        # FIXME When we implement #231 use it here instead of running the model
+        # Just run the model to see what the output pos size is (we tried to make this nicer in
+        # PR #231 but there wasn't a nice way to do this.
         with torch.inference_mode():
             out_pos_size = module_hat(f_in_hat, in_tuple_dims).shape[1]
 
@@ -408,7 +408,6 @@ def calc_edge_squared(
 
         # We have to compute inputs from f_hat to make autograd work
         alpha_f_in_hat = alpha * f_in_hat
-        # FIXME When we implement #231 modify module_hat to no longer need in_tuple_dims
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output.
@@ -469,7 +468,7 @@ def calc_basis_jacobian(
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
 ) -> Float[Tensor, "batch out_hidden_trunc out_pos in_pos in_hidden"]:
-    # Ensure that the inputs have requires_grad=True from now on
+    # Ensure that the inputs have requires_grad=True
     for x in inputs:
         x.requires_grad_(True)
 
@@ -489,15 +488,14 @@ def calc_basis_jacobian(
     out_hidden_size = sum(x.shape[-1] for x in f_out_dummy)
     out_hat_hidden_size = out_hidden_size if C_out is None else C_out.shape[1]
     out_pos_size = f_out_dummy[0].shape[1] if has_pos else None
-    # Asserts
     if C_out is not None:
         assert out_hidden_size == C_out.shape[0], "C_out has wrong shape"
     assert batch_size == f_out_dummy[0].shape[0], "batch size mismatch"
 
     if has_pos:
         assert in_pos_size is not None  # needed for mypy
-        # grads.shape: batch, i, t (out_pos), tprime (in_pos), j/jprime
-        grads = torch.zeros(
+        # in_grads.shape: batch, i (out_hidden), t (out_pos), s (in_pos), j (in_hidden)
+        in_grads = torch.zeros(
             batch_size,
             out_hat_hidden_size,
             out_pos_size,
@@ -507,8 +505,6 @@ def calc_basis_jacobian(
             device=inputs[0].device,
         )
 
-        # Old in_grads shape: batch pos j
-        # New in_grads shape: batch i t tprime j
         for alpha_index, alpha in enumerate(alphas):
             # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
             # point estimate at alpha=0.5) and multiply by the interval size.
@@ -525,29 +521,27 @@ def calc_basis_jacobian(
                 else torch.cat(outputs_alpha, dim=-1)
             )
             f_out_hat_alpha = f_out_alpha @ C_out if C_out is not None else f_out_alpha
-            # out_acts_alpha_hat.shape: batch (pos) i
-            # input shape:n batch, (in-pos), j/jprime
 
-            # Calculate the grads, numerator indices i and t
+            # Shapes of inputs and outputs, that lead to in_grads.shape = batch, i, t, s, j/jprime
+            # f_out_hat_alpha.shape: batch t i
+            # f_in_alpha: batch, s, j
             for i in range(out_hat_hidden_size):
                 for t in range(out_pos_size):
-                    # Sum over batch is a trick to get the grad for every batch index vectorized.
                     # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
                     # times (for each i and t, in a for loop) aka we're doing a jacobian.
-                    # Concatenate over the tuple dimension of the inputs.
+                    # Sum over batch is a trick to get the grad for every batch index vectorized.
                     alpha_in_grads = torch.cat(
                         torch.autograd.grad(
                             f_out_hat_alpha[:, t, i].sum(dim=0), f_in_alpha, retain_graph=True
                         ),
                         dim=-1,
                     )
-                    # grads.shape: batch, i, t (out_pos), tprime (in_pos), j/jprime
-                    grads[:, i, t, :, :] += alpha_in_grads * trapezoidal_scaler
-                    # Contraction over batch, i, t, and tprime happens after the integral,
-                    # but we cannot contract earlier because we have to finish the integral
+                    in_grads[:, i, t, :, :] += alpha_in_grads * trapezoidal_scaler
+                    # Contraction over batch, i, t, s happens after the integral, but we cannot
+                    # contract earlier because we have to finish the integral sum (+=) first.
     else:
-        # grads.shape: batch, i, j/jprime
-        grads = torch.zeros(
+        # in_grads.shape: batch, i (out_hidden), j (in_hidden)
+        in_grads = torch.zeros(
             batch_size,
             out_hat_hidden_size,
             in_hidden_size,
@@ -555,8 +549,6 @@ def calc_basis_jacobian(
             device=inputs[0].device,
         )
 
-        # Old in_grads shape: batch j
-        # New in_grads shape: batch i j
         for alpha_index, alpha in enumerate(alphas):
             # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
             # point estimate at alpha=0.5) and multiply by the interval size.
@@ -573,27 +565,21 @@ def calc_basis_jacobian(
                 else torch.cat(outputs_alpha, dim=-1)
             )
             f_out_hat_alpha = f_out_alpha @ C_out if C_out is not None else f_out_alpha
-            # f_out_hat_alpha.shape: batch i
-            # f_in_alpha: batch, j/jprime
 
             # Calculate the grads, numerator index i
             for i in range(out_hat_hidden_size):
-                # Sum over batch is a trick to get the grad for every batch index vectorized.
                 # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
                 # times (for each i in a for loop) aka we're doing a jacobian.
-                # Concatenate over the tuple dimension of the inputs.
+                # Sum over batch is a trick to get the grad for every batch index vectorized.
                 alpha_in_grads = torch.cat(
                     torch.autograd.grad(
                         f_out_hat_alpha[:, i].sum(dim=0), f_in_alpha, retain_graph=True
                     ),
                     dim=-1,
                 )
-                # grads.shape: batch, i, j/jprime
-                grads[:, i] += alpha_in_grads * trapezoidal_scaler
-                # Contraction over batch and i happens after the integral,
-                # but we cannot contract earlier because we have to finish the integral
+                in_grads[:, i] += alpha_in_grads * trapezoidal_scaler
 
-    return grads
+    return in_grads
 
 
 def calc_edge_stochastic(

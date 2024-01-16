@@ -342,34 +342,28 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
 
     elif basis_formula == "jacobian":
+        # in_grads.shape: batch, i (out_hidden), t (out_pos), s (in_pos), j/jprime (in_hidden)
         in_grads = calc_basis_jacobian(
             module=module,
             inputs=inputs,
             C_out=C_out,
             n_intervals=n_intervals,
-        )  # shape:  batch, i, t (out_pos), tprime (in_pos), j/jprime
-
+        )
         has_pos = inputs[0].dim() == 3
         einsum_pattern = (
-            "batch i t tprime j, batch i t tprime jprime -> j jprime"
+            "batch i t s j, batch i t s jprime -> j jprime"
             if has_pos
             else "batch i j, batch i jprime -> j jprime"
         )
         pos_size = in_grads.shape[2] if has_pos else 1
         normalization_factor = pos_size * dataset_size
-        # Old in_grads shape: batch pos j, batch pos jprime
-        # New in_grads shape: batch i t tprime j, batch i t tprime jprime
-        # extra i and tprime index.
-        # Old sum after product: batch pos
-        # New sum after product: batch, i, t, tprime
         with torch.inference_mode():
+            # M_dash.shape: j jprime
             M_dash = einops.einsum(
                 in_grads.to(M_dtype) / normalization_factor, in_grads.to(M_dtype), einsum_pattern
             )
-            # Concatenate the inputs over the hidden dimension
-            in_acts = torch.cat(inputs, dim=-1)
-
-            # Placeholder that will get overwritten later
+            # In the jacobian basis, Lambda is not computed here but from the M eigenvalues later.
+            # Set a placeholder to maintain the same function signature.
             Lambda_dash = torch.tensor(torch.nan)
 
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)

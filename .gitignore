@@ -1,5 +1,6 @@
 .vscode/launch.json
 # ignore all out folders in rib_scripts
+experiments/**/out/
 rib_scripts/**/out/
 wandb/
 .data/

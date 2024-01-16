@@ -174,65 +174,6 @@ def check_outfile_overwrite(out_file: Path, force: bool = False) -> bool:
         return True
 
 
-def calc_exponential_ablation_schedule(
-    n_vecs: int, exp_base: Optional[float] = None, ablate_every_vec_cutoff: Optional[int] = None
-) -> list[int]:
-    """Create a schedule for the number of vectors to ablate.
-
-    The schedule is exponential with a base of 2, with the exception that from
-    `ablate_every_vec_cutoff` to `n_vecs` we ablate every vector. The schedule also includes a run
-    with no ablations.
-
-    Args:
-        n_vecs: Total number of vectors.
-        exp_base: The base of the exponential schedule.
-        ablate_every_vec_cutoff: The point in which we ablate every vector. If None, we ablate
-            every vector in the schedule individually (i.e. no exponential schedule).
-
-    Returns:
-        The schedule for the number of vectors to ablate.
-
-    Examples:
-        >>> calc_exponential_ablation_schedule(None, 12)
-        [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
-        >>> calc_exponential_ablation_schedule(0, 12)
-        [12, 11, 9, 5, 0]  # Exponential schedule (2^x) from the beginning.
-        >>> calc_exponential_ablation_schedule(1, 12)
-        [12, 11, 10, 8, 4, 0]  # Exponential schedule (2^x) after the first 1 value
-        >>> calc_exponential_ablation_schedule(3, 12)
-        [12, 11, 10, 9, 8, 6, 2, 0]
-        >>> calc_exponential_ablation_schedule(3, 24)
-        [24, 23, 22, 21, 20, 18, 14, 6, 0]
-    """
-    if exp_base is None:
-        exp_base = 2.0
-    if ablate_every_vec_cutoff is None:
-        return list(range(n_vecs, -1, -1))
-
-    assert ablate_every_vec_cutoff < n_vecs, "ablate_every_vec_cutoff must be smaller than n_vecs"
-    assert ablate_every_vec_cutoff >= 0, "ablate_every_vec_cutoff must be positive"
-    # The section in which we ablate every vector.
-    ablate_every_vecs: list[int] = list(range(n_vecs, n_vecs - ablate_every_vec_cutoff - 1, -1))
-    # The section in which we ablate according to 2^x.
-    ablate_exponential: list[int] = []
-    prev_val = ablate_every_vecs[-1]
-    for x in range(n_vecs):
-        exp_val = int(prev_val - exp_base**x)
-        if exp_val > 0:
-            ablate_exponential.append(exp_val)
-            prev_val = exp_val
-        else:
-            # No more values to append, just add the case for no ablation and exit
-            ablate_exponential.append(0)
-            break
-
-    # combine the two sections
-    schedule = ablate_every_vecs + ablate_exponential
-    assert schedule[0] == n_vecs, "The first element of the schedule must be n_vecs."
-    assert schedule[-1] == 0, "The last element of the schedule must be 0."
-    return schedule
-
-
 def set_seed(seed: Optional[int]) -> None:
     """Set the random seed for random, PyTorch and NumPy"""
     if seed is not None:

@@ -20,7 +20,7 @@ from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import Eigenvectors, InteractionRotation
 from rib.linalg import calc_rotation_matrix
-from rib.loader import load_dataset, load_model_from_rib_config
+from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import MLP, SequentialTransformer
 from rib.rib_builder import RibBuildResults
@@ -338,15 +338,12 @@ def load_bases_and_ablate(
         device=device,
     )
 
-    model: Union[MLP, SequentialTransformer] = load_model_from_rib_config(
-        rib_results.config, device=device, dtype=dtype, node_layers=config.ablation_node_layers
-    )
-    model_n_ctx = model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None
-    dataset = load_dataset(
-        config.dataset,
-        return_set=config.dataset.return_set,
-        model_n_ctx=model_n_ctx,
-        tlens_model_path=rib_results.config.tlens_model_path,
+    model, dataset = load_model_and_dataset_from_rib_config(
+        rib_results.config,
+        dataset_config=config.dataset,
+        device=device,
+        dtype=dtype,
+        node_layers=config.ablation_node_layers,
     )
     model.to(device=torch.device(device), dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)

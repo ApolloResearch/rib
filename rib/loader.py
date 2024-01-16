@@ -1,7 +1,7 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal, Optional, Tuple, Union
 
 import torch
 import torchvision
@@ -424,12 +424,13 @@ def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Da
     return Subset(dataset, range(dataset_idx_start, dataset_idx_end))
 
 
-def load_model_from_rib_config(
+def load_model_and_dataset_from_rib_config(
     rib_config: "RibBuildConfig",
     device: str,
     dtype: torch.dtype,
+    dataset_config: Optional[DatasetConfig] = None,
     node_layers: Optional[list[str]] = None,
-) -> Union[SequentialTransformer, MLP]:
+) -> Tuple[Union[SequentialTransformer, MLP], Dataset]:
     """Loads the model and dataset used for a rib build from the results dictionary.
 
     Combines both model and dataset loading in one function as the dataset conditionally needs
@@ -478,4 +479,12 @@ def load_model_from_rib_config(
             device=device,
         )
     model.eval()
-    return model
+    dataset_config = dataset_config or rib_config.dataset
+    dataset = load_dataset(
+        dataset_config=dataset_config,
+        return_set=dataset_config.return_set,
+        model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
+        tlens_model_path=rib_config.tlens_model_path,
+    )
+
+    return model, dataset

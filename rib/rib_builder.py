@@ -68,7 +68,7 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
-from rib.loader import get_dataset_chunk, load_dataset, load_model_from_rib_config
+from rib.loader import get_dataset_chunk, load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
     MLPConfig,
@@ -391,17 +391,12 @@ def rib_build(
     calc_edges_time = None
 
     # Load model
-    model = load_model_from_rib_config(config, device=device, dtype=dtype)
+    model, dataset = load_model_and_dataset_from_rib_config(config, device=device, dtype=dtype)
     model.eval()
     hooked_model = HookedModel(model)
 
     # Load dataset
-    dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set=config.dataset.return_set,
-        model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
-        tlens_model_path=config.tlens_model_path,
-    )
+
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
 
     # Evaluate model on dataset for sanity check

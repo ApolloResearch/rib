@@ -349,6 +349,7 @@ def get_modular_mlp_config(**kwargs) -> ModularMLPConfig:
         ("(1-0)*alpha", "functional"),
         ("(1-alpha)^2", "squared"),
         ("(1-0)*alpha", "squared"),
+        ("jacobian", "squared"),
     ],
 )
 def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
@@ -378,6 +379,7 @@ def test_pythia_14m_build_graph():
         ("(1-0)*alpha", "functional"),
         ("(1-alpha)^2", "squared"),
         ("(1-0)*alpha", "squared"),
+        ("jacobian", "squared"),
     ],
 )
 def test_mnist_build_graph(basis_formula, edge_formula):

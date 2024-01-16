@@ -61,6 +61,15 @@ arbitrary sections of the LM.
 - Plot the RIB graph using `experiments/lm_rib_build/plot_lm_graph.py`, passing in the path to the
 results file generated from `experiments/lm_rib_build/run_lm_rib_build.py`
 
+### Bases and attributions
+
+There are four basis formulas and two edges formulas implemented. Sensible combinations are:
+* `jacobian` basis with `squared` edges: Most up-to-date and possibly correct version
+* `(1-0)*alpha` basis with `squared` edges: Used for OP report, but the Lambdas are technically
+  wrong. Can and does produce stray edges.
+* `(1-alpha)^2` basis with `functional` edges: Old functional-based approach. Self-consistent (and
+  working Lambdas) but we know counterexampes where this method would give wrong results.
+
 ## Development
 
 To install the development dependencies that includes formatters, linters, and type checkers, run

@@ -167,8 +167,6 @@ def collect_gram_matrices(
         hook_names: Used to store the gram matrices in the hooked model.
         means: A dictionary of mean activations for each module. The keys are the hook names. If
             not none, will be used to center the activations when computing the gram matrices.
-        bias_positions: A dictionary of the positions of the bias terms in each module. Must be
-            non-none if `means` is provided, with the same keys.
 
     Returns:
         A dictionary of gram matrices, where the keys are the hook names (a.k.a. node layer names)

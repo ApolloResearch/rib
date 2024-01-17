@@ -275,6 +275,7 @@ def calculate_interaction_rotations(
         ### CENTERING MATRIX (Y)
         Y: Float[Tensor, "d_hidden d_hidden"]
         Y_inv: Float[Tensor, "d_hidden d_hidden"]
+
         if center:
             assert means is not None
             # Y uses the bias position to center the activations
@@ -285,8 +286,7 @@ def calculate_interaction_rotations(
             Id = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
             Y, Y_inv = Id, Id
 
-        U_info = Eigenvectors(node_layer, out_dim=U.shape[1], U=U.cpu())
-        Us.append(U_info)
+        Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
         if basis_formula == "svd":
             # use U as C, with centering matrix
             C_info = InteractionRotation(

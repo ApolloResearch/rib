@@ -251,11 +251,11 @@ class RibBuildResults(BaseModel):
     ml_model_config: Union[MLPConfig, ModularMLPConfig, SequentialTransformerConfig] = Field(
         discriminator="config_type", description="The config of the model used to build the graph."
     )
-    calc_C_time: Optional[str] = Field(
-        None, description="The time taken to calculate the interaction rotations."
+    calc_C_time: Optional[float] = Field(
+        None, description="The time taken (in minutes) to calculate the interaction rotations."
     )
-    calc_edges_time: Optional[str] = Field(
-        None, description="The time taken to calculate the edges."
+    calc_edges_time: Optional[float] = Field(
+        None, description="The time taken (in minutes) to calculate the edges."
     )
 
 
@@ -525,8 +525,8 @@ def rib_build(
         # Cs used to calculate edges
         edge_Cs = Cs
 
-        calc_C_time = f"{(time.time() - c_start_time) / 60:.1f} minutes"
-        logger.info("Time to calculate Cs: %s", calc_C_time)
+        calc_C_time = (time.time() - c_start_time) / 60
+        logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
     else:
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
         edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
@@ -563,8 +563,8 @@ def rib_build(
             n_stochastic_sources=config.n_stochastic_sources,
         )
 
-        calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
-        logger.info("Time to calculate edges: %s", calc_edges_time)
+        calc_edges_time = (time.time() - edges_start_time) / 60
+        logger.info("Time to calculate edges: %.2f minutes", calc_edges_time)
 
     results = RibBuildResults(
         exp_name=config.exp_name,

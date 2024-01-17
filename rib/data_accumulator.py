@@ -184,7 +184,7 @@ def collect_gram_matrices(
         shift: Optional[Float[Tensor, "d_hidden"]] = None
         if means is not None and hook_name in means:
             shift = -means[hook_name]
-            shift[-1] = 0.0  # don't shift bias pos
+            shift[-1] = 0.0  # don't shift the final bias pos
         gram_hooks.append(
             Hook(
                 name=hook_name,

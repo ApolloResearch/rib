@@ -125,7 +125,8 @@ def load_mlp(
 
     Args:
         config (Union[MLPConfig, ModularMLPConfig]): The MLP config.
-        node_layers (list[str]): The node layers to use for the model.
+        node_layers (list[str]): The node layers to use for the model. Currently only used for
+            checking that the node layers are valid for this model.
         mlp_path (Optional[Path]): The path to the MLP weights.
         device (str): The device to use for the model.
         fold_bias (bool): Whether to fold the bias into the weights. Defaults to True.

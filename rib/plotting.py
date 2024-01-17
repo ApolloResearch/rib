@@ -67,13 +67,13 @@ def _add_edges_to_graph(
 
 
 def _prepare_edges_for_plotting(
-    raw_edges: list[torch.Tensor],
-    nodes_per_layer: list[int],
+    raw_edges: list[torch.Tensor], nodes_per_layer: list[int]
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
     Args:
-        raw_edges (list[torch.Tensor]): List of edges of shape (n_nodes_in_l+1, n_nodes_in_l)
+        raw_edges (list[torch.Tensor]): List of edges tensors, each with shape
+            (n_nodes_in_l+1, n_nodes_in_l).
         nodes_per_layer (list[int]): The number of nodes in each layer.
 
     Returns:

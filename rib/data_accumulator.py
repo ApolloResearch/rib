@@ -244,7 +244,7 @@ def collect_gram_matrices(
 
 
 def collect_M_dash_and_Lambda_dash(
-    C_out: Optional[Float[Tensor, "rib_out rib_out"]],
+    C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     hooked_model: HookedModel,
     n_intervals: int,
     data_loader: DataLoader,

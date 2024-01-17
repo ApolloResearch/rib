@@ -93,8 +93,8 @@ def build_sorted_lambda_matrices(
     ]
 
     assert not torch.any(torch.isnan(lambda_matrix_pinv)), "NaNs in the pseudoinverse."
-    # (lambda_matrix @ lambda_matrix_pinv).diag() should contain rib 1s and
-    # orig_trunc - rib 0s
+    # `(lambda_matrix @ lambda_matrix_pinv).diag()` should contain `rib_dim` 1s and
+    # `orig_trunc - rib_dim` 0s
     assert torch.allclose(
         (lambda_matrix @ lambda_matrix_pinv).diag().sum(),
         torch.tensor(lambda_matrix.shape[0] - n_small_lambdas, dtype=lambda_matrix.dtype),

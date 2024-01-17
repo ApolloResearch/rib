@@ -260,10 +260,7 @@ def rotate_pre_forward_hook_fn(
 
 def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module: torch.nn.Module,
-    inputs: Union[
-        tuple[Float[Tensor, "batch emb_in"]],
-        tuple[Float[Tensor, "batch pos _"], ...],
-    ],
+    inputs: InputActType,
     hooked_data: dict[str, Any],
     hook_name: str,
     data_key: Union[str, list[str]],

@@ -7,6 +7,7 @@ import torch
 import yaml
 from jaxtyping import Float, Int
 from pydantic import BaseModel
+from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
@@ -280,3 +281,27 @@ def check_device_is_cpu(X: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
     if X is not None:
         assert X.device == torch.device("cpu"), "X must be on the CPU."
     return X
+
+
+BaseModelType = TypeVar("BaseModelType", bound=BaseModel)
+
+
+def update_pydantic_model(model: BaseModelType, *updates: dict) -> BaseModelType:
+    """Create a new model with (potentially nested) updates in the form of dictionaries.
+
+    Examples:
+        >>> class Foo(BaseModel):
+        ...     a: int
+        ...     b: int
+        >>> foo = Foo(a=1, b=2)
+        >>> foo2 = update_pydantic_model(foo, {"a": 3})
+        >>> foo2
+        Foo(a=3, b=2)
+        >>> class Bar(BaseModel):
+        ...     foo: Foo
+        >>> bar = Bar(foo={"a": 1, "b": 2})
+        >>> bar2 = update_pydantic_model(bar, {"foo": {"a": 3}})
+        >>> bar2
+        Bar(foo=Foo(a=3, b=2))
+    """
+    return model.__class__(**deep_update(model.model_dump(), *updates))

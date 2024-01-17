@@ -3,13 +3,14 @@ from unittest.mock import Mock
 
 import pytest
 import torch
+from pydantic import BaseModel, ConfigDict, ValidationError
 from torch import nn
 from torch.utils.data import DataLoader
 
 from rib.ablations import ExponentialScheduleConfig
 from rib.models import MLP, MLPConfig, MLPLayer
 from rib.models.utils import gelu_new, get_model_attr
-from rib.utils import eval_model_accuracy, find_root
+from rib.utils import eval_model_accuracy, find_root, update_pydantic_model
 
 
 def test_get_model_attr() -> None:
@@ -127,3 +128,55 @@ class TestFindRoot:
         func = lambda x: gelu_new(x) - 1.0
         root = find_root(func, xmin=torch.tensor(-1.0), xmax=torch.tensor(4.0))
         assert root == pytest.approx(1.1446, abs=1e-4)
+
+
+# For TestUpdatePydanticModel (must be defined outside for linting reasons)
+class SimpleModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    x: int
+    y: str
+
+
+class NestedModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    value: SimpleModel
+
+
+class DeeplyNestedModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    inner: NestedModel
+
+
+class TestUpdatePydanticModel:
+    """Test the update_pydantic_model function.
+
+    Note that we only care about configs defined with extra="forbid" and frozen=True.
+    """
+
+    def test_update_simple_fields(self):
+        model = SimpleModel(x=1, y="hello")
+        updated_model = update_pydantic_model(model, {"x": 2})
+        assert updated_model.x == 2
+        assert updated_model.y == "hello"
+
+    def test_nonexistent_fields(self):
+        model = SimpleModel(x=1, y="hello")
+        with pytest.raises(ValidationError):
+            update_pydantic_model(model, {"z": 2})
+
+    def test_update_nested_model(self):
+        model = NestedModel(value=SimpleModel(x=1, y="hello"))
+        updated_model = update_pydantic_model(model, {"value": {"x": 2}})
+        assert updated_model.value.x == 2
+        assert updated_model.value.y == "hello"
+
+    def test_deeply_nested_model_update(self):
+        model = DeeplyNestedModel(inner=NestedModel(value=SimpleModel(x=1, y="hello")))
+        updated_model = update_pydantic_model(model, {"inner": {"value": {"x": 2}}})
+        assert updated_model.inner.value.x == 2
+        assert updated_model.inner.value.y == "hello"
+
+    def test_update_with_invalid_data_type(self):
+        model = SimpleModel(x=1, y="hello")
+        with pytest.raises(ValidationError):
+            update_pydantic_model(model, {"x": "help"})

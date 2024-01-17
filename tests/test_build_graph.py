@@ -212,6 +212,7 @@ def get_modular_arithmetic_config(**kwargs) -> LMRibConfig:
         return_set_n_samples: 10
     node_layers:
         - ln1.0
+        - attn_in.0
         - mlp_in.0
         - unembed
         - output
@@ -632,35 +633,35 @@ def centered_rib_test(results: RibBuildResults, atol=1e-6):
 @pytest.mark.slow
 @pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
 def test_centered_rib_mnist(basis_formula):
-    """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
+    """Test that centred rib works for MNIST."""
     config = get_mnist_config(basis_formula=basis_formula, edge_formula="functional", center=True)
     results = mlp_build_graph_main(config)
     centered_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("basis_formula", ["(1-0)*alpha", "svd"])
-def test_centered_rib_pythia(basis_formula):
-    """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
-    config = get_pythia_config(basis_formula=basis_formula, center=True)
+def test_centered_rib_pythia():
+    """Test that the centred rib works for pythia."""
+    config = get_pythia_config(basis_formula="(1-0)*alpha", center=True)
     results = lm_build_graph_main(config)
-    centered_rib_test(results, atol=1e-6)
+    centered_rib_test(results, atol=1e-9)
 
 
 @pytest.mark.slow
-def test_centered_rib_modadd():
-    """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
+def test_centered_rib_modadd(basis_formula):
+    """Test that centred rib & pca works for modadd."""
     # we set a lower truncation threshold as there are some directions w/ small eigenvals that
     # violate our assumption. I think this is a precision error that shouldn't be a problem
     # elsewhere. See https://apolloresearchhq.slack.com/archives/C06484S5UF9/p1704966880983049
     config = get_modular_arithmetic_config(
-        basis_formula="svd",
+        basis_formula=basis_formula,
         edge_formula="squared",
         center=True,
         truncation_threshold=1e-10,
     )
     results = lm_build_graph_main(config)
-    centered_rib_test(results, atol=1e-6)
+    centered_rib_test(results, atol=1e-10)
 
 
 @pytest.mark.slow

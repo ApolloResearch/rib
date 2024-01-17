@@ -566,9 +566,9 @@ def test_svd_basis():
             assert torch.allclose(C, U, atol=0)
 
 
-def centred_rib_test(results: RibBuildResults, atol=1e-6):
+def centered_rib_test(results: RibBuildResults, atol=1e-6):
     """
-    Test that centred rib (and pca, aka centred svd) works as expected.
+    Test that centered rib (and pca, aka centered svd) works as expected.
 
     In particular:
     - We collect the rib activations
@@ -635,7 +635,7 @@ def test_centered_rib_mnist(basis_formula):
     """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
     config = get_mnist_config(basis_formula=basis_formula, edge_formula="functional", center=True)
     results = mlp_build_graph_main(config)
-    centred_rib_test(results, atol=1e-6)
+    centered_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow
@@ -644,7 +644,7 @@ def test_centered_rib_pythia(basis_formula):
     """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
     config = get_pythia_config(basis_formula=basis_formula, center=True)
     results = lm_build_graph_main(config)
-    centred_rib_test(results, atol=1e-6)
+    centered_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow
@@ -660,7 +660,7 @@ def test_centered_rib_modadd():
         truncation_threshold=1e-10,
     )
     results = lm_build_graph_main(config)
-    centred_rib_test(results, atol=1e-6)
+    centered_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow

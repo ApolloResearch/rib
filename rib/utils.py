@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
 from rib.log import logger
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.hook_manager import Hook, HookedModel
 
 T = TypeVar("T", bound=BaseModel)

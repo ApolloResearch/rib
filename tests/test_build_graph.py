@@ -35,7 +35,7 @@ from rib.loader import load_model_and_dataset_from_rib_results
 from rib.log import logger
 from rib.models.modular_mlp import ModularMLPConfig
 from rib.types import TORCH_DTYPES, RibBuildResults
-from tests.utils import assert_is_close, assert_is_ones, assert_is_zeros
+from tests.utils import assert_is_close, assert_is_zeros
 
 
 def build_get_lambdas(config: Union[LMRibConfig, MlpRibConfig], build_graph_main_fn: Callable):
@@ -170,11 +170,11 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
     test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
     utils_rib_acts = rib_acts[module_to_test].cpu()
-    assert torch.allclose(utils_rib_acts, test_rib_acts, atol=atol)
+    assert_is_close(utils_rib_acts, test_rib_acts, atol=atol, rtol=1e-5)
     return rib_acts
 
 
-def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
+def get_means(results: RibBuildResults, atol: float, batch_size=16):
     """Takes the results of a graph build and runs collect_dataset_means."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results["config"]["dtype"]]
@@ -188,7 +188,7 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
         module_names = [model.module_id_to_section_id[m_name] for m_name in module_ids]
     else:
         module_names = module_ids
-    means, bias_positions = collect_dataset_means(
+    return collect_dataset_means(
         hooked_model=hooked_model,
         module_names=module_names,
         data_loader=data_loader,
@@ -197,17 +197,6 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
         collect_output_dataset_means=False,
         hook_names=module_ids,
     )
-    for m_name in module_ids:
-        is_bias_mask = torch.zeros(means[m_name].shape[-1]).bool()
-        is_bias_mask[bias_positions[m_name]] = True
-        assert_is_ones(means[m_name][is_bias_mask], atol=atol, m_name=m_name)
-        # we want to check we didn't miss a bias position. We do this by checking that the other
-        # means aren't 1. This is a bit sketchy, as there's nothing guarenteeing they can't be 1.
-        mean_1_positions = (means[m_name][~is_bias_mask] - 1).abs() < atol
-        assert (
-            not mean_1_positions.any()
-        ), f"means at positions {mean_1_positions.nonzero()} are unexpectely 1"
-    return means, bias_positions
 
 
 def get_modular_arithmetic_config(**kwargs) -> LMRibConfig:
@@ -223,6 +212,7 @@ def get_modular_arithmetic_config(**kwargs) -> LMRibConfig:
         return_set_n_samples: 10
     node_layers:
         - ln1.0
+        - attn_in.0
         - mlp_in.0
         - unembed
         - output
@@ -260,6 +250,7 @@ def get_pythia_config(**kwargs) -> LMRibConfig:
         return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
         return_set_portion: first
     node_layers:
+        - ln1.0
         - ln2.1
         - unembed
     batch_size: 2
@@ -354,7 +345,7 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
     config = get_modular_arithmetic_config(basis_formula=basis_formula, edge_formula=edge_formula)
     results = graph_build_test(config=config, build_graph_main_fn=lm_build_graph_main, atol=atol)
-    get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
+    get_rib_acts_test(results, atol=atol)  # Need atol=1e-3 if float32
 
 
 @pytest.mark.slow
@@ -366,7 +357,7 @@ def test_pythia_14m_build_graph():
         build_graph_main_fn=lm_build_graph_main,
         atol=atol,
     )
-    get_rib_acts_test(results, atol=0)
+    get_rib_acts_test(results, atol=atol)
 
 
 @pytest.mark.slow
@@ -381,17 +372,15 @@ def test_pythia_14m_build_graph():
 )
 def test_mnist_build_graph(basis_formula, edge_formula):
     dtype_str = "float32"
-    # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64
-    atol = 1e-5
     config = get_mnist_config(
         basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
     )
     results = graph_build_test(
         config=config,
         build_graph_main_fn=mlp_build_graph_main,
-        atol=atol,
+        atol=1e-5,  # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64
     )
-    get_rib_acts_test(results, atol=atol)
+    get_rib_acts_test(results, atol=1e-5)
 
 
 @pytest.mark.parametrize(
@@ -578,26 +567,29 @@ def test_svd_basis():
             assert torch.allclose(C, U, atol=0)
 
 
-def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
+def centered_rib_test(results: RibBuildResults, atol=1e-6):
     """
-    Test that the 'pca' basis (aka svd with center=true) works as expected.
+    Test that centered rib (and pca, aka centered svd) works as expected.
 
     In particular:
-    1. We collect the rib activations
-    2. We collect the means, checking that the mean == 1 exactly at the bias positions
-    3. We expect there to be a single rib direction encoding the bias and means activation.
-        We call this `bias_dir` and expect it's value to be the mean activation at non-bias
-        positions, and equal to 1/sqrt(# bias positions) at bias positions. C_inv gives us all
-        rib directions in the original coordinate system, so we compute the expected direction and
-        compare cosine similarities with rows of C_inv.
-    4. We assert the `bias_dir` does match what we expect
-    5. We assert that all other rib directions have no bias component (in the original coordinates)
-    6. We assert the rib activation of `bias_dir` is always 1
-    7. We assert the mean rib activation of all other directions is 0 (they are centered)
+    - We collect the rib activations
+    - We collect the means, checking that the mean == 1 exactly at the bias positions
+    - We expect there to be a single rib direction (the 'constant' direction or 'const_dir') in
+        which the activations is constant for all inputs. This is always returned as the 0th rib
+        dir. When written in the neuron basis this direciton will equal to the mean-activation at
+        non bias positions and 1/sqrt(# bias positions) at bias positions. C_inv gives us all
+        rib directions in the original coordinate system, so we compare C_inv[0] with this expected
+        direction. There's also various scaling factors.
+
+    We then check 4 properties:
+    1. We assert the `const_dir` written in the original coords matches what we expect
+    2. We assert that all other rib directions have no bias component (in the original coordinates)
+    3. We assert the rib activation of `const_dir` is always 1
+    4. We assert the mean rib activation of all other directions is 0 (they are centered)
     """
-    # 1 and 2: collect C_inv, rib acts, means, bias positions
+    # collect C_inv, rib acts, means, bias positions
     all_rib_acts = get_rib_acts_test(results, atol=1e-6)
-    all_mean_acts, all_bias_pos = get_means_test(results, atol=atol)
+    all_mean_acts = get_means(results, atol=atol)
     C_infos = parse_c_infos(results["interaction_rotations"])
     # output and pre-unembed have no bias
     m_names = [m_name for m_name in results["config"]["node_layers"] if m_name not in ["output"]]
@@ -605,58 +597,71 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
         C_inv = C_infos[m_name].C_pinv  # [rib_dir, emb_pos]
         if C_inv is None:  # this happens when rotate_final_layer is true
             continue
-        bias_positions = all_bias_pos[m_name].cpu()
         mean_acts = all_mean_acts[m_name].cpu()  # [emb_pos]
         rib_acts = all_rib_acts[m_name]  # [batch, (seqpos?), rib_dir]
 
-        # find the bias direction. This should be the only dir with non-zero magnitude
-        # in the bias_positions directions
-        bias_dir_idx = C_inv[:, bias_positions[0]].abs().argmax()
-        # sometimes rib finds the opposite direction, which is OK
-        bias_dir_sign = C_inv[bias_dir_idx, bias_positions[0]].sign()
+        # compute the expected bias direction
+        # we can't directly compare, as there's some scale factor. This involves:
+        # - ±1, as rib is allowed to find the opposite direction
+        # - a factor 1/sqrt(# bias positions) from compressing the bias directions
+        # - scale factors from D and lambda when basis != svd
+        if results["config"]["basis_formula"] == "svd":
+            scale_factor = torch.sign(C_inv[0, -1])
+        else:
+            # in the non-svd case we just get the scale factor from comparing one component
+            # with what we expect.
+            # this is less strong as a check, but it's hard to compute D and lambda
+            scale_factor = C_inv[0, -1]
 
-        # 3) compute the expected bias direction
-        expected_bias_dir = mean_acts.clone()  # [emb]
-        expected_bias_dir[bias_positions] = 1
-        scale_factor = bias_dir_sign / len(bias_positions) ** 0.5
-        expected_bias_dir *= scale_factor
-        # and assert it's close to the actual bias direction
-        assert_is_close(C_inv[bias_dir_idx, :], expected_bias_dir, atol=atol, rtol=0, m_name=m_name)
+        expected_const_dir = mean_acts * scale_factor
 
-        # mask over rib dir. True everywhere except the bias dir
-        non_bias_dir_mask = torch.ones(C_inv.shape[0]).bool()  # [rib_dir]
-        non_bias_dir_mask[bias_dir_idx] = False
+        # Check 1: Assert this is close to the actual const direction
+        assert_is_close(C_inv[0, :], expected_const_dir, atol=atol, rtol=0, m_name=m_name)
 
-        # 5) no other rib dir point in the bias dir
-        assert_is_zeros(C_inv[non_bias_dir_mask][:, bias_positions], atol=atol, m_name=m_name)
+        # Check 2: no other rib dir has non-zero component in the bias position
+        assert_is_zeros(C_inv[1:][:, -1], atol=atol, m_name=m_name)
 
-        # 6) bias dir rib act is always the same, the correct amount to scale back to the mean +
-        # bias in original coordinates
-        assert_is_close(
-            rib_acts[..., bias_dir_idx], 1 / scale_factor, atol=atol, rtol=0, m_name=m_name
-        )
+        # Check 3: rib act in the constant direction is actually constant.
+        # in particualar it's the inverse of the scaling factor above
+        assert_is_close(rib_acts[..., 0], 1 / scale_factor, atol=atol, rtol=0, m_name=m_name)
 
-        # 7) all other rib acts are centered (mean zero)
+        # Check 4: all other rib acts are have mean zero across the dataset
         mean_rib_acts = einops.reduce(rib_acts, "... ribdir -> ribdir", "mean")
-        assert_is_zeros(mean_rib_acts[non_bias_dir_mask], atol=atol, m_name=m_name)
+        assert_is_zeros(mean_rib_acts[1:], atol=atol, m_name=m_name)
 
 
 @pytest.mark.slow
-def test_pca_basis_mnist():
-    """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
-    config = get_mnist_config(basis_formula="svd", edge_formula="functional")
-    config = config.model_copy(update={"center": True})
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
+def test_centered_rib_mnist(basis_formula):
+    """Test that centred rib works for MNIST."""
+    config = get_mnist_config(basis_formula=basis_formula, edge_formula="functional", center=True)
     results = mlp_build_graph_main(config)
-    pca_rib_acts_test(results, atol=1e-4)
+    centered_rib_test(results, atol=1e-6)
 
 
 @pytest.mark.slow
-def test_pca_basis_pythia():
-    """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
-    config = get_pythia_config(basis_formula="svd")
-    config = config.model_copy(update={"center": True, "rotate_final_node_layer": True})
+def test_centered_rib_pythia():
+    """Test that the centred rib works for pythia."""
+    config = get_pythia_config(basis_formula="(1-0)*alpha", center=True)
     results = lm_build_graph_main(config)
-    pca_rib_acts_test(results, atol=1e-6)
+    centered_rib_test(results, atol=1e-9)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
+def test_centered_rib_modadd(basis_formula):
+    """Test that centred rib & pca works for modadd."""
+    # we set a lower truncation threshold as there are some directions w/ small eigenvals that
+    # violate our assumption. I think this is a precision error that shouldn't be a problem
+    # elsewhere. See https://apolloresearchhq.slack.com/archives/C06484S5UF9/p1704966880983049
+    config = get_modular_arithmetic_config(
+        basis_formula=basis_formula,
+        edge_formula="squared",
+        center=True,
+        truncation_threshold=1e-10,
+    )
+    results = lm_build_graph_main(config)
+    centered_rib_test(results, atol=1e-10)
 
 
 @pytest.mark.slow

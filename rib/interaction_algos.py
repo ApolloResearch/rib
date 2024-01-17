@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import eigendecompose, pinv_diag, shift_matrix
+from rib.linalg import centering_matrix, eigendecompose, move_const_dir_first, pinv_diag
 from rib.models.mlp import MLP
 from rib.models.sequential_transformer.transformer import SequentialTransformer
 
@@ -23,9 +23,10 @@ class InteractionRotation:
 
     node_layer_name: str
     out_dim: int  # Equal to d_hidden_extra_trunc if C is not None and d_hidden otherwise
-    C: Optional[Float[Tensor, "d_hidden d_hidden_extra_trunc"]] = None
+    # if centering was used, C[:, 0] is the constant direction
+    C: Optional[Float[Tensor, "orig rib"]] = None
     # pseudoinverse of C, not needed for the output node layer
-    C_pinv: Optional[Float[Tensor, "d_hidden_extra_trunc d_hidden"]] = None
+    C_pinv: Optional[Float[Tensor, "rib orig"]] = None
 
     def __post_init__(self):
         if self.C is not None:
@@ -111,7 +112,6 @@ def calculate_interaction_rotations(
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-0)*alpha",
     center: bool = False,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
-    bias_positions: Optional[dict[str, Int[Tensor, "sections"]]] = None,
 ) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -155,7 +155,6 @@ def calculate_interaction_rotations(
         center: Whether to center the activations while computing the desired basis. Only supported
             for the "svd" basis formula.
         means: The means of the activations for each node layer. Only used if `center=true`.
-        bias_positions: The positions of the biases for each node layer. Only used if `center=true`.
     Returns:
         - A list of objects containing the interaction rotation matrices and their pseudoinverses,
         ordered by node layer appearance in model.
@@ -170,10 +169,8 @@ def calculate_interaction_rotations(
         section_names
     ), "Must specify a hook name for each section (except the output section)."
 
-    if center and basis_formula != "svd":
-        raise NotImplementedError(
-            "centering is currently only implemented for the svd basis formula."
-        )
+    if center and basis_formula == "neuron":
+        raise NotImplementedError("centering is not currently implemented for the neuron basis.")
 
     # We start appending Us and Cs from the output layer and work our way backwards
     Us: list[Eigenvectors] = []
@@ -184,17 +181,18 @@ def calculate_interaction_rotations(
     U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
     C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
     if rotate_final_node_layer:
-        U_output = eigendecompose(gram_matrices[node_layers[-1]])[1].detach()
+        # We don't use D_output except in finding the index of the const_dir in U
+        D_output, U_output = eigendecompose(gram_matrices[node_layers[-1]])
         assert U_output is not None
         if center:
-            assert means is not None
-            assert bias_positions is not None
-            assert node_layers[-1] in means
-            Y = shift_matrix(-means[node_layers[-1]], bias_positions[node_layers[-1]])
-            C_output = (Y @ U_output).detach().cpu()
+            assert means is not None and node_layers[-1] in means
+            mean = means[node_layers[-1]]
+            D_output, U_output = move_const_dir_first(D_output, U_output)
+            C_output = centering_matrix(mean) @ U_output
         else:
-            C_output = U_output.detach().cpu()
-        U_output = U_output.cpu()
+            C_output = U_output
+        C_output = C_output.detach().cpu()
+        U_output = U_output.detach().cpu()
 
     if node_layers[-1] not in gram_matrices:
         # Technically we don't actually need the final node layer to be in gram_matrices if we're
@@ -262,50 +260,52 @@ def calculate_interaction_rotations(
                 InteractionRotation(node_layer_name=node_layer, out_dim=width, C=Id, C_pinv=Id)
             )
             continue
+
+        ### SVD ROTATION (U)
         D_dash, U_dash = eigendecompose(gram_matrices[node_layer])
+        if center:
+            assert means is not None and node_layer in means
+            D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
 
-        n_small_eigenvals: int = int(torch.sum(D_dash < truncation_threshold).item())
-        # Truncate the D matrix to remove small eigenvalues
-        D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            torch.diag(D_dash)[:-n_small_eigenvals, :-n_small_eigenvals]
-            if n_small_eigenvals > 0
-            else torch.diag(D_dash)
-        )
-        # Truncate the columns of U to remove small eigenvalues
-        U: Float[Tensor, "d_hidden d_hidden_trunc"] = (
-            U_dash[:, :-n_small_eigenvals] if n_small_eigenvals > 0 else U_dash
-        )
-        Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
+        # Trucate all directions with eigenvalues smaller than some threshold
+        mask = D_dash > truncation_threshold  # true if we keep the direction
+        D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = D_dash[mask].diag()
+        U: Float[Tensor, "d_hidden d_hidden_trunc"] = U_dash[:, mask]
 
-        # currently only used for svd basis, but will be used more in text PR
+        ### CENTERING MATRIX (Y)
+        Y: Float[Tensor, "d_hidden d_hidden"]
+        Y_inv: Float[Tensor, "d_hidden d_hidden"]
+
         if center:
             assert means is not None
-            assert bias_positions is not None
-            # Y (or Gamma) is a matrix that shifts the activations to be mean zero
-            # with the exception of the bias positions which are still 1
-            Y = shift_matrix(-means[node_layer], bias_positions[node_layer])
-            Y_inv = shift_matrix(means[node_layer], bias_positions[node_layer])
+            # Y uses the bias position to center the activations
+            Y = centering_matrix(means[node_layer])
+            Y_inv = centering_matrix(means[node_layer], inverse=True)
         else:
-            # if not centering, we set Y to be the identity matrix
-            Y = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
-            Y_inv = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
+            # If no centering, Y is the identity matrix
+            Id = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
+            Y, Y_inv = Id, Id.detach().clone()
 
+        Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
         if basis_formula == "svd":
-            # We set C based on U (maybe centered as well)
-            Cs.append(
-                InteractionRotation(
-                    node_layer_name=node_layer,
-                    out_dim=U.shape[1],
-                    C=(Y @ U).cpu(),
-                    C_pinv=(U.T @ Y_inv).cpu(),
-                )
+            # Use U as C, with centering matrix
+            C_info = InteractionRotation(
+                node_layer, out_dim=U.shape[1], C=(Y @ U).cpu(), C_pinv=(U.T @ Y_inv).cpu()
             )
+            Cs.append(C_info)
             continue
 
-        # Most recently stored interaction matrix
-        C_out = Cs[-1].C.to(device=device) if Cs[-1].C is not None else None
+        ### FIRST ROTATION MATRIX (R)
+        # Combines Y, U, D. This centers (if Y is not an identity), then orthogonalizes and scales.
+        R: Float[Tensor, "orig d_hidden_trunc"] = Y @ U @ pinv_diag(D.sqrt())
+        R_inv: Float[Tensor, "d_hidden_trunc orig"] = D.sqrt() @ U.T @ Y_inv
+
+        ### ROTATION TO SPARSIFY EDGES (V)
+        # This is an orthogonal rotation that attempts to sparsify the edges
+        last_C = Cs[-1].C.to(device=device) if Cs[-1].C is not None else None
+        # Compute M_dash in the neuron basis
         M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
-            C_out=C_out,
+            C_out=last_C,
             hooked_model=hooked_model,
             n_intervals=n_intervals,
             data_loader=data_loader,
@@ -317,33 +317,36 @@ def calculate_interaction_rotations(
             Lambda_einsum_dtype=Lambda_einsum_dtype,
             basis_formula=basis_formula,
         )
-
-        U_D_sqrt: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D.sqrt()
-
-        # Converts M to fp64
+        # Then convert it into the pca basis
         M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
-            U_D_sqrt.T.to(M_dtype) @ M_dash @ U_D_sqrt.to(M_dtype)
+            R_inv.to(M_dash.dtype) @ M_dash @ R_inv.T.to(M_dash.dtype)
         )
-        V = eigendecompose(M)[1]  # V has size (d_hidden_trunc, d_hidden_trunc)
+        # and take it's eigenvector basis as V
+        V: Float[Tensor, "d_hidden_trunc d_hidden_trunc"]
+        if center:
+            # We don't want to rotate the constant direction (in the 0th position).
+            # We thus eigendecompose a submatrix ignoring the first row and col
+            sub_V = eigendecompose(M[1:, 1:])[1]
+            V = torch.zeros_like(M)
+            V[0, 0] = 1
+            V[1:, 1:] = sub_V
+        else:
+            V = eigendecompose(M)[1]
         V = V.to(dtype)
 
-        # Multiply U_D_sqrt with V, corresponding to $U D^{1/2} V$ in the paper.
-        U_D_sqrt_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U_D_sqrt @ V
-        D_sqrt_pinv: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = pinv_diag(D.sqrt())
-        U_D_sqrt_pinv_V: Float[Tensor, "d_hidden d_hidden_trunc"] = U @ D_sqrt_pinv @ V
+        ### SCALING MATRIX (Lambda)
+        # Tranform lambda_dash (computed in the neuron basis) into our new basis with R and V
         Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
-            (U_D_sqrt_V.T @ Lambda_dash @ U_D_sqrt_pinv_V).diag().abs()
+            (V.T @ R_inv @ Lambda_dash @ R @ V).diag().abs()
         )
+        # Build a matrix for scaling by sqrt(Lambda).
+        # This function prunes directions with small Lambdas. This is our second trunctaion.
+        L, L_inv = build_sorted_lambda_matrices(Lambda_abs, truncation_threshold)
 
-        Lambda_abs_sqrt_trunc, Lambda_abs_sqrt_trunc_pinv = build_sorted_lambda_matrices(
-            Lambda_abs, truncation_threshold
-        )
-
-        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (
-            (U_D_sqrt_pinv_V @ Lambda_abs_sqrt_trunc).detach().cpu()
-        )
+        ### FINAL ROTATION MATRIX (C)
+        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (R @ V @ L).detach().cpu()
         C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
-            (Lambda_abs_sqrt_trunc_pinv @ U_D_sqrt_V.T).detach().cpu()
+            (L_inv @ V.T @ R_inv).detach().cpu()
         )
         Cs.append(
             InteractionRotation(node_layer_name=node_layer, out_dim=C.shape[1], C=C, C_pinv=C_pinv)

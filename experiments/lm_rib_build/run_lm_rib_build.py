@@ -27,7 +27,10 @@ as well as the output of the final node layer. For example, if `node_layers` is 
     output of "mlp_in.0".
 - (If logits_node_layer is True:) One on the output of the model, i.e. the logits.
 
-This file also support parallelization to compute edge values across multiple processes using mpi. To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data and output it as a single file.
+This file also support parallelization to compute edge values across multiple processes using mpi.
+To enable this, just preface the command with `mpirun -n [num_processes]`. These processes will
+distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data
+and output it as a single file.
 """
 import json
 import time
@@ -37,7 +40,7 @@ from typing import Literal, Optional, Union
 
 import fire
 import torch
-from jaxtyping import Float, Int
+from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -153,8 +156,7 @@ class Config(BaseModel):
     )
     center: bool = Field(
         False,
-        description="Whether to center the activations before performing rib. Currently only"
-        "supported for basis_formula='svd', which gives the 'pca' basis.",
+        description="Whether to center the activations before performing rib.",
     )
 
     @model_validator(mode="after")
@@ -335,10 +337,9 @@ def main(
         )
 
         means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
-        bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
         if config.center:
             logger.info("Collecting dataset means")
-            means, bias_positions = collect_dataset_means(
+            means = collect_dataset_means(
                 hooked_model=hooked_model,
                 module_names=section_names,
                 data_loader=gram_train_loader,
@@ -360,7 +361,6 @@ def main(
             collect_output_gram=collect_output_gram,
             hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             means=means,
-            bias_positions=bias_positions,
         )
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
@@ -388,7 +388,6 @@ def main(
             basis_formula=config.basis_formula,
             center=config.center,
             means=means,
-            bias_positions=bias_positions,
         )
         # Cs used to calculate edges
         edge_Cs = Cs

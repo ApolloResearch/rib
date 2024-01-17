@@ -179,7 +179,10 @@ def collect_gram_matrices(
 
     Args:
         hooked_model: The hooked model.
-        module_names: The names of the modules to collect gram matrices for.
+        module_names: The names of the modules to collect gram matrices for. Can be any valid
+            pytorch module in hooked_model.model. These typically correspond to section_names (e.g.
+            "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
+            "layers.2") when the model is an MLP.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
         dtype: The data type to use for model computations.

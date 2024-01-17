@@ -206,7 +206,7 @@ def ablate_node_layers_and_eval(
     hooked_model: HookedModel,
     data_loader: DataLoader,
     eval_fn: Callable,
-    graph_module_names: list[str],
+    module_names: list[str],
     schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
     device: str,
     dtype: Optional[torch.dtype] = None,
@@ -225,7 +225,10 @@ def ablate_node_layers_and_eval(
         hooked_model: The hooked model.
         data_loader: The data loader to use for testing.
         eval_fn: The function to use to evaluate the model.
-        graph_module_names: The names of the modules we want to build the graph around.
+        module_names: The names of the modules to apply the ablations. Can be any valid pytorch
+            module in hooked_model.model. These typically correspond to section_names (e.g.
+            "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
+            "layers.2") when the model is an MLP.
         schedule_config: The config for the ablation schedule.
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
@@ -235,7 +238,7 @@ def ablate_node_layers_and_eval(
     """
     results: AblationAccuracies = {}
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
-        ablation_node_layers, graph_module_names, basis_matrices
+        ablation_node_layers, module_names, basis_matrices
     ):
         ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=basis_vecs.shape[0])
 
@@ -347,7 +350,7 @@ def load_bases_and_ablate(
     """Load basis matrices and run ablation experiments.
 
     The process is as follows:
-        1. Load pre-saved basis matrices (Typcially RIB bases (Cs) or orthogonal bases (Us)).
+        1. Load pre-saved basis matrices (typcially RIB bases (Cs) or orthogonal bases (Us)).
         2. Load the corresponding model and dataset (the dataset may be non-overlapping with
             that used to create the basis matrices).
         3. For each number of ablated nodes `n`, create a rotation matrix that has the effect of
@@ -416,10 +419,10 @@ def load_bases_and_ablate(
     logger.info("Model %s on dataset: %.4f", config.eval_type, eval_results)
 
     if isinstance(model, MLP):
-        graph_module_names = config.ablation_node_layers
+        module_names = config.ablation_node_layers
     else:
         assert isinstance(model, SequentialTransformer)
-        graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+        module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
     ablation_results: AblationAccuracies = ablate_node_layers_and_eval(
         basis_matrices=basis_matrices,
@@ -427,7 +430,7 @@ def load_bases_and_ablate(
         hooked_model=hooked_model,
         data_loader=data_loader,
         eval_fn=eval_fn,
-        graph_module_names=graph_module_names,
+        module_names=module_names,
         schedule_config=config.schedule,
         device=device,
         dtype=dtype,

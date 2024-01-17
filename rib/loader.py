@@ -153,9 +153,7 @@ def load_mlp(
 
 
 def create_modular_arithmetic_dataset(
-    dataset_config: ModularArithmeticDatasetConfig,
-    return_set: Literal["train", "test", "all"],
-    tlens_model_path: Optional[Path] = None,
+    dataset_config: ModularArithmeticDatasetConfig, tlens_model_path: Optional[Path] = None
 ) -> Dataset:
     """Create a ModularArithmeticDataset from the provided arguments.
 
@@ -170,11 +168,12 @@ def create_modular_arithmetic_dataset(
     Returns:
         The dataset.
     """
-    modulus, fn_name, frac_train, seed = (
+    modulus, fn_name, frac_train, seed, return_set = (
         dataset_config.modulus,
         dataset_config.fn_name,
         dataset_config.frac_train,
         dataset_config.seed,
+        dataset_config.return_set,
     )
     if tlens_model_path:
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
@@ -262,9 +261,7 @@ def tokenize_dataset(
 
 
 def create_hf_dataset(
-    dataset_config: HFDatasetConfig,
-    return_set: Literal["train", "test", "all"],
-    model_n_ctx: Optional[int] = None,
+    dataset_config: HFDatasetConfig, model_n_ctx: Optional[int] = None
 ) -> Dataset:
     """Create a HuggingFace dataset from the provided arguments.
 
@@ -286,7 +283,6 @@ def create_hf_dataset(
 
     Args:
         dataset_config (HFDatasetConfig): The dataset config.
-        return_set (Literal["train", "test", "all"]): The dataset to return.
         model_n_ctx (int): The max context length of the model. Used for HFDatasetConfigs. Data
             sequences are packed to dataset_config.n_ctx if it is not None and is <= model_n_ctx,
             otherwise to model_n_ctx.
@@ -301,19 +297,19 @@ def create_hf_dataset(
         f"({model_n_ctx})."
     )
 
-    assert return_set in ["train", "test"], "Can only load train or test sets from HF"
+    assert dataset_config.return_set in ["train", "test"], "Only train and test sets are supported"
 
     if dataset_config.return_set_frac:
         percent = int(dataset_config.return_set_frac * 100)
         if dataset_config.return_set_portion == "first":
-            data_split = f"{return_set}[:{percent}%]"
+            data_split = f"{dataset_config.return_set}[:{percent}%]"
         elif dataset_config.return_set_portion == "last":
-            data_split = f"{return_set}[-{percent}%:]"
+            data_split = f"{dataset_config.return_set}[-{percent}%:]"
     elif dataset_config.return_set_n_samples:
         if dataset_config.return_set_portion == "first":
-            data_split = f"{return_set}[:{dataset_config.return_set_n_samples}]"
+            data_split = f"{dataset_config.return_set}[:{dataset_config.return_set_n_samples}]"
         elif dataset_config.return_set_portion == "last":
-            data_split = f"{return_set}[-{dataset_config.return_set_n_samples}:]"
+            data_split = f"{dataset_config.return_set}[-{dataset_config.return_set_n_samples}:]"
 
     raw_dataset = hf_load_dataset(dataset_config.name, split=data_split)
 
@@ -322,15 +318,12 @@ def create_hf_dataset(
     return tokenize_dataset(dataset=raw_dataset, tokenizer=tokenizer, n_ctx=n_ctx)
 
 
-def create_vision_dataset(
-    dataset_config: VisionDatasetConfig,
-    return_set: Literal["train", "test", "all"],
-) -> Dataset:
+def create_vision_dataset(dataset_config: VisionDatasetConfig) -> Dataset:
     dataset_fn = getattr(torchvision.datasets, dataset_config.name)
-    assert return_set != "all", "Cannot return 'all' for vision datasets."
+    assert dataset_config.return_set in ["train", "test"], "Can only load train or test sets"
     raw_dataset = dataset_fn(
         root=REPO_ROOT / ".data",
-        train=return_set == "train",
+        train=dataset_config.return_set == "train",
         download=True,
         transform=torchvision.transforms.ToTensor(),
     )
@@ -344,9 +337,7 @@ def create_vision_dataset(
     return dataset
 
 
-def create_block_vector_dataset(
-    dataset_config: BlockVectorDatasetConfig,
-) -> Dataset:
+def create_block_vector_dataset(dataset_config: BlockVectorDatasetConfig) -> Dataset:
     raw_dataset = BlockVectorDataset(dataset_config=dataset_config)
 
     dataset = get_data_subset(
@@ -360,7 +351,6 @@ def create_block_vector_dataset(
 
 def load_dataset(
     dataset_config: DatasetConfig,
-    return_set: Literal["train", "test", "all"],
     model_n_ctx: Optional[int] = None,
     tlens_model_path: Optional[Path] = None,
 ) -> Dataset:
@@ -369,7 +359,6 @@ def load_dataset(
 
     Args:
         dataset_config (DatasetConfig): The dataset config.
-        return_set (Literal["train", "test", "all"]): The dataset to return.
         model_n_ctx (int): The max context length of the model, used for HFDatasetConfigs. Data
             sequences are packed to dataset_config.n_ctx if it is not None and is <= model_n_ctx,
             otherwise to model_n_ctx.
@@ -382,14 +371,12 @@ def load_dataset(
 
     if isinstance(dataset_config, ModularArithmeticDatasetConfig):
         return create_modular_arithmetic_dataset(
-            dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
+            dataset_config=dataset_config, tlens_model_path=tlens_model_path
         )
     elif isinstance(dataset_config, HFDatasetConfig):
-        return create_hf_dataset(
-            dataset_config=dataset_config, return_set=return_set, model_n_ctx=model_n_ctx
-        )
+        return create_hf_dataset(dataset_config=dataset_config, model_n_ctx=model_n_ctx)
     elif isinstance(dataset_config, VisionDatasetConfig):
-        return create_vision_dataset(dataset_config=dataset_config, return_set=return_set)
+        return create_vision_dataset(dataset_config=dataset_config)
     else:
         assert isinstance(dataset_config, BlockVectorDatasetConfig)
         return create_block_vector_dataset(dataset_config=dataset_config)
@@ -481,7 +468,6 @@ def load_model_and_dataset_from_rib_config(
     dataset_config = dataset_config or rib_config.dataset
     dataset = load_dataset(
         dataset_config=dataset_config,
-        return_set=dataset_config.return_set,
         model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
         tlens_model_path=rib_config.tlens_model_path,
     )

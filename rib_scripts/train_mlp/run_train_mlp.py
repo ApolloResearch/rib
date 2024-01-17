@@ -24,7 +24,7 @@ from rib.models import MLP
 from rib.models.mlp import MLPConfig
 from rib.models.utils import save_model
 from rib.types import RootPath
-from rib.utils import load_config, set_seed
+from rib.utils import load_config, set_seed, update_pydantic_model
 
 
 class TrainConfig(BaseModel):
@@ -158,11 +158,12 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Using device: %s", device)
 
-    dataset = load_dataset(config.dataset, "train")
-    train_loader = DataLoader(dataset, batch_size=config.train.batch_size, shuffle=True)
+    assert config.dataset.return_set == "train", "currently only supports training on the train set"
+    train_dataset = load_dataset(config.dataset)
+    train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True)
 
-    #  Get the input size from the flattened first input
-    data_in_dim = len(dataset[0][0].flatten())
+    # Get the input size from the flattened first input
+    data_in_dim = len(train_dataset[0][0].flatten())
     assert (
         config.model.input_size == data_in_dim
     ), f"mismatch between data size {data_in_dim} and config in_dim {config.model.input_size}"
@@ -182,7 +183,7 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
     trained_model = train_model(config, model, train_loader, device, run_name)
 
     # Evaluate the model on the test set
-    test_dataset = load_dataset(config.dataset, "test")
+    test_dataset = load_dataset(update_pydantic_model(config.dataset, {"return_set": "test"}))
     test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size, shuffle=True)
     accuracy = evaluate_model(trained_model, test_loader, device)
     logger.info(f"Accuracy of the network on the {len(test_dataset)} test images: %d %%", accuracy)  # type: ignore

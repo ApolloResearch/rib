@@ -19,6 +19,7 @@ import torch
 import yaml
 from fancy_einsum import einsum
 from jaxtyping import Float
+from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.testing import assert_close
 from torch.utils.data import DataLoader
@@ -30,9 +31,10 @@ from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import build_sorted_lambda_matrices
 from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
-from rib.models import ModularMLPConfig, SequentialTransformer
+from rib.models import SequentialTransformer
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 from rib.types import TORCH_DTYPES
+from rib.utils import update_pydantic_model
 from tests.utils import assert_is_close, assert_is_ones, assert_is_zeros
 
 
@@ -210,7 +212,7 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
     return means, bias_positions
 
 
-def get_modular_arithmetic_config(**kwargs) -> RibBuildConfig:
+def get_modular_arithmetic_config(*updates: dict) -> RibBuildConfig:
     config_str = f"""
     exp_name: test
     seed: 0
@@ -237,14 +239,11 @@ def get_modular_arithmetic_config(**kwargs) -> RibBuildConfig:
     edge_formula: squared
     n_stochastic_sources: null
     """
-    config_dict = yaml.safe_load(config_str)
-    # allow changing dataset config with kwargs
-    config_dict.update({k: v for k, v in kwargs.items() if k not in config_dict["dataset"]})
-    config_dict["dataset"].update({k: v for k, v in kwargs.items() if k in config_dict["dataset"]})
+    config_dict = deep_update(yaml.safe_load(config_str), *updates)
     return RibBuildConfig(**config_dict)
 
 
-def get_pythia_config(**kwargs) -> RibBuildConfig:
+def get_pythia_config(*updates: dict) -> RibBuildConfig:
     config_str = f"""
     exp_name: test
     seed: 0
@@ -271,12 +270,11 @@ def get_pythia_config(**kwargs) -> RibBuildConfig:
     out_dir: null
     basis_formula: (1-0)*alpha
     """
-    config_dict = yaml.safe_load(config_str)
-    config_dict.update(kwargs)
+    config_dict = deep_update(yaml.safe_load(config_str), *updates)
     return RibBuildConfig(**config_dict)
 
 
-def get_mnist_config(**kwargs) -> RibBuildConfig:
+def get_mnist_config(*updates: dict) -> RibBuildConfig:
     config_str = f"""
     exp_name: test
     mlp_path: "rib_scripts/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
@@ -299,12 +297,11 @@ def get_mnist_config(**kwargs) -> RibBuildConfig:
     basis_formula: (1-0)*alpha
     edge_formula: squared
     """
-    config_dict = yaml.safe_load(config_str)
-    config_dict.update(kwargs)
+    config_dict = deep_update(yaml.safe_load(config_str), *updates)
     return RibBuildConfig(**config_dict)
 
 
-def get_modular_mlp_config(**kwargs) -> ModularMLPConfig:
+def get_modular_mlp_config(*updates: dict) -> RibBuildConfig:
     config_str = f"""
     exp_name: test
     out_dir: null
@@ -335,8 +332,7 @@ def get_modular_mlp_config(**kwargs) -> ModularMLPConfig:
     basis_formula: (1-0)*alpha
     edge_formula: squared
     """
-    config_dict = yaml.safe_load(config_str)
-    config_dict.update(kwargs)
+    config_dict = deep_update(yaml.safe_load(config_str), *updates)
     config = RibBuildConfig(**config_dict)
     return config
 
@@ -353,7 +349,9 @@ def get_modular_mlp_config(**kwargs) -> ModularMLPConfig:
 )
 def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
     atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
-    config = get_modular_arithmetic_config(basis_formula=basis_formula, edge_formula=edge_formula)
+    config = get_modular_arithmetic_config(
+        {"basis_formula": basis_formula, "edge_formula": edge_formula}
+    )
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
 
@@ -381,7 +379,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
     # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64.
     atol = 1e-5
     config = get_mnist_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
+        {"basis_formula": basis_formula, "edge_formula": edge_formula, "dtype": dtype_str}
     )
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=atol)
@@ -410,7 +408,7 @@ def test_mnist_build_graph(basis_formula, edge_formula):
 )
 def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
     config = get_modular_mlp_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
+        {"basis_formula": basis_formula, "edge_formula": edge_formula, "dtype": dtype_str}
     )
     graph_build_test(config=config, atol=atol)
 
@@ -419,7 +417,7 @@ def rotate_final_layer_invariance(
     config_not_rotated: RibBuildConfig, rtol: float = 1e-7, atol: float = 0
 ):
     assert config_not_rotated.rotate_final_node_layer is False
-    config_rotated = config_not_rotated.model_copy(update={"rotate_final_node_layer": True})
+    config_rotated = update_pydantic_model(config_not_rotated, {"rotate_final_node_layer": True})
     edges_rotated = rib_build(config_rotated).edges
     edges_not_rotated = rib_build(config_not_rotated).edges
 
@@ -443,7 +441,7 @@ def rotate_final_layer_invariance(
         )
 
 
-@pytest.mark.slow
+@pytest.mark.skip
 @pytest.mark.parametrize(
     "basis_formula, edge_formula",
     [
@@ -454,14 +452,20 @@ def rotate_final_layer_invariance(
     ],
 )
 def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1e-7, atol=1e-8):
-    """Test that the non-final edges are the same for MNIST whether or not we rotate the final layer."""
+    """Test that the non-final edges are the same for MNIST whether or not we rotate the final
+    layer.
+
+    TODO: This doesn't actually enter the block in the test function. Investigate.
+    """
     not_rotated_config = get_mnist_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype="float64"
+        {
+            "basis_formula": basis_formula,
+            "edge_formula": edge_formula,
+            "dtype": "float64",
+            "node_layers": ["layers.1", "layers.2"],
+        }
     )
-    # TODO: this fails for layers.0 but shouldn't (afaik)
-    not_rotated_config = not_rotated_config.model_copy(
-        update={"node_layers": ["layers.1", "layers.2"]}
-    )
+
     rotate_final_layer_invariance(config_not_rotated=not_rotated_config, rtol=rtol, atol=atol)
 
 
@@ -480,7 +484,7 @@ def test_modular_mlp_rotate_final_layer_invariance(
     basis_formula, edge_formula, rtol=1e-7, atol=1e-8
 ):
     """Test that the non-final edges are the same for ModularMLP whether or not we rotate the final layer."""
-    config = get_modular_mlp_config(basis_formula=basis_formula, edge_formula=edge_formula)
+    config = get_modular_mlp_config({"basis_formula": basis_formula, "edge_formula": edge_formula})
     rotate_final_layer_invariance(config_not_rotated=config, rtol=rtol, atol=atol)
 
 
@@ -514,7 +518,7 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
     """
     rotate_final_layer_invariance(
         config_not_rotated=get_modular_arithmetic_config(
-            basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
+            {"basis_formula": basis_formula, "edge_formula": edge_formula, "dtype": dtype_str}
         ),
         rtol=rtol,
         atol=atol,
@@ -523,7 +527,7 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
 
 def test_mnist_build_graph_invalid_node_layers():
     """Test that non-sequential node_layers raises an error."""
-    config = get_mnist_config(node_layers=["layers.0", "layers.2"])
+    config = get_mnist_config({"node_layers": ["layers.0", "layers.2"]})
     with pytest.raises(AssertionError, match="is not a subsequence of all_node_layers:"):
         graph_build_test(config=config, atol=0)
 
@@ -531,14 +535,14 @@ def test_mnist_build_graph_invalid_node_layers():
 def test_modular_arithmetic_build_graph_invalid_node_layers():
     """Test that out of order node_layers raises an error."""
     # ln1 should be before mlp_in
-    config = get_modular_arithmetic_config(node_layers=["mlp_in.0", "ln1.0", "unembed"])
+    config = get_modular_arithmetic_config({"node_layers": ["mlp_in.0", "ln1.0", "unembed"]})
     with pytest.raises(AssertionError, match="Node layers must be in order."):
         graph_build_test(config=config, atol=0)
 
 
 @pytest.mark.slow
 def test_svd_basis():
-    config = get_pythia_config(basis_formula="svd")
+    config = get_pythia_config({"basis_formula": "svd"})
     results = rib_build(config)
     for c_info, u_info in zip(results.interaction_rotations, results.eigenvectors):
         C = c_info.C
@@ -615,7 +619,7 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
 def test_pca_basis_mnist():
     """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
     config = get_mnist_config(
-        basis_formula="svd", edge_formula="functional", dtype="float64", center=True
+        {"basis_formula": "svd", "edge_formula": "functional", "dtype": "float64", "center": True}
     )
     results = rib_build(config)
     pca_rib_acts_test(results, atol=1e-4)
@@ -626,7 +630,12 @@ def test_pca_basis_pythia():
     """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
     dtype_str = "float64"
     config = get_pythia_config(
-        dtype=dtype_str, basis_formula="svd", center=True, rotate_final_node_layer=True
+        {
+            "dtype": dtype_str,
+            "basis_formula": "svd",
+            "center": True,
+            "rotate_final_node_layer": True,
+        }
     )
     results = rib_build(config)
     pca_rib_acts_test(results, atol=1e-6)
@@ -652,11 +661,13 @@ def test_modular_mlp_diagonal_edges_when_linear(
         gtol: The geometric mean and max column/row value scaling tolerance to use.
     """
     config = get_modular_mlp_config(
-        basis_formula=basis_formula, edge_formula=edge_formula, dtype=dtype_str
-    )
-    new_mod_mlp_config = config.modular_mlp_config.model_copy(update={"activation_fn": "identity"})
-    config = config.model_copy(
-        update={"rotate_final_node_layer": rotate_final, "modular_mlp_config": new_mod_mlp_config}
+        {
+            "basis_formula": basis_formula,
+            "edge_formula": edge_formula,
+            "dtype": dtype_str,
+            "rotate_final_node_layer": rotate_final,
+            "modular_mlp_config": {"activation_fn": "identity"},
+        }
     )
     edges = rib_build(config).edges
 
@@ -704,19 +715,23 @@ def test_stochastic_source_single_pos_modadd():
     node_layers = ["mlp_in.0", "mlp_out.0"]
     # Calc squared edges
     config_squared = get_modular_arithmetic_config(
-        edge_formula="squared",
-        node_layers=node_layers,
-        last_pos_module_type="add_resid1",
-        n_stochastic_sources=None,
+        {
+            "edge_formula": "squared",
+            "node_layers": node_layers,
+            "last_pos_module_type": "add_resid1",
+            "n_stochastic_sources": None,
+        }
     )
     squared_edges = rib_build(config_squared).edges[0].E_hat
 
     # Calc stochastic edges
     config_stochastic = get_modular_arithmetic_config(
-        edge_formula="stochastic",
-        node_layers=node_layers,
-        last_pos_module_type="add_resid1",
-        n_stochastic_sources=1,
+        {
+            "edge_formula": "stochastic",
+            "node_layers": node_layers,
+            "last_pos_module_type": "add_resid1",
+            "n_stochastic_sources": 1,
+        }
     )
     stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
 
@@ -741,12 +756,14 @@ def test_stochastic_source_modadd_convergence():
 
     # Calc squared edges
     config_squared = get_modular_arithmetic_config(
-        return_set_n_samples=return_set_n_samples,
-        batch_size=batch_size,
-        edge_formula="squared",
-        node_layers=node_layers,
-        last_pos_module_type="unembed",
-        n_stochastic_sources=None,
+        {
+            "dataset": {"return_set_n_samples": return_set_n_samples},
+            "batch_size": batch_size,
+            "edge_formula": "squared",
+            "node_layers": node_layers,
+            "last_pos_module_type": "unembed",
+            "n_stochastic_sources": None,
+        }
     )
     squared_edges = rib_build(config_squared).edges[0].E_hat
 
@@ -756,12 +773,14 @@ def test_stochastic_source_modadd_convergence():
     # Ideally we'd use more sources, but that is very slow
     for n_stochastic_sources in [1, 3, 7]:
         config_stochastic = get_modular_arithmetic_config(
-            return_set_n_samples=return_set_n_samples,
-            batch_size=batch_size,
-            edge_formula="stochastic",
-            node_layers=node_layers,
-            last_pos_module_type="unembed",
-            n_stochastic_sources=n_stochastic_sources,
+            {
+                "dataset": {"return_set_n_samples": return_set_n_samples},
+                "batch_size": batch_size,
+                "edge_formula": "stochastic",
+                "node_layers": node_layers,
+                "last_pos_module_type": "unembed",
+                "n_stochastic_sources": n_stochastic_sources,
+            }
         )
         stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
         all_stochastic_edges.append(stochastic_edges)

@@ -5,6 +5,7 @@ import pytest
 import torch
 import yaml
 from mpi4py import MPI
+from pydantic.v1.utils import deep_update
 from torch.utils.data import ConcatDataset, TensorDataset
 
 from rib.edge_combiner import combine_edges
@@ -15,7 +16,7 @@ from rib.settings import REPO_ROOT
 
 @pytest.mark.slow
 class TestDistributed:
-    def make_config_dict(self, exp_name: str, **kwargs):
+    def make_config_dict(self, exp_name: str, *updates: dict) -> dict[str, Any]:
         config_str = f"""
         exp_name: {exp_name}
         seed: 0
@@ -40,15 +41,15 @@ class TestDistributed:
         eval_type: accuracy
         out_dir: null
         """
-        config_dict: dict[str, Any] = yaml.safe_load(config_str)
-        config_dict.update(kwargs)
-        return config_dict
+        return deep_update(yaml.safe_load(config_str), *updates)
 
     def get_single_edges(self, tmpdir):
         single_config_dict = self.make_config_dict(
             "test_single",
-            calculate_edges=True,
-            interaction_matrices_path=f"{tmpdir}/compute_cs_rib_Cs.pt",
+            {
+                "calculate_edges": True,
+                "interaction_matrices_path": f"{tmpdir}/compute_cs_rib_Cs.pt",
+            },
         )
         return rib_build(RibBuildConfig(**single_config_dict)).edges
 
@@ -64,14 +65,16 @@ class TestDistributed:
         double_config_path = f"{tmpdir}/double_config.yaml"
         double_outdir_path = f"{tmpdir}/double_out/"
 
-        double_config = self.make_config_dict(
+        double_config_dict = self.make_config_dict(
             "test_double",
-            calculate_edges=True,
-            interaction_matrices_path=f"{tmpdir}/compute_cs_rib_Cs.pt",
-            out_dir=double_outdir_path,
+            {
+                "calculate_edges": True,
+                "interaction_matrices_path": f"{tmpdir}/compute_cs_rib_Cs.pt",
+                "out_dir": double_outdir_path,
+            },
         )
         with open(double_config_path, "w") as f:
-            yaml.dump(double_config, f)
+            yaml.dump(double_config_dict, f)
 
         # mpi might be initialized which causes problems for running an mpiexec subcommand.
         MPI.Finalize()
@@ -86,7 +89,7 @@ class TestDistributed:
         # first we compute the cs. we do this separately as there are occasional reproducibility
         # issues with computing them.
         cs_config = RibBuildConfig(
-            **self.make_config_dict("compute_cs", out_dir=tmpdir, calculate_edges=False)
+            **self.make_config_dict("compute_cs", {"out_dir": tmpdir, "calculate_edges": False})
         )
         rib_build(cs_config)
         # not using fixtures as we need to compute Cs first

@@ -102,7 +102,7 @@ def test_modular_arithmetic_conversion() -> None:
         },
         "blocks.1.hook_mlp_out": {
             "section_id": "sections.section_0.10",
-            "tuple_idx": 1,
+            "tuple_idx": 0,
         },
     }
     outputA, cacheA = tlens_model.run_with_cache(input_ids)
@@ -295,7 +295,7 @@ def test_pythia_conversion():
         },
         "blocks.3.hook_mlp_out": {
             "section_id": "sections.section_0.21",
-            "tuple_idx": 1,
+            "tuple_idx": 0,
         },
         "blocks.4.hook_resid_post": {
             "section_id": "sections.section_0.31",

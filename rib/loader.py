@@ -466,6 +466,7 @@ def load_model_and_dataset_from_rib_config(
         )
     model.eval()
     dataset_config = dataset_config or rib_config.dataset
+
     dataset = load_dataset(
         dataset_config=dataset_config,
         model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,

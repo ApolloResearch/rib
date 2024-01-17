@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from einops import rearrange
 from fancy_einsum import einsum
-from jaxtyping import Float, Int
+from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
 
@@ -12,10 +12,10 @@ from rib.types import TORCH_DTYPES, StrDtype
 
 
 def eigendecompose(
-    x: Float[Tensor, "d_hidden d_hidden"],
+    x: Float[Tensor, "orig orig"],
     descending: bool = True,
     dtype: StrDtype = "float64",
-) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
+) -> tuple[Float[Tensor, "orig"], Float[Tensor, "orig orig"]]:
     """Calculate eigenvalues and eigenvectors of a real symmetric matrix.
 
     Eigenvectors are returned as columns of a matrix, sorted in descending order of eigenvalues.
@@ -34,7 +34,7 @@ def eigendecompose(
         dtype: The precision in which to perform the eigendecomposition.
             Values below torch.float64 tend to be very unstable.
     Returns:
-        eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
+        eigenvalues: Vector of the eigenvalues of x.
         eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
     in_dtype = x.dtype
@@ -50,11 +50,48 @@ def eigendecompose(
     return eigenvalues, eigenvectors
 
 
+def move_const_dir_first(
+    D_dash: Float[Tensor, "d_hidden"],
+    U_dash: Float[Tensor, "d_hidden d_hidden"],
+) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
+    """
+    Finds the constant direction in D and U and moves it to the first position.
+
+    When performing centered RIB we expect there to be a unique direction with constant activation
+    that encodes the mean activation. We special-handle this RIB direction in various places and
+    it's thus convenient to ensure it's first in our basis.
+
+    This function finds that direction, asserts it's unique, and rearranges U, D to put it first.
+
+    We use the eigenvalues as sometimes there are directions with non-zero bias component but
+    very small eigenvalues. We don't want these to trigger the assert.
+
+    Args:
+        D_dash: Eigenvalues of gram matrix.
+        U_dash: Eigenvectors of gram matrix.
+    """
+    # we expect the const dir to have non-zero component in the bias dir and nonzero eigenvalue
+    threshold = 1e-6
+    nonzero_in_bias_component = U_dash[-1, :].abs() > threshold
+    nonzero_eigenval = D_dash.abs() > threshold
+    is_const_dir = nonzero_in_bias_component & nonzero_eigenval
+    assert is_const_dir.any(), "No const direction found"
+    assert is_const_dir.sum() == 1, "More than one const direction found"
+    const_dir_idx = is_const_dir.nonzero()[0, 0].item()
+    # move the const dir to the first position
+    order = torch.tensor(
+        [const_dir_idx] + [i for i in range(D_dash.shape[0]) if i != const_dir_idx]
+    )
+    D_dash = D_dash[order]
+    U_dash = U_dash[:, order]
+    return D_dash, U_dash
+
+
 def calc_rotation_matrix(
-    vecs: Float[Tensor, "d_hidden d_hidden_trunc"],
-    vecs_pinv: Float[Tensor, "d_hidden_trunc d_hidden"],
+    vecs: Float[Tensor, "orig orig_trunc"],
+    vecs_pinv: Float[Tensor, "orig_trunc orig"],
     n_ablated_vecs: int,
-) -> Float[Tensor, "d_hidden d_hidden"]:
+) -> Float[Tensor, "orig orig"]:
     """Calculate the matrix to rotates into and out of a new basis with optional ablations.
 
     This can be used for rotating to and from an eigenbasis or interaction basis (or any other
@@ -95,13 +132,13 @@ def calc_rotation_matrix(
 
 
 def _fold_jacobian_pos_recursive(
-    x: Union[Float[Tensor, "batch out_pos out_hidden in_pos in_hidden"], tuple]
-) -> Union[Float[Tensor, "batch out_pos_hidden in_pos_hidden"], tuple]:
-    """Recursively fold the pos dimension into the hidden dimension."""
+    x: Union[Float[Tensor, "batch out_pos orig_out in_pos orig_in"], tuple]
+) -> Union[Float[Tensor, "batch pos_orig_out pos_orig_in"], tuple]:
+    """Recursively fold the pos dimension into the final dimension."""
     if isinstance(x, torch.Tensor):
         out = rearrange(
             x,
-            "batch out_pos out_hidden in_pos in_hidden -> batch (out_pos out_hidden) (in_pos in_hidden)",
+            "batch out_pos orig_out in_pos orig_in -> batch (out_pos orig_out) (in_pos orig_in)",
         )
         return out
     elif isinstance(x, tuple):
@@ -139,12 +176,12 @@ def pinv_diag(x: Float[Tensor, "a a"]) -> Float[Tensor, "a a"]:
 
 
 def module_hat(
-    f_in_hat: Float[Tensor, "... in_hidden_trunc"],
+    f_in_hat: Float[Tensor, "... rib_in"],
     in_tuple_dims: list[int],
     module: torch.nn.Module,
-    C_in_pinv: Float[Tensor, "in_hidden_trunc in_hidden"],
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
-) -> Float[Tensor, "... out_hidden_trunc"]:
+    C_in_pinv: Float[Tensor, "rib_in orig_in"],
+    C_out: Optional[Float[Tensor, "orig_out rib_out"]],
+) -> Float[Tensor, "... rib_out"]:
     """Run a module in the RIB basis, f_hat^{l} --> f_hat^{l+1}.
 
     This converts the input f_in_hat to f_in (using C_in_pinv), splits it into a tuple (using
@@ -158,16 +195,15 @@ def module_hat(
         C_in_pinv: The pseudo-inverse of input RIB rotation.
         C_out: The output RIB rotation.
 
-
     Returns:
         f_out_hat: The module output in the RIB basis.
     """
-    f_in: Float[Tensor, "... in_hidden"] = f_in_hat @ C_in_pinv
+    f_in: Float[Tensor, "... orig_in"] = f_in_hat @ C_in_pinv
     f_in_tuple = torch.split(f_in, in_tuple_dims, dim=-1)
     f_out_tuple = module(*f_in_tuple)
     f_out = f_out_tuple if isinstance(f_out_tuple, torch.Tensor) else torch.cat(f_out_tuple, dim=-1)
 
-    f_out_hat: Float[Tensor, "... out_hidden_trunc"] = f_out @ C_out if C_out is not None else f_out
+    f_out_hat: Float[Tensor, "... rib_out"] = f_out @ C_out if C_out is not None else f_out
 
     return f_out_hat
 
@@ -213,12 +249,10 @@ def _calc_integration_intervals(
 
 
 def calc_edge_functional(
-    module_hat: Callable[
-        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
-    ],
-    f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
+    module_hat: Callable[[Float[Tensor, "... rib_in"], list[int]], Float[Tensor, "... rib_out"]],
+    f_in_hat: Float[Tensor, "... rib_out"],
     in_tuple_dims: list[int],
-    edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
     tqdm_desc: str = "Integration steps (alphas)",
@@ -268,9 +302,7 @@ def calc_edge_functional(
         alpha_f_in_hat = alpha * f_in_hat
         f_out_hat_alpha = module_hat(alpha_f_in_hat, in_tuple_dims)
 
-        f_out_hat_norm: Float[Tensor, "... out_hidden_combined_trunc"] = (
-            f_out_hat_const - f_out_hat_alpha
-        ) ** 2
+        f_out_hat_norm: Float[Tensor, "... rib_out"] = (f_out_hat_const - f_out_hat_alpha) ** 2
         if has_pos:
             # Sum over the position dimension
             f_out_hat_norm = f_out_hat_norm.sum(dim=1)
@@ -299,12 +331,10 @@ def calc_edge_functional(
 
 
 def calc_edge_squared(
-    module_hat: Callable[
-        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
-    ],
-    f_in_hat: Float[Tensor, "... out_hidden_combined_trunc"],
+    module_hat: Callable[[Float[Tensor, "... rib_in"], list[int]], Float[Tensor, "... rib_out"]],
+    f_in_hat: Float[Tensor, "... rib_out"],
     in_tuple_dims: list[int],
-    edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
     tqdm_desc: str = "Integration steps (alphas)",
@@ -332,7 +362,7 @@ def calc_edge_squared(
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
-    out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = edge.shape
+    rib_out_size, rib_in_size = edge.shape
     if has_pos:
         # Just run the model to see what the output pos size is
         with torch.inference_mode():
@@ -341,20 +371,9 @@ def calc_edge_squared(
     # Accumulate integral results for all x (batch) and t (out position) values.
     # We store values because we need to square the integral result before summing.
     J_hat = (
-        torch.zeros(
-            batch_size,
-            out_pos_size,
-            out_hidden_size_comb_trunc,
-            in_hidden_size_comb_trunc,
-            device=f_in_hat.device,
-        )
+        torch.zeros(batch_size, out_pos_size, rib_out_size, rib_in_size, device=f_in_hat.device)
         if has_pos
-        else torch.zeros(
-            batch_size,
-            out_hidden_size_comb_trunc,
-            in_hidden_size_comb_trunc,
-            device=f_in_hat.device,
-        )
+        else torch.zeros(batch_size, rib_out_size, rib_in_size, device=f_in_hat.device)
     )
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
@@ -374,10 +393,7 @@ def calc_edge_squared(
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output.
         for out_dim in tqdm(
-            range(out_hidden_size_comb_trunc),
-            total=out_hidden_size_comb_trunc,
-            desc="Iteration over output dims",
-            leave=False,
+            range(rib_out_size), total=rib_out_size, desc="Iteration over output dims", leave=False
         ):
             if has_pos:
                 for output_pos_idx in range(out_pos_size):
@@ -404,9 +420,7 @@ def calc_edge_squared(
             else:
                 i_grad = (
                     torch.autograd.grad(
-                        f_out_alpha_hat[:, out_dim].sum(dim=0),
-                        alpha_f_in_hat,
-                        retain_graph=True,
+                        f_out_alpha_hat[:, out_dim].sum(dim=0), alpha_f_in_hat, retain_graph=True
                     )[0]
                     * trapezoidal_scaler
                 )
@@ -421,12 +435,10 @@ def calc_edge_squared(
 
 
 def calc_edge_stochastic(
-    module_hat: Callable[
-        [Float[Tensor, "... in_hidden_trunc"], list[int]], Float[Tensor, "... out_hidden_trunc"]
-    ],
-    f_in_hat: Float[Tensor, "... pos out_hidden_combined_trunc"],
+    module_hat: Callable[[Float[Tensor, "... rib_in"], list[int]], Float[Tensor, "... rib_out"]],
+    f_in_hat: Float[Tensor, "... pos rib_out"],
     in_tuple_dims: list[int],
-    edge: Float[Tensor, "out_hidden_combined_trunc in_hidden_combined_trunc"],
+    edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
     n_stochastic_sources: int,
@@ -457,7 +469,7 @@ def calc_edge_stochastic(
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
-    out_hidden_size_comb_trunc, in_hidden_size_comb_trunc = edge.shape
+    rib_out_size, rib_in_size = edge.shape
 
     # Just run the model to see what the output pos size is
     with torch.inference_mode():
@@ -466,11 +478,7 @@ def calc_edge_stochastic(
     # Accumulate integral results for all x (batch) and r (stochastic dim) values.
     # We store values because we need to square the integral result before summing.
     J_hat = torch.zeros(
-        batch_size,
-        n_stochastic_sources,
-        out_hidden_size_comb_trunc,
-        in_hidden_size_comb_trunc,
-        device=f_in_hat.device,
+        batch_size, n_stochastic_sources, rib_out_size, rib_in_size, device=f_in_hat.device
     )
 
     # Create phis that are -1 or 1 with equal probability
@@ -496,10 +504,7 @@ def calc_edge_stochastic(
 
         # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
         for out_dim in tqdm(
-            range(out_hidden_size_comb_trunc),
-            total=out_hidden_size_comb_trunc,
-            desc="Iteration over output dims",
-            leave=False,
+            range(rib_out_size), total=rib_out_size, desc="Iteration over output dims", leave=False
         ):
             for r in range(n_stochastic_sources):
                 # autograd gives us the derivative w.r.t. in_batch, in_pos, in_dim.
@@ -531,13 +536,14 @@ def calc_edge_stochastic(
 def integrated_gradient_trapezoidal_norm(
     module: torch.nn.Module,
     inputs: Union[
-        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch emb_in"]],
+        tuple[Float[Tensor, "batch pos emb_in"]],
         tuple[Float[Tensor, "batch pos _"], ...],
     ],
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
+    C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     n_intervals: int,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
-) -> Float[Tensor, "... in_hidden_combined"]:
+) -> Float[Tensor, "... orig_in"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
     following the definition of e.g. g() in equation (3.27) of the paper. This means we compute the
     derivative of f^{l+1}(x) - f^{l+1}(f^l(alpha x)) where module(·) is f^{l+1}(·).
@@ -559,11 +565,14 @@ def integrated_gradient_trapezoidal_norm(
             latter is a new (November) version that should be used from now on. The latter makes
             sense especially in light of the new attribution (edge_formula="squared") but is
             generally good and does not change results much. Defaults to "(1-0)*alpha".
+
+    Returns:
+        The integrated gradient of the norm of the module output w.r.t. its inputs.
     """
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         output_const = module(*tuple(x.detach().clone() for x in inputs))
-        # Concatenate the outputs over the hidden dimension
+        # Concatenate the outputs over the final dimension
         out_acts_const = (
             output_const
             if isinstance(output_const, torch.Tensor)
@@ -571,7 +580,7 @@ def integrated_gradient_trapezoidal_norm(
         )
         if basis_formula == "(1-0)*alpha":
             output_zero = module(*tuple(torch.zeros_like(x) for x in inputs))
-            # Concatenate the outputs over the hidden dimension
+            # Concatenate the outputs over the final dimension
             out_acts_zero = (
                 output_zero
                 if isinstance(output_zero, torch.Tensor)
@@ -590,7 +599,7 @@ def integrated_gradient_trapezoidal_norm(
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
-        # Concatenate the outputs over the hidden dimension
+        # Concatenate the outputs over the final dimension
         out_acts_alpha = (
             output_alpha
             if isinstance(output_alpha, torch.Tensor)
@@ -643,11 +652,11 @@ def integrated_gradient_trapezoidal_norm(
 
 def calc_gram_matrix(
     acts: Union[
-        Float[Tensor, "batch pos d_hidden"],
-        Float[Tensor, "batch d_hidden"],
+        Float[Tensor, "batch pos orig"],
+        Float[Tensor, "batch orig"],
     ],
     dataset_size: int,
-) -> Float[Tensor, "d_hidden d_hidden"]:
+) -> Float[Tensor, "orig orig"]:
     """Calculate the gram matrix for a given tensor.
 
     The gram is normalized by the number of positions if the tensor has a position dimension.
@@ -674,27 +683,25 @@ def calc_gram_matrix(
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
 
 
-def shift_matrix(
-    shift: Float[torch.Tensor, "n"], bias_positions: Int[torch.Tensor, "sections"]
-) -> Float[torch.Tensor, "n n"]:
+def centering_matrix(
+    mean: Float[torch.Tensor, "emb"],
+    inverse: bool = False,
+) -> Float[torch.Tensor, "emb emb"]:
     """
-    Returns a matrix S such that `x @ S = shifted_x`, for x with `x[bias_positions] = 1`.
-    `shifted_x` is `x + shift` at all non bias positions, and still 1 at all bias positions. The value of `shift` at bias positions is ignored.
+    Returns a matrix S such that `x @ S = x - mean` (everywhere except the last position of x)
 
+    If inverse=True, instead returns the inverse (a matrix that adds the mean back to x)
     Example:
-        >>> shift = torch.tensor([2., 2., 4., 4.])
-        >>> bias_positions = torch.tensor([1, 3])
-        >>> shift_matrix(shift, bias_positions)
+        >>> mean = torch.tensor([2., 2., 4., 1.])
+        >>> shift_matrix(mean, inverse=False)
         tensor([[1., 0., 0., 0.],
-                [1., 1., 2., 0.],
+                [0., 1., 0., 0.],
                 [0., 0., 1., 0.],
-                [1., 0., 2., 1.]])
+                [-2., -2., -4., 1.]])
     """
-    assert shift.ndim == 1, "shift must be 1d"
-    n = shift.shape[0]
-    S = torch.eye(n, dtype=shift.dtype, device=shift.device)
-    assert (n - 1) in bias_positions
-    shift = shift / len(bias_positions)  # we'll spread the shift out across bias pos
-    shift[bias_positions] = 0  # we don't shift at bias positions
-    S[bias_positions, :] += shift[None, :]
+    assert mean.ndim == 1, "mean must be 1d"
+    assert (mean[-1].abs() - 1).abs() < 1e-6, "last element of mean must be 1 or -1"
+    S = torch.eye(mean.shape[0], dtype=mean.dtype, device=mean.device)
+    shift = mean.clone() if inverse else -mean.clone()
+    S[-1, :-1] = shift[:-1]  # don't shift the bias position
     return S

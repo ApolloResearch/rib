@@ -57,11 +57,13 @@ def check_accuracies(
             accuracies are roughly sorted.
     """
     # Check that there are accuracies returned
-    assert list(accuracies.keys()) == config.ablation_node_layers, (
-        f"Expected accuracies for {config.ablation_node_layers}, but got "
-        f"{list(accuracies.keys())}"
+    expected_layers = (
+        config.ablation_node_layers[:-1] if config.edge_ablation else config.ablation_node_layers
     )
-    for layer_key in config.ablation_node_layers:
+    assert list(accuracies.keys()) == expected_layers, (
+        f"Expected accuracies for {expected_layers}, but got " f"{list(accuracies.keys())}"
+    )
+    for layer_key in expected_layers:
         vecs_remaining = list(accuracies[layer_key].keys())
         accuracy_vals = list(accuracies[layer_key].values())
 
@@ -92,7 +94,8 @@ def check_accuracies(
 
 
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
-def test_run_mnist_ablations(ablation_type):
+@pytest.mark.parametrize("edge_ablation", [False, True])
+def test_run_mnist_ablations(ablation_type, edge_ablation):
     """Test various ablation result properties for ablations on MNIST.
 
     The ablation rib_scripts load model from the config of the RIB graph. To run on ci
@@ -132,6 +135,7 @@ def test_run_mnist_ablations(ablation_type):
     seed: 0
     out_dir: null
     eval_type: accuracy
+    edge_ablation: {edge_ablation}
     """
     config_dict = yaml.safe_load(config_str)
     config = AblationConfig(**config_dict)

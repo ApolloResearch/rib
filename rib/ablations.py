@@ -5,7 +5,7 @@ from typing import Callable, Literal, Optional, Union
 
 import numpy as np
 import torch
-from jaxtyping import Float
+from jaxtyping import Bool, Float
 from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -16,7 +16,8 @@ from rib.data import (
     ModularArithmeticDatasetConfig,
     VisionDatasetConfig,
 )
-from rib.hook_fns import rotate_pre_forward_hook_fn
+from rib.data_accumulator import Edges
+from rib.hook_fns import edge_ablation_forward_hook_fn, rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import Eigenvectors, InteractionRotation
 from rib.linalg import calc_rotation_matrix
@@ -36,6 +37,7 @@ from rib.utils import (
 BasisVecs = Union[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden d_hidden"]]
 BasisVecsPinv = Union[Float[Tensor, "d_hidden_trunc d_hidden"], Float[Tensor, "d_hidden d_hidden"]]
 AblationAccuracies = dict[str, dict[int, float]]
+EdgeMasks = dict[str, dict[int, Bool[Tensor, "out in"]]]
 
 
 class ScheduleConfig(BaseModel):
@@ -179,6 +181,11 @@ class AblationConfig(BaseModel):
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     ablation_type: Literal["rib", "orthogonal"]
+    edge_ablation: bool = Field(
+        False,
+        description="Whether to perform edge ablation experiments. If False, we perform node "
+        "ablation experiments.",
+    )
     rib_results_path: RootPath
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
         ...,
@@ -344,6 +351,149 @@ def load_basis_matrices(
     return basis_matrices
 
 
+@torch.inference_mode()
+def ablate_edges_in_multiple_layers(
+    basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]],
+    edges: list[Edges],
+    num_edges_to_keep: list[int],
+    hooked_model: HookedModel,
+    data_loader: DataLoader,
+    eval_fn: Callable,
+    module_names: list[str],
+    device: str,
+    dtype: Optional[torch.dtype] = None,
+) -> float:
+    """Perform a single edge ablation experiment on multiple layers.
+
+    Args:
+        edge_masks: A dictionary mapping node layers to edge masks.
+        interaction_rotations: The interaction rotations for all node layers.
+        hooked_model: The hooked model.
+        data_loader: The data loader to use for testing.
+        eval_fn: The function to use to evaluate the model.
+        device: The device to run the model on.
+        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
+    """
+    paired_basis = zip(basis_matrices[:-1], basis_matrices[1:])
+    hooks = []
+    for module_name, basis_pair, layer_edges, layer_num_edges_to_keep in zip(
+        module_names[-1], paired_basis, edges, num_edges_to_keep
+    ):
+        if layer_num_edges_to_keep > layer_edges.E_hat.numel():
+            # no ablation in this layer so no hook needed
+            continue
+
+        threshold = torch.topk(layer_edges.E_hat.flatten(), k=layer_num_edges_to_keep).values[-1]
+        edge_mask = layer_edges.E_hat >= threshold
+
+        (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
+        hook = Hook(
+            name=module_name,
+            data_key="edge_ablation",
+            fn=edge_ablation_forward_hook_fn,
+            module_name=module_name,
+            fn_kwargs={
+                "edge_mask": edge_mask,
+                "in_C": in_C.to(device),
+                "in_C_inv": in_C_inv.to(device),
+                "out_C": out_C.to(device),
+                "out_C_inv": out_C_inv.to(device),
+            },
+        )
+        hooks.append(hook)
+
+    return eval_fn(hooked_model, data_loader, hooks=hooks, dtype=dtype, device=device)
+
+
+@torch.inference_mode()
+def ablate_edges_and_eval(
+    basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]],
+    ablation_node_layers: list[str],
+    edges: list[Edges],
+    hooked_model: HookedModel,
+    data_loader: DataLoader,
+    eval_fn: Callable,
+    module_names: list[str],
+    schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
+    device: str,
+    dtype: Optional[torch.dtype] = None,
+) -> tuple[AblationAccuracies, EdgeMasks]:
+    """Perform a series of edge ablation experiments across layers and multiple # of edges to keep.
+
+    Note that we want our ablation schedules for different bases to match up, even though different
+    bases may have different number of basis vectors due to truncation. We therefore create our
+    ablation schedule assuming a non-truncated basis (i.e. using the full possible # of edges,
+    out_dim * in_dim. This can be very large).
+
+    Args:
+        interaction_rotations:
+        ablation_node_layers: The names of the node layers whose (rotated) inputs we want to ablate.
+        hooked_model: The hooked model.
+        data_loader: The data loader to use for testing.
+        eval_fn: The function to use to evaluate the model.
+        module_names: The names of the modules to apply the ablations. Can be any valid pytorch
+            module in hooked_model.model. These typically correspond to section_names (e.g.
+            "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
+            "layers.2") when the model is an MLP.
+        schedule_config: The config for the ablation schedule.
+        device: The device to run the model on.
+        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
+
+    Returns:
+        A dictionary mapping node layers to ablation accuracies/losses.
+    """
+    base_score = eval_fn(hooked_model, data_loader, hooks=[], dtype=dtype, device=device)
+
+    results: AblationAccuracies = {}
+    edge_masks: EdgeMasks = {}
+    basis_pairs = zip(basis_matrices[:-1], basis_matrices[1:])
+    for ablation_node_layer, module_name, basis_pair, layer_edges in zip(
+        ablation_node_layers[:-1], module_names[:-1], basis_pairs, edges
+    ):
+        (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
+        total_possible_edges = in_C.shape[0] * out_C.shape[1]
+        ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=total_possible_edges)
+        results[ablation_node_layer] = {}
+        edge_masks[ablation_node_layer] = {}
+        # Iterate through possible number of ablated vectors, starting from no ablated vectors
+        for num_edges_ablated in tqdm(
+            ablation_schedule[::-1], total=len(ablation_schedule), desc=f"Ablating {module_name}"
+        ):
+            num_edges_kept = total_possible_edges - num_edges_ablated
+            if num_edges_kept > layer_edges.E_hat.numel():
+                results[ablation_node_layer][num_edges_kept] = base_score
+                continue
+
+            threshold = torch.topk(layer_edges.E_hat.flatten(), k=num_edges_kept).values[-1]
+            edge_mask = layer_edges.E_hat >= threshold
+            edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
+
+            hook = Hook(
+                name=module_name,
+                data_key="edge_ablation",
+                fn=edge_ablation_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={
+                    "edge_mask": edge_mask,
+                    "in_C": in_C.to(device),
+                    "in_C_inv": in_C_inv.to(device),
+                    "out_C": out_C.to(device),
+                    "out_C_inv": out_C_inv.to(device),
+                },
+            )
+
+            score = eval_fn(hooked_model, data_loader, hooks=[hook], dtype=dtype, device=device)
+            results[ablation_node_layer][num_edges_kept] = score
+
+            if schedule_config.early_stopping_threshold is not None:
+                # If the score is more than `early_stopping_threshold` away from the base result,
+                # then we stop ablating vectors.
+                if abs(score - base_score) > schedule_config.early_stopping_threshold:
+                    break
+
+    return results, edge_masks
+
+
 def load_bases_and_ablate(
     config_path_or_obj: Union[str, AblationConfig], force: bool = False
 ) -> AblationAccuracies:
@@ -364,7 +514,7 @@ def load_bases_and_ablate(
 
     Args:
         config_path_or_obj: The path to the config file or the config object itself.
-        force: Whether to overwrite existing output files.
+        force: Whether to overwrite existing output files.`
 
     Returns:
         A dictionary mapping node layers to accuracies/losses. If the config has an out_dir, the
@@ -385,6 +535,11 @@ def load_bases_and_ablate(
     assert set(config.ablation_node_layers) <= set(
         rib_results.config.node_layers
     ), "The node layers in the config must be a subset of the node layers in the RIB graph."
+    if config.edge_ablation:
+        # config.node_layers must be a subsequence of loaded_config.node_layers
+        assert "|".join(config.ablation_node_layers) in "|".join(
+            rib_results.config.node_layers
+        ), "node_layers in the config must be a subsequence of the node layers in the RIB graph."
 
     assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
@@ -423,17 +578,33 @@ def load_bases_and_ablate(
         assert isinstance(model, SequentialTransformer)
         module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
-    ablation_results: AblationAccuracies = ablate_node_layers_and_eval(
-        basis_matrices=basis_matrices,
-        ablation_node_layers=config.ablation_node_layers,
-        hooked_model=hooked_model,
-        data_loader=data_loader,
-        eval_fn=eval_fn,
-        module_names=module_names,
-        schedule_config=config.schedule,
-        device=device,
-        dtype=dtype,
-    )
+    if config.edge_ablation:
+        edges_dict = {info.in_node_layer_name: info for info in rib_results.edges}
+        edges = [edges_dict[layer] for layer in config.ablation_node_layers]
+        ablation_results, edge_masks = ablate_edges_and_eval(
+            basis_matrices=basis_matrices,
+            ablation_node_layers=config.ablation_node_layers,
+            edges=edges,
+            hooked_model=hooked_model,
+            data_loader=data_loader,
+            eval_fn=eval_fn,
+            module_names=module_names,
+            schedule_config=config.schedule,
+            device=device,
+            dtype=dtype,
+        )
+    else:
+        ablation_results = ablate_node_layers_and_eval(
+            basis_matrices=basis_matrices,
+            ablation_node_layers=config.ablation_node_layers,
+            hooked_model=hooked_model,
+            data_loader=data_loader,
+            eval_fn=eval_fn,
+            module_names=module_names,
+            schedule_config=config.schedule,
+            device=device,
+            dtype=dtype,
+        )
 
     time_taken = f"{(time.time() - start_time) / 60:.1f} minutes"
     logger.info("Finished in %s.", time_taken)
@@ -443,6 +614,9 @@ def load_bases_and_ablate(
         "results": ablation_results,
         "time_taken": time_taken,
     }
+    if config.edge_ablation:
+        results["edge_masks"] = edge_masks
+
     if config.out_dir is not None:
         with open(out_file, "w") as f:
             json.dump(results, f)

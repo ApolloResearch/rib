@@ -349,7 +349,7 @@ def load_bases_and_ablate(
     data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
     hooked_model = HookedModel(model)
 
-    # Test model accuracy/loss before running ablations, to be sure
+    # Test model accuracy/loss before running ablations, ta be sure
     eval_fn: Callable = (
         eval_model_accuracy if config.eval_type == "accuracy" else eval_cross_entropy_loss
     )

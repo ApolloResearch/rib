@@ -39,7 +39,6 @@ from pathlib import Path
 from typing import Literal, Optional, Union
 
 import torch
-import yaml
 from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
@@ -69,15 +68,9 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
-from rib.loader import (
-    get_dataset_chunk,
-    load_dataset,
-    load_mlp,
-    load_sequential_transformer,
-)
+from rib.loader import get_dataset_chunk, load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
-    MLP,
     MLPConfig,
     ModularMLPConfig,
     SequentialTransformer,
@@ -397,47 +390,9 @@ def rib_build(
     calc_C_time = None
     calc_edges_time = None
 
-    # Load model
-    model: Union[SequentialTransformer, MLP]
-    if config.mlp_path is not None or config.modular_mlp_config is not None:
-        mlp_config: Union[MLPConfig, ModularMLPConfig]
-        if config.mlp_path is not None:
-            with open(config.mlp_path.parent / "config.yaml", "r") as f:
-                raw_model_config_dict = yaml.safe_load(f)
-            mlp_config = MLPConfig(**raw_model_config_dict["model"])
-        else:
-            assert config.modular_mlp_config is not None
-            mlp_config = config.modular_mlp_config
-
-        model = load_mlp(
-            mlp_config,
-            node_layers=config.node_layers,
-            mlp_path=config.mlp_path,
-            fold_bias=True,
-            device=device,
-            seed=config.seed,
-        ).to(device=torch.device(device), dtype=dtype)
-        assert model.has_folded_bias, "MLP must have folded bias to run RIB"
-    else:
-        model = load_sequential_transformer(
-            node_layers=config.node_layers,
-            last_pos_module_type=config.last_pos_module_type,
-            tlens_pretrained=config.tlens_pretrained,
-            tlens_model_path=config.tlens_model_path,
-            fold_bias=True,
-            dtype=dtype,
-            device=device,
-        )
+    model, dataset = load_model_and_dataset_from_rib_config(config, device=device, dtype=dtype)
     model.eval()
     hooked_model = HookedModel(model)
-
-    # Load dataset
-    dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set=config.dataset.return_set,
-        model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
-        tlens_model_path=config.tlens_model_path,
-    )
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
 
     # Evaluate model on dataset for sanity check

@@ -728,6 +728,7 @@ def centering_matrix(
                 [-2., -2., -4., 1.]])
     """
     assert mean.ndim == 1, "mean must be 1d"
+    assert (mean[-1].abs() - 1).abs() < 1e-6, "last element of mean must be 1 or -1"
     S = torch.eye(mean.shape[0], dtype=mean.dtype, device=mean.device)
     shift = mean.clone() if inverse else -mean.clone()
     S[-1, :-1] = shift[:-1]  # don't shift the bias position

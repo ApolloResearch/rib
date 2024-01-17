@@ -33,7 +33,7 @@ class InteractionRotation(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     node_layer_name: str
-    out_dim: int  # Equal to d_hidden_extra_trunc if C is not None and d_hidden otherwise
+    out_dim: int  # Equal to 'rib' if C is not None and 'orig' otherwise
     # if centering was used, C[:, 0] is the constant direction
     C: Annotated[
         Optional[Float[Tensor, "orig rib"]],
@@ -52,21 +52,18 @@ class Eigenvectors(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     node_layer_name: str
-    out_dim: int  # Equal to d_hidden_trunc if U is not None and d_hidden otherwise
+    out_dim: int  # Equal to orig_trunc if U is not None and orig otherwise
     U: Annotated[
-        Optional[Float[Tensor, "d_hidden d_hidden_trunc"]],
+        Optional[Float[Tensor, "orig orig_trunc"]],
         AfterValidator(check_second_dim_is_out_dim),
         AfterValidator(check_device_is_cpu),
     ] = None
 
 
 def build_sorted_lambda_matrices(
-    Lambda_abs: Float[Tensor, "d_hidden_trunc"],
+    Lambda_abs: Float[Tensor, "orig_trunc"],
     truncation_threshold: float,
-) -> tuple[
-    Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"],
-    Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"],
-]:
+) -> tuple[Float[Tensor, "orig_trunc rib"], Float[Tensor, "rib orig_trunc"],]:
     """Build the sqrt sorted Lambda matrix and its pseudoinverse.
 
     We truncate the Lambda matrix to remove small values.
@@ -80,28 +77,24 @@ def build_sorted_lambda_matrices(
 
     """
     # Get the sort indices in descending order
-    idxs: Int[Tensor, "d_hidden_trunc"] = torch.argsort(Lambda_abs, descending=True)
+    idxs: Int[Tensor, "orig_trunc"] = torch.argsort(Lambda_abs, descending=True)
 
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
 
-    truncated_idxs: Int[Tensor, "d_hidden_extra_trunc"] = (
-        idxs[:-n_small_lambdas] if n_small_lambdas > 0 else idxs
-    )
+    truncated_idxs: Int[Tensor, "rib"] = idxs[:-n_small_lambdas] if n_small_lambdas > 0 else idxs
 
-    Lambda_abs_sqrt: Float[Tensor, "d_hidden_trunc"] = Lambda_abs.sqrt()
+    Lambda_abs_sqrt: Float[Tensor, "orig_trunc"] = Lambda_abs.sqrt()
     # Create a matrix from lambda_vals with the sorted columns and removing n_small_lambdas cols
-    lambda_matrix: Float[Tensor, "d_hidden_trunc d_hidden_extra_trunc"] = torch.diag(
-        Lambda_abs_sqrt
-    )[:, truncated_idxs]
+    lambda_matrix: Float[Tensor, "orig_trunc rib"] = torch.diag(Lambda_abs_sqrt)[:, truncated_idxs]
     # We also need the pseudoinverse of this matrix. We sort and remove the n_small_lambdas rows
-    lambda_matrix_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden_trunc"] = torch.diag(
-        Lambda_abs_sqrt.reciprocal()
-    )[truncated_idxs, :]
+    lambda_matrix_pinv: Float[Tensor, "rib orig_trunc"] = torch.diag(Lambda_abs_sqrt.reciprocal())[
+        truncated_idxs, :
+    ]
 
     assert not torch.any(torch.isnan(lambda_matrix_pinv)), "NaNs in the pseudoinverse."
-    # (lambda_matrix @ lambda_matrix_pinv).diag() should contain d_hidden_extra_trunc 1s and
-    # d_hidden_trunc - d_hidden_extra_trunc 0s
+    # `(lambda_matrix @ lambda_matrix_pinv).diag()` should contain `rib_dim` 1s and
+    # `orig_trunc - rib_dim` 0s
     assert torch.allclose(
         (lambda_matrix @ lambda_matrix_pinv).diag().sum(),
         torch.tensor(lambda_matrix.shape[0] - n_small_lambdas, dtype=lambda_matrix.dtype),
@@ -111,7 +104,7 @@ def build_sorted_lambda_matrices(
 
 
 def calculate_interaction_rotations(
-    gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]],
+    gram_matrices: dict[str, Float[Tensor, "orig orig"]],
     section_names: list[str],
     node_layers: list[str],
     hooked_model: HookedModel,
@@ -191,8 +184,8 @@ def calculate_interaction_rotations(
 
     # The C matrix for the final layer is either the eigenvectors U if rotate_final_node_layer is
     # True, and None otherwise
-    U_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
-    C_output: Optional[Float[Tensor, "d_hidden d_hidden"]] = None
+    U_output: Optional[Float[Tensor, "orig orig"]] = None
+    C_output: Optional[Float[Tensor, "orig orig"]] = None
     if rotate_final_node_layer:
         # We don't use D_output except in finding the index of the const_dir in U
         D_output, U_output = eigendecompose(gram_matrices[node_layers[-1]])
@@ -277,12 +270,12 @@ def calculate_interaction_rotations(
 
         # Trucate all directions with eigenvalues smaller than some threshold
         mask = D_dash > truncation_threshold  # true if we keep the direction
-        D: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = D_dash[mask].diag()
-        U: Float[Tensor, "d_hidden d_hidden_trunc"] = U_dash[:, mask]
+        D: Float[Tensor, "orig_trunc orig_trunc"] = D_dash[mask].diag()
+        U: Float[Tensor, "orig orig_trunc"] = U_dash[:, mask]
 
         ### CENTERING MATRIX (Y)
-        Y: Float[Tensor, "d_hidden d_hidden"]
-        Y_inv: Float[Tensor, "d_hidden d_hidden"]
+        Y: Float[Tensor, "orig orig"]
+        Y_inv: Float[Tensor, "orig orig"]
 
         if center:
             assert means is not None
@@ -329,11 +322,11 @@ def calculate_interaction_rotations(
             basis_formula=basis_formula,
         )
         # Then convert it into the pca basis
-        M: Float[Tensor, "d_hidden_trunc d_hidden_trunc"] = (
+        M: Float[Tensor, "orig_trunc orig_trunc"] = (
             R_inv.to(M_dash.dtype) @ M_dash @ R_inv.T.to(M_dash.dtype)
         )
         # and take it's eigenvector basis as V
-        V: Float[Tensor, "d_hidden_trunc d_hidden_trunc"]
+        V: Float[Tensor, "orig_trunc orig_trunc"]
         if center:
             # We don't want to rotate the constant direction (in the 0th position).
             # We thus eigendecompose a submatrix ignoring the first row and col
@@ -347,18 +340,14 @@ def calculate_interaction_rotations(
 
         ### SCALING MATRIX (Lambda)
         # Tranform lambda_dash (computed in the neuron basis) into our new basis with R and V
-        Lambda_abs: Float[Tensor, "d_hidden_trunc"] = (
-            (V.T @ R_inv @ Lambda_dash @ R @ V).diag().abs()
-        )
+        Lambda_abs: Float[Tensor, "orig_trunc"] = (V.T @ R_inv @ Lambda_dash @ R @ V).diag().abs()
         # Build a matrix for scaling by sqrt(Lambda).
         # This function prunes directions with small Lambdas. This is our second trunctaion.
         L, L_inv = build_sorted_lambda_matrices(Lambda_abs, truncation_threshold)
 
         ### FINAL ROTATION MATRIX (C)
-        C: Float[Tensor, "d_hidden d_hidden_extra_trunc"] = (R @ V @ L).detach().cpu()
-        C_pinv: Float[Tensor, "d_hidden_extra_trunc d_hidden"] = (
-            (L_inv @ V.T @ R_inv).detach().cpu()
-        )
+        C: Float[Tensor, "orig rib"] = (R @ V @ L).detach().cpu()
+        C_pinv: Float[Tensor, "rib orig"] = (L_inv @ V.T @ R_inv).detach().cpu()
         Cs.append(
             InteractionRotation(node_layer_name=node_layer, out_dim=C.shape[1], C=C, C_pinv=C_pinv)
         )

@@ -34,9 +34,7 @@ class Edges(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     in_node_layer_name: str
     out_node_layer_name: str
-    E_hat: Annotated[
-        Float[Tensor, "out_extra_trunc in_extra_trunc"], AfterValidator(check_device_is_cpu)
-    ]
+    E_hat: Annotated[Float[Tensor, "rib_out rib_in"], AfterValidator(check_device_is_cpu)]
 
 
 def run_dataset_through_model(
@@ -76,7 +74,7 @@ def collect_dataset_means(
     dtype: torch.dtype,
     collect_output_dataset_means: bool = True,
     hook_names: Optional[list[str]] = None,
-) -> dict[str, Float[Tensor, "d_hidden"]]:
+) -> dict[str, Float[Tensor, "orig"]]:
     """Collect the mean input activation for each module on the dataset.
 
     Also returns the positions of the bias terms in each input activation. The mean should be
@@ -134,7 +132,7 @@ def collect_dataset_means(
         hooked_model, data_loader, dataset_mean_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    dataset_mean: dict[str, Float[Tensor, "d_hidden"]] = {
+    dataset_mean: dict[str, Float[Tensor, "orig"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["dataset_mean"]
         for hook_name in hooked_model.hooked_data
     }
@@ -159,8 +157,8 @@ def collect_gram_matrices(
     dtype: torch.dtype,
     collect_output_gram: bool = True,
     hook_names: Optional[list[str]] = None,
-    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
-) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
+    means: Optional[dict[str, Float[Tensor, "orig"]]] = None,
+) -> dict[str, Float[Tensor, "orig orig"]]:
     """Collect gram matrices for the module inputs and optionally the output of the final module.
 
     We use pre_forward hooks for the input to each module. If `collect_output_gram` is True, we
@@ -197,7 +195,7 @@ def collect_gram_matrices(
     gram_hooks: list[Hook] = []
     # Add input hooks
     for module_name, hook_name in zip(module_names, hook_names):
-        shift: Optional[Float[Tensor, "d_hidden"]] = None
+        shift: Optional[Float[Tensor, "orig"]] = None
         if means is not None and hook_name in means:
             shift = -means[hook_name]
             shift[-1] = 0.0  # don't shift the final bias pos
@@ -230,7 +228,7 @@ def collect_gram_matrices(
         hooked_model, data_loader, gram_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
+    gram_matrices: dict[str, Float[Tensor, "orig orig"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["gram"]
         for hook_name in hooked_model.hooked_data
     }
@@ -246,7 +244,7 @@ def collect_gram_matrices(
 
 
 def collect_M_dash_and_Lambda_dash(
-    C_out: Optional[Float[Tensor, "out_hidden_extra_trunc out_hidden_extra_trunc"]],
+    C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     hooked_model: HookedModel,
     n_intervals: int,
     data_loader: DataLoader,
@@ -257,7 +255,7 @@ def collect_M_dash_and_Lambda_dash(
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
-) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
+) -> tuple[Float[Tensor, "orig_in orig_in"], Float[Tensor, "orig_in orig_in"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
     We accumulate the matrices, M' and Lambda' for each batch. To do this, we apply

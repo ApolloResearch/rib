@@ -302,9 +302,7 @@ def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildCo
 
 def load_interaction_rotations(
     config: RibBuildConfig,
-) -> tuple[
-    dict[str, Float[Tensor, "d_hidden d_hidden"]], list[InteractionRotation], list[Eigenvectors]
-]:
+) -> tuple[dict[str, Float[Tensor, "orig orig"]], list[InteractionRotation], list[Eigenvectors]]:
     """Load pre-saved C matrices from file. Useful for just calculating edges on large models.
 
     Args:
@@ -420,7 +418,7 @@ def rib_build(
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
-        means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
+        means: Optional[dict[str, Float[Tensor, "orig"]]] = None
         if config.center:
             logger.info("Collecting dataset means")
             means = collect_dataset_means(

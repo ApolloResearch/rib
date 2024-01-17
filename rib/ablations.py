@@ -33,8 +33,8 @@ from rib.utils import (
     set_seed,
 )
 
-BasisVecs = Union[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden d_hidden"]]
-BasisVecsPinv = Union[Float[Tensor, "d_hidden_trunc d_hidden"], Float[Tensor, "d_hidden d_hidden"]]
+BasisVecs = Union[Float[Tensor, "orig orig_trunc"], Float[Tensor, "orig orig"]]
+BasisVecsPinv = Union[Float[Tensor, "orig_trunc orig"], Float[Tensor, "orig orig"]]
 AblationAccuracies = dict[str, dict[int, float]]
 
 
@@ -216,7 +216,7 @@ def ablate_node_layers_and_eval(
 
     Note that we want our ablation schedules for different bases to match up, even though different
     bases may have different number of basis vectors due to truncation. We therefore create our
-    ablation schedule assuming a non-truncated basis (i.e. using the full hidden size
+    ablation schedule assuming a non-truncated basis (i.e. using the `orig` size
     (basis_vecs.shape[0])).
 
     Args:

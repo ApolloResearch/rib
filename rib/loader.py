@@ -479,6 +479,7 @@ def load_model_and_dataset_from_rib_config(
         )
     model.eval()
     dataset_config = dataset_config or rib_config.dataset
+
     dataset = load_dataset(
         dataset_config=dataset_config,
         return_set=dataset_config.return_set,

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from einops import rearrange
 from fancy_einsum import einsum
-from jaxtyping import Float, Int
+from jaxtyping import Float
 from torch import Tensor
 from tqdm import tqdm
 
@@ -34,7 +34,7 @@ def eigendecompose(
         dtype: The precision in which to perform the eigendecomposition.
             Values below torch.float64 tend to be very unstable.
     Returns:
-        eigenvalues: Diagonal matrix whose diagonal entries are the eigenvalues of x.
+        eigenvalues: Vector of the eigenvalues of x.
         eigenvectors: Matrix whose columns are the eigenvectors of x.
     """
     in_dtype = x.dtype
@@ -48,6 +48,43 @@ def eigendecompose(
         eigenvalues = eigenvalues[idx]
         eigenvectors = eigenvectors[:, idx]
     return eigenvalues, eigenvectors
+
+
+def move_const_dir_first(
+    D_dash: Float[Tensor, "d_hidden"],
+    U_dash: Float[Tensor, "d_hidden d_hidden"],
+) -> tuple[Float[Tensor, "d_hidden"], Float[Tensor, "d_hidden d_hidden"]]:
+    """
+    Finds the constant direction in D and U and moves it to the first position.
+
+    When performing centered RIB we expect there to be a unique direction with constant activation
+    that encodes the mean activation. We special-handle this RIB direction in various places and
+    it's thus convenient to ensure it's first in our basis.
+
+    This function finds that direction, asserts it's unique, and rearranges U, D to put it first.
+
+    We use the eigenvalues as sometimes there are directions with non-zero bias component but
+    very small eigenvalues. We don't want these to trigger the assert.
+
+    Args:
+        D_dash: Eigenvalues of gram matrix.
+        U_dash: Eigenvectors of gram matrix.
+    """
+    # we expect the const dir to have non-zero component in the bias dir and nonzero eigenvalue
+    threshold = 1e-6
+    nonzero_in_bias_component = U_dash[-1, :].abs() > threshold
+    nonzero_eigenval = D_dash.abs() > threshold
+    is_const_dir = nonzero_in_bias_component & nonzero_eigenval
+    assert is_const_dir.any(), "No const direction found"
+    assert is_const_dir.sum() == 1, "More than one const direction found"
+    const_dir_idx = is_const_dir.nonzero()[0, 0].item()
+    # move the const dir to the first position
+    order = torch.tensor(
+        [const_dir_idx] + [i for i in range(D_dash.shape[0]) if i != const_dir_idx]
+    )
+    D_dash = D_dash[order]
+    U_dash = U_dash[:, order]
+    return D_dash, U_dash
 
 
 def calc_rotation_matrix(
@@ -646,27 +683,25 @@ def calc_gram_matrix(
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
 
 
-def shift_matrix(
-    shift: Float[torch.Tensor, "n"], bias_positions: Int[torch.Tensor, "sections"]
-) -> Float[torch.Tensor, "n n"]:
+def centering_matrix(
+    mean: Float[torch.Tensor, "emb"],
+    inverse: bool = False,
+) -> Float[torch.Tensor, "emb emb"]:
     """
-    Returns a matrix S such that `x @ S = shifted_x`, for x with `x[bias_positions] = 1`.
-    `shifted_x` is `x + shift` at all non bias positions, and still 1 at all bias positions. The value of `shift` at bias positions is ignored.
+    Returns a matrix S such that `x @ S = x - mean` (everywhere except the last position of x)
 
+    If inverse=True, instead returns the inverse (a matrix that adds the mean back to x)
     Example:
-        >>> shift = torch.tensor([2., 2., 4., 4.])
-        >>> bias_positions = torch.tensor([1, 3])
-        >>> shift_matrix(shift, bias_positions)
+        >>> mean = torch.tensor([2., 2., 4., 1.])
+        >>> shift_matrix(mean, inverse=False)
         tensor([[1., 0., 0., 0.],
-                [1., 1., 2., 0.],
+                [0., 1., 0., 0.],
                 [0., 0., 1., 0.],
-                [1., 0., 2., 1.]])
+                [-2., -2., -4., 1.]])
     """
-    assert shift.ndim == 1, "shift must be 1d"
-    n = shift.shape[0]
-    S = torch.eye(n, dtype=shift.dtype, device=shift.device)
-    assert (n - 1) in bias_positions
-    shift = shift / len(bias_positions)  # we'll spread the shift out across bias pos
-    shift[bias_positions] = 0  # we don't shift at bias positions
-    S[bias_positions, :] += shift[None, :]
+    assert mean.ndim == 1, "mean must be 1d"
+    assert (mean[-1].abs() - 1).abs() < 1e-6, "last element of mean must be 1 or -1"
+    S = torch.eye(mean.shape[0], dtype=mean.dtype, device=mean.device)
+    shift = mean.clone() if inverse else -mean.clone()
+    S[-1, :-1] = shift[:-1]  # don't shift the bias position
     return S

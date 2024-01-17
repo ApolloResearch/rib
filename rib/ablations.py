@@ -387,7 +387,9 @@ def load_bases_and_ablate(
     ), "The node layers in the config must be a subset of the node layers in the RIB graph."
 
     assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
-
+    assert not (
+        config.ablation_type == "orthogonal" and rib_results.config.center
+    ), "Cannot use orthogonal ablations with a centered RIB, as Us don't include centering matrix"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 

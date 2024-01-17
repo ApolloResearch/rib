@@ -37,7 +37,7 @@ class Embed(nn.Module):
     def forward(
         self, tokens: Int[Tensor, "..."]
     ) -> Union[
-        tuple[Int[Tensor, "d_vocab d_model"], Float[Tensor, "... d_model"]],
+        tuple[Float[Tensor, "d_vocab d_model"], Int[Tensor, "... d_model"]],
         Float[Tensor, "... d_model"],
     ]:
         """Calculate token embeddings of the input tokens.
@@ -49,14 +49,14 @@ class Embed(nn.Module):
             tokens: The input tokens, typically (batch, pos)
 
         Returns:
-            - The input tokens (if self.return_tokens is True)
             - The token embeddings
+            - The input tokens (if self.return_tokens is True)
         """
         # If A has shape [a, b] and B has shape [c, d], then A[:, B] has shape [a, c, d]
         # B acts as a tensor of indices into the second dimension (so >=0 and <b)
         token_embeddings: Float[Tensor, "... d_model"] = self.W_E[tokens, :]
         if self.return_tokens:
-            return tokens, token_embeddings
+            return token_embeddings, tokens
         else:
             return token_embeddings
 
@@ -68,17 +68,17 @@ class PosEmbed(nn.Module):
         self.W_pos = nn.Parameter(torch.empty(self.cfg.n_ctx, self.cfg.d_model, dtype=cfg.dtype))
 
     def forward(
-        self, tokens: Int[Tensor, "... pos"], token_embed: Float[Tensor, "... pos d_model"]
-    ) -> tuple[Int[Tensor, "... pos d_model"], Float[Tensor, "... pos d_model"]]:
+        self, token_embed: Float[Tensor, "... pos d_model"], tokens: Int[Tensor, "... pos"]
+    ) -> tuple[Float[Tensor, "... pos d_model"], Int[Tensor, "... pos d_model"]]:
         """Add positional embeddings to the input.
 
         Args:
-            tokens (Int[Tensor, "... pos"]): The input tokens.
             token_embed (Float[Tensor, "... pos d_model"]): Tokens after embedding.
+            tokens (Int[Tensor, "... pos"]): The input tokens.
 
         Returns:
-            - Positional embeddings
             - Token embeddings
+            - Positional embeddings
         """
 
         n_tokens = tokens.size(-1)
@@ -88,7 +88,7 @@ class PosEmbed(nn.Module):
             pos_embed = einops.repeat(
                 pos_embed, "pos d_model -> batch pos d_model", batch=tokens.size(0)
             )  # [..., pos, d_model]
-        return pos_embed, token_embed
+        return token_embed, pos_embed
 
 
 class Unembed(nn.Module):
@@ -145,7 +145,7 @@ class Add(nn.Module):
         self.return_residual = return_residual
 
     def forward(
-        self, residual: Float[Tensor, "#dims"], y: Float[Tensor, "#dims"]
+        self, y: Float[Tensor, "#dims"], residual: Float[Tensor, "#dims"]
     ) -> Union[tuple[Float[Tensor, "#dims"], Float[Tensor, "#dims"]], Float[Tensor, "#dims"]]:
         summed = residual + y
         if self.last_pos_only:
@@ -161,7 +161,7 @@ class Add(nn.Module):
             else:
                 raise ValueError(f"summed should have dim 2 or 3, but has dim {summed.dim()}")
         if self.return_residual:
-            return residual, summed
+            return summed, residual
         else:
             return summed
 
@@ -212,26 +212,28 @@ class AttentionIn(nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "... pos d_model"],
         x: Float[Tensor, "... pos d_model"],
+        residual: Float[Tensor, "... pos d_model"],
     ) -> tuple[
+        Float[Tensor, "... pos n_head_times_d_head"],
+        Float[Tensor, "... pos n_head_times_d_head"],
+        Float[Tensor, "... pos n_head_times_d_head"],
         Float[Tensor, "... pos d_model"],
-        Float[Tensor, "... pos n_head_times_d_head"],
-        Float[Tensor, "... pos n_head_times_d_head"],
-        Float[Tensor, "... pos n_head_times_d_head"],
     ]:
         """Forward through the entire attention block.
 
         Args:
-            residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
             x (Float[Tensor, "... pos d_model]): The normed residual stream (the input to the
                 attention block)
+            residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
+
 
         Returns:
-            - The residual stream
             - The query tensor
             - The key tensor
             - The value tensor
+            - The residual stream
+
         """
 
         def add_head_dimension(tensor):
@@ -293,7 +295,7 @@ class AttentionIn(nn.Module):
         k = einops.rearrange(k, "... pos head_index d_head -> ... pos (head_index d_head)")
         v = einops.rearrange(v, "... pos head_index d_head_v -> ... pos (head_index d_head_v)")
 
-        return residual, q, k, v
+        return q, k, v, residual
 
     def calculate_sin_cos_rotary(
         self,
@@ -482,22 +484,22 @@ class AttentionOut(nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "... pos d_model"],
         q: Float[Tensor, "... pos n_head_times_d_head"],
         k: Float[Tensor, "... pos n_head_times_d_head"],
         v: Float[Tensor, "... pos n_head_times_d_head"],
+        residual: Float[Tensor, "... pos d_model"],
     ) -> tuple[Float[Tensor, "... pos d_model"], Float[Tensor, "... pos d_model"]]:
         """Forward through the entire attention block.
 
         Args:
-            residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
             q (Float[Tensor, "... pos n_head_times_d_head]): The query tensor
             k (Float[Tensor, "... pos n_head_times_d_head]): The key tensor
             v (Float[Tensor, "... pos n_head_times_d_head]): The value tensor
+            residual (Float[Tensor, "... pos d_model]): The "pure" residual stream
 
         Returns:
-            - The residual stream
             - The attention output
+            - The residual stream
         """
 
         # Separate the last dimension into head_index and d_head (undo the operation from AttentionIn)
@@ -548,7 +550,7 @@ class AttentionOut(nn.Module):
             + self.b_O
         )  # [..., pos, d_model]
 
-        return residual, out
+        return out, residual
 
 
 class MLPIn(nn.Module):
@@ -560,11 +562,11 @@ class MLPIn(nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "... d_model"],
         x: Float[Tensor, "... d_model"],
+        residual: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_mlp"]]:
         pre_act = einsum("... d_model, d_model d_mlp -> ... d_mlp", x, self.W_in) + self.b_in
-        return residual, pre_act
+        return pre_act, residual
 
 
 class MLPAct(nn.Module):
@@ -584,12 +586,12 @@ class MLPAct(nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "... d_model"],
         pre_act: Float[Tensor, "... d_mlp"],
+        residual: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         # Technically, all these einsums could be done with a single matmul, but this is more readable.
         post_act = self.act_fn(pre_act)  # [..., d_mlp]
-        return residual, post_act
+        return post_act, residual
 
 
 class MLPOut(nn.Module):
@@ -601,8 +603,8 @@ class MLPOut(nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "... d_model"],
         post_act: Float[Tensor, "... d_mlp"],
+        residual: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         out = (
             einsum(
@@ -612,7 +614,7 @@ class MLPOut(nn.Module):
             )
             + self.b_out
         )
-        return residual, out
+        return out, residual
 
 
 class LayerNormPre(torch.nn.Module):
@@ -635,7 +637,7 @@ class LayerNormPre(torch.nn.Module):
     ]:
         out = layer_norm(residual.clone(), self.cfg.eps)
         if self.return_residual:
-            return residual, out
+            return out, residual
         else:
             return out
 
@@ -653,22 +655,22 @@ class DualLayerNormPre(torch.nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "... d_model"],
         attn_resid: Float[Tensor, "... d_model"],
+        residual: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         """Forward through the module.
 
         Args:
-            residual: The raw residual stream.
             attn_resid: The residual stream after adding the attention block.
+            residual: The raw residual stream.
 
         Returns:
+            - The application of layer norm to the raw residual stream.
             - The residual stream after adding the attention block. This will be considered the
                 "new" residual stream in the subsequent (MLP) layers.
-            - The application of layer norm to the raw residual stream.
         """
         out = layer_norm(residual.clone(), self.cfg.eps)
-        return attn_resid, out
+        return out, attn_resid
 
 
 class LayerNormPreFolded(torch.nn.Module):
@@ -691,7 +693,7 @@ class LayerNormPreFolded(torch.nn.Module):
         x0_out = layer_norm(x0, self.cfg.eps)
         out = torch.cat([x0_out, residual[..., -1:]], dim=-1)  # [..., length]
         if self.return_residual:
-            return residual, out
+            return out, residual
         else:
             return out
 
@@ -705,25 +707,25 @@ class DualLayerNormPreFolded(torch.nn.Module):
 
     def forward(
         self,
-        residual: Float[Tensor, "... d_model"],
         attn_resid: Float[Tensor, "... d_model"],
+        residual: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         """Forward through the module.
 
         Args:
-            residual: The raw residual stream.
             attn_resid: The residual stream after adding the attention block.
+            residual: The raw residual stream.
 
         Returns:
+            - The application of layer norm to the raw residual stream.
             - The residual stream after adding the attention block. This will be considered the
                 "new" residual stream in the subsequent (MLP) layers.
-            - The application of layer norm to the raw residual stream.
         """
         x0 = residual[..., :-1].clone()  # [..., length-1]
 
         x0_out = layer_norm(x0, self.cfg.eps)
         out = torch.cat([x0_out, residual[..., -1:]], dim=-1)
-        return attn_resid, out
+        return out, attn_resid
 
 
 class IdentitySplit(torch.nn.Module):

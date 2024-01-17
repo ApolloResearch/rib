@@ -96,6 +96,10 @@ def main(config_path_or_obj: Union[str, Config], force: bool = False) -> Ablatio
 
     assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
+    assert not (
+        config.ablation_type == "orthagonal" and interaction_graph_info["config"].get("center")
+    ), "Cannot use orthogonal ablations with a centered RIB, as Us don't include centering matrix"
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 

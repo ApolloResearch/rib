@@ -115,6 +115,15 @@
             "env": {
                 "PYTEST_ADDOPTS": "--runslow"
             }
+        },
+        {
+            "name": "Python: Attach",
+            "type": "python",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            }
         }
     ]
 }

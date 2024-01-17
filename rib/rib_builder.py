@@ -390,13 +390,9 @@ def rib_build(
     calc_C_time = None
     calc_edges_time = None
 
-    # Load model
     model, dataset = load_model_and_dataset_from_rib_config(config, device=device, dtype=dtype)
     model.eval()
     hooked_model = HookedModel(model)
-
-    # Load dataset
-
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
 
     # Evaluate model on dataset for sanity check

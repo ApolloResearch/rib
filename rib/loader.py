@@ -117,7 +117,6 @@ def load_mlp(
     config: Union[MLPConfig, ModularMLPConfig],
     node_layers: list[str],
     mlp_path: Optional[Path],
-    device: str,
     fold_bias: bool = True,
     seed: Optional[int] = None,
 ) -> MLP:
@@ -127,7 +126,6 @@ def load_mlp(
         config (Union[MLPConfig, ModularMLPConfig]): The MLP config.
         node_layers (list[str]): The node layers to use for the model.
         mlp_path (Optional[Path]): The path to the MLP weights.
-        device (str): The device to use for the model.
         fold_bias (bool): Whether to fold the bias into the weights. Defaults to True.
         seed (Optional[int]): The seed to use for the model.
 
@@ -137,12 +135,11 @@ def load_mlp(
     mlp: MLP
     if isinstance(config, ModularMLPConfig):
         mlp = create_modular_mlp(config, seed=seed)
-        mlp.to(device)
     else:
         assert isinstance(config, MLPConfig)
         assert mlp_path is not None, "mlp_path must be provided for MLPConfig"
         mlp = MLP(config)
-        mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
+        mlp.load_state_dict(torch.load(mlp_path, map_location="cpu"))
     if fold_bias:
         mlp.fold_bias()
 
@@ -431,15 +428,17 @@ def load_model_and_dataset_from_rib_config(
     dataset_config: Optional[DatasetConfig] = None,
     node_layers: Optional[list[str]] = None,
 ) -> Tuple[Union[SequentialTransformer, MLP], Dataset]:
-    """Loads the model and dataset used for a rib build from the results dictionary.
+    """Loads the model and dataset for a rib build based on the config.
 
     Combines both model and dataset loading in one function as the dataset conditionally needs
     extra arguments depending on the dataset type.
 
     Args:
-        results (RibBuildResults): The results from a rib build.
+        rib_config (RibBuildConfig): The rib build config.
         device (str): The device to use for the model.
         dtype (torch.dtype): The dtype to use for the model.
+        dataset_config (Optional[DatasetConfig]): The dataset config to use. If None, uses the
+            dataset config from the rib_config.
         node_layers (Optional[list[str]]): The node layers to use for the model. If None, uses the
             node layers from the rib_config. Note that changing the sections in the model has no
             effect on the model computation, so we allow specifying any node_layers for the
@@ -464,7 +463,6 @@ def load_model_and_dataset_from_rib_config(
             node_layers=node_layers or rib_config.node_layers,
             mlp_path=rib_config.mlp_path,
             fold_bias=True,
-            device=device,
             seed=rib_config.seed,
         ).to(device=torch.device(device), dtype=dtype)
         assert model.has_folded_bias, "MLP must have folded bias to run RIB"

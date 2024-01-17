@@ -45,8 +45,8 @@ class ScheduleConfig(BaseModel):
     early_stopping_threshold: Optional[float] = Field(
         None,
         description="The threshold to use for stopping the ablation calculations early. The"
-        "experiment will stop when the more than `early_stopping_threshold` away from the unablated"
-        "score. If None, we don't stop early.",
+        "experiment will stop when the ablated score is more than `early_stopping_threshold` away "
+        "from the unablated score. If None, we don't stop early.",
     )
     specific_points: Optional[list[int]] = Field(
         None,

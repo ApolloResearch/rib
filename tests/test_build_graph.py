@@ -178,7 +178,7 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results.config.dtype]
     model, dataset = load_model_and_dataset_from_rib_config(
-        results.config, device=device, dtype=dtype
+        rib_config=results.config, device=device, dtype=dtype
     )
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     hooked_model = HookedModel(model)
@@ -522,11 +522,7 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
 
 
 def test_mnist_build_graph_invalid_node_layers():
-    """Test that non-sequential node_layers raises an error.
-
-    TODO: While this test passes, there is actually no code that explicitly checks for valid
-    node layers in mlp models. Need to write this.
-    """
+    """Test that non-sequential node_layers raises an error."""
     config = get_mnist_config(node_layers=["layers.0", "layers.2"])
     with pytest.raises(AssertionError, match="is not a subsequence of all_node_layers:"):
         graph_build_test(config=config, atol=0)

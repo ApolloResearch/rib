@@ -413,10 +413,10 @@ def collect_interaction_edges(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    module_names = [C.node_layer_name for C in Cs]  # module ids (edge_modules are section ids)
+    module_ids = [C.node_layer_name for C in Cs]
     all_edges: list[Edges] = []
-    for start, end in zip(module_names[:-1], module_names[1:]):
-        E_hat: Float[Tensor, "out_nodes in_nodes"] = hooked_model.hooked_data[start]["edge"]
+    for start, end in zip(module_ids[:-1], module_ids[1:]):
+        E_hat: Float[Tensor, "rib_out rib_in"] = hooked_model.hooked_data[start]["edge"]
         if torch.all(E_hat == 0.0):
             logger.warning(
                 f"Edges for node layer {start}-{end} are still zero, must be an error somewhere."

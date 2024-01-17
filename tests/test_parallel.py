@@ -1,57 +1,30 @@
+import json
 import subprocess
-from typing import Any
 
 import pytest
 import torch
 import yaml
 from mpi4py import MPI
-from pydantic.v1.utils import deep_update
 from torch.utils.data import ConcatDataset, TensorDataset
 
 from rib.edge_combiner import combine_edges
 from rib.loader import get_dataset_chunk
-from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
+from rib.rib_builder import RibBuildResults, rib_build
 from rib.settings import REPO_ROOT
+from tests.utils import get_modular_arithmetic_config
 
 
 @pytest.mark.slow
 class TestDistributed:
-    def make_config_dict(self, exp_name: str, *updates: dict) -> dict[str, Any]:
-        config_str = f"""
-        exp_name: {exp_name}
-        seed: 0
-        tlens_pretrained: null
-        tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-        interaction_matrices_path: null
-        node_layers:
-            - ln1.0
-            - mlp_in.0
-            - unembed
-            - output
-        dataset:
-            dataset_type: modular_arithmetic
-            return_set: train
-            return_set_n_samples: 10
-        batch_size: 6
-        truncation_threshold: 1e-15
-        rotate_final_node_layer: false
-        last_pos_module_type: add_resid1
-        n_intervals: 0
-        dtype: float64
-        eval_type: accuracy
-        out_dir: null
-        """
-        return deep_update(yaml.safe_load(config_str), *updates)
-
     def get_single_edges(self, tmpdir):
-        single_config_dict = self.make_config_dict(
-            "test_single",
+        config = get_modular_arithmetic_config(
             {
+                "exp_name": "test_single",
                 "calculate_edges": True,
                 "interaction_matrices_path": f"{tmpdir}/compute_cs_rib_Cs.pt",
-            },
+            }
         )
-        return rib_build(RibBuildConfig(**single_config_dict)).edges
+        return rib_build(config).edges
 
     def run_distributed_edges(self, config_path: str, n_pods: int, pod_rank: int, n_processes: int):
         build_script_path = f"{REPO_ROOT}/rib_scripts/rib_build/run_rib_build.py"
@@ -65,16 +38,17 @@ class TestDistributed:
         double_config_path = f"{tmpdir}/double_config.yaml"
         double_outdir_path = f"{tmpdir}/double_out/"
 
-        double_config_dict = self.make_config_dict(
-            "test_double",
+        double_config = get_modular_arithmetic_config(
             {
+                "exp_name": "test_double",
                 "calculate_edges": True,
                 "interaction_matrices_path": f"{tmpdir}/compute_cs_rib_Cs.pt",
                 "out_dir": double_outdir_path,
-            },
+            }
         )
         with open(double_config_path, "w") as f:
-            yaml.dump(double_config_dict, f)
+            # yaml.dump can't convert PosixPath to str so we convert to json first
+            yaml.dump(json.loads(double_config.model_dump_json()), f)
 
         # mpi might be initialized which causes problems for running an mpiexec subcommand.
         MPI.Finalize()
@@ -88,8 +62,8 @@ class TestDistributed:
     def test_edges_are_same(self, tmpdir):
         # first we compute the cs. we do this separately as there are occasional reproducibility
         # issues with computing them.
-        cs_config = RibBuildConfig(
-            **self.make_config_dict("compute_cs", {"out_dir": tmpdir, "calculate_edges": False})
+        cs_config = get_modular_arithmetic_config(
+            {"exp_name": "compute_cs", "out_dir": tmpdir, "calculate_edges": False}
         )
         rib_build(cs_config)
         # not using fixtures as we need to compute Cs first

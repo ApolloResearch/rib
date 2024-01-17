@@ -16,10 +16,8 @@ from unittest.mock import patch
 import einops
 import pytest
 import torch
-import yaml
 from fancy_einsum import einsum
 from jaxtyping import Float
-from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.testing import assert_close
 from torch.utils.data import DataLoader
@@ -35,7 +33,15 @@ from rib.models import SequentialTransformer
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 from rib.types import TORCH_DTYPES
 from rib.utils import update_pydantic_model
-from tests.utils import assert_is_close, assert_is_ones, assert_is_zeros
+from tests.utils import (
+    assert_is_close,
+    assert_is_ones,
+    assert_is_zeros,
+    get_mnist_config,
+    get_modular_arithmetic_config,
+    get_modular_mlp_config,
+    get_pythia_config,
+)
 
 
 def build_get_lambdas(
@@ -210,131 +216,6 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
             not mean_1_positions.any()
         ), f"means at positions {mean_1_positions.nonzero()} are unexpectely 1"
     return means, bias_positions
-
-
-def get_modular_arithmetic_config(*updates: dict) -> RibBuildConfig:
-    config_str = f"""
-    exp_name: test
-    seed: 0
-    tlens_pretrained: null
-    tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-    dataset:
-        dataset_type: modular_arithmetic
-        return_set: train
-        return_set_n_samples: 10
-    node_layers:
-        - ln1.0
-        - mlp_in.0
-        - unembed
-        - output
-    batch_size: 6
-    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
-    rotate_final_node_layer: false
-    last_pos_module_type: add_resid1
-    n_intervals: 0
-    dtype: float64
-    eval_type: accuracy
-    out_dir: null
-    basis_formula: (1-0)*alpha
-    edge_formula: squared
-    n_stochastic_sources: null
-    """
-    config_dict = deep_update(yaml.safe_load(config_str), *updates)
-    return RibBuildConfig(**config_dict)
-
-
-def get_pythia_config(*updates: dict) -> RibBuildConfig:
-    config_str = f"""
-    exp_name: test
-    seed: 0
-    tlens_pretrained: pythia-14m
-    tlens_model_path: null
-    dataset:
-        dataset_type: huggingface
-        name: NeelNanda/pile-10k
-        tokenizer_name: EleutherAI/pythia-14m
-        return_set: train
-        return_set_frac: null
-        return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
-        return_set_portion: first
-    node_layers:
-        - ln2.1
-        - unembed
-    batch_size: 2
-    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
-    rotate_final_node_layer: false
-    n_intervals: 0
-    dtype: float64
-    calculate_edges: false
-    eval_type: ce_loss
-    out_dir: null
-    basis_formula: (1-0)*alpha
-    """
-    config_dict = deep_update(yaml.safe_load(config_str), *updates)
-    return RibBuildConfig(**config_dict)
-
-
-def get_mnist_config(*updates: dict) -> RibBuildConfig:
-    config_str = f"""
-    exp_name: test
-    mlp_path: "rib_scripts/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
-    batch_size: 256
-    seed: 0
-    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
-    rotate_final_node_layer: false
-    n_intervals: 0
-    dtype: float64
-    node_layers:
-        - layers.0
-        - layers.1
-        - layers.2
-        - output
-    dataset:
-        dataset_type: torchvision
-        name: MNIST
-        return_set_frac: 0.01  # 3 batches (with batch_size=256)
-    out_dir: null
-    basis_formula: (1-0)*alpha
-    edge_formula: squared
-    """
-    config_dict = deep_update(yaml.safe_load(config_str), *updates)
-    return RibBuildConfig(**config_dict)
-
-
-def get_modular_mlp_config(*updates: dict) -> RibBuildConfig:
-    config_str = f"""
-    exp_name: test
-    out_dir: null
-    node_layers:
-        - layers.0
-        - layers.1
-        - layers.2
-        - output
-    modular_mlp_config:
-        n_hidden_layers: 2
-        width: 10
-        weight_variances: [1,1]
-        weight_equal_columns: false
-        bias: 0
-        activation_fn: relu
-    dataset:
-        dataset_type: block_vector
-        size: 1000
-        length: 10
-        data_variances: [1,1]
-        data_perfect_correlation: false
-    seed: 123
-    batch_size: 256
-    n_intervals: 0
-    truncation_threshold: 1e-15
-    dtype: float64
-    rotate_final_node_layer: false
-    basis_formula: (1-0)*alpha
-    edge_formula: squared
-    """
-    config_dict = deep_update(yaml.safe_load(config_str), *updates)
-    config = RibBuildConfig(**config_dict)
-    return config
 
 
 @pytest.mark.slow

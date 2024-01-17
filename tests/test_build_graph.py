@@ -28,7 +28,7 @@ from rib.data_accumulator import collect_dataset_means
 from rib.hook_fns import acts_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import build_sorted_lambda_matrices
-from rib.loader import load_model_and_dataset_from_rib_results
+from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import ModularMLPConfig, SequentialTransformer
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
@@ -121,7 +121,9 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results.config.dtype]
-    model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
+    model, dataset = load_model_and_dataset_from_rib_config(
+        rib_config=results.config, device=device, dtype=dtype
+    )
     model.to(device=torch.device(device), dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     hooked_model = HookedModel(model)
@@ -175,8 +177,9 @@ def get_means_test(results: RibBuildResults, atol: float, batch_size=16):
     """Takes the results of a graph build and runs collect_dataset_means."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[results.config.dtype]
-    model, dataset = load_model_and_dataset_from_rib_results(results, device=device, dtype=dtype)
-    model.to(device=torch.device(device), dtype=dtype)
+    model, dataset = load_model_and_dataset_from_rib_config(
+        rib_config=results.config, device=device, dtype=dtype
+    )
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     hooked_model = HookedModel(model)
 
@@ -519,68 +522,16 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
 
 
 def test_mnist_build_graph_invalid_node_layers():
-    """Test that non-sequential node_layers raises an error.
-
-    TODO: While this test passes, there is actually no code that explicitly checks for valid
-    node layers in mlp models. Need to write this.
-    """
-    config_str = """
-    exp_name: test
-    mlp_path: "rib_scripts/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt"
-    batch_size: 10
-    seed: 0
-    truncation_threshold: 1e-15
-    rotate_final_node_layer: false
-    n_intervals: 0
-    dtype: float32
-    node_layers:
-        - layers.0
-        - layers.2
-    dataset:
-        dataset_type: torchvision
-        name: MNIST
-        return_set_n_samples: 10
-    out_dir: null
-    """
-
-    config_dict = yaml.safe_load(config_str)
-    config = RibBuildConfig(**config_dict)
-
+    """Test that non-sequential node_layers raises an error."""
+    config = get_mnist_config(node_layers=["layers.0", "layers.2"])
     with pytest.raises(AssertionError, match="is not a subsequence of all_node_layers:"):
         graph_build_test(config=config, atol=0)
 
 
 def test_modular_arithmetic_build_graph_invalid_node_layers():
-    """Test that non-sequential node_layers raises an error."""
-    config_str = """
-    exp_name: test
-    seed: 0
-    tlens_pretrained: null
-    tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-    node_layers:
-        - mlp_in.0
-        - ln1.0  # This should appear before mlp_in.0
-        - unembed
-        - output
-    dataset:
-        dataset_type: modular_arithmetic
-        return_set: train
-        return_set_n_samples: 1
-    batch_size: 1
-    truncation_threshold: 1e-15
-    rotate_final_node_layer: false
-    last_pos_module_type: add_resid1
-    n_intervals: 0
-    dtype: bfloat16
-    eval_type: accuracy
-    out_dir: null
-    basis_formula: (1-alpha)^2
-    edge_formula: functional
-    """
-
-    config_dict = yaml.safe_load(config_str)
-    config = RibBuildConfig(**config_dict)
-
+    """Test that out of order node_layers raises an error."""
+    # ln1 should be before mlp_in
+    config = get_modular_arithmetic_config(node_layers=["mlp_in.0", "ln1.0", "unembed"])
     with pytest.raises(AssertionError, match="Node layers must be in order."):
         graph_build_test(config=config, atol=0)
 
@@ -663,8 +614,9 @@ def pca_rib_acts_test(results: RibBuildResults, atol=1e-6):
 @pytest.mark.slow
 def test_pca_basis_mnist():
     """Test that the 'pca' basis (aka svd with center=true) works for MNIST."""
-    config = get_mnist_config(basis_formula="svd", edge_formula="functional")
-    config = config.model_copy(update={"center": True})
+    config = get_mnist_config(
+        basis_formula="svd", edge_formula="functional", dtype="float64", center=True
+    )
     results = rib_build(config)
     pca_rib_acts_test(results, atol=1e-4)
 
@@ -672,8 +624,10 @@ def test_pca_basis_mnist():
 @pytest.mark.slow
 def test_pca_basis_pythia():
     """Test that the 'pca' basis (aka svd with center=true) works for pythia."""
-    config = get_pythia_config(basis_formula="svd")
-    config = config.model_copy(update={"center": True, "rotate_final_node_layer": True})
+    dtype_str = "float64"
+    config = get_pythia_config(
+        dtype=dtype_str, basis_formula="svd", center=True, rotate_final_node_layer=True
+    )
     results = rib_build(config)
     pca_rib_acts_test(results, atol=1e-6)
 

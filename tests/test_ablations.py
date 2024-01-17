@@ -1,13 +1,9 @@
-"""Run the mnist orthog and rib ablation scripts and check the below properties:
+"""Run MNIST and modular artihmetic ablation scripts and check the below properties:
 
 1. The accuracy when no vectors are ablated is higher than a set threshold (e.g. 95%)
 2. Ablating all vectors gives an accuracy lower than 50% (arbitrarily chosen)
 3. There are accuracies for all ablated vectors.
 4. The accuracies are sorted roughly in descending order of the number of ablated vectors.
-
-This is currently quite hacky. In particular, we mock torch.load to return an RIB graph
-with an updated MLP path. This is necessary because the RIB graph is saved with an
-absolute path to the MLP, and a github action will not have access to the same absolute path.
 """
 
 from pathlib import Path

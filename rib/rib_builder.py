@@ -39,7 +39,6 @@ from pathlib import Path
 from typing import Literal, Optional, Union
 
 import torch
-import yaml
 from jaxtyping import Float, Int
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
@@ -69,15 +68,9 @@ from rib.interaction_algos import (
     InteractionRotation,
     calculate_interaction_rotations,
 )
-from rib.loader import (
-    get_dataset_chunk,
-    load_dataset,
-    load_mlp,
-    load_sequential_transformer,
-)
+from rib.loader import get_dataset_chunk, load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
-    MLP,
     MLPConfig,
     ModularMLPConfig,
     SequentialTransformer,
@@ -251,11 +244,11 @@ class RibBuildResults(BaseModel):
     ml_model_config: Union[MLPConfig, ModularMLPConfig, SequentialTransformerConfig] = Field(
         discriminator="config_type", description="The config of the model used to build the graph."
     )
-    calc_C_time: Optional[str] = Field(
-        None, description="The time taken to calculate the interaction rotations."
+    calc_C_time: Optional[float] = Field(
+        None, description="The time taken (in minutes) to calculate the interaction rotations."
     )
-    calc_edges_time: Optional[str] = Field(
-        None, description="The time taken to calculate the edges."
+    calc_edges_time: Optional[float] = Field(
+        None, description="The time taken (in minutes) to calculate the edges."
     )
 
 
@@ -395,47 +388,9 @@ def rib_build(
     calc_C_time = None
     calc_edges_time = None
 
-    # Load model
-    model: Union[SequentialTransformer, MLP]
-    if config.mlp_path is not None or config.modular_mlp_config is not None:
-        mlp_config: Union[MLPConfig, ModularMLPConfig]
-        if config.mlp_path is not None:
-            with open(config.mlp_path.parent / "config.yaml", "r") as f:
-                raw_model_config_dict = yaml.safe_load(f)
-            mlp_config = MLPConfig(**raw_model_config_dict["model"])
-        else:
-            assert config.modular_mlp_config is not None
-            mlp_config = config.modular_mlp_config
-
-        model = load_mlp(
-            mlp_config,
-            node_layers=config.node_layers,
-            mlp_path=config.mlp_path,
-            fold_bias=True,
-            device=device,
-            seed=config.seed,
-        ).to(device=torch.device(device), dtype=dtype)
-        assert model.has_folded_bias, "MLP must have folded bias to run RIB"
-    else:
-        model = load_sequential_transformer(
-            node_layers=config.node_layers,
-            last_pos_module_type=config.last_pos_module_type,
-            tlens_pretrained=config.tlens_pretrained,
-            tlens_model_path=config.tlens_model_path,
-            fold_bias=True,
-            dtype=dtype,
-            device=device,
-        )
+    model, dataset = load_model_and_dataset_from_rib_config(config, device=device, dtype=dtype)
     model.eval()
     hooked_model = HookedModel(model)
-
-    # Load dataset
-    dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set=config.dataset.return_set,
-        model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
-        tlens_model_path=config.tlens_model_path,
-    )
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
 
     # Evaluate model on dataset for sanity check
@@ -523,8 +478,8 @@ def rib_build(
         # Cs used to calculate edges
         edge_Cs = Cs
 
-        calc_C_time = f"{(time.time() - c_start_time) / 60:.1f} minutes"
-        logger.info("Time to calculate Cs: %s", calc_C_time)
+        calc_C_time = (time.time() - c_start_time) / 60
+        logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
     else:
         gram_matrices, Cs, Us = load_interaction_rotations(config=config)
         edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
@@ -561,8 +516,8 @@ def rib_build(
             n_stochastic_sources=config.n_stochastic_sources,
         )
 
-        calc_edges_time = f"{(time.time() - edges_start_time) / 60:.1f} minutes"
-        logger.info("Time to calculate edges: %s", calc_edges_time)
+        calc_edges_time = (time.time() - edges_start_time) / 60
+        logger.info("Time to calculate edges: %.2f minutes", calc_edges_time)
 
     results = RibBuildResults(
         exp_name=config.exp_name,

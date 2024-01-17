@@ -177,7 +177,10 @@ def collect_gram_matrices(
 
     Args:
         hooked_model: The hooked model.
-        module_names: The names of the modules to collect gram matrices for.
+        module_names: The names of the modules to collect gram matrices for. Can be any valid
+            pytorch module in hooked_model.model. These typically correspond to section_names (e.g.
+            "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
+            "layers.2") when the model is an MLP.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
         dtype: The data type to use for model computations.
@@ -411,22 +414,16 @@ def collect_interaction_edges(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
+    module_ids = [C.node_layer_name for C in Cs]
     all_edges: list[Edges] = []
-    for node_layer_idx in range(len(Cs) - 1):
-        E_hat: Float[Tensor, "rib_out rib_in"] = hooked_model.hooked_data[
-            Cs[node_layer_idx].node_layer_name
-        ]["edge"]
+    for start, end in zip(module_ids[:-1], module_ids[1:]):
+        E_hat: Float[Tensor, "rib_out rib_in"] = hooked_model.hooked_data[start]["edge"]
         if torch.all(E_hat == 0.0):
             logger.warning(
-                "Edges for node layer %s are still zero, must be an error somewhere.",
-                Cs[node_layer_idx].node_layer_name,
+                f"Edges for node layer {start}-{end} are still zero, must be an error somewhere."
             )
         all_edges.append(
-            Edges(
-                in_node_layer_name=Cs[node_layer_idx].node_layer_name,
-                out_node_layer_name=Cs[node_layer_idx + 1].node_layer_name,
-                E_hat=E_hat.detach().cpu(),
-            )
+            Edges(in_node_layer_name=start, out_node_layer_name=end, E_hat=E_hat.detach().cpu())
         )
     hooked_model.clear_hooked_data()
 

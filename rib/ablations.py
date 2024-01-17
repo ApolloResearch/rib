@@ -20,7 +20,7 @@ from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import Eigenvectors, InteractionRotation
 from rib.linalg import calc_rotation_matrix
-from rib.loader import load_model_and_dataset_from_rib_results
+from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import MLP, SequentialTransformer
 from rib.rib_builder import RibBuildResults
@@ -43,8 +43,9 @@ class ScheduleConfig(BaseModel):
     schedule_type: Literal["exponential", "linear"]
     early_stopping_threshold: Optional[float] = Field(
         None,
-        description="The threshold to use for stopping the ablation calculations early. If None,"
-        "we don't use early stopping.",
+        description="The threshold to use for stopping the ablation calculations early. The"
+        "experiment will stop when the ablated score is more than `early_stopping_threshold` away "
+        "from the unablated score. If None, we don't stop early.",
     )
     specific_points: Optional[list[int]] = Field(
         None,
@@ -206,7 +207,7 @@ def ablate_node_layers_and_eval(
     hooked_model: HookedModel,
     data_loader: DataLoader,
     eval_fn: Callable,
-    graph_module_names: list[str],
+    module_names: list[str],
     schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
     device: str,
     dtype: Optional[torch.dtype] = None,
@@ -225,7 +226,10 @@ def ablate_node_layers_and_eval(
         hooked_model: The hooked model.
         data_loader: The data loader to use for testing.
         eval_fn: The function to use to evaluate the model.
-        graph_module_names: The names of the modules we want to build the graph around.
+        module_names: The names of the modules to apply the ablations. Can be any valid pytorch
+            module in hooked_model.model. These typically correspond to section_names (e.g.
+            "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
+            "layers.2") when the model is an MLP.
         schedule_config: The config for the ablation schedule.
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
@@ -235,7 +239,7 @@ def ablate_node_layers_and_eval(
     """
     results: AblationAccuracies = {}
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
-        ablation_node_layers, graph_module_names, basis_matrices
+        ablation_node_layers, module_names, basis_matrices
     ):
         ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=basis_vecs.shape[0])
 
@@ -320,24 +324,23 @@ def load_basis_matrices(
 
     # Get the basis vecs and their pseudoinverses using the module_names as keys
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
+    basis_infos_list = getattr(rib_results, basis_matrix_key)
+    basis_infos_dict = {info.node_layer_name: info for info in basis_infos_list}
     for module_name in ablation_node_layers:
-        for basis_info in getattr(rib_results, basis_matrix_key):
-            if basis_info.node_layer_name == module_name:
-                if ablation_type == "rib":
-                    assert isinstance(basis_info, InteractionRotation)
-                    assert basis_info.C is not None, f"{module_name} has no C matrix."
-                    assert basis_info.C_pinv is not None, f"{module_name} has no C_pinv matrix."
-                    basis_vecs = basis_info.C.to(dtype=dtype, device=device)
-                    basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
-                elif ablation_type == "orthogonal":
-                    assert isinstance(basis_info, Eigenvectors)
-                    assert basis_info.U is not None, f"{module_name} has no U matrix."
-                    basis_vecs = basis_info.U.to(dtype=dtype, device=device)
-                    # Pseudoinverse of an orthonormal matrix is its transpose
-                    basis_vecs_pinv = basis_vecs.T.detach().clone()
-                basis_matrices.append((basis_vecs, basis_vecs_pinv))
-                break
-    assert len(basis_matrices) == len(ablation_node_layers), f"node_layers not all in rib_results"
+        basis_info = basis_infos_dict[module_name]
+        if ablation_type == "rib":
+            assert isinstance(basis_info, InteractionRotation)
+            assert basis_info.C is not None, f"{module_name} has no C matrix."
+            assert basis_info.C_pinv is not None, f"{module_name} has no C_pinv matrix."
+            basis_vecs = basis_info.C.to(dtype=dtype, device=device)
+            basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
+        elif ablation_type == "orthogonal":
+            assert isinstance(basis_info, Eigenvectors)
+            assert basis_info.U is not None, f"{module_name} has no U matrix."
+            basis_vecs = basis_info.U.to(dtype=dtype, device=device)
+            # Pseudoinverse of an orthonormal matrix is its transpose
+            basis_vecs_pinv = basis_vecs.T.detach().clone()
+        basis_matrices.append((basis_vecs, basis_vecs_pinv))
     return basis_matrices
 
 
@@ -347,7 +350,7 @@ def load_bases_and_ablate(
     """Load basis matrices and run ablation experiments.
 
     The process is as follows:
-        1. Load pre-saved basis matrices (Typcially RIB bases (Cs) or orthogonal bases (Us)).
+        1. Load pre-saved basis matrices (typcially RIB bases (Cs) or orthogonal bases (Us)).
         2. Load the corresponding model and dataset (the dataset may be non-overlapping with
             that used to create the basis matrices).
         3. For each number of ablated nodes `n`, create a rotation matrix that has the effect of
@@ -396,13 +399,12 @@ def load_bases_and_ablate(
         device=device,
     )
 
-    model, dataset = load_model_and_dataset_from_rib_results(
-        rib_results,
+    model, dataset = load_model_and_dataset_from_rib_config(
+        rib_results.config,
+        dataset_config=config.dataset,
         device=device,
         dtype=dtype,
         node_layers=config.ablation_node_layers,
-        dataset_config=config.dataset,
-        return_set=config.dataset.return_set,
     )
     model.to(device=torch.device(device), dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
@@ -416,10 +418,10 @@ def load_bases_and_ablate(
     logger.info("Model %s on dataset: %.4f", config.eval_type, eval_results)
 
     if isinstance(model, MLP):
-        graph_module_names = config.ablation_node_layers
+        module_names = config.ablation_node_layers
     else:
         assert isinstance(model, SequentialTransformer)
-        graph_module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+        module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
     ablation_results: AblationAccuracies = ablate_node_layers_and_eval(
         basis_matrices=basis_matrices,
@@ -427,7 +429,7 @@ def load_bases_and_ablate(
         hooked_model=hooked_model,
         data_loader=data_loader,
         eval_fn=eval_fn,
-        graph_module_names=graph_module_names,
+        module_names=module_names,
         schedule_config=config.schedule,
         device=device,
         dtype=dtype,

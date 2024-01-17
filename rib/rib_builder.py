@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Literal, Optional, Union
 
 import torch
-from jaxtyping import Float, Int
+from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -186,8 +186,7 @@ class RibBuildConfig(BaseModel):
     )
     center: bool = Field(
         False,
-        description="Whether to center the activations before performing rib. Currently only"
-        "supported for basis_formula='svd', which gives the 'pca' basis.",
+        description="Whether to center the activations before performing rib.",
     )
 
     @model_validator(mode="after")
@@ -422,10 +421,9 @@ def rib_build(
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
 
         means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None
-        bias_positions: Optional[dict[str, Int[Tensor, "segments"]]] = None
         if config.center:
             logger.info("Collecting dataset means")
-            means, bias_positions = collect_dataset_means(
+            means = collect_dataset_means(
                 hooked_model=hooked_model,
                 module_names=section_names,
                 data_loader=gram_train_loader,
@@ -447,7 +445,6 @@ def rib_build(
             collect_output_gram=collect_output_gram,
             hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             means=means,
-            bias_positions=bias_positions,
         )
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
@@ -475,7 +472,6 @@ def rib_build(
             basis_formula=config.basis_formula,
             center=config.center,
             means=means,
-            bias_positions=bias_positions,
         )
         # Cs used to calculate edges
         edge_Cs = Cs

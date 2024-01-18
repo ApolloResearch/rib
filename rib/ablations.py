@@ -505,7 +505,7 @@ def load_bases_and_ablate(
         ), "node_layers in the config must be a subsequence of the node layers in the RIB graph."
         assert (
             config.ablation_type == "rib"
-        ), "Can't do edge ablation with Us we don't have edges for U basis"
+        ), "Can't do edge ablation with Us, as we don't have edges for U basis"
         assert len(rib_results.edges) > 0, "No edges found in the RIB results."
         assert rib_results.contains_all_edges
     else:

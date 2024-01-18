@@ -148,7 +148,8 @@ def test_run_mnist_ablations(ablation_type, edge_ablation):
 
 
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
-def test_run_modular_arithmetic_rib_ablations(ablation_type):
+@pytest.mark.parametrize("edge_ablation", [False, True])
+def test_run_modular_arithmetic_rib_ablations(ablation_type, edge_ablation):
     """Test various ablation result properties on modular arithmetic.
 
     The ablation rib_scripts load model from the config of the RIB graph. To run on ci
@@ -181,15 +182,20 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
         return_set: test
         return_set_n_samples: 1000
     ablation_node_layers:
-        - ln1.0
+        - mlp_out.0
         - unembed
     batch_size: 1000  # single batch
     dtype: float32
     seed: 0
     eval_type: accuracy
     out_dir: null
+    edge_ablation: {edge_ablation}
     """
     config_dict = yaml.safe_load(config_str)
     config = AblationConfig(**config_dict)
+    if edge_ablation and ablation_type == "orthogonal":
+        with pytest.raises(AssertionError):
+            load_bases_and_ablate(config)
+        return
     accuracies = load_bases_and_ablate(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)

@@ -310,101 +310,6 @@ def ablate_node_layers_and_eval(
     return results
 
 
-def load_basis_matrices(
-    rib_results: RibBuildResults,
-    ablation_node_layers: list[str],
-    ablation_type: Literal["rib", "orthogonal"],
-    dtype: torch.dtype,
-    device: str,
-) -> list[tuple[BasisVecs, BasisVecsPinv]]:
-    """Load the basis matrices and their pseudoinverses.
-
-    Supports both rib and orthogonal basis matrices. Converts each matrix to the specified dtype
-    and device.
-    """
-    if ablation_type == "rib":
-        basis_matrix_key = "interaction_rotations"
-    elif ablation_type == "orthogonal":
-        basis_matrix_key = "eigenvectors"
-    else:
-        raise ValueError(f"ablation_type must be one of ['rib', 'orthogonal']")
-
-    # Get the basis vecs and their pseudoinverses using the module_names as keys
-    basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
-    basis_infos_list = getattr(rib_results, basis_matrix_key)
-    basis_infos_dict = {info.node_layer_name: info for info in basis_infos_list}
-    for module_name in ablation_node_layers:
-        basis_info = basis_infos_dict[module_name]
-        if ablation_type == "rib":
-            assert isinstance(basis_info, InteractionRotation)
-            assert basis_info.C is not None, f"{module_name} has no C matrix."
-            assert basis_info.C_pinv is not None, f"{module_name} has no C_pinv matrix."
-            basis_vecs = basis_info.C.to(dtype=dtype, device=device)
-            basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
-        elif ablation_type == "orthogonal":
-            assert isinstance(basis_info, Eigenvectors)
-            assert basis_info.U is not None, f"{module_name} has no U matrix."
-            basis_vecs = basis_info.U.to(dtype=dtype, device=device)
-            # Pseudoinverse of an orthonormal matrix is its transpose
-            basis_vecs_pinv = basis_vecs.T.detach().clone()
-        basis_matrices.append((basis_vecs, basis_vecs_pinv))
-    return basis_matrices
-
-
-@torch.inference_mode()
-def ablate_edges_in_multiple_layers(
-    basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]],
-    edges: list[Edges],
-    num_edges_to_keep: list[int],
-    hooked_model: HookedModel,
-    data_loader: DataLoader,
-    eval_fn: Callable,
-    module_names: list[str],
-    device: str,
-    dtype: Optional[torch.dtype] = None,
-) -> float:
-    """Perform a single edge ablation experiment on multiple layers.
-
-    Args:
-        edge_masks: A dictionary mapping node layers to edge masks.
-        interaction_rotations: The interaction rotations for all node layers.
-        hooked_model: The hooked model.
-        data_loader: The data loader to use for testing.
-        eval_fn: The function to use to evaluate the model.
-        device: The device to run the model on.
-        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
-    """
-    paired_basis = zip(basis_matrices[:-1], basis_matrices[1:])
-    hooks = []
-    for module_name, basis_pair, layer_edges, layer_num_edges_to_keep in zip(
-        module_names[-1], paired_basis, edges, num_edges_to_keep
-    ):
-        if layer_num_edges_to_keep > layer_edges.E_hat.numel():
-            # no ablation in this layer so no hook needed
-            continue
-
-        threshold = torch.topk(layer_edges.E_hat.flatten(), k=layer_num_edges_to_keep).values[-1]
-        edge_mask = layer_edges.E_hat >= threshold
-
-        (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
-        hook = Hook(
-            name=module_name,
-            data_key="edge_ablation",
-            fn=edge_ablation_forward_hook_fn,
-            module_name=module_name,
-            fn_kwargs={
-                "edge_mask": edge_mask,
-                "in_C": in_C.to(device),
-                "in_C_inv": in_C_inv.to(device),
-                "out_C": out_C.to(device),
-                "out_C_inv": out_C_inv.to(device),
-            },
-        )
-        hooks.append(hook)
-
-    return eval_fn(hooked_model, data_loader, hooks=hooks, dtype=dtype, device=device)
-
-
 @torch.inference_mode()
 def ablate_edges_and_eval(
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]],
@@ -463,9 +368,11 @@ def ablate_edges_and_eval(
             if num_edges_kept > layer_edges.E_hat.numel():
                 results[ablation_node_layer][num_edges_kept] = base_score
                 continue
-
-            threshold = torch.topk(layer_edges.E_hat.flatten(), k=num_edges_kept).values[-1]
-            edge_mask = layer_edges.E_hat >= threshold
+            if num_edges_kept > 0:
+                threshold = torch.topk(layer_edges.E_hat.flatten(), k=num_edges_kept).values[-1]
+                edge_mask = layer_edges.E_hat >= threshold
+            else:
+                edge_mask = torch.zeros_like(layer_edges.E_hat, dtype=torch.bool)
             edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
 
             hook = Hook(
@@ -474,7 +381,7 @@ def ablate_edges_and_eval(
                 fn=edge_ablation_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={
-                    "edge_mask": edge_mask,
+                    "edge_mask": edge_mask.to(device),
                     "in_C": in_C.to(device),
                     "in_C_inv": in_C_inv.to(device),
                     "out_C": out_C.to(device),
@@ -492,6 +399,127 @@ def ablate_edges_and_eval(
                     break
 
     return results, edge_masks
+
+
+def load_basis_matrices(
+    rib_results: RibBuildResults,
+    ablation_node_layers: list[str],
+    ablation_type: Literal["rib", "orthogonal"],
+    dtype: torch.dtype,
+    device: str,
+    none_ok: bool = False,
+) -> list[tuple[BasisVecs, BasisVecsPinv]]:
+    """Load the basis matrices and their pseudoinverses.
+
+    Supports both rib and orthogonal basis matrices. Converts each matrix to the specified dtype
+    and device.
+    """
+    if ablation_type == "rib":
+        basis_matrix_key = "interaction_rotations"
+    elif ablation_type == "orthogonal":
+        basis_matrix_key = "eigenvectors"
+    else:
+        raise ValueError(f"ablation_type must be one of ['rib', 'orthogonal']")
+
+    # Get the basis vecs and their pseudoinverses using the module_names as keys
+    basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
+    basis_infos_list = getattr(rib_results, basis_matrix_key)
+    basis_infos_dict = {info.node_layer_name: info for info in basis_infos_list}
+    for module_name in ablation_node_layers:
+        basis_info = basis_infos_dict[module_name]
+        if ablation_type == "rib":
+            assert isinstance(basis_info, InteractionRotation)
+            if none_ok and basis_info.C is None:
+                assert basis_info.C_pinv is None, f"{module_name} has a C_pinv matrix."
+                basis_vecs = torch.eye(basis_info.out_dim, dtype=dtype, device=device)
+                basis_vecs_pinv = torch.eye(basis_info.out_dim, dtype=dtype, device=device)
+            else:
+                assert basis_info.C is not None, f"{module_name} has no C matrix."
+                assert basis_info.C_pinv is not None, f"{module_name} has no C_pinv matrix."
+                basis_vecs = basis_info.C.to(dtype=dtype, device=device)
+                basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
+        elif ablation_type == "orthogonal":
+            assert isinstance(basis_info, Eigenvectors)
+            if none_ok and basis_info.U is None:
+                basis_vecs = torch.eye(basis_info.out_dim, dtype=dtype, device=device)
+                basis_vecs_pinv = torch.eye(basis_info.out_dim, dtype=dtype, device=device)
+            else:
+                assert basis_info.U is not None, f"{module_name} has no U matrix."
+                basis_vecs = basis_info.U.to(dtype=dtype, device=device)
+                # Pseudoinverse of an orthonormal matrix is its transpose
+                basis_vecs_pinv = basis_vecs.T.detach().clone()
+        basis_matrices.append((basis_vecs, basis_vecs_pinv))
+    return basis_matrices
+
+
+@torch.inference_mode()
+def ablate_edges_in_multiple_layers(
+    rib_results: RibBuildResults,
+    config: AblationConfig,
+    edge_masks: list[Bool[torch.Tensor, "out in"]],
+) -> float:
+    """Perform a single edge ablation experiment on multiple layers.
+
+    Args:
+        basis_matrices: List of basis vector matrices and their pseudoinverses. In the orthogonal
+            basis case, the pseudoinverse is the transpose.
+        edge_masks: List of boolean masks over edges. True means the edge will be kept.
+        hooked_model: The hooked model.
+        data_loader: The data loader to use for testing.
+        eval_fn: The function to use to evaluate the model.
+        device: The device to run the model on.
+        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
+    """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[config.dtype]
+    basis_matrices = load_basis_matrices(
+        rib_results=rib_results,
+        ablation_node_layers=config.ablation_node_layers,
+        ablation_type=config.ablation_type,
+        dtype=dtype,
+        device=device,
+        none_ok=True,
+    )
+
+    model, dataset = load_model_and_dataset_from_rib_config(
+        rib_results.config,
+        dataset_config=config.dataset,
+        device=device,
+        dtype=dtype,
+        node_layers=config.ablation_node_layers,
+    )
+    model.to(device=torch.device(device), dtype=dtype)
+    data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    hooked_model = HookedModel(model)
+
+    eval_fn: Callable = (
+        eval_model_accuracy if config.eval_type == "accuracy" else eval_cross_entropy_loss
+    )
+    if isinstance(model, MLP):
+        module_names = config.ablation_node_layers
+    else:
+        assert isinstance(model, SequentialTransformer)
+        module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+    paired_basis = zip(basis_matrices[:-1], basis_matrices[1:])
+    hooks = []
+    for module_name, basis_pair, edge_mask in zip(module_names[:-1], paired_basis, edge_masks):
+        (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
+        hook = Hook(
+            name=module_name,
+            data_key="edge_ablation",
+            fn=edge_ablation_forward_hook_fn,
+            module_name=module_name,
+            fn_kwargs={
+                "edge_mask": edge_mask.to(device),
+                "in_C": in_C.to(device),
+                "in_C_inv": in_C_inv.to(device),
+                "out_C": out_C.to(device),
+                "out_C_inv": out_C_inv.to(device),
+            },
+        )
+        hooks.append(hook)
+
+    return eval_fn(hooked_model, data_loader, hooks=hooks, dtype=dtype, device=device)
 
 
 def load_bases_and_ablate(
@@ -525,7 +553,8 @@ def load_bases_and_ablate(
 
     if config.out_dir is not None:
         config.out_dir.mkdir(parents=True, exist_ok=True)
-        out_file = config.out_dir / f"{config.exp_name}_ablation_results.json"
+        edge_node = "edge" if config.edge_ablation else "node"
+        out_file = config.out_dir / f"{config.exp_name}_{edge_node}_ablation_results.json"
         if not check_outfile_overwrite(out_file, force):
             raise FileExistsError("Not overwriting output file")
 
@@ -540,8 +569,13 @@ def load_bases_and_ablate(
         assert "|".join(config.ablation_node_layers) in "|".join(
             rib_results.config.node_layers
         ), "node_layers in the config must be a subsequence of the node layers in the RIB graph."
-
-    assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
+        assert (
+            config.ablation_type == "rib"
+        ), "Can't do edge ablation with Us we don't have edges for U basis"
+        assert len(rib_results.edges) > 0, "No edges found in the RIB results."
+        assert rib_results.contains_all_edges
+    else:
+        assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
@@ -552,6 +586,7 @@ def load_bases_and_ablate(
         ablation_type=config.ablation_type,
         dtype=dtype,
         device=device,
+        none_ok=config.edge_ablation,
     )
 
     model, dataset = load_model_and_dataset_from_rib_config(
@@ -580,7 +615,7 @@ def load_bases_and_ablate(
 
     if config.edge_ablation:
         edges_dict = {info.in_node_layer_name: info for info in rib_results.edges}
-        edges = [edges_dict[layer] for layer in config.ablation_node_layers]
+        edges = [edges_dict[layer] for layer in config.ablation_node_layers[:-1]]
         ablation_results, edge_masks = ablate_edges_and_eval(
             basis_matrices=basis_matrices,
             ablation_node_layers=config.ablation_node_layers,
@@ -619,7 +654,7 @@ def load_bases_and_ablate(
 
     if config.out_dir is not None:
         with open(out_file, "w") as f:
-            json.dump(results, f)
+            json.dump(results, f, default=lambda x: x.tolist())  # serialize edge_mask tensors
         logger.info("Wrote results to %s", out_file)
 
     return ablation_results

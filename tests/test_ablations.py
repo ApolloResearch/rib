@@ -139,6 +139,10 @@ def test_run_mnist_ablations(ablation_type, edge_ablation):
     """
     config_dict = yaml.safe_load(config_str)
     config = AblationConfig(**config_dict)
+    if edge_ablation and ablation_type == "orthogonal":
+        with pytest.raises(AssertionError):
+            load_bases_and_ablate(config)
+        return
     accuracies = load_bases_and_ablate(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
 

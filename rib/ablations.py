@@ -331,7 +331,6 @@ def _get_edge_mask(
         full_mask[1:, 1:] = sub_mask
     else:
         full_mask = sub_mask
-    logger.info(full_mask[:10, :10].int())
     return full_mask
 
 
@@ -347,7 +346,7 @@ def ablate_edges_and_eval(
     schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
     device: str,
     dtype: Optional[torch.dtype] = None,
-    keep_const_edges=False,
+    always_keep_const_dir=False,
 ) -> tuple[AblationAccuracies, EdgeMasks]:
     """Perform a series of edge ablation experiments across layers and multiple # of edges to keep.
 
@@ -397,7 +396,7 @@ def ablate_edges_and_eval(
             edge_mask = _get_edge_mask(
                 edge_weights=layer_edges.E_hat,
                 num_edges_kept=num_edges_kept,
-                keep_const_edges=keep_const_edges,
+                keep_const_edges=always_keep_const_dir,
             )
             if edge_mask.all():
                 results[ablation_node_layer][num_edges_kept] = base_score
@@ -594,6 +593,7 @@ def load_bases_and_ablate(
             schedule_config=config.schedule,
             device=device,
             dtype=dtype,
+            always_keep_const_dir=rib_results.config.center,
         )
     else:
         ablation_results = ablate_node_layers_and_eval(

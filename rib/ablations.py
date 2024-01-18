@@ -246,7 +246,7 @@ def ablate_node_layers_and_eval(
     """
     results: AblationAccuracies = {}
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
-        ablation_node_layers, module_names, basis_matrices
+        ablation_node_layers, module_names, basis_matrices, strict=True
     ):
         ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=basis_vecs.shape[0])
 
@@ -331,8 +331,9 @@ def ablate_edges_and_eval(
     out_dim * in_dim. This can be very large).
 
     Args:
-        interaction_rotations:
+        basis_matrices: List of basis vector matrices (Cs) and their pseudoinverses (C_pinv).
         ablation_node_layers: The names of the node layers whose (rotated) inputs we want to ablate.
+        edges: The edge weights computed by RIB. We use these to determine edge ablation order.
         hooked_model: The hooked model.
         data_loader: The data loader to use for testing.
         eval_fn: The function to use to evaluate the model.
@@ -353,7 +354,7 @@ def ablate_edges_and_eval(
     edge_masks: EdgeMasks = {}
     basis_pairs = zip(basis_matrices[:-1], basis_matrices[1:])
     for ablation_node_layer, module_name, basis_pair, layer_edges in zip(
-        ablation_node_layers[:-1], module_names[:-1], basis_pairs, edges
+        ablation_node_layers[:-1], module_names[:-1], basis_pairs, edges, strict=True
     ):
         (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
         total_possible_edges = in_C.shape[0] * out_C.shape[1]
@@ -413,6 +414,9 @@ def load_basis_matrices(
 
     Supports both rib and orthogonal basis matrices. Converts each matrix to the specified dtype
     and device.
+
+    By default asserts that all basis matrices are non-None. If none_ok is True then an identity
+    matrix is returned in place of None matricies.
     """
     if ablation_type == "rib":
         basis_matrix_key = "interaction_rotations"
@@ -534,8 +538,8 @@ def load_bases_and_ablate(
     eval_fn: Callable = (
         eval_model_accuracy if config.eval_type == "accuracy" else eval_cross_entropy_loss
     )
-    eval_results = eval_fn(hooked_model, data_loader, dtype=dtype, device=device)
-    logger.info("Model %s on dataset: %.4f", config.eval_type, eval_results)
+    no_ablation_result = eval_fn(hooked_model, data_loader, dtype=dtype, device=device)
+    logger.info("Model %s on dataset: %.4f", config.eval_type, no_ablation_result)
 
     if isinstance(model, MLP):
         module_names = config.ablation_node_layers
@@ -578,6 +582,7 @@ def load_bases_and_ablate(
         "config": json.loads(config.model_dump_json()),
         "results": ablation_results,
         "time_taken": time_taken,
+        "no_ablation_result": no_ablation_result,
     }
     if config.edge_ablation:
         results["edge_masks"] = edge_masks

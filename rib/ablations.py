@@ -1,6 +1,5 @@
 import json
 import time
-from pathlib import Path
 from typing import Callable, Literal, Optional, Union
 
 import numpy as np
@@ -23,6 +22,7 @@ from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import MLP, SequentialTransformer
 from rib.rib_builder import RibBuildResults
+from rib.settings import REPO_ROOT
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
@@ -32,8 +32,8 @@ from rib.utils import (
     set_seed,
 )
 
-BasisVecs = Union[Float[Tensor, "orig orig_trunc"], Float[Tensor, "orig orig"]]
-BasisVecsPinv = Union[Float[Tensor, "orig_trunc orig"], Float[Tensor, "orig orig"]]
+BasisVecs = Union[Float[Tensor, "orig rib"], Float[Tensor, "orig orig"]]
+BasisVecsPinv = Union[Float[Tensor, "rib orig"], Float[Tensor, "orig orig"]]
 AblationAccuracies = dict[str, dict[int, float]]
 
 
@@ -173,7 +173,7 @@ class AblationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str
     out_dir: Optional[RootPath] = Field(
-        Path(__file__).parent / "out",
+        REPO_ROOT / "rib_scripts/ablations/out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )

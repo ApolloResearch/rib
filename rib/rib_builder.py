@@ -222,11 +222,13 @@ class RibBuildConfig(BaseModel):
 class RibBuildResults(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
     exp_name: str = Field(..., description="The name of the experiment")
-    gram_matrices: dict[str, torch.Tensor] = Field(description="Gram matrices at each node layer.")
-    interaction_rotations: list[InteractionRotation] = Field(
-        description="Interaction rotation matrices (e.g. Cs, Us) at each node layer."
+    gram_matrices: dict[str, torch.Tensor] = Field(
+        description="Gram matrices at each node layer.", repr=False
     )
-    edges: list[Edges] = Field(description="The edges between each node layer.")
+    interaction_rotations: list[InteractionRotation] = Field(
+        description="Interaction rotation matrices (e.g. Cs, Us) at each node layer.", repr=False
+    )
+    edges: list[Edges] = Field(description="The edges between each node layer.", repr=False)
     dist_info: DistributedInfo = Field(
         description="Information about the parallelisation setup used for the run."
     )

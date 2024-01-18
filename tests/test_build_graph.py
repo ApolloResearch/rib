@@ -177,7 +177,7 @@ def get_means(results: RibBuildResults, atol: float, batch_size=16):
     )
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @pytest.mark.parametrize(
     "basis_formula, edge_formula",
     [

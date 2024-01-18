@@ -11,22 +11,17 @@ various scales. This is because combining atol and rtol does not work particular
 that have a small set of large numbers and a large set of small numbers.
 """
 
-from unittest.mock import patch
-
 import einops
 import pytest
 import torch
 from fancy_einsum import einsum
-from jaxtyping import Float
-from torch import Tensor
 from torch.testing import assert_close
 from torch.utils.data import DataLoader
 
-from rib.analysis_utils import get_rib_acts, parse_c_infos
+from rib.analysis_utils import get_rib_acts, rotation_list_to_dict
 from rib.data_accumulator import collect_dataset_means
 from rib.hook_fns import acts_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
-from rib.interaction_algos import build_sorted_lambda_matrices
 from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import SequentialTransformer
@@ -43,31 +38,8 @@ from tests.utils import (
 )
 
 
-def build_get_lambdas(
-    config: RibBuildConfig,
-) -> tuple[RibBuildResults, list[Float[Tensor, "orig_trunc"]]]:
-    """Build the graph but extracting the lambdas"""
-    Lambda_abs: list[torch.Tensor] = []
-
-    def mock_build_sorted_lambda_matrices(Lambda_abs_arg, *args, **kwargs):
-        # Call the original function to get the real lambdas
-        Lambda_abs.append(Lambda_abs_arg.cpu())
-        return build_sorted_lambda_matrices(Lambda_abs_arg, *args, **kwargs)
-
-    with patch(
-        "rib.interaction_algos.build_sorted_lambda_matrices",
-        side_effect=mock_build_sorted_lambda_matrices,
-    ):
-        results = rib_build(config)
-
-    # Sort each row, and reverse the order of the Lambda_abs
-    Lambdas = [torch.sort(lambda_row, descending=True).values for lambda_row in Lambda_abs[::-1]]
-
-    return results, Lambdas
-
-
 def graph_build_test(config: RibBuildConfig, atol: float):
-    results, Lambdas = build_get_lambdas(config)
+    results = rib_build(config)
 
     grams = results.gram_matrices
     Cs = results.interaction_rotations
@@ -107,11 +79,10 @@ def graph_build_test(config: RibBuildConfig, atol: float):
             # Check that the Lambdas are also the same as the act_size and edge_size
             # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
             # `rib.interaction_algos.build_sort_lambda_matrix)
-            Lambdas_trunc = Lambdas[i][: len(act_size)]
+            Lambda_raw = results.interaction_rotations[i].Lambda
+            Lambda = torch.sort(Lambda_raw, descending=True).values[: len(act_size)]
             assert torch.allclose(
-                act_size / act_size.abs().max(),
-                Lambdas_trunc / Lambdas_trunc.max(),
-                atol=atol,
+                act_size / act_size.abs().max(), Lambda / Lambda.max(), atol=atol
             ), f"act_size not equal to Lambdas for {module_name}"
 
     return results
@@ -134,12 +105,11 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
     model.to(device=torch.device(device), dtype=dtype)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     hooked_model = HookedModel(model)
-    Cs = parse_c_infos(results.interaction_rotations)
 
     rib_acts = get_rib_acts(
         hooked_model=hooked_model,
         data_loader=data_loader,
-        c_infos=Cs.values(),
+        interaction_rotations=results.interaction_rotations,
         device=device,
         dtype=dtype,
     )
@@ -174,7 +144,8 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
             hooked_model.clear_hooked_data()
             prev_module_outputs.append(torch.concatenate(cache_out, dim=-1).cpu())
     prev_module_outputs = torch.concatenate(prev_module_outputs, dim=0)
-    test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, Cs[module_to_test].C)
+    C = rotation_list_to_dict(results.interaction_rotations)[module_to_test].C
+    test_rib_acts = einsum("... emb, emb rib -> ... rib", prev_module_outputs, C)
     utils_rib_acts = rib_acts[module_to_test].cpu()
     assert_is_close(utils_rib_acts, test_rib_acts, atol=atol, rtol=1e-5)
     return rib_acts
@@ -413,12 +384,10 @@ def test_modular_arithmetic_build_graph_invalid_node_layers():
 def test_svd_basis():
     config = get_pythia_config({"basis_formula": "svd"})
     results = rib_build(config)
-    for c_info, u_info in zip(results.interaction_rotations, results.eigenvectors):
-        C = c_info.C
-        U = u_info.U
-        assert (C is None) == (U is None)
-        if C is not None:
-            assert torch.allclose(C, U, atol=0)
+    for interaction_rotations in results.interaction_rotations:
+        assert (interaction_rotations.C is None) == (interaction_rotations.W is None)
+        if interaction_rotations.C is not None:
+            assert torch.allclose(interaction_rotations.C, interaction_rotations.W, atol=0)
 
 
 def centered_rib_test(results: RibBuildResults, atol=1e-6):
@@ -444,11 +413,11 @@ def centered_rib_test(results: RibBuildResults, atol=1e-6):
     # collect C_inv, rib acts, means, bias positions
     all_rib_acts = get_rib_acts_test(results, atol=1e-6)
     all_mean_acts = get_means(results, atol=atol)
-    C_infos = parse_c_infos(results.interaction_rotations)
+    interaction_rotations = rotation_list_to_dict(results.interaction_rotations)
     # output and pre-unembed have no bias
     m_names = [m_name for m_name in results.config.node_layers if m_name not in ["output"]]
     for m_name in m_names:
-        C_inv = C_infos[m_name].C_pinv  # [rib_dir, emb_pos]
+        C_inv = interaction_rotations[m_name].C_pinv  # [rib_dir, emb_pos]
         if C_inv is None:  # this happens when rotate_final_layer is true
             continue
         mean_acts = all_mean_acts[m_name].cpu()  # [emb_pos]

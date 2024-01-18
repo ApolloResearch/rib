@@ -1,6 +1,6 @@
 """This module contains algorithms related to interaction rotations."""
 
-from typing import Literal, Optional
+from typing import Callable, Literal, Optional
 
 import torch
 from jaxtyping import Float, Int
@@ -13,51 +13,60 @@ from typing_extensions import Annotated
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
 from rib.linalg import centering_matrix, eigendecompose, move_const_dir_first, pinv_diag
-from rib.models.mlp import MLP
-from rib.models.transformer import SequentialTransformer
+from rib.models import MLP, SequentialTransformer
 from rib.utils import check_device_is_cpu
 
 
-def check_second_dim_is_out_dim(
-    X: Optional[torch.Tensor], info: ValidationInfo
-) -> Optional[torch.Tensor]:
-    if X is not None:
-        assert (
-            X.shape[1] == info.data["out_dim"]
-        ), f"Expected tensor to have shape (_, {info.data['out_dim']}). Got {X.shape}."
-    return X
+def wrap_check_dim_is_out_dim(
+    dim: int,
+) -> Callable[[Optional[torch.Tensor], ValidationInfo], Optional[torch.Tensor]]:
+    """Returns a function that checks whether `dim` of a tensor is equal to out_dim."""
+
+    def check_dim_is_out_dim(
+        X: Optional[torch.Tensor], info: ValidationInfo
+    ) -> Optional[torch.Tensor]:
+        if X is not None:
+            assert (
+                X.shape[dim] == info.data["out_dim"]
+            ), f"Expected dim {dim} to be {info.data['out_dim']}. Got {X.shape[dim]}."
+        return X
+
+    return check_dim_is_out_dim
 
 
 class InteractionRotation(BaseModel):
-    """Stores an interaction rotation matrix and its pseudo-inverse for a node layer."""
+    """Stores useful matrices that are computed in `calculate_interaction_rotations`."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
     node_layer_name: str
-    out_dim: int  # Equal to 'rib' if C is not None and 'orig' otherwise
+    out_dim: int  # Size of the concatenated embeddings at node_layer_name (denoted 'orig')
     # if centering was used, C[:, 0] is the constant direction
     C: Annotated[
         Optional[Float[Tensor, "orig rib"]],
-        AfterValidator(check_second_dim_is_out_dim),
+        AfterValidator(wrap_check_dim_is_out_dim(dim=0)),
         AfterValidator(check_device_is_cpu),
     ] = None
     # pseudoinverse of C, not needed for the output node layer
     C_pinv: Annotated[
         Optional[Float[Tensor, "rib orig"]],
+        AfterValidator(wrap_check_dim_is_out_dim(dim=1)),
         AfterValidator(check_device_is_cpu),
     ] = None
-
-
-class Eigenvectors(BaseModel):
-    """Stores eigenvectors of a node layer."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
-    node_layer_name: str
-    out_dim: int  # Equal to orig_trunc if U is not None and orig otherwise
-    U: Annotated[
+    W: Annotated[
         Optional[Float[Tensor, "orig orig_trunc"]],
-        AfterValidator(check_second_dim_is_out_dim),
+        AfterValidator(wrap_check_dim_is_out_dim(dim=0)),
         AfterValidator(check_device_is_cpu),
     ] = None
+    W_pinv: Annotated[
+        Optional[Float[Tensor, "orig_trunc orig"]],
+        AfterValidator(wrap_check_dim_is_out_dim(dim=1)),
+        AfterValidator(check_device_is_cpu),
+    ] = None
+    V: Annotated[
+        Optional[Float[Tensor, "orig_trunc orig_trunc"]],
+        AfterValidator(check_device_is_cpu),
+    ] = None
+    Lambda: Optional[Float[Tensor, "orig_trunc"]] = None
 
 
 def build_sorted_lambda_matrices(
@@ -119,7 +128,7 @@ def calculate_interaction_rotations(
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-0)*alpha",
     center: bool = False,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
-) -> tuple[list[InteractionRotation], list[Eigenvectors]]:
+) -> list[InteractionRotation]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
     This function implements Algorithm 2 (Pseudocode for RIB in transformers) of the paper. We name
@@ -163,9 +172,7 @@ def calculate_interaction_rotations(
             for the "svd" basis formula.
         means: The means of the activations for each node layer. Only used if `center=true`.
     Returns:
-        - A list of objects containing the interaction rotation matrices and their pseudoinverses
-            for each node layer.
-        - A list of objects containing the eigenvectors of each node layer
+        A list of InteractionRotation objects containing useful matrices.
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate Cs."
     assert len(section_names) > 0, "No sections specified."
@@ -178,87 +185,80 @@ def calculate_interaction_rotations(
     if center and basis_formula == "neuron":
         raise NotImplementedError("centering is not currently implemented for the neuron basis.")
 
-    # We start appending Us and Cs from the output layer and work our way backwards
-    Us: list[Eigenvectors] = []
-    Cs: list[InteractionRotation] = []
+    # We start appending InteractionRotation from the output layer and work our way backwards
+    interaction_rotations: list[InteractionRotation] = []
 
-    # The C matrix for the final layer is either the eigenvectors U if rotate_final_node_layer is
-    # True, and None otherwise
-    U_output: Optional[Float[Tensor, "orig orig"]] = None
-    C_output: Optional[Float[Tensor, "orig orig"]] = None
+    # The C matrix for the final layer is either the centered, unscaled eigenvectors of the gram
+    # matrix (i.e. W) if rotate_final_node_layer is True, and None otherwise
+    W_output: Optional[Float[Tensor, "orig orig_trunc"]] = None
     if rotate_final_node_layer:
         # We don't use D_output except in finding the index of the const_dir in U
-        D_output, U_output = eigendecompose(gram_matrices[node_layers[-1]])
-        assert U_output is not None
+        D_dash_output, U_dash_output = eigendecompose(gram_matrices[node_layers[-1]])
+        # Trucate all directions with eigenvalues smaller than some threshold
+        mask = D_dash_output > truncation_threshold  # true if we keep the direction
+        D_output: Float[Tensor, "orig_trunc orig_trunc"] = D_dash_output[mask].diag()
+        U_output: Float[Tensor, "orig orig_trunc"] = U_dash_output[:, mask]
         if center:
-            assert means is not None and node_layers[-1] in means
-            mean = means[node_layers[-1]]
+            assert means is not None
             D_output, U_output = move_const_dir_first(D_output, U_output)
-            C_output = centering_matrix(mean) @ U_output
+            Y_output = centering_matrix(means[node_layers[-1]])
         else:
-            C_output = U_output
-        C_output = C_output.detach().cpu()
-        U_output = U_output.detach().cpu()
+            # If no centering, Y is the identity matrix
+            Y_output = torch.eye(U_output.shape[0], dtype=U_output.dtype, device=U_output.device)
 
+        ### FIRST ROTATION MATRIX (R) to eigenbasis
+        # Combines Y, U, D. This centers (if Y is not an identity), then orthogonalizes and scales.
+        W_output = (Y_output @ U_output).cpu()
+
+    # Get the out_dim of the final node layer
     if node_layers[-1] not in gram_matrices:
-        # Technically we don't actually need the final node layer to be in gram_matrices if we're
-        # not rotating it, but for now, our implementation assumes that it always is unless the
-        # final node_layer "output".
         assert (
             node_layers[-1] == "output"
-        ), f"Final node layer {node_layers[-1]} not in gram matrices."
-
+        ), f"Final node layer {node_layers[-1]} not in gram matrices and not output."
         if isinstance(hooked_model.model, MLP):
             out_dim = hooked_model.model.output_size
-        else:
-            assert isinstance(hooked_model.model, SequentialTransformer)
+        elif isinstance(hooked_model.model, SequentialTransformer):
             out_dim = hooked_model.model.cfg.d_vocab
+        else:
+            raise NotImplementedError(f"Unknown model type {type(hooked_model.model)}")
     else:
         out_dim = gram_matrices[node_layers[-1]].shape[0]
 
-    Us.append(
-        Eigenvectors(
-            node_layer_name=node_layers[-1],
-            out_dim=out_dim,
-            U=U_output,
-        )
-    )
-    Cs.append(
+    interaction_rotations.append(
         InteractionRotation(
             node_layer_name=node_layers[-1],
             out_dim=out_dim,
-            C=C_output,
+            C=W_output.detach().clone() if W_output is not None else None,
+            W=W_output,
         )
     )
-    if U_output is not None:
-        assert C_output is not None
-        out_shape = (out_dim, out_dim)
-        assert C_output.shape == out_shape, f"Expected shape {out_shape}. Got {C_output.shape}."
-        assert U_output.shape == out_shape, f"Expected shape {out_shape}. Got {U_output.shape}."
 
-    # We only need to calculate C for the final section if there is no output node layer
+    # We only need to calculate C for the final section if there is a node layer at "output"
+    # Otherwise, we've already handled the final node layer above
     section_names_to_calculate = (
         section_names if node_layers[-1] == "output" else section_names[:-1]
     )
-
     assert (
         len(section_names_to_calculate) == len(node_layers) - 1
     ), "Must be a section name for all but the final node_layer which was already handled above."
 
-    # Since we've already handled the last node layer, we can ignore it in the loop
     for node_layer, section_name in tqdm(
         zip(node_layers[-2::-1], section_names_to_calculate[::-1]),
         total=len(section_names_to_calculate),
         desc="Interaction rotations",
     ):
+        out_dim = gram_matrices[node_layer].shape[0]
         if basis_formula == "neuron":
-            # Use identity matrix as C and then progress to the next loop
-            # TODO assert not rotate final
-            width = gram_matrices[node_layer].shape[0]
-            Id = torch.eye(width, dtype=dtype, device="cpu")
-            Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=width, U=Id))
-            Cs.append(
-                InteractionRotation(node_layer_name=node_layer, out_dim=width, C=Id, C_pinv=Id)
+            # Use identity matrix as C and W since we don't rotate
+            interaction_rotations.append(
+                InteractionRotation(
+                    node_layer_name=node_layer,
+                    out_dim=out_dim,
+                    C=torch.eye(out_dim, dtype=dtype),
+                    C_pinv=torch.eye(out_dim, dtype=dtype),
+                    W=torch.eye(out_dim, dtype=dtype),
+                    W_pinv=torch.eye(out_dim, dtype=dtype),
+                )
             )
             continue
 
@@ -279,7 +279,6 @@ def calculate_interaction_rotations(
 
         if center:
             assert means is not None
-            # Y uses the bias position to center the activations
             Y = centering_matrix(means[node_layer])
             Y_inv = centering_matrix(means[node_layer], inverse=True)
         else:
@@ -287,26 +286,35 @@ def calculate_interaction_rotations(
             Id = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
             Y, Y_inv = Id, Id.detach().clone()
 
-        Us.append(Eigenvectors(node_layer_name=node_layer, out_dim=U.shape[1], U=U.detach().cpu()))
-        if basis_formula == "svd":
-            # Use U as C, with centering matrix
-            C_info = InteractionRotation(
-                node_layer_name=node_layer,
-                out_dim=U.shape[1],
-                C=(Y @ U).cpu(),
-                C_pinv=(U.T @ Y_inv).cpu(),
-            )
-            Cs.append(C_info)
-            continue
+        # First, W combines Y and U. This centers (if Y is not an identity), then orthogonalizes.
+        W: Float[Tensor, "orig orig_trunc"] = Y @ U
+        W_pinv: Float[Tensor, "orig_trunc orig"] = U.T @ Y_inv
+        ### FIRST ROTATION MATRIX (R) to eigenbasis
+        # Then scale by sqrt(D) to get R
+        R: Float[Tensor, "orig orig_trunc"] = W @ pinv_diag(D.sqrt())
+        R_pinv: Float[Tensor, "orig_trunc orig"] = D.sqrt() @ W_pinv
 
-        ### FIRST ROTATION MATRIX (R)
-        # Combines Y, U, D. This centers (if Y is not an identity), then orthogonalizes and scales.
-        R: Float[Tensor, "orig d_hidden_trunc"] = Y @ U @ pinv_diag(D.sqrt())
-        R_inv: Float[Tensor, "d_hidden_trunc orig"] = D.sqrt() @ U.T @ Y_inv
+        if basis_formula == "svd":
+            # Use W as C, with centering matrix
+            interaction_rotations.append(
+                InteractionRotation(
+                    node_layer_name=node_layer,
+                    out_dim=out_dim,
+                    C=W.cpu().detach().clone(),
+                    C_pinv=W_pinv.cpu().detach().clone(),
+                    W=W.cpu(),
+                    W_pinv=W_pinv.cpu(),
+                )
+            )
+            continue
 
         ### ROTATION TO SPARSIFY EDGES (V)
         # This is an orthogonal rotation that attempts to sparsify the edges
-        last_C = Cs[-1].C.to(device=device) if Cs[-1].C is not None else None
+        last_C = (
+            interaction_rotations[-1].C.to(device=device)
+            if interaction_rotations[-1].C is not None
+            else None
+        )
         # Compute M_dash in the neuron basis
         M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
             C_out=last_C,
@@ -323,7 +331,7 @@ def calculate_interaction_rotations(
         )
         # Then convert it into the pca basis
         M: Float[Tensor, "orig_trunc orig_trunc"] = (
-            R_inv.to(M_dash.dtype) @ M_dash @ R_inv.T.to(M_dash.dtype)
+            R_pinv.to(M_dash.dtype) @ M_dash @ R_pinv.T.to(M_dash.dtype)
         )
         # and take it's eigenvector basis as V
         V: Float[Tensor, "orig_trunc orig_trunc"]
@@ -339,17 +347,27 @@ def calculate_interaction_rotations(
         V = V.to(dtype)
 
         ### SCALING MATRIX (Lambda)
-        # Tranform lambda_dash (computed in the neuron basis) into our new basis with R and V
-        Lambda_abs: Float[Tensor, "orig_trunc"] = (V.T @ R_inv @ Lambda_dash @ R @ V).diag().abs()
+        # Transform lambda_dash (computed in the neuron basis) into our new basis with R and V
+        Lambda: Float[Tensor, "orig_trunc"] = (V.T @ R_pinv @ Lambda_dash @ R @ V).diag().abs()
         # Build a matrix for scaling by sqrt(Lambda).
         # This function prunes directions with small Lambdas. This is our second trunctaion.
-        L, L_inv = build_sorted_lambda_matrices(Lambda_abs, truncation_threshold)
+        L, L_inv = build_sorted_lambda_matrices(Lambda, truncation_threshold)
 
         ### FINAL ROTATION MATRIX (C)
         C: Float[Tensor, "orig rib"] = (R @ V @ L).detach().cpu()
-        C_pinv: Float[Tensor, "rib orig"] = (L_inv @ V.T @ R_inv).detach().cpu()
-        Cs.append(
-            InteractionRotation(node_layer_name=node_layer, out_dim=C.shape[1], C=C, C_pinv=C_pinv)
+        C_pinv: Float[Tensor, "rib orig"] = (L_inv @ V.T @ R_pinv).detach().cpu()
+
+        interaction_rotations.append(
+            InteractionRotation(
+                node_layer_name=node_layer,
+                out_dim=out_dim,
+                C=C,
+                C_pinv=C_pinv,
+                W=W.cpu(),
+                W_pinv=W_pinv.cpu(),
+                V=V.detach().cpu(),
+                Lambda=Lambda.detach().cpu(),
+            )
         )
 
-    return Cs[::-1], Us[::-1]
+    return interaction_rotations[::-1]

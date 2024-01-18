@@ -63,11 +63,7 @@ from rib.distributed_utils import (
     get_dist_info,
 )
 from rib.hook_manager import HookedModel
-from rib.interaction_algos import (
-    Eigenvectors,
-    InteractionRotation,
-    calculate_interaction_rotations,
-)
+from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
 from rib.loader import get_dataset_chunk, load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
@@ -228,9 +224,8 @@ class RibBuildResults(BaseModel):
     exp_name: str = Field(..., description="The name of the experiment")
     gram_matrices: dict[str, torch.Tensor] = Field(description="Gram matrices at each node layer.")
     interaction_rotations: list[InteractionRotation] = Field(
-        description="Interaction rotations (Cs) at each node layer."
+        description="Interaction rotation matrices (e.g. Cs, Us) at each node layer."
     )
-    eigenvectors: list[Eigenvectors] = Field(description="Eigenvectors at each node layer.")
     edges: list[Edges] = Field(description="The edges between each node layer.")
     dist_info: DistributedInfo = Field(
         description="Information about the parallelisation setup used for the run."
@@ -302,14 +297,16 @@ def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildCo
 
 def load_interaction_rotations(
     config: RibBuildConfig,
-) -> tuple[dict[str, Float[Tensor, "orig orig"]], list[InteractionRotation], list[Eigenvectors]]:
-    """Load pre-saved C matrices from file. Useful for just calculating edges on large models.
+) -> tuple[dict[str, Float[Tensor, "orig orig"]], list[InteractionRotation]]:
+    """Load pre-saved grams and interaction rotation matrices from file.
+
+    Useful for just calculating edges on large models.
 
     Args:
         config: The config used to calculate the C matrices.
 
     Returns:
-        The gram matrices, Cs, and Us.
+        The gram matrices and InteractionRotation objects
     """
     logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
     assert config.interaction_matrices_path is not None
@@ -333,9 +330,10 @@ def load_interaction_rotations(
     loaded_config = RibBuildConfig(**loaded_config_dict)
     _verify_compatible_configs(config, loaded_config)
 
-    Cs = [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
-    Us = [Eigenvectors(**data) for data in matrices_info["eigenvectors"]]
-    return matrices_info["gram_matrices"], Cs, Us
+    interaction_rotations = [
+        InteractionRotation(**data) for data in matrices_info["interaction_rotations"]
+    ]
+    return matrices_info["gram_matrices"], interaction_rotations
 
 
 def rib_build(
@@ -456,7 +454,7 @@ def rib_build(
             config.node_layers,
             len(graph_train_loader),
         )
-        Cs, Us = calculate_interaction_rotations(
+        interaction_rotations = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
             section_names=section_names,
             node_layers=config.node_layers,
@@ -471,14 +469,16 @@ def rib_build(
             center=config.center,
             means=means,
         )
-        # Cs used to calculate edges
-        edge_Cs = Cs
+        # InteractionRotation objects used to calculate edges
+        edge_interaction_rotations = interaction_rotations
 
         calc_C_time = (time.time() - c_start_time) / 60
         logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
     else:
-        gram_matrices, Cs, Us = load_interaction_rotations(config=config)
-        edge_Cs = [C for C in Cs if C.node_layer_name in config.node_layers]
+        gram_matrices, interaction_rotations = load_interaction_rotations(config=config)
+        edge_interaction_rotations = [
+            obj for obj in interaction_rotations if obj.node_layer_name in config.node_layers
+        ]
 
     if not config.calculate_edges:
         logger.info("Skipping edge calculation.")
@@ -500,7 +500,7 @@ def rib_build(
         )
         edges_start_time = time.time()
         E_hats = collect_interaction_edges(
-            Cs=edge_Cs,
+            interaction_rotations=edge_interaction_rotations,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
             section_names=section_names,
@@ -518,8 +518,7 @@ def rib_build(
     results = RibBuildResults(
         exp_name=config.exp_name,
         gram_matrices={k: v.cpu() for k, v in gram_matrices.items()},
-        interaction_rotations=Cs,
-        eigenvectors=Us,
+        interaction_rotations=interaction_rotations,
         edges=E_hats,
         dist_info=dist_info,
         contains_all_edges=dist_info.global_size == 1,  # True if no parallelisation

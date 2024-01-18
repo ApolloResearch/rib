@@ -347,23 +347,24 @@ def edge_ablation_forward_hook_fn(
     in_rib_acts: Float[Tensor, "... rib"] = in_acts @ in_C
     orig_out_rib_acts = orig_out_acts @ out_C
 
-    # TODO: we currently compute each output direction one at a time. This is inefficient.
-    # instead we can combine the computation for output directions which have the same set of
-    # unablated input edges.
+    # We set all output RIB activations to zero and compute them one set at a time.
     new_out_rib_acts: Float[Tensor, "... rib"] = torch.zeros_like(orig_out_rib_acts)
-    out_dirs_to_calc = edge_mask.any(dim=1).nonzero().squeeze()
-    if out_dirs_to_calc.dim() == 0:
-        out_dirs_to_calc = out_dirs_to_calc.unsqueeze(0)
-    for out_rib_dir in out_dirs_to_calc:
+    # In particular we can compute all output directions that share the same unablated input nodes.
+    # Below we iterate over sets of input nodes (`in_mask`) and the output nodes that share this set
+    # (`out_mask`). Worst case, we need to compute run this for every output node.
+    unique_in_masks, out_node_to_in_mask_map = edge_mask.unique(dim=0, return_inverse=True)
+    for i, in_mask in enumerate(unique_in_masks):
+        # find output nodes that match in_mask
+        out_mask = out_node_to_in_mask_map == i
         # project out some rib dirs in input
-        ablated_in_rib_acts = torch.where(edge_mask[out_rib_dir], in_rib_acts, 0.0)
+        ablated_in_rib_acts = torch.where(in_mask, in_rib_acts, 0.0)
         ablated_in_acts = ablated_in_rib_acts @ in_C_inv
         # pass through the hooked module
         raw_out = module(*ablated_in_acts.split(in_shape, dim=-1))
         ablated_out_acts = torch.cat(_to_tuple(raw_out), dim=-1)
         # rotate into rib and get the right component
-        ablated_out_rib_acts_in_dir = ablated_out_acts @ out_C[:, out_rib_dir]
-        new_out_rib_acts[..., out_rib_dir] = ablated_out_rib_acts_in_dir
+        ablated_out_rib_acts_in_dir = ablated_out_acts @ out_C[:, out_mask]
+        new_out_rib_acts[..., out_mask] = ablated_out_rib_acts_in_dir
 
     # rotate output RIB acts back to neuron basis
     new_out_acts: Float[Tensor, "... orig"] = new_out_rib_acts @ out_C_inv

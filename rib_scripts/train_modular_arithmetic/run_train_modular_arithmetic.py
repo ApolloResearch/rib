@@ -26,7 +26,7 @@ from rib.loader import load_dataset
 from rib.log import logger
 from rib.models.utils import save_model
 from rib.types import RootPath
-from rib.utils import load_config, set_seed
+from rib.utils import load_config, replace_pydantic_model, set_seed
 
 
 class ModelConfig(BaseModel):
@@ -205,16 +205,14 @@ def main(config_path_or_obj: Union[str, Config]) -> tuple[float, float]:
     model = HookedTransformer(transformer_lens_config)
     model = model.to(device)
 
+    assert config.dataset.return_set == "train", "currently only supports training on the train set"
     train_dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set="train",
-        model_n_ctx=transformer_lens_config.n_ctx,
+        dataset_config=config.dataset, model_n_ctx=transformer_lens_config.n_ctx
     )
     train_loader = DataLoader(train_dataset, batch_size=config.train.batch_size, shuffle=True)
 
     test_dataset = load_dataset(
-        dataset_config=config.dataset,
-        return_set="test",
+        dataset_config=replace_pydantic_model(config.dataset, {"return_set": "test"}),
         model_n_ctx=transformer_lens_config.n_ctx,
     )
     test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size, shuffle=True)

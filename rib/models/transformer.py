@@ -34,6 +34,7 @@ from rib.models.utils import (
     get_model_attr,
 )
 from rib.types import TORCH_DTYPES, StrDtype
+from rib.utils import replace_pydantic_model
 
 
 class SequentialTransformerConfig(BaseModel):
@@ -400,8 +401,8 @@ class SequentialTransformer(nn.Module):
                 fold_fn(*args)
 
         # We also need to convert all instances of LayerNormPre into LayerNormPreFolded
-        lnpre_folded_cfg = self.cfg.model_copy(
-            update={"d_model:": self.cfg.d_model + 1, "d_mlp": self.cfg.d_mlp + 1}
+        lnpre_folded_cfg = replace_pydantic_model(
+            self.cfg, {"d_model": self.cfg.d_model + 1, "d_mlp": self.cfg.d_mlp + 1}
         )
         for section_name, section in self.sections.items():
             for module_idx, module in enumerate(section):  # type: ignore

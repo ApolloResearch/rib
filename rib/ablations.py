@@ -34,10 +34,10 @@ from rib.utils import (
     set_seed,
 )
 
-BasisVecs = Union[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden d_hidden"]]
-BasisVecsPinv = Union[Float[Tensor, "d_hidden_trunc d_hidden"], Float[Tensor, "d_hidden d_hidden"]]
+BasisVecs = Union[Float[Tensor, "orig orig_trunc"], Float[Tensor, "orig orig"]]
+BasisVecsPinv = Union[Float[Tensor, "orig_trunc orig"], Float[Tensor, "orig orig"]]
 AblationAccuracies = dict[str, dict[int, float]]
-EdgeMasks = dict[str, dict[int, Bool[Tensor, "out in"]]]
+EdgeMasks = dict[str, dict[int, Bool[Tensor, "rib_out rib_in"]]]
 
 
 class ScheduleConfig(BaseModel):
@@ -223,7 +223,7 @@ def ablate_node_layers_and_eval(
 
     Note that we want our ablation schedules for different bases to match up, even though different
     bases may have different number of basis vectors due to truncation. We therefore create our
-    ablation schedule assuming a non-truncated basis (i.e. using the full hidden size
+    ablation schedule assuming a non-truncated basis (i.e. using the `orig` size
     (basis_vecs.shape[0])).
 
     Args:
@@ -310,6 +310,28 @@ def ablate_node_layers_and_eval(
     return results
 
 
+def _get_edge_mask(
+    edge_weights: Float[Tensor, "rib_out rib_in"], num_edges_kept: int, keep_const_edges: bool
+) -> Bool[Tensor, "rib_out rib_in"]:
+    """ """
+    sub_weights = edge_weights[1:, 1:] if keep_const_edges else edge_weights
+    if num_edges_kept > sub_weights.numel():  # keep all edges
+        return torch.ones_like(edge_weights, dtype=torch.bool)
+    if num_edges_kept == 0:  # ablate no edges
+        sub_mask = torch.zeros_like(sub_weights, dtype=torch.bool)
+    else:  # keep some edges
+        threshold = torch.topk(sub_weights.flatten(), k=num_edges_kept).values[-1]
+        sub_mask = sub_weights >= threshold
+    # transform sub_mask back to full size
+    if keep_const_edges:
+        full_mask = torch.ones_like(edge_weights, dtype=torch.bool)
+        full_mask[1:, 1:] = sub_mask
+    else:
+        full_mask = sub_mask
+    logger.info(full_mask[:10, :10].int())
+    return full_mask
+
+
 @torch.inference_mode()
 def ablate_edges_and_eval(
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]],
@@ -322,6 +344,7 @@ def ablate_edges_and_eval(
     schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
     device: str,
     dtype: Optional[torch.dtype] = None,
+    keep_const_edges=False,
 ) -> tuple[AblationAccuracies, EdgeMasks]:
     """Perform a series of edge ablation experiments across layers and multiple # of edges to keep.
 
@@ -344,6 +367,8 @@ def ablate_edges_and_eval(
         schedule_config: The config for the ablation schedule.
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
+        keep_const_edges: Used to always keep the constant edges (for free) when ablating a
+            centered RIB graph.
 
     Returns:
         A dictionary mapping node layers to ablation accuracies/losses.
@@ -366,14 +391,15 @@ def ablate_edges_and_eval(
             ablation_schedule[::-1], total=len(ablation_schedule), desc=f"Ablating {module_name}"
         ):
             num_edges_kept = total_possible_edges - num_edges_ablated
-            if num_edges_kept > layer_edges.E_hat.numel():
+            edge_mask = _get_edge_mask(
+                edge_weights=layer_edges.E_hat,
+                num_edges_kept=num_edges_kept,
+                keep_const_edges=keep_const_edges,
+            )
+            if edge_mask.all():
                 results[ablation_node_layer][num_edges_kept] = base_score
                 continue
-            if num_edges_kept > 0:
-                threshold = torch.topk(layer_edges.E_hat.flatten(), k=num_edges_kept).values[-1]
-                edge_mask = layer_edges.E_hat >= threshold
-            else:
-                edge_mask = torch.zeros_like(layer_edges.E_hat, dtype=torch.bool)
+
             edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
 
             hook = Hook(
@@ -397,6 +423,7 @@ def ablate_edges_and_eval(
                 # If the score is more than `early_stopping_threshold` away from the base result,
                 # then we stop ablating vectors.
                 if abs(score - base_score) > schedule_config.early_stopping_threshold:
+                    logger.info(f"Stopping early at {num_edges_kept} with {score=}, {base_score=} ")
                     break
 
     return results, edge_masks
@@ -511,6 +538,9 @@ def load_bases_and_ablate(
     else:
         assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
+    assert not (
+        config.ablation_type == "orthogonal" and rib_results.config.center
+    ), "Cannot use orthogonal ablations with a centered RIB, as Us don't include centering matrix"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 

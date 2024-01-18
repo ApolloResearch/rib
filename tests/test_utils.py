@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from rib.ablations import ExponentialScheduleConfig
 from rib.models import MLP, MLPConfig, MLPLayer
 from rib.models.utils import gelu_new, get_model_attr
-from rib.utils import eval_model_accuracy, find_root, update_pydantic_model
+from rib.utils import eval_model_accuracy, find_root, replace_pydantic_model
 
 
 def test_get_model_attr() -> None:
@@ -147,36 +147,42 @@ class DeeplyNestedModel(BaseModel):
     inner: NestedModel
 
 
-class TestUpdatePydanticModel:
-    """Test the update_pydantic_model function.
+class TestReplacePydanticModel:
+    """Test the replace_pydantic_model function.
 
     Note that we only care about configs defined with extra="forbid" and frozen=True.
     """
 
-    def test_update_simple_fields(self):
+    def test_replace_simple_fields(self):
         model = SimpleModel(x=1, y="hello")
-        updated_model = update_pydantic_model(model, {"x": 2})
-        assert updated_model.x == 2
-        assert updated_model.y == "hello"
+        replaced_model = replace_pydantic_model(model, {"x": 2})
+        assert replaced_model.x == 2
+        assert replaced_model.y == "hello"
 
     def test_nonexistent_fields(self):
         model = SimpleModel(x=1, y="hello")
         with pytest.raises(ValidationError):
-            update_pydantic_model(model, {"z": 2})
+            replace_pydantic_model(model, {"z": 2})
 
-    def test_update_nested_model(self):
+    def test_replace_nested_model(self):
         model = NestedModel(value=SimpleModel(x=1, y="hello"))
-        updated_model = update_pydantic_model(model, {"value": {"x": 2}})
-        assert updated_model.value.x == 2
-        assert updated_model.value.y == "hello"
+        replaced_model = replace_pydantic_model(model, {"value": {"x": 2}})
+        assert replaced_model.value.x == 2
+        assert replaced_model.value.y == "hello"
 
-    def test_deeply_nested_model_update(self):
+    def test_deeply_nested_model_replace(self):
         model = DeeplyNestedModel(inner=NestedModel(value=SimpleModel(x=1, y="hello")))
-        updated_model = update_pydantic_model(model, {"inner": {"value": {"x": 2}}})
-        assert updated_model.inner.value.x == 2
-        assert updated_model.inner.value.y == "hello"
+        replaced_model = replace_pydantic_model(model, {"inner": {"value": {"x": 2}}})
+        assert replaced_model.inner.value.x == 2
+        assert replaced_model.inner.value.y == "hello"
 
-    def test_update_with_invalid_data_type(self):
+    def test_replace_with_invalid_data_type(self):
         model = SimpleModel(x=1, y="hello")
         with pytest.raises(ValidationError):
-            update_pydantic_model(model, {"x": "help"})
+            replace_pydantic_model(model, {"x": "help"})
+
+    def test_replace_with_multiple_dicts(self):
+        model = SimpleModel(x=1, y="hello")
+        replaced_model = replace_pydantic_model(model, {"x": 2, "y": "world"}, {"x": 3})
+        assert replaced_model.x == 3
+        assert replaced_model.y == "world"

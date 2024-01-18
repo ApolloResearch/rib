@@ -24,7 +24,7 @@ from rib.models import MLP
 from rib.models.mlp import MLPConfig
 from rib.models.utils import save_model
 from rib.types import RootPath
-from rib.utils import load_config, set_seed, update_pydantic_model
+from rib.utils import load_config, replace_pydantic_model, set_seed
 
 
 class TrainConfig(BaseModel):
@@ -183,7 +183,7 @@ def main(config_path_or_obj: Union[str, Config]) -> float:
     trained_model = train_model(config, model, train_loader, device, run_name)
 
     # Evaluate the model on the test set
-    test_dataset = load_dataset(update_pydantic_model(config.dataset, {"return_set": "test"}))
+    test_dataset = load_dataset(replace_pydantic_model(config.dataset, {"return_set": "test"}))
     test_loader = DataLoader(test_dataset, batch_size=config.train.batch_size, shuffle=True)
     accuracy = evaluate_model(trained_model, test_loader, device)
     logger.info(f"Accuracy of the network on the {len(test_dataset)} test images: %d %%", accuracy)  # type: ignore

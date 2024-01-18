@@ -32,7 +32,7 @@ from rib.log import logger
 from rib.models import SequentialTransformer
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 from rib.types import TORCH_DTYPES
-from rib.utils import update_pydantic_model
+from rib.utils import replace_pydantic_model
 from tests.utils import (
     assert_is_close,
     assert_is_zeros,
@@ -286,7 +286,7 @@ def rotate_final_layer_invariance(
     config_not_rotated: RibBuildConfig, rtol: float = 1e-7, atol: float = 0
 ):
     assert config_not_rotated.rotate_final_node_layer is False
-    config_rotated = update_pydantic_model(config_not_rotated, {"rotate_final_node_layer": True})
+    config_rotated = replace_pydantic_model(config_not_rotated, {"rotate_final_node_layer": True})
     edges_rotated = rib_build(config_rotated).edges
     edges_not_rotated = rib_build(config_not_rotated).edges
 

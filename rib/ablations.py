@@ -305,6 +305,9 @@ def ablate_node_layers_and_eval(
                     # If the score is more than `early_stopping_threshold` away from the base result,
                     # then we stop ablating vectors.
                     if abs(score - base_score) > schedule_config.early_stopping_threshold:
+                        logger.info(
+                            f"Stopping early at {n_vecs_remaining} with {score=}, {base_score=} "
+                        )
                         break
 
     return results

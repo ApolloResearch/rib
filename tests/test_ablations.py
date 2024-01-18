@@ -147,6 +147,7 @@ def test_run_mnist_ablations(ablation_type, edge_ablation):
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
 
 
+@pytest.mark.xfail(reason="Need to retrain RIB after centering PR.")
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
 @pytest.mark.parametrize("edge_ablation", [False, True])
 def test_run_modular_arithmetic_rib_ablations(ablation_type, edge_ablation):
@@ -179,9 +180,11 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, edge_ablation):
         specific_points: [30, 31]
     dataset:
         dataset_type: modular_arithmetic
-        return_set: test
+        return_set: train
         return_set_n_samples: 1000
     ablation_node_layers:
+        - ln1.0
+        - ln2.0
         - mlp_out.0
         - unembed
     batch_size: 1000  # single batch

@@ -1,0 +1,16 @@
+exp_name: 4-node-layers
+seed: 0
+mlp_path: rib_scripts/train_mlp/sample_checkpoints/lr-0.001_bs-64_2023-11-29_14-36-29/model_epoch_12.pt
+batch_size: 16384
+truncation_threshold: 1e-15
+rotate_final_node_layer: false
+n_intervals: 0
+dtype: float32
+dataset:
+  dataset_type: torchvision
+  name: MNIST
+node_layers:
+  - layers.0
+  - layers.1
+  - layers.2
+  - output

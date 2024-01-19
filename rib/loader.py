@@ -1,7 +1,7 @@
 """Utilities for loading models and data."""
 
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal, Optional, Tuple, Union
 
 import torch
 import torchvision
@@ -10,6 +10,9 @@ from datasets import load_dataset as hf_load_dataset
 from torch.utils.data import Dataset, Subset, TensorDataset
 from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
+
+if TYPE_CHECKING:
+    from rib.rib_builder import RibBuildConfig
 
 from rib.data import (
     BlockVectorDataset,
@@ -22,10 +25,9 @@ from rib.data import (
 )
 from rib.models import SequentialTransformer, SequentialTransformerConfig
 from rib.models.mlp import MLP, MLPConfig
-from rib.models.modular_mlp import ModularMLP, ModularMLPConfig
-from rib.models.sequential_transformer.converter import convert_tlens_weights
-from rib.types import RibBuildResults
-from rib.utils import REPO_ROOT, get_data_subset, to_root_path, train_test_split
+from rib.models.modular_mlp import ModularMLPConfig, create_modular_mlp
+from rib.settings import REPO_ROOT
+from rib.utils import get_data_subset, train_test_split
 
 
 def load_sequential_transformer(
@@ -36,7 +38,7 @@ def load_sequential_transformer(
     fold_bias: bool = True,
     dtype: torch.dtype = torch.float32,
     device: str = "cpu",
-) -> tuple[SequentialTransformer, dict]:
+) -> SequentialTransformer:
     """Load a SequentialTransformer model from a pretrained transformerlens model.
 
     Requires config to contain a pretrained model name or a path to a transformerlens model.
@@ -55,8 +57,7 @@ def load_sequential_transformer(
         device (str): The device to use for the model. Defaults to "cpu".
 
     Returns:
-        - SequentialTransformer: The SequentialTransformer model.
-        - dict: The config used in the transformerlens model.
+        The SequentialTransformer model.
     """
     assert (
         tlens_pretrained is not None or tlens_model_path is not None
@@ -97,12 +98,9 @@ def load_sequential_transformer(
     )
 
     # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(
-        seq_model=seq_model,
-        tlens_model=tlens_model,
-        positional_embedding_type=seq_cfg.positional_embedding_type,
+    seq_model.load_tlens_weights(
+        tlens_model, positional_embedding_type=seq_cfg.positional_embedding_type
     )
-    seq_model.load_state_dict(state_dict)
 
     if fold_bias:
         seq_model.fold_bias()
@@ -112,34 +110,50 @@ def load_sequential_transformer(
         f"Model dtype ({next(seq_model.parameters()).dtype}) does not match specified dtype "
         f"({dtype})."
     )
-    return seq_model.to(device), tlens_cfg_dict
+    return seq_model.to(device)
 
 
 def load_mlp(
     config: Union[MLPConfig, ModularMLPConfig],
+    node_layers: list[str],
     mlp_path: Optional[Path],
-    device: str,
     fold_bias: bool = True,
     seed: Optional[int] = None,
-) -> Union[MLP, ModularMLP]:
-    mlp: Union[MLP, ModularMLP]
+) -> MLP:
+    """Load an MLP model and check that node_layers is valid for this mlp.
+
+    Args:
+        config (Union[MLPConfig, ModularMLPConfig]): The MLP config.
+        node_layers (list[str]): The node layers to use for the model. Currently only used for
+            checking that the node layers are valid for this model.
+        mlp_path (Optional[Path]): The path to the MLP weights.
+        fold_bias (bool): Whether to fold the bias into the weights. Defaults to True.
+        seed (Optional[int]): The seed to use for the model.
+
+    Returns:
+        The MLP model.
+    """
+    mlp: MLP
     if isinstance(config, ModularMLPConfig):
-        mlp = ModularMLP(config, seed=seed)
-        mlp.to(device)
+        mlp = create_modular_mlp(config, seed=seed)
     else:
         assert isinstance(config, MLPConfig)
         assert mlp_path is not None, "mlp_path must be provided for MLPConfig"
         mlp = MLP(config)
-        mlp.load_state_dict(torch.load(mlp_path, map_location=torch.device(device)))
+        mlp.load_state_dict(torch.load(mlp_path, map_location="cpu"))
     if fold_bias:
         mlp.fold_bias()
+
+    all_node_layers = [f"layers.{i}" for i in range(len(mlp.layers))] + ["output"]
+    assert len(node_layers) > 0 and "-".join(node_layers) in "-".join(all_node_layers), (
+        f"Provided node_layers: {node_layers} is not a subsequence of all_node_layers: "
+        f"{all_node_layers}. This must be the case to build a valid RIB graph."
+    )
     return mlp
 
 
 def create_modular_arithmetic_dataset(
-    dataset_config: ModularArithmeticDatasetConfig,
-    return_set: Literal["train", "test", "all"],
-    tlens_model_path: Optional[Path] = None,
+    dataset_config: ModularArithmeticDatasetConfig, tlens_model_path: Optional[Path] = None
 ) -> Dataset:
     """Create a ModularArithmeticDataset from the provided arguments.
 
@@ -154,11 +168,12 @@ def create_modular_arithmetic_dataset(
     Returns:
         The dataset.
     """
-    modulus, fn_name, frac_train, seed = (
+    modulus, fn_name, frac_train, seed, return_set = (
         dataset_config.modulus,
         dataset_config.fn_name,
         dataset_config.frac_train,
         dataset_config.seed,
+        dataset_config.return_set,
     )
     if tlens_model_path:
         with open(tlens_model_path.parent / "config.yaml", "r") as f:
@@ -246,9 +261,7 @@ def tokenize_dataset(
 
 
 def create_hf_dataset(
-    dataset_config: HFDatasetConfig,
-    return_set: Literal["train", "test", "all"],
-    model_n_ctx: Optional[int] = None,
+    dataset_config: HFDatasetConfig, model_n_ctx: Optional[int] = None
 ) -> Dataset:
     """Create a HuggingFace dataset from the provided arguments.
 
@@ -270,7 +283,6 @@ def create_hf_dataset(
 
     Args:
         dataset_config (HFDatasetConfig): The dataset config.
-        return_set (Literal["train", "test", "all"]): The dataset to return.
         model_n_ctx (int): The max context length of the model. Used for HFDatasetConfigs. Data
             sequences are packed to dataset_config.n_ctx if it is not None and is <= model_n_ctx,
             otherwise to model_n_ctx.
@@ -285,19 +297,19 @@ def create_hf_dataset(
         f"({model_n_ctx})."
     )
 
-    assert return_set in ["train", "test"], "Can only load train or test sets from HF"
+    assert dataset_config.return_set in ["train", "test"], "Only train and test sets are supported"
 
     if dataset_config.return_set_frac:
         percent = int(dataset_config.return_set_frac * 100)
         if dataset_config.return_set_portion == "first":
-            data_split = f"{return_set}[:{percent}%]"
+            data_split = f"{dataset_config.return_set}[:{percent}%]"
         elif dataset_config.return_set_portion == "last":
-            data_split = f"{return_set}[-{percent}%:]"
+            data_split = f"{dataset_config.return_set}[-{percent}%:]"
     elif dataset_config.return_set_n_samples:
         if dataset_config.return_set_portion == "first":
-            data_split = f"{return_set}[:{dataset_config.return_set_n_samples}]"
+            data_split = f"{dataset_config.return_set}[:{dataset_config.return_set_n_samples}]"
         elif dataset_config.return_set_portion == "last":
-            data_split = f"{return_set}[-{dataset_config.return_set_n_samples}:]"
+            data_split = f"{dataset_config.return_set}[-{dataset_config.return_set_n_samples}:]"
 
     raw_dataset = hf_load_dataset(dataset_config.name, split=data_split)
 
@@ -306,15 +318,12 @@ def create_hf_dataset(
     return tokenize_dataset(dataset=raw_dataset, tokenizer=tokenizer, n_ctx=n_ctx)
 
 
-def create_vision_dataset(
-    dataset_config: VisionDatasetConfig,
-    return_set: Literal["train", "test", "all"],
-) -> Dataset:
+def create_vision_dataset(dataset_config: VisionDatasetConfig) -> Dataset:
     dataset_fn = getattr(torchvision.datasets, dataset_config.name)
-    assert return_set != "all", "Cannot return 'all' for vision datasets."
+    assert dataset_config.return_set in ["train", "test"], "Can only load train or test sets"
     raw_dataset = dataset_fn(
         root=REPO_ROOT / ".data",
-        train=return_set == "train",
+        train=dataset_config.return_set == "train",
         download=True,
         transform=torchvision.transforms.ToTensor(),
     )
@@ -328,9 +337,7 @@ def create_vision_dataset(
     return dataset
 
 
-def create_block_vector_dataset(
-    dataset_config: BlockVectorDatasetConfig,
-) -> Dataset:
+def create_block_vector_dataset(dataset_config: BlockVectorDatasetConfig) -> Dataset:
     raw_dataset = BlockVectorDataset(dataset_config=dataset_config)
 
     dataset = get_data_subset(
@@ -344,7 +351,6 @@ def create_block_vector_dataset(
 
 def load_dataset(
     dataset_config: DatasetConfig,
-    return_set: Literal["train", "test", "all"],
     model_n_ctx: Optional[int] = None,
     tlens_model_path: Optional[Path] = None,
 ) -> Dataset:
@@ -353,7 +359,6 @@ def load_dataset(
 
     Args:
         dataset_config (DatasetConfig): The dataset config.
-        return_set (Literal["train", "test", "all"]): The dataset to return.
         model_n_ctx (int): The max context length of the model, used for HFDatasetConfigs. Data
             sequences are packed to dataset_config.n_ctx if it is not None and is <= model_n_ctx,
             otherwise to model_n_ctx.
@@ -366,14 +371,12 @@ def load_dataset(
 
     if isinstance(dataset_config, ModularArithmeticDatasetConfig):
         return create_modular_arithmetic_dataset(
-            dataset_config=dataset_config, return_set=return_set, tlens_model_path=tlens_model_path
+            dataset_config=dataset_config, tlens_model_path=tlens_model_path
         )
     elif isinstance(dataset_config, HFDatasetConfig):
-        return create_hf_dataset(
-            dataset_config=dataset_config, return_set=return_set, model_n_ctx=model_n_ctx
-        )
+        return create_hf_dataset(dataset_config=dataset_config, model_n_ctx=model_n_ctx)
     elif isinstance(dataset_config, VisionDatasetConfig):
-        return create_vision_dataset(dataset_config=dataset_config, return_set=return_set)
+        return create_vision_dataset(dataset_config=dataset_config)
     else:
         assert isinstance(dataset_config, BlockVectorDatasetConfig)
         return create_block_vector_dataset(dataset_config=dataset_config)
@@ -406,53 +409,68 @@ def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Da
     return Subset(dataset, range(dataset_idx_start, dataset_idx_end))
 
 
-def load_model_and_dataset_from_rib_results(
-    results: RibBuildResults, device: str, dtype: torch.dtype
-) -> tuple[Union[SequentialTransformer, MLP], Dataset]:
-    """Loads the model and dataset used for a rib build from the results dictionary.
+def load_model_and_dataset_from_rib_config(
+    rib_config: "RibBuildConfig",
+    device: str,
+    dtype: torch.dtype,
+    dataset_config: Optional[DatasetConfig] = None,
+    node_layers: Optional[list[str]] = None,
+) -> Tuple[Union[SequentialTransformer, MLP], Dataset]:
+    """Loads the model and dataset for a rib build based on the config.
 
     Combines both model and dataset loading in one function as the dataset conditionally needs
-    extra arguments depending on the dataset type."""
-    data_config: DatasetConfig
+    extra arguments depending on the dataset type.
+
+    Args:
+        rib_config (RibBuildConfig): The rib build config.
+        device (str): The device to use for the model.
+        dtype (torch.dtype): The dtype to use for the model.
+        dataset_config (Optional[DatasetConfig]): The dataset config to use. If None, uses the
+            dataset config from the rib_config.
+        node_layers (Optional[list[str]]): The node layers to use for the model. If None, uses the
+            node layers from the rib_config. Note that changing the sections in the model has no
+            effect on the model computation, so we allow specifying any node_layers for the
+            convenience of hooking different sections of the model.
+
+    Returns:
+        tuple[Union[SequentialTransformer, MLP], Dataset]: The model and dataset.
+    """
     model: Union[SequentialTransformer, MLP]
+    if rib_config.mlp_path is not None or rib_config.modular_mlp_config is not None:
+        mlp_config: Union[MLPConfig, ModularMLPConfig]
+        if rib_config.mlp_path is not None:
+            with open(rib_config.mlp_path.parent / "config.yaml", "r") as f:
+                raw_model_config_dict = yaml.safe_load(f)
+            mlp_config = MLPConfig(**raw_model_config_dict["model"])
+        else:
+            assert rib_config.modular_mlp_config is not None
+            mlp_config = rib_config.modular_mlp_config
 
-    if (
-        "tlens_model_path" in results["config"]
-        and results["config"]["tlens_model_path"] is not None
-    ):
-        tlens_model_path = to_root_path(Path(results["config"]["tlens_model_path"]))
+        model = load_mlp(
+            mlp_config,
+            node_layers=node_layers or rib_config.node_layers,
+            mlp_path=rib_config.mlp_path,
+            fold_bias=True,
+            seed=rib_config.seed,
+        ).to(device=torch.device(device), dtype=dtype)
+        assert model.has_folded_bias, "MLP must have folded bias to run RIB"
     else:
-        tlens_model_path = None
-
-    if "n_heads" in results["model_config_dict"]:  # sequential transformer
-        model, _ = load_sequential_transformer(
-            node_layers=results["config"]["node_layers"],
-            last_pos_module_type=results["config"]["last_pos_module_type"],
-            tlens_pretrained=results["config"]["tlens_pretrained"],
-            tlens_model_path=tlens_model_path,
+        model = load_sequential_transformer(
+            node_layers=node_layers or rib_config.node_layers,
+            last_pos_module_type=rib_config.last_pos_module_type,
+            tlens_pretrained=rib_config.tlens_pretrained,
+            tlens_model_path=rib_config.tlens_model_path,
             fold_bias=True,
             dtype=dtype,
             device=device,
         )
-        if results["config"]["dataset"]["source"] == "huggingface":
-            data_config = HFDatasetConfig(**results["config"]["dataset"])
-        else:
-            data_config = ModularArithmeticDatasetConfig(**results["config"]["dataset"])
-        model_n_ctx = model.cfg.n_ctx
-
-    else:  # mlp
-        mlp_config = MLPConfig(**results["model_config_dict"])
-        model = load_mlp(
-            config=mlp_config,
-            mlp_path=Path(results["config"]["mlp_path"]),
-            fold_bias=True,
-            device=device,
-        )
-        model.to(device=torch.device(device), dtype=dtype)
-        data_config = VisionDatasetConfig(**results["config"]["dataset"])
-        model_n_ctx, tlens_model_path = None, None
+    model.eval()
+    dataset_config = dataset_config or rib_config.dataset
 
     dataset = load_dataset(
-        data_config, return_set="train", model_n_ctx=model_n_ctx, tlens_model_path=tlens_model_path
+        dataset_config=dataset_config,
+        model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
+        tlens_model_path=rib_config.tlens_model_path,
     )
+
     return model, dataset

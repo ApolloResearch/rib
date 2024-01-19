@@ -1,3 +1,5 @@
+import json
+import time
 from typing import Callable, Literal, Optional, Union
 
 import numpy as np
@@ -8,13 +10,30 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from rib.data import (
+    HFDatasetConfig,
+    ModularArithmeticDatasetConfig,
+    VisionDatasetConfig,
+)
 from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.linalg import calc_rotation_matrix
-from rib.utils import calc_exponential_ablation_schedule
+from rib.loader import load_model_and_dataset_from_rib_config
+from rib.log import logger
+from rib.models import MLP, SequentialTransformer
+from rib.rib_builder import RibBuildResults
+from rib.settings import REPO_ROOT
+from rib.types import TORCH_DTYPES, RootPath, StrDtype
+from rib.utils import (
+    check_outfile_overwrite,
+    eval_cross_entropy_loss,
+    eval_model_accuracy,
+    load_config,
+    set_seed,
+)
 
-BasisVecs = Union[Float[Tensor, "d_hidden d_hidden_trunc"], Float[Tensor, "d_hidden d_hidden"]]
-BasisVecsPinv = Union[Float[Tensor, "d_hidden_trunc d_hidden"], Float[Tensor, "d_hidden d_hidden"]]
+BasisVecs = Union[Float[Tensor, "orig rib"], Float[Tensor, "orig orig"]]
+BasisVecsPinv = Union[Float[Tensor, "rib orig"], Float[Tensor, "orig orig"]]
 AblationAccuracies = dict[str, dict[int, float]]
 
 
@@ -23,14 +42,29 @@ class ScheduleConfig(BaseModel):
     schedule_type: Literal["exponential", "linear"]
     early_stopping_threshold: Optional[float] = Field(
         None,
-        description="The threshold to use for stopping the ablation calculations early. If None,"
-        "we don't use early stopping.",
+        description="The threshold to use for stopping the ablation calculations early. The"
+        "experiment will stop when the ablated score is more than `early_stopping_threshold` away "
+        "from the unablated score. If None, we don't stop early.",
     )
     specific_points: Optional[list[int]] = Field(
         None,
         description="A list of number of vecs remaining to add to the schedule. If None, we use"
         "the default schedule.",
     )
+
+    def get_ablation_schedule(self, n_vecs: int) -> list[int]:
+        raise NotImplementedError("This method should be implemented in subclasses.")
+
+    def _add_specific_ablation_points(self, ablation_schedule: list[int], n_vecs: int) -> list[int]:
+        """Add each number of vecs remaining in self.specific_points to the ablation schedule."""
+        if self.specific_points is not None:
+            # Ignore the specific points that are greater than the number of vecs
+            specific_ablated_vecs = [n_vecs - x for x in self.specific_points if x <= n_vecs]
+            # Add our specific points for the number of vecs remaining to the ablation schedule
+            ablation_schedule = sorted(
+                list(set(ablation_schedule + specific_ablated_vecs)), reverse=True
+            )
+        return ablation_schedule
 
 
 class ExponentialScheduleConfig(ScheduleConfig):
@@ -42,124 +76,137 @@ class ExponentialScheduleConfig(ScheduleConfig):
     )
     exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
 
+    def get_ablation_schedule(self, n_vecs: int) -> list[int]:
+        """Create an exponential schedule for the number of vectors to ablate.
+
+        The schedule is exponential with a base of 2, with the exception that from
+        `self.ablate_every_vec_cutoff` to `n_vecs` we ablate every vector. The schedule also
+        includes a run with no ablations as well as with the number of vecs remaining given in
+        `self.specific_points`.
+
+        Args:
+            n_vecs: Total number of vectors.
+
+        Returns:
+            The schedule for the number of vectors to ablate.
+
+        Examples:
+            >>> ExponentialScheduleConfig("exponential", None).get_ablation_schedule(12)
+            [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+            >>> ExponentialScheduleConfig("exponential", 0).get_ablation_schedule(12)
+            [12, 11, 9, 5, 0]  # Exponential schedule (2^x) from the beginning.
+            >>> ExponentialScheduleConfig("exponential", 1).get_ablation_schedule(12)
+            [12, 11, 10, 8, 4, 0]  # Exponential schedule (2^x) after the first 1 value
+            >>> ExponentialScheduleConfig("exponential", 3).get_ablation_schedule(12)
+            [12, 11, 10, 9, 8, 6, 2, 0]
+            >>> ExponentialScheduleConfig("exponential", 3).get_ablation_schedule(24)
+            [24, 23, 22, 21, 20, 18, 14, 6, 0]
+        """
+        cutoff = self.ablate_every_vec_cutoff
+        exp_base = self.exp_base if self.exp_base is not None else 2.0
+
+        if cutoff is None:
+            return list(range(n_vecs, -1, -1))
+
+        assert cutoff < n_vecs, "ablate_every_vec_cutoff must be smaller than n_vecs"
+        assert cutoff >= 0, "ablate_every_vec_cutoff must be positive"
+        # The section in which we ablate every vector.
+        ablate_every_vecs: list[int] = list(range(n_vecs, n_vecs - cutoff - 1, -1))
+        # The section in which we ablate according to 2^x.
+        ablate_exponential: list[int] = []
+        prev_val = ablate_every_vecs[-1]
+        for x in range(n_vecs):
+            exp_val = int(prev_val - exp_base**x)
+            if exp_val > 0:
+                ablate_exponential.append(exp_val)
+                prev_val = exp_val
+            else:
+                # No more values to append, just add the case for no ablation and exit
+                ablate_exponential.append(0)
+                break
+
+        # combine the two sections
+        ablation_schedule = ablate_every_vecs + ablate_exponential
+        assert ablation_schedule[0] == n_vecs, "The first element of the schedule must be n_vecs."
+        assert ablation_schedule[-1] == 0, "The last element of the schedule must be 0."
+
+        ablation_schedule = self._add_specific_ablation_points(ablation_schedule, n_vecs)
+        return ablation_schedule
+
 
 class LinearScheduleConfig(ScheduleConfig):
     schedule_type: Literal["linear"]
     n_points: int = Field(
         ...,
-        description="The number of points to use in the linear ablation schedule. Must be specified if schedule_type is linear and cannot be specified if schedule_type is exponential.",
+        description=(
+            "The number of points to use in the linear ablation schedule. Must be specified if "
+            "schedule_type is linear and cannot be specified if schedule_type is exponential."
+        ),
+    )
+
+    def get_ablation_schedule(self, n_vecs: int) -> list[int]:
+        """Create a linear schedule for the number of vectors to ablate.
+
+        The points are evenly spaced between `n_vecs` and 0, including the endpoints and any points
+        in `self.specific_points` are also added.
+
+        Args:
+            n_vecs: Total number of vectors.
+
+        Returns:
+            The schedule for the number of vectors to ablate.
+
+        Examples:
+            >>> LinearScheduleConfig("linear", 3).get_ablation_schedule(12)
+            [12, 6, 0]
+        """
+        assert self.n_points >= 2, f"{self.n_points} must be at least 2."
+        assert self.n_points <= n_vecs, f"{self.n_points} must be <= {n_vecs}."
+
+        ablation_schedule = [int(a) for a in np.linspace(n_vecs, 0, self.n_points, dtype=int)]
+
+        ablation_schedule = self._add_specific_ablation_points(ablation_schedule, n_vecs)
+        return ablation_schedule
+
+
+class AblationConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    exp_name: str
+    out_dir: Optional[RootPath] = Field(
+        REPO_ROOT / "rib_scripts/ablations/out",
+        description="Directory for the output files. Defaults to `./out/`. If None, no output "
+        "is written. If a relative path, it is relative to the root of the rib repo.",
+    )
+    ablation_type: Literal["rib", "orthogonal"]
+    rib_results_path: RootPath
+    schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
+        ...,
+        discriminator="schedule_type",
+        description="The schedule to use for ablations.",
+    )
+    dataset: Union[ModularArithmeticDatasetConfig, HFDatasetConfig, VisionDatasetConfig] = Field(
+        ...,
+        discriminator="dataset_type",
+        description="The dataset to use to build the graph.",
+    )
+    ablation_node_layers: list[str]
+    batch_size: int
+    dtype: StrDtype
+    seed: int
+    eval_type: Literal["accuracy", "ce_loss"] = Field(
+        ...,
+        description="The type of evaluation to perform on the model before building the graph.",
     )
 
 
-def ablate_and_test(
-    hooked_model: HookedModel,
-    module_name: str,
-    basis_vecs: BasisVecs,
-    basis_vecs_pinv: BasisVecsPinv,
-    test_loader: DataLoader,
-    eval_fn: Callable,
-    ablation_schedule: list[int],
-    device: str,
-    dtype: Optional[torch.dtype] = None,
-    hook_name: Optional[str] = None,
-    early_stopping_threshold: Optional[float] = None,
-) -> dict[int, float]:
-    """Ablate eigenvectors and test the model accuracy/loss.
-
-    We start by ablating zero vectors, measuring the ce_loss/accuracy, and continue ablating vectors
-    until the absolute value of result is `early_stopping_threshold` different than the original
-    ce_loss/accuracy.
-
-    Args:
-        hooked_model: The hooked model.
-        module_name: The name of the module whose inputs we want to rotate and ablate.
-        basis_vecs: Matrix with basis vectors (rib or orthogonal) in the columns.
-        basis_vecs_pinv: The pseudo-inverse of the basis_vecs matrix.
-        hook_config: The config for the hook point.
-        test_loader: The DataLoader for the test data.
-        eval_fn: The function to use to evaluate the model.
-        ablation_schedule: A list of the number of vectors to ablate at each step.
-        device: The device to run the model on.
-        dtype: The data type to cast the inputs to. Ignored if int32 or int64.
-        hook_name: The name of the hook point to use. If None, defaults to `module_name`.
-        early_stopping_threshold: The threshold to use for early stopping. If None, we don't use
-            early stopping.
-
-    Returns:
-        Dictionary mapping the number of basis vectors remaining and the resulting accuracy.
-    """
-
-    if hook_name is None:
-        hook_name = module_name
-
-    base_result: Optional[float] = None
-
-    # Track the results for the case when there is no ablation. There may be many of these, so we
-    # store them to avoid recomputing.
-    n_truncated_vecs = basis_vecs.shape[0] - basis_vecs.shape[1]
-    no_ablation_result: Optional[float] = None
-
-    eval_results: dict[int, float] = {}
-    # Iterate through possible number of ablated vectors, starting from no ablated vectors
-    for i, n_ablated_vecs in enumerate(
-        tqdm(
-            ablation_schedule[::-1],
-            total=len(ablation_schedule),
-            desc=f"Ablating {module_name}",
-        )
-    ):
-        # Note that we may have truncated vectors with small eigenvalues, so we make sure not to
-        # ablate more vectors than we have remaining
-        n_vecs_remaining = basis_vecs.shape[0] - n_ablated_vecs
-
-        # Count the n_ablated_vecs taking into account the truncation
-        n_ablated_vecs_trunc = max(n_ablated_vecs - n_truncated_vecs, 0)
-
-        if n_ablated_vecs_trunc == 0 and no_ablation_result is not None:
-            eval_results[n_vecs_remaining] = no_ablation_result
-            continue
-
-        basis_vecs = basis_vecs.to(device)
-        basis_vecs_pinv = basis_vecs_pinv.to(device)
-        rotation_matrix = calc_rotation_matrix(
-            vecs=basis_vecs,
-            vecs_pinv=basis_vecs_pinv,
-            n_ablated_vecs=n_ablated_vecs_trunc,
-        )
-
-        rotation_hook = Hook(
-            name=hook_name,
-            data_key="rotation",
-            fn=rotate_pre_forward_hook_fn,
-            module_name=module_name,
-            fn_kwargs={"rotation_matrix": rotation_matrix},
-        )
-
-        eval_results_ablated = eval_fn(
-            hooked_model, test_loader, hooks=[rotation_hook], dtype=dtype, device=device
-        )
-        eval_results[n_vecs_remaining] = eval_results_ablated
-
-        if early_stopping_threshold is not None:
-            if i == 0:
-                base_result = eval_results_ablated
-            else:
-                # If the result is more than `early_stopping_threshold` different than the base result,
-                # then we stop ablating vectors.
-                if abs(eval_results_ablated - base_result) > early_stopping_threshold:
-                    break
-
-    return eval_results
-
-
 @torch.inference_mode()
-def run_ablations(
+def ablate_node_layers_and_eval(
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]],
     ablation_node_layers: list[str],
     hooked_model: HookedModel,
     data_loader: DataLoader,
     eval_fn: Callable,
-    graph_module_names: list[str],
+    module_names: list[str],
     schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
     device: str,
     dtype: Optional[torch.dtype] = None,
@@ -168,7 +215,7 @@ def run_ablations(
 
     Note that we want our ablation schedules for different bases to match up, even though different
     bases may have different number of basis vectors due to truncation. We therefore create our
-    ablation schedule assuming a non-truncated basis (i.e. using the full hidden size
+    ablation schedule assuming a non-truncated basis (i.e. using the `orig` size
     (basis_vecs.shape[0])).
 
     Args:
@@ -178,7 +225,10 @@ def run_ablations(
         hooked_model: The hooked model.
         data_loader: The data loader to use for testing.
         eval_fn: The function to use to evaluate the model.
-        graph_module_names: The names of the modules we want to build the graph around.
+        module_names: The names of the modules to apply the ablations. Can be any valid pytorch
+            module in hooked_model.model. These typically correspond to section_names (e.g.
+            "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
+            "layers.2") when the model is an MLP.
         schedule_config: The config for the ablation schedule.
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
@@ -188,57 +238,72 @@ def run_ablations(
     """
     results: AblationAccuracies = {}
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
-        ablation_node_layers, graph_module_names, basis_matrices
+        ablation_node_layers, module_names, basis_matrices
     ):
-        n_vecs = basis_vecs.shape[0]
-        if isinstance(schedule_config, ExponentialScheduleConfig):
-            ablation_schedule = calc_exponential_ablation_schedule(
-                n_vecs=n_vecs,
-                exp_base=schedule_config.exp_base,
-                ablate_every_vec_cutoff=schedule_config.ablate_every_vec_cutoff,
+        ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=basis_vecs.shape[0])
+
+        base_score: Optional[float] = None
+
+        # Track the results for the case when there is no ablation. There may be many of these, so we
+        # store them to avoid recomputing.
+        n_truncated_vecs = basis_vecs.shape[0] - basis_vecs.shape[1]
+
+        results[ablation_node_layer] = {}
+        # Iterate through possible number of ablated vectors, starting from no ablated vectors
+        for i, n_ablated_vecs in enumerate(
+            tqdm(
+                ablation_schedule[::-1],
+                total=len(ablation_schedule),
+                desc=f"Ablating {module_name}",
             )
-        elif isinstance(schedule_config, LinearScheduleConfig):
-            assert schedule_config.n_points >= 2, f"{schedule_config.n_points} must be at least 2."
-            assert (
-                schedule_config.n_points <= n_vecs
-            ), f"{schedule_config.n_points} must be <= {n_vecs}."
+        ):
+            # Note that we may have truncated vectors with small eigenvalues, so we make sure not to
+            # ablate more vectors than we have remaining
+            n_vecs_remaining = basis_vecs.shape[0] - n_ablated_vecs
 
-            ablation_schedule = [
-                int(a) for a in np.linspace(n_vecs, 0, schedule_config.n_points, dtype=int)
-            ]
-        else:
-            raise NotImplementedError(f"Schedule: {schedule_config.schedule_type} not supported.")
+            # Count the n_ablated_vecs taking into account the truncation
+            n_ablated_vecs_trunc = max(n_ablated_vecs - n_truncated_vecs, 0)
 
-        if schedule_config.specific_points is not None:
-            # Ignore the specific points that are greater than the number of vecs
-            specific_ablated_vecs = [
-                n_vecs - x for x in schedule_config.specific_points if x <= n_vecs
-            ]
-            # Add our specific points for the number of vecs remaining to the ablation schedule
-            ablation_schedule = sorted(
-                list(set(ablation_schedule + specific_ablated_vecs)), reverse=True
+            if n_ablated_vecs_trunc == 0 and base_score is not None:
+                # We may have already calculated the score for the case when there is no ablation
+                results[ablation_node_layer][n_vecs_remaining] = base_score
+                continue
+
+            basis_vecs = basis_vecs.to(device)
+            basis_vecs_pinv = basis_vecs_pinv.to(device)
+            rotation_matrix = calc_rotation_matrix(
+                vecs=basis_vecs,
+                vecs_pinv=basis_vecs_pinv,
+                n_ablated_vecs=n_ablated_vecs_trunc,
             )
 
-        ablation_eval_results: dict[int, float] = ablate_and_test(
-            hooked_model=hooked_model,
-            module_name=module_name,
-            basis_vecs=basis_vecs,
-            basis_vecs_pinv=basis_vecs_pinv,
-            test_loader=data_loader,
-            eval_fn=eval_fn,
-            ablation_schedule=ablation_schedule,
-            device=device,
-            dtype=dtype,
-            hook_name=ablation_node_layer,
-            early_stopping_threshold=schedule_config.early_stopping_threshold,
-        )
-        results[ablation_node_layer] = ablation_eval_results
+            rotation_hook = Hook(
+                name=ablation_node_layer,
+                data_key="rotation",
+                fn=rotate_pre_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"rotation_matrix": rotation_matrix},
+            )
+
+            score = eval_fn(
+                hooked_model, data_loader, hooks=[rotation_hook], dtype=dtype, device=device
+            )
+            results[ablation_node_layer][n_vecs_remaining] = score
+
+            if schedule_config.early_stopping_threshold is not None:
+                if i == 0:
+                    base_score = score
+                else:
+                    # If the score is more than `early_stopping_threshold` away from the base result,
+                    # then we stop ablating vectors.
+                    if abs(score - base_score) > schedule_config.early_stopping_threshold:
+                        break
 
     return results
 
 
 def load_basis_matrices(
-    interaction_graph_info: dict,
+    rib_results: RibBuildResults,
     ablation_node_layers: list[str],
     ablation_type: Literal["rib", "orthogonal"],
     dtype: torch.dtype,
@@ -246,34 +311,145 @@ def load_basis_matrices(
 ) -> list[tuple[BasisVecs, BasisVecsPinv]]:
     """Load the basis matrices and their pseudoinverses.
 
-    Supports both rib and orthogonal basis matrices. Converts each matrix to the specified dtype
-    and device.
+    Uses C and C_pinv for 'rib' ablations and W and W_pinv for 'orthogonal' ablations.
+
+    Args:
+        rib_results: The results of building the RIB graph.
+        ablation_node_layers: The node layers to ablate.
+        ablation_type: The type of ablation to perform ('rib' or 'orthogonal').
+        dtype: The data type to cast the basis matrices to.
+        device: The device to load the basis matrices to.
+
+    Returns:
+        - A list of basis matrices.
+        - A list of pseudoinverse basis matrices.
     """
-    if ablation_type == "rib":
-        basis_matrix_key = "interaction_rotations"
-    elif ablation_type == "orthogonal":
-        basis_matrix_key = "eigenvectors"
-    else:
-        raise ValueError(f"ablation_type must be one of ['rib', 'orthogonal']")
 
     # Get the basis vecs and their pseudoinverses using the module_names as keys
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
+    basis_infos_dict = {info.node_layer: info for info in rib_results.interaction_rotations}
     for module_name in ablation_node_layers:
-        for basis_info in interaction_graph_info[basis_matrix_key]:
-            if basis_info["node_layer_name"] == module_name:
-                if ablation_type == "rib":
-                    assert basis_info["C"] is not None, f"{module_name} has no C matrix."
-                    assert basis_info["C_pinv"] is not None, f"{module_name} has no C_pinv matrix."
-                    basis_vecs = basis_info["C"].to(dtype=dtype, device=device)
-                    basis_vecs_pinv = basis_info["C_pinv"].to(dtype=dtype, device=device)
-                elif ablation_type == "orthogonal":
-                    assert basis_info["U"] is not None, f"{module_name} has no U matrix."
-                    basis_vecs = basis_info["U"].to(dtype=dtype, device=device)
-                    # Pseudoinverse of an orthonormal matrix is its transpose
-                    basis_vecs_pinv = basis_vecs.T.detach().clone()
-                basis_matrices.append((basis_vecs, basis_vecs_pinv))
-                break
-    assert len(basis_matrices) == len(
-        ablation_node_layers
-    ), f"Could not find all node_layer modules in the interaction graph config."
+        basis_info = basis_infos_dict[module_name]
+        if ablation_type == "rib":
+            assert basis_info.C is not None, f"{module_name} has no C matrix."
+            assert basis_info.C_pinv is not None, f"{module_name} has no C_pinv matrix."
+            basis_vecs = basis_info.C.to(dtype=dtype, device=device)
+            basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
+        elif ablation_type == "orthogonal":
+            assert basis_info.W is not None, f"{module_name} has no W matrix."
+            assert basis_info.W_pinv is not None, f"{module_name} has no W_pinv matrix."
+            basis_vecs = basis_info.W.to(dtype=dtype, device=device)
+            basis_vecs_pinv = basis_info.W_pinv.to(dtype=dtype, device=device)
+            # Pseudoinverse of an orthonormal matrix is its transpose
+            basis_vecs_pinv = basis_vecs.T.detach().clone()
+        basis_matrices.append((basis_vecs, basis_vecs_pinv))
     return basis_matrices
+
+
+def load_bases_and_ablate(
+    config_path_or_obj: Union[str, AblationConfig], force: bool = False
+) -> AblationAccuracies:
+    """Load basis matrices and run ablation experiments.
+
+    The process is as follows:
+        1. Load pre-saved basis matrices (typcially RIB bases (Cs) or orthogonal bases (Us)).
+        2. Load the corresponding model and dataset (the dataset may be non-overlapping with
+            that used to create the basis matrices).
+        3. For each number of ablated nodes `n`, create a rotation matrix that has the effect of
+        rotating to and from the new basis with `n` fewer basis vectors.
+        4. Run the test set through the model, applying the above rotations at each node layer, and
+        calculate the resulting accuracy/loss.
+        5. Repeat steps 3 and 4 for a range of values of n, storing the resulting accuracies/losses.
+
+    Note that we don't create a node layer at the output of the final module, as ablating nodes in
+    this layer is not useful.
+
+    Args:
+        config_path_or_obj: The path to the config file or the config object itself.
+        force: Whether to overwrite existing output files.
+
+    Returns:
+        A dictionary mapping node layers to accuracies/losses. If the config has an out_dir, the
+        results are also written to a file in that directory.
+    """
+    start_time = time.time()
+    config = load_config(config_path_or_obj, config_model=AblationConfig)
+
+    if config.out_dir is not None:
+        config.out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = config.out_dir / f"{config.exp_name}_ablation_results.json"
+        if not check_outfile_overwrite(out_file, force):
+            raise FileExistsError("Not overwriting output file")
+
+    set_seed(config.seed)
+    rib_results = RibBuildResults(**torch.load(config.rib_results_path))
+
+    assert set(config.ablation_node_layers) <= set(
+        rib_results.config.node_layers
+    ), "The node layers in the config must be a subset of the node layers in the RIB graph."
+
+    assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
+    assert not (
+        config.ablation_type == "orthogonal" and rib_results.config.center
+    ), "Cannot use orthogonal ablations with a centered RIB, as Us don't include centering matrix"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = TORCH_DTYPES[config.dtype]
+
+    basis_matrices = load_basis_matrices(
+        rib_results=rib_results,
+        ablation_node_layers=config.ablation_node_layers,
+        ablation_type=config.ablation_type,
+        dtype=dtype,
+        device=device,
+    )
+
+    model, dataset = load_model_and_dataset_from_rib_config(
+        rib_results.config,
+        dataset_config=config.dataset,
+        device=device,
+        dtype=dtype,
+        node_layers=config.ablation_node_layers,
+    )
+    model.to(device=torch.device(device), dtype=dtype)
+    data_loader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
+    hooked_model = HookedModel(model)
+
+    # Test model accuracy/loss before running ablations, ta be sure
+    eval_fn: Callable = (
+        eval_model_accuracy if config.eval_type == "accuracy" else eval_cross_entropy_loss
+    )
+    eval_results = eval_fn(hooked_model, data_loader, dtype=dtype, device=device)
+    logger.info("Model %s on dataset: %.4f", config.eval_type, eval_results)
+
+    if isinstance(model, MLP):
+        module_names = config.ablation_node_layers
+    else:
+        assert isinstance(model, SequentialTransformer)
+        module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+
+    ablation_results: AblationAccuracies = ablate_node_layers_and_eval(
+        basis_matrices=basis_matrices,
+        ablation_node_layers=config.ablation_node_layers,
+        hooked_model=hooked_model,
+        data_loader=data_loader,
+        eval_fn=eval_fn,
+        module_names=module_names,
+        schedule_config=config.schedule,
+        device=device,
+        dtype=dtype,
+    )
+
+    time_taken = f"{(time.time() - start_time) / 60:.1f} minutes"
+    logger.info("Finished in %s.", time_taken)
+
+    results = {
+        "config": json.loads(config.model_dump_json()),
+        "results": ablation_results,
+        "time_taken": time_taken,
+    }
+    if config.out_dir is not None:
+        with open(out_file, "w") as f:
+            json.dump(results, f)
+        logger.info("Wrote results to %s", out_file)
+
+    return ablation_results

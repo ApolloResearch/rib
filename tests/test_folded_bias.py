@@ -10,7 +10,6 @@ from transformer_lens import HookedTransformer, HookedTransformerConfig
 
 from rib.hook_manager import HookedModel
 from rib.models import SequentialTransformer, SequentialTransformerConfig
-from rib.models.sequential_transformer.converter import convert_tlens_weights
 from rib.models.utils import get_model_attr
 from rib.utils import set_seed
 
@@ -131,17 +130,12 @@ def pretrained_lm_folded_bias_comparison(
     cfg = SequentialTransformerConfig(**asdict(tlens_model.cfg))
     assert cfg.dtype == dtype
     model_raw = SequentialTransformer(cfg, node_layers)
-    # Load the transformer-lens weights into the sequential transformer model
-    state_dict = convert_tlens_weights(
-        seq_model=model_raw,
-        tlens_model=tlens_model,
-        positional_embedding_type=positional_embedding_type,
-    )
-    model_raw.load_state_dict(state_dict)
+    model_raw.load_tlens_weights(tlens_model, positional_embedding_type=positional_embedding_type)
+
     model_raw.to(device=device)
     model_raw.eval()
     model_folded = SequentialTransformer(cfg, node_layers)
-    model_folded.load_state_dict(state_dict)
+    model_folded.load_state_dict(model_raw.state_dict())
     model_folded.fold_bias()
     model_folded.to(device=device)
     model_folded.eval()

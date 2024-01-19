@@ -1,9 +1,9 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import torch
 import torch.nn as nn
 from jaxtyping import Float
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor
 
 from rib.models import MLP, MLPConfig
@@ -12,6 +12,7 @@ from rib.types import TorchDtype
 
 class ModularMLPConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+    config_type: Literal["ModularMLP"] = "ModularMLP"
     n_hidden_layers: int = Field(
         4,
         description="The number of hidden layers [input, hidden, ..., hidden, output]",
@@ -44,88 +45,98 @@ class ModularMLPConfig(BaseModel):
     )
     dtype: TorchDtype = Field(torch.float32, description="The dtype to initialize the model with.")
 
-    @field_validator("first_block_width", mode="after")
-    @classmethod
-    def set_first_block_width(cls, v: Optional[int], info: ValidationInfo) -> int:
-        if v is None:
-            return info.data["width"] // 2
-        return v
 
-    @property
-    def mlp_config(self) -> MLPConfig:
-        return MLPConfig(
-            hidden_sizes=[self.width] * self.n_hidden_layers,
-            input_size=self.width,
-            output_size=self.width,
-            activation_fn=self.activation_fn,
-            dtype=self.dtype,
-            fold_bias=False,  # Don't fold bias here, it should be done after initialisation
-            bias=True,
+def generate_block_diagonal_weights(
+    dtype: TorchDtype,
+    total_width: int,
+    first_block_width: Optional[int],
+    block_variances: List[float],
+    equal_columns: bool,
+) -> Float[Tensor, "width width"]:
+    """Generate a random block diagonal matrix.
+
+    Args:
+        dtype: The dtype of the weights
+        total_width: The width of the matrix
+        first_block_width: The width of the first block. If None, defaults to total_width // 2
+        block_variances: The variances of the two blocks
+        equal_columns: Whether to make the columns of each block equal
+
+    Returns:
+        A random block diagonal matrix
+    """
+    if first_block_width is None:
+        first_block_width = total_width // 2
+
+    assert total_width > first_block_width, "First block width must be smaller than total width"
+    assert len(block_variances) == 2, "Only two blocks supported"
+
+    second_block_width = total_width - first_block_width
+
+    if equal_columns:
+        # Duplicate the same columns in each block
+        first_block = (
+            block_variances[0]
+            * torch.randn(1, first_block_width, dtype=dtype).repeat(first_block_width, 1).T
+        )
+        second_block = (
+            block_variances[1]
+            * torch.randn(1, second_block_width, dtype=dtype).repeat(second_block_width, 1).T
+        )
+    else:
+        # Normal random weights
+        first_block = block_variances[0] * torch.randn(
+            first_block_width, first_block_width, dtype=dtype
+        )
+        second_block = block_variances[1] * torch.randn(
+            second_block_width, second_block_width, dtype=dtype
         )
 
+    return torch.block_diag(first_block, second_block)
 
-class ModularMLP(MLP):
-    def __init__(
-        self,
-        mlp_config: ModularMLPConfig,
-        seed: Optional[int] = None,
-    ):
-        """Generate a block diagonal MLP
 
-        Args:
-            mlp_config: Config class for the block diagonal MLP
-            seed: Seed for generating the weights
-        """
-        self.cfg = mlp_config
-        super(ModularMLP, self).__init__(config=self.cfg.mlp_config)
+def create_modular_mlp(modular_mlp_config: ModularMLPConfig, seed: Optional[int] = None) -> MLP:
+    """Generate a block diagonal MLP.
 
-        if seed is not None:
-            torch.manual_seed(seed)
+    Args:
+        modular_mlp_config: Config class for the block diagonal MLP
+        seed: Seed for generating the weights
 
-        # Hardcode weights and biases
-        assert len(self.layers) == self.cfg.n_hidden_layers + 1
-        for layer in self.layers:
-            layer.W = nn.Parameter(self.generate_weights())
-            layer.b = nn.Parameter(
-                torch.full((self.cfg.width,), fill_value=self.cfg.bias, dtype=self.cfg.dtype)
+    Returns:
+        A block diagonal MLP
+    """
+    mlp_config = MLPConfig(
+        hidden_sizes=[modular_mlp_config.width] * modular_mlp_config.n_hidden_layers,
+        input_size=modular_mlp_config.width,
+        output_size=modular_mlp_config.width,
+        activation_fn=modular_mlp_config.activation_fn,
+        dtype=modular_mlp_config.dtype,
+        fold_bias=False,  # Don't fold bias here, it should be done after initialisation
+        bias=True,
+    )
+    mlp = MLP(mlp_config)
+
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    # Hardcode weights and biases
+    assert len(mlp.layers) == modular_mlp_config.n_hidden_layers + 1
+    for layer in mlp.layers:
+        layer.W = nn.Parameter(
+            generate_block_diagonal_weights(
+                dtype=modular_mlp_config.dtype,
+                total_width=modular_mlp_config.width,
+                first_block_width=modular_mlp_config.first_block_width,
+                block_variances=modular_mlp_config.weight_variances,
+                equal_columns=modular_mlp_config.weight_equal_columns,
             )
-
-    def generate_weights(self) -> Float[Tensor, "width width"]:
-        """Generate a random block diagonal matrix
-
-        Note, changes to the structure of this function may break reproducibility.
-
-        Returns:
-            A random block diagonal matrix
-        """
-        dtype = self.cfg.dtype
-        total_width = self.cfg.width
-        first_block_width = self.cfg.first_block_width or total_width // 2
-        block_variances = self.cfg.weight_variances
-        equal_columns = self.cfg.weight_equal_columns
-
-        assert total_width > first_block_width, "First block width must be smaller than total width"
-        assert len(block_variances) == 2, "Only two blocks supported"
-
-        second_block_width = total_width - first_block_width
-
-        if equal_columns:
-            # Duplicate the same columns in each block
-            first_block = (
-                block_variances[0]
-                * torch.randn(1, first_block_width, dtype=dtype).repeat(first_block_width, 1).T
+        )
+        layer.b = nn.Parameter(
+            torch.full(
+                (modular_mlp_config.width,),
+                fill_value=modular_mlp_config.bias,
+                dtype=modular_mlp_config.dtype,
             )
-            second_block = (
-                block_variances[1]
-                * torch.randn(1, second_block_width, dtype=dtype).repeat(second_block_width, 1).T
-            )
-        else:
-            # Normal random weights
-            first_block = block_variances[0] * torch.randn(
-                first_block_width, first_block_width, dtype=dtype
-            )
-            second_block = block_variances[1] * torch.randn(
-                second_block_width, second_block_width, dtype=dtype
-            )
+        )
 
-        return torch.block_diag(first_block, second_block)
+    return mlp

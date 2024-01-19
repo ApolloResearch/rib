@@ -6,7 +6,7 @@ import torch
 from rib.hook_manager import HookedModel
 from rib.loader import load_sequential_transformer
 from rib.models import SequentialTransformer, SequentialTransformerConfig
-from rib.models.sequential_transformer.transformer import MultiSequential
+from rib.models.components import MultiSequential
 from rib.models.utils import create_list_partitions
 from rib.utils import set_seed
 
@@ -259,7 +259,7 @@ def test_validate_node_layers_valid(node_layers: list[str], module_ids: list[str
     ],
 )
 def test_validate_node_layers_invalid(node_layers: list[str], module_ids: list[str]):
-    with pytest.raises(ValueError):
+    with pytest.raises(AssertionError):
         SequentialTransformer.validate_node_layers(node_layers, module_ids)
 
 
@@ -287,7 +287,7 @@ def test_n_ctx_pythia():
     short_n_ctx = 20
     long_n_ctx = 2048
 
-    seq_model, _ = load_sequential_transformer(
+    seq_model = load_sequential_transformer(
         node_layers=[module_id],
         last_pos_module_type=None,
         tlens_pretrained="pythia-14m",

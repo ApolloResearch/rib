@@ -1,0 +1,18 @@
+seed: 0
+model:
+  hidden_sizes:
+    - 100
+    - 100
+  activation_fn: relu
+  bias: true
+  input_size: 3072
+  output_size: 10
+train:
+  learning_rate: 0.001
+  batch_size: 64
+  epochs: 12
+  save_every_n_epochs: null
+wandb: null
+dataset:
+  dataset_type: torchvision
+  name: CIFAR10

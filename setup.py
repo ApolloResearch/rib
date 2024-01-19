@@ -9,13 +9,13 @@ else:
 
 setup(
     name="rib",
-    version="0.0.1",
+    version="0.2",
     description="Library for the Rotation into the Interaction Basis (RIB) method.",
     long_description=Path("README.md").read_text("utf-8"),
     author="Dan Braun",
     author_email="dan@apolloresearch.ai",
     url="https://github.com/ApolloResearch/rib",
-    packages=find_packages(),
+    packages=find_packages(include=["rib", "rib.*", "rib_scripts", "rib_scripts.*"]),
     install_requires=requirements,
     extras_require={
         "dev": [

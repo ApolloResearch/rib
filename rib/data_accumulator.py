@@ -1,10 +1,11 @@
 """Functions that apply hooks and accumulate data when passing batches through a model."""
 
 from functools import partial
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Annotated, Literal, Optional, Union
 
 import torch
 from jaxtyping import Float
+from pydantic import AfterValidator, BaseModel, ConfigDict
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -21,9 +22,19 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import module_hat
 from rib.log import logger
 from rib.models.utils import get_model_attr
+from rib.utils import check_device_is_cpu
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
+
+
+class Edges(BaseModel):
+    """Stores a matrix of edges of shape (rib_out, rib_in) between two node layers."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+    in_node_layer: str
+    out_node_layer: str
+    E_hat: Annotated[Float[Tensor, "rib_out rib_in"], AfterValidator(check_device_is_cpu)]
 
 
 def run_dataset_through_model(
@@ -63,7 +74,7 @@ def collect_dataset_means(
     dtype: torch.dtype,
     collect_output_dataset_means: bool = True,
     hook_names: Optional[list[str]] = None,
-) -> dict[str, Float[Tensor, "d_hidden"]]:
+) -> dict[str, Float[Tensor, "orig"]]:
     """Collect the mean input activation for each module on the dataset.
 
     Also returns the positions of the bias terms in each input activation. The mean should be
@@ -121,7 +132,7 @@ def collect_dataset_means(
         hooked_model, data_loader, dataset_mean_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    dataset_mean: dict[str, Float[Tensor, "d_hidden"]] = {
+    dataset_mean: dict[str, Float[Tensor, "orig"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["dataset_mean"]
         for hook_name in hooked_model.hooked_data
     }
@@ -146,8 +157,8 @@ def collect_gram_matrices(
     dtype: torch.dtype,
     collect_output_gram: bool = True,
     hook_names: Optional[list[str]] = None,
-    means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
-) -> dict[str, Float[Tensor, "d_hidden d_hidden"]]:
+    means: Optional[dict[str, Float[Tensor, "orig"]]] = None,
+) -> dict[str, Float[Tensor, "orig orig"]]:
     """Collect gram matrices for the module inputs and optionally the output of the final module.
 
     We use pre_forward hooks for the input to each module. If `collect_output_gram` is True, we
@@ -159,7 +170,10 @@ def collect_gram_matrices(
 
     Args:
         hooked_model: The hooked model.
-        module_names: The names of the modules to collect gram matrices for.
+        module_names: The names of the modules to collect gram matrices for. Can be any valid
+            pytorch module in hooked_model.model. These typically correspond to section_names (e.g.
+            "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
+            "layers.2") when the model is an MLP.
         data_loader: The pytorch data loader.
         device: The device to run the model on.
         dtype: The data type to use for model computations.
@@ -181,7 +195,7 @@ def collect_gram_matrices(
     gram_hooks: list[Hook] = []
     # Add input hooks
     for module_name, hook_name in zip(module_names, hook_names):
-        shift: Optional[Float[Tensor, "d_hidden"]] = None
+        shift: Optional[Float[Tensor, "orig"]] = None
         if means is not None and hook_name in means:
             shift = -means[hook_name]
             shift[-1] = 0.0  # don't shift the final bias pos
@@ -214,7 +228,7 @@ def collect_gram_matrices(
         hooked_model, data_loader, gram_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    gram_matrices: dict[str, Float[Tensor, "d_hidden d_hidden"]] = {
+    gram_matrices: dict[str, Float[Tensor, "orig orig"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["gram"]
         for hook_name in hooked_model.hooked_data
     }
@@ -230,7 +244,7 @@ def collect_gram_matrices(
 
 
 def collect_M_dash_and_Lambda_dash(
-    C_out: Optional[Float[Tensor, "out_hidden out_hidden"]],
+    C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     hooked_model: HookedModel,
     n_intervals: int,
     data_loader: DataLoader,
@@ -241,7 +255,7 @@ def collect_M_dash_and_Lambda_dash(
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
-) -> tuple[Float[Tensor, "in_hidden in_hidden"], Float[Tensor, "in_hidden in_hidden"]]:
+) -> tuple[Float[Tensor, "orig_in orig_in"], Float[Tensor, "orig_in orig_in"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
     We accumulate the matrices, M' and Lambda' for each batch. To do this, we apply
@@ -307,7 +321,7 @@ def collect_M_dash_and_Lambda_dash(
 
 
 def collect_interaction_edges(
-    Cs: list["InteractionRotation"],
+    interaction_rotations: list["InteractionRotation"],
     hooked_model: HookedModel,
     n_intervals: int,
     section_names: list[str],
@@ -317,7 +331,7 @@ def collect_interaction_edges(
     data_set_size: Optional[int] = None,
     edge_formula: Literal["functional", "squared", "stochastic"] = "functional",
     n_stochastic_sources: Optional[int] = None,
-) -> dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]]:
+) -> list[Edges]:
     """Collect interaction edges between each node layer in Cs.
 
     Note that there is no edge weight that uses the position of the final interaction matrix as a
@@ -325,7 +339,8 @@ def collect_interaction_edges(
     final section name in section_names when calculating the edges.
 
     Args:
-        Cs: The interaction rotation matrix and its pseudoinverse, order by node layer.
+        interaction_rotations: InteractionRotation objects containing C, C_pinv, node_layer and
+            orig_dim, order by node layer.
         hooked_model: The hooked model.
         n_intervals: The number of integrated gradient intervals to use.
         section_names: The names of the modules to apply the hooks to.
@@ -342,66 +357,84 @@ def collect_interaction_edges(
         n_stochastic_sources: The number of stochastic sources of noise. Only used when
             `edge_formula="stochastic"`. Defaults to None.
     Returns:
-        A dictionary of interaction edge matrices, keyed by the module name which the edge passes
-        through.
+        A list of Edges objects, which contain a matrix of edges between two node layers.
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
 
-    edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
-    assert len(edge_modules) == len(Cs) - 1, "Number of edge modules not the same as Cs - 1."
+    edge_modules = (
+        section_names if interaction_rotations[-1].node_layer == "output" else section_names[:-1]
+    )
+    assert (
+        len(edge_modules) == len(interaction_rotations) - 1
+    ), "Number of edge modules not the same as interaction_rotations - 1."
 
     edge_hooks: list[Hook] = []
-    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
+    for idx, (interaction_rotation, module_name) in enumerate(
+        zip(interaction_rotations[:-1], edge_modules)
+    ):
         # C from the next node layer
-        assert C_info.C is not None, "C matrix is None."
-        assert C_info.C_pinv is not None, "C_pinv matrix is None."
-        C_out = Cs[idx + 1].C
+        assert interaction_rotation.C is not None, "C matrix is None."
+        assert interaction_rotation.C_pinv is not None, "C_pinv matrix is None."
+        C_out = interaction_rotations[idx + 1].C
         if C_out is not None:
             C_out = C_out.to(device=device)
 
         module_hat_partial = partial(
             module_hat,
             module=get_model_attr(hooked_model.model, module_name),
-            C_in_pinv=C_info.C_pinv.to(device=device),
+            C_in_pinv=interaction_rotation.C_pinv.to(device=device),
             C_out=C_out,
         )
         edge_hooks.append(
             Hook(
-                name=C_info.node_layer_name,
+                name=interaction_rotation.node_layer,
                 data_key="edge",
                 fn=interaction_edge_pre_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={
-                    "C_in": C_info.C.to(device=device),  # C from the current node layer
+                    "C_in": interaction_rotation.C.to(
+                        device=device
+                    ),  # C from the current node layer
                     "module_hat": module_hat_partial,
                     "n_intervals": n_intervals,
-                    "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
+                    "dataset_size": data_set_size or len(data_loader.dataset),  # type: ignore
                     "edge_formula": edge_formula,
                     "n_stochastic_sources": n_stochastic_sources,
                 },
             )
         )
-        # Initialise the edge matrices to zeros to (out_dim, in_dim). These get added to in the
-        # forward hook.
-        hooked_model.hooked_data[C_info.node_layer_name] = {
-            "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.out_dim, dtype=dtype, device=device)
+        # Get the output edge dimension from the next node layer
+        C_out = interaction_rotations[idx + 1].C
+        out_rib_dim = (
+            C_out.shape[1] if C_out is not None else interaction_rotations[idx + 1].orig_dim
+        )
+
+        C_in = interaction_rotations[idx].C
+        assert C_in is not None, "C_in is None."
+        # Initialise the edge matrices to zeros(out_rib_dim, in_rib_dim). These get accumulated in
+        # the forward hook.
+        hooked_model.hooked_data[interaction_rotation.node_layer] = {
+            "edge": torch.zeros(
+                out_rib_dim,
+                C_in.shape[1],
+                dtype=dtype,
+                device=device,
+            )
         }
 
     run_dataset_through_model(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    edges: dict[str, Float[Tensor, "out_hidden_trunc in_hidden_trunc"]] = {
-        node_layer_name: hooked_model.hooked_data[node_layer_name]["edge"]
-        for node_layer_name in hooked_model.hooked_data
-    }
+    module_ids = [info.node_layer for info in interaction_rotations]
+    all_edges: list[Edges] = []
+    for start, end in zip(module_ids[:-1], module_ids[1:]):
+        E_hat: Float[Tensor, "rib_out rib_in"] = hooked_model.hooked_data[start]["edge"]
+        if torch.all(E_hat == 0.0):
+            logger.warning(
+                f"Edges for node layer {start}-{end} are still zero, must be an error somewhere."
+            )
+        all_edges.append(Edges(in_node_layer=start, out_node_layer=end, E_hat=E_hat.detach().cpu()))
     hooked_model.clear_hooked_data()
 
-    # Ensure that the keys of the edges dict are the same as the node layer names without `output`
-    if set(edges.keys()) != set([C.node_layer_name for C in Cs[:-1]]):
-        logger.warning(
-            "Edge keys not the same as node layer names. " "Expected: %s, got: %s",
-            set([C.node_layer_name for C in Cs[:-1]]),
-            set(edges.keys()),
-        )
-    return edges
+    return all_edges

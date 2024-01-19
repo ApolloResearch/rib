@@ -112,7 +112,7 @@ def test_collect_dataset_means_pythia():
         "mlp_out.2",
         "add_resid2.2",
     ]
-    model, _ = load_sequential_transformer(
+    model = load_sequential_transformer(
         node_layers=node_layers,
         last_pos_module_type=None,
         tlens_pretrained="pythia-14m",

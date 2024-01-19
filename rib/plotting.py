@@ -1,13 +1,12 @@
 """Plotting functions
 
-plot_rib_graph:
-    - Plot an interaction graph given a results file contain the graph edges.
+plot_graph:
+    - Plot a rib graph given a results file contain the graph edges.
 
 plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
-import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional, Union
@@ -68,21 +67,20 @@ def _add_edges_to_graph(
 
 
 def _prepare_edges_for_plotting(
-    raw_edges: list[tuple[str, torch.Tensor]],
-    nodes_per_layer: list[int],
+    raw_edges: list[torch.Tensor], nodes_per_layer: list[int]
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
     Args:
-        raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
-            (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
+        raw_edges (list[torch.Tensor]): List of edges tensors, each with shape
+            (n_nodes_in_l+1, n_nodes_in_l).
         nodes_per_layer (list[int]): The number of nodes in each layer.
 
     Returns:
         list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
     """
     edges: list[torch.Tensor] = []
-    for i, (_, weight_matrix) in enumerate(raw_edges):
+    for i, weight_matrix in enumerate(raw_edges):
         # Convert edges to float32 (bfloat16 will cause errors and we don't need higher precision)
         weight_matrix = weight_matrix.float()
         # Normalize the edge weights by the sum of the absolute values of the weights
@@ -92,101 +90,6 @@ def _prepare_edges_for_plotting(
         out_nodes = nodes_per_layer[i + 1]
         edges.append(weight_matrix[:out_nodes, :in_nodes])
     return edges
-
-
-def plot_interaction_graph(
-    raw_edges: list[tuple[str, torch.Tensor]],
-    layer_names: list[str],
-    exp_name: str,
-    nodes_per_layer: Union[int, list[int]],
-    out_file: Path,
-    node_labels: Optional[list[list[str]]] = None,
-) -> None:
-    """Plot the interaction graph for the given edges.
-
-    Args:
-        raw_edges (list[tuple[str, torch.Tensor]]): List of edges which are tuples of
-            (module, edge_weights), each edge with shape (n_nodes_in_l+1, n_nodes_in_l)
-        layer_names (list[str]): The names of the layers. These should correspond to the first
-            element of each tuple in raw_edges, but also include a name for the final node_layer.
-        exp_name (str): The name of the experiment.
-        nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
-            all layers have the same number of nodes. If list, then the number of nodes in each
-            layer is given by the list.
-        out_file (Path): The file to save the plot to.
-    """
-
-    if isinstance(nodes_per_layer, int):
-        # Note that there is one more layer than there edge matrices
-        nodes_per_layer = [nodes_per_layer] * (len(raw_edges) + 1)
-
-    max_layer_height = max(nodes_per_layer)
-
-    edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
-
-    # Verify that the layer names match the edge names
-    edge_names = [edge_info[0] for edge_info in raw_edges]
-    if len(edge_names) != len(layer_names) - 1:
-        warnings.warn(
-            f"len(edge_names) != len(layer_names) - 1. edge_names={edge_names}, layer_names={layer_names}. This will probably cause the last layer in the plot to have no nodes. Are you using an old file?"
-        )
-    for edge_name, layer_name in zip(edge_names, layer_names[:-1]):
-        assert edge_name == layer_name, "The layer names must match the edge names."
-
-    # Create the undirected graph
-    graph = nx.Graph()
-
-    fig, ax = plt.subplots(1, 1, figsize=(20, 10))
-
-    layers = _create_node_layers(edges)
-    # Add nodes to the graph object
-    for layer in layers:
-        graph.add_nodes_from(layer)
-
-    _add_edges_to_graph(graph, edges, layers)
-
-    # Create positions for each node
-    pos: dict[int, tuple[int, Union[int, float]]] = {}
-    for i, layer in enumerate(layers):
-        # Add extra spacing for nodes that have fewer nodes than the biggest layer
-        spacing = 1 if i == 0 else max_layer_height / len(layer)
-        for j, node in enumerate(layer):
-            pos[node] = (i, j * spacing)
-
-    # Draw nodes
-    colors = ["black", "green", "orange", "purple"]  # Add more colors if you have more layers
-    options = {"edgecolors": "tab:gray", "node_size": 100, "alpha": 0.3}
-    for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
-        nx.draw_networkx_nodes(
-            graph, pos, nodelist=layer, node_color=colors[i % len(colors)], **options
-        )
-        # Add layer label above the nodes
-        plt.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
-
-    # Label nodes if node_labels is provided
-    if node_labels is not None:
-        node_label_dict = {}
-        for i, layer in enumerate(layers):
-            for j, node in enumerate(layer):
-                node_label_dict[node] = node_labels[i][j].replace("|", "\n")
-        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8)
-
-    # Draw edges
-    width_factor = 15
-    # for edge in graph.edges(data=True):
-    nx.draw_networkx_edges(
-        graph,
-        pos,
-        edgelist=[(edge[0], edge[1]) for edge in graph.edges(data=True)],
-        width=[width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
-        alpha=1,
-        edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
-    )
-
-    plt.suptitle(exp_name)
-    plt.tight_layout()
-    ax.axis("off")
-    plt.savefig(out_file)
 
 
 def plot_ablation_results(
@@ -205,7 +108,7 @@ def plot_ablation_results(
         results: A list of dictionares mapping node layers to an inner dictionary that maps the
             number of basis vectors remaining to the accuracy/loss.
         out_file: The file to save the plot to.
-        exp_names: The names of the experiments.
+        exp_names: The names of the rib_scripts.
         ablation_types: The type of ablation performed for each experiment ("orthogonal" or "rib").
         log_scale: Whether to use a log scale for the x-axis. Defaults to False.
         xlim: The limits for the x-axis. Defaults to None.
@@ -263,4 +166,87 @@ def plot_ablation_results(
     # Adjust the spacing between subplots
     plt.subplots_adjust(hspace=0.4)
 
+    plt.savefig(out_file)
+
+
+def plot_rib_graph(
+    raw_edges: list[torch.Tensor],
+    layer_names: list[str],
+    exp_name: str,
+    nodes_per_layer: Union[int, list[int]],
+    out_file: Path,
+    node_labels: Optional[list[list[str]]] = None,
+) -> None:
+    """Plot the RIB graph for the given edges.
+
+    Args:
+        raw_edges (list[torch.Tensor]): List of edges with shape (n_nodes_in_l+1, n_nodes_in_l)
+        layer_names (list[str]): The names of the layers. These correspond to the first dimension
+            of each tensor in raw_edges, and also includes a name for the final node_layer.
+        exp_name (str): The name of the experiment.
+        nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
+            all layers have the same number of nodes. If list, then the number of nodes in each
+            layer is given by the list.
+        out_file (Path): The file to save the plot to.
+    """
+    if isinstance(nodes_per_layer, int):
+        # Note that there is one more layer than there edge matrices
+        nodes_per_layer = [nodes_per_layer] * (len(raw_edges) + 1)
+
+    max_layer_height = max(nodes_per_layer)
+
+    edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
+
+    # Create the undirected graph
+    graph = nx.Graph()
+
+    fig, ax = plt.subplots(1, 1, figsize=(20, 10))
+
+    layers = _create_node_layers(edges)
+    # Add nodes to the graph object
+    for layer in layers:
+        graph.add_nodes_from(layer)
+
+    _add_edges_to_graph(graph, edges, layers)
+
+    # Create positions for each node
+    pos: dict[int, tuple[int, Union[int, float]]] = {}
+    for i, layer in enumerate(layers):
+        # Add extra spacing for nodes that have fewer nodes than the biggest layer
+        spacing = 1 if i == 0 else max_layer_height / len(layer)
+        for j, node in enumerate(layer):
+            pos[node] = (i, j * spacing)
+
+    # Draw nodes
+    colors = ["black", "green", "orange", "purple"]  # Add more colors if you have more layers
+    options = {"edgecolors": "tab:gray", "node_size": 100, "alpha": 0.3}
+    for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
+        nx.draw_networkx_nodes(
+            graph, pos, nodelist=layer, node_color=colors[i % len(colors)], **options
+        )
+        # Add layer label above the nodes
+        plt.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+
+    # Label nodes if node_labels is provided
+    if node_labels is not None:
+        node_label_dict = {}
+        for i, layer in enumerate(layers):
+            for j, node in enumerate(layer):
+                node_label_dict[node] = node_labels[i][j].replace("|", "\n")
+        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8)
+
+    # Draw edges
+    width_factor = 15
+    nx.draw_networkx_edges(
+        graph,
+        pos,
+        edgelist=[(edge[0], edge[1]) for edge in graph.edges(data=True)],
+        width=[width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
+        alpha=1,
+        edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
+    )
+
+    plt.suptitle(exp_name)
+    plt.tight_layout()
+    ax.axis("off")
     plt.savefig(out_file)

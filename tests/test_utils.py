@@ -3,12 +3,14 @@ from unittest.mock import Mock
 
 import pytest
 import torch
+from pydantic import BaseModel, ConfigDict, ValidationError
 from torch import nn
 from torch.utils.data import DataLoader
 
+from rib.ablations import ExponentialScheduleConfig
 from rib.models import MLP, MLPConfig, MLPLayer
 from rib.models.utils import gelu_new, get_model_attr
-from rib.utils import calc_exponential_ablation_schedule, eval_model_accuracy, find_root
+from rib.utils import eval_model_accuracy, find_root, replace_pydantic_model
 
 
 def test_get_model_attr() -> None:
@@ -96,9 +98,9 @@ def test_calc_exponential_ablation_schedule(
     n_eigenvecs: int,
     expected: list[int],
 ):
-    schedule = calc_exponential_ablation_schedule(
-        n_eigenvecs, exp_base=2.0, ablate_every_vec_cutoff=ablate_every_vec_cutoff
-    )
+    schedule = ExponentialScheduleConfig(
+        schedule_type="exponential", ablate_every_vec_cutoff=ablate_every_vec_cutoff
+    ).get_ablation_schedule(n_eigenvecs)
     assert schedule == expected
 
 
@@ -126,3 +128,61 @@ class TestFindRoot:
         func = lambda x: gelu_new(x) - 1.0
         root = find_root(func, xmin=torch.tensor(-1.0), xmax=torch.tensor(4.0))
         assert root == pytest.approx(1.1446, abs=1e-4)
+
+
+# For TestUpdatePydanticModel (must be defined outside for linting reasons)
+class SimpleModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    x: int
+    y: str
+
+
+class NestedModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    value: SimpleModel
+
+
+class DeeplyNestedModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    inner: NestedModel
+
+
+class TestReplacePydanticModel:
+    """Test the replace_pydantic_model function.
+
+    Note that we only care about configs defined with extra="forbid" and frozen=True.
+    """
+
+    def test_replace_simple_fields(self):
+        model = SimpleModel(x=1, y="hello")
+        replaced_model = replace_pydantic_model(model, {"x": 2})
+        assert replaced_model.x == 2
+        assert replaced_model.y == "hello"
+
+    def test_nonexistent_fields(self):
+        model = SimpleModel(x=1, y="hello")
+        with pytest.raises(ValidationError):
+            replace_pydantic_model(model, {"z": 2})
+
+    def test_replace_nested_model(self):
+        model = NestedModel(value=SimpleModel(x=1, y="hello"))
+        replaced_model = replace_pydantic_model(model, {"value": {"x": 2}})
+        assert replaced_model.value.x == 2
+        assert replaced_model.value.y == "hello"
+
+    def test_deeply_nested_model_replace(self):
+        model = DeeplyNestedModel(inner=NestedModel(value=SimpleModel(x=1, y="hello")))
+        replaced_model = replace_pydantic_model(model, {"inner": {"value": {"x": 2}}})
+        assert replaced_model.inner.value.x == 2
+        assert replaced_model.inner.value.y == "hello"
+
+    def test_replace_with_invalid_data_type(self):
+        model = SimpleModel(x=1, y="hello")
+        with pytest.raises(ValidationError):
+            replace_pydantic_model(model, {"x": "help"})
+
+    def test_replace_with_multiple_dicts(self):
+        model = SimpleModel(x=1, y="hello")
+        replaced_model = replace_pydantic_model(model, {"x": 2, "y": "world"}, {"x": 3})
+        assert replaced_model.x == 3
+        assert replaced_model.y == "world"

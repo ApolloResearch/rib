@@ -17,6 +17,7 @@ on:
       - '.gitignore'
       - 'README.md'
       - 'ACCESS.md'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -49,22 +50,22 @@ jobs:
     - name: Check with Black
       run: |
         source /home/user/actions-runner/rib-env/bin/activate
-        black --check --diff --line-length 100 rib experiments tests
+        black --check --diff --line-length 100 rib rib_scripts tests
 
     - name: Check with isort
       run: |
         source /home/user/actions-runner/rib-env/bin/activate
-        isort --check --thirdparty wandb --profile black rib experiments tests
+        isort --check --thirdparty wandb --profile black rib rib_scripts tests
 
     - name: Check unused imports with pylint
       run: |
         source /home/user/actions-runner/rib-env/bin/activate
-        pylint --disable=all --enable=unused-import --score=n rib experiments tests
+        pylint --disable=all --enable=unused-import --score=n rib rib_scripts tests
 
     - name: Check with mypy
       run: |
         source /home/user/actions-runner/rib-env/bin/activate
-        mypy rib experiments
+        mypy rib rib_scripts
 
     - name: Run tests
       run: |

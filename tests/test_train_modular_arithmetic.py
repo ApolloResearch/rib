@@ -2,8 +2,8 @@
 import pytest
 import yaml
 
-from experiments.train_modular_arithmetic.run_train_modular_arithmetic import Config
-from experiments.train_modular_arithmetic.run_train_modular_arithmetic import (
+from rib_scripts.train_modular_arithmetic.run_train_modular_arithmetic import Config
+from rib_scripts.train_modular_arithmetic.run_train_modular_arithmetic import (
     main as train_main,
 )
 
@@ -20,8 +20,7 @@ model:
   act_fn: relu
   normalization_type: null
 dataset:
-  source: custom
-  name: modular_arithmetic
+  dataset_type: modular_arithmetic
   modulus: 113
   frac_train: .30
   fn_name: add

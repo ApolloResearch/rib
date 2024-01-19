@@ -2,34 +2,28 @@
 Utilities for dealing with parallel processes across pods and also across GPUs within a pod.
 """
 import warnings
-from dataclasses import dataclass, fields
 from logging import WARNING
 
 import torch
 from mpi4py import MPI
+from pydantic import BaseModel, ConfigDict, Field
 
 from rib.log import logger
 
 
-@dataclass(frozen=True)
-class DistributedInfo:
+class DistributedInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True, frozen=True)
     global_size: int  # Total number of processes. Equivalent to n_pods * n_gpus_per_pod.
     global_rank: int  # The rank of this process amongst all processes, from 0 to world_size.
     n_pods: int  # The number of pods (i.e. machines) used to parallelize the script.
     pod_rank: int  # The rank of this pod, from 0 to n_pods.
-    local_comm: MPI.Intracomm  # The MPI communicator used for communication within this pod.
+    local_comm: MPI.Intracomm = Field(
+        default_factory=lambda: MPI.COMM_WORLD, exclude=True
+    )  # MPI communicator used within this pod.
     local_rank: int  # The rank of this process within this pod, from 0 to n_gpus_per_pod.
     local_size: int  # The number of processes in this pod.
     is_parallelised: bool  # Whether the script is parallelised.
     is_main_process: bool  # True if local_rank == 0 and false otherwise.
-
-    def to_dict(self):
-        # Exclude local_comm because it can't be pickled
-        return {
-            field.name: getattr(self, field.name)
-            for field in fields(self)
-            if field.name != "local_comm"
-        }
 
 
 def get_dist_info(n_pods: int, pod_rank: int) -> DistributedInfo:

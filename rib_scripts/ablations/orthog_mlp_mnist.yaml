@@ -1,0 +1,19 @@
+exp_name: orthog_4-node-layers
+ablation_type: orthogonal
+rib_results_path: rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
+schedule:
+  schedule_type: exponential
+  early_stopping_threshold: null
+  ablate_every_vec_cutoff: 10
+  exp_base: 2.0
+dataset:
+  dataset_type: torchvision
+  name: MNIST
+ablation_node_layers:  # Rotate input to these modules
+  - layers.0
+  - layers.1
+  - layers.2
+batch_size: 512
+dtype: float32
+eval_type: accuracy
+seed: 0

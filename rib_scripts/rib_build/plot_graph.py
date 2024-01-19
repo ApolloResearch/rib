@@ -48,8 +48,8 @@ def main(
     else:
         node_labels = None
 
-    edge_layers = [edges.in_node_layer_name for edges in results.edges] + [
-        results.edges[-1].out_node_layer_name
+    edge_layers = [edges.in_node_layer for edges in results.edges] + [
+        results.edges[-1].out_node_layer
     ]
     assert edge_layers == results.config.node_layers, (
         "The layers of the edges do not match the layers of the nodes. "

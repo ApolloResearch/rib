@@ -1,6 +1,5 @@
 import json
 import time
-from pathlib import Path
 from typing import Callable, Literal, Optional, Union
 
 import numpy as np
@@ -18,12 +17,12 @@ from rib.data import (
 )
 from rib.hook_fns import rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
-from rib.interaction_algos import Eigenvectors, InteractionRotation
 from rib.linalg import calc_rotation_matrix
 from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import MLP, SequentialTransformer
 from rib.rib_builder import RibBuildResults
+from rib.settings import REPO_ROOT
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
@@ -33,8 +32,8 @@ from rib.utils import (
     set_seed,
 )
 
-BasisVecs = Union[Float[Tensor, "orig orig_trunc"], Float[Tensor, "orig orig"]]
-BasisVecsPinv = Union[Float[Tensor, "orig_trunc orig"], Float[Tensor, "orig orig"]]
+BasisVecs = Union[Float[Tensor, "orig rib"], Float[Tensor, "orig orig"]]
+BasisVecsPinv = Union[Float[Tensor, "rib orig"], Float[Tensor, "orig orig"]]
 AblationAccuracies = dict[str, dict[int, float]]
 
 
@@ -174,7 +173,7 @@ class AblationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str
     out_dir: Optional[RootPath] = Field(
-        Path(__file__).parent / "out",
+        REPO_ROOT / "rib_scripts/ablations/out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
@@ -312,32 +311,35 @@ def load_basis_matrices(
 ) -> list[tuple[BasisVecs, BasisVecsPinv]]:
     """Load the basis matrices and their pseudoinverses.
 
-    Supports both rib and orthogonal basis matrices. Converts each matrix to the specified dtype
-    and device.
+    Uses C and C_pinv for 'rib' ablations and W and W_pinv for 'orthogonal' ablations.
+
+    Args:
+        rib_results: The results of building the RIB graph.
+        ablation_node_layers: The node layers to ablate.
+        ablation_type: The type of ablation to perform ('rib' or 'orthogonal').
+        dtype: The data type to cast the basis matrices to.
+        device: The device to load the basis matrices to.
+
+    Returns:
+        - A list of basis matrices.
+        - A list of pseudoinverse basis matrices.
     """
-    if ablation_type == "rib":
-        basis_matrix_key = "interaction_rotations"
-    elif ablation_type == "orthogonal":
-        basis_matrix_key = "eigenvectors"
-    else:
-        raise ValueError(f"ablation_type must be one of ['rib', 'orthogonal']")
 
     # Get the basis vecs and their pseudoinverses using the module_names as keys
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
-    basis_infos_list = getattr(rib_results, basis_matrix_key)
-    basis_infos_dict = {info.node_layer_name: info for info in basis_infos_list}
+    basis_infos_dict = {info.node_layer: info for info in rib_results.interaction_rotations}
     for module_name in ablation_node_layers:
         basis_info = basis_infos_dict[module_name]
         if ablation_type == "rib":
-            assert isinstance(basis_info, InteractionRotation)
             assert basis_info.C is not None, f"{module_name} has no C matrix."
             assert basis_info.C_pinv is not None, f"{module_name} has no C_pinv matrix."
             basis_vecs = basis_info.C.to(dtype=dtype, device=device)
             basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
         elif ablation_type == "orthogonal":
-            assert isinstance(basis_info, Eigenvectors)
-            assert basis_info.U is not None, f"{module_name} has no U matrix."
-            basis_vecs = basis_info.U.to(dtype=dtype, device=device)
+            assert basis_info.W is not None, f"{module_name} has no W matrix."
+            assert basis_info.W_pinv is not None, f"{module_name} has no W_pinv matrix."
+            basis_vecs = basis_info.W.to(dtype=dtype, device=device)
+            basis_vecs_pinv = basis_info.W_pinv.to(dtype=dtype, device=device)
             # Pseudoinverse of an orthonormal matrix is its transpose
             basis_vecs_pinv = basis_vecs.T.detach().clone()
         basis_matrices.append((basis_vecs, basis_vecs_pinv))

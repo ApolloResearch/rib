@@ -29,11 +29,11 @@ if TYPE_CHECKING:  # Prevent circular import to import type annotations
 
 
 class Edges(BaseModel):
-    """Stores a matrix of edges of shape (out_dim, in_dim) between two node layers."""
+    """Stores a matrix of edges of shape (rib_out, rib_in) between two node layers."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
-    in_node_layer_name: str
-    out_node_layer_name: str
+    in_node_layer: str
+    out_node_layer: str
     E_hat: Annotated[Float[Tensor, "rib_out rib_in"], AfterValidator(check_device_is_cpu)]
 
 
@@ -321,7 +321,7 @@ def collect_M_dash_and_Lambda_dash(
 
 
 def collect_interaction_edges(
-    Cs: list["InteractionRotation"],
+    interaction_rotations: list["InteractionRotation"],
     hooked_model: HookedModel,
     n_intervals: int,
     section_names: list[str],
@@ -339,7 +339,8 @@ def collect_interaction_edges(
     final section name in section_names when calculating the edges.
 
     Args:
-        Cs: The interaction rotation matrix and its pseudoinverse, order by node layer.
+        interaction_rotations: InteractionRotation objects containing C, C_pinv, node_layer and
+            orig_dim, order by node layer.
         hooked_model: The hooked model.
         n_intervals: The number of integrated gradient intervals to use.
         section_names: The names of the modules to apply the hooks to.
@@ -360,51 +361,72 @@ def collect_interaction_edges(
     """
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
 
-    edge_modules = section_names if Cs[-1].node_layer_name == "output" else section_names[:-1]
-    assert len(edge_modules) == len(Cs) - 1, "Number of edge modules not the same as Cs - 1."
+    edge_modules = (
+        section_names if interaction_rotations[-1].node_layer == "output" else section_names[:-1]
+    )
+    assert (
+        len(edge_modules) == len(interaction_rotations) - 1
+    ), "Number of edge modules not the same as interaction_rotations - 1."
 
     edge_hooks: list[Hook] = []
-    for idx, (C_info, module_name) in enumerate(zip(Cs[:-1], edge_modules)):
+    for idx, (interaction_rotation, module_name) in enumerate(
+        zip(interaction_rotations[:-1], edge_modules)
+    ):
         # C from the next node layer
-        assert C_info.C is not None, "C matrix is None."
-        assert C_info.C_pinv is not None, "C_pinv matrix is None."
-        C_out = Cs[idx + 1].C
+        assert interaction_rotation.C is not None, "C matrix is None."
+        assert interaction_rotation.C_pinv is not None, "C_pinv matrix is None."
+        C_out = interaction_rotations[idx + 1].C
         if C_out is not None:
             C_out = C_out.to(device=device)
 
         module_hat_partial = partial(
             module_hat,
             module=get_model_attr(hooked_model.model, module_name),
-            C_in_pinv=C_info.C_pinv.to(device=device),
+            C_in_pinv=interaction_rotation.C_pinv.to(device=device),
             C_out=C_out,
         )
         edge_hooks.append(
             Hook(
-                name=C_info.node_layer_name,
+                name=interaction_rotation.node_layer,
                 data_key="edge",
                 fn=interaction_edge_pre_forward_hook_fn,
                 module_name=module_name,
                 fn_kwargs={
-                    "C_in": C_info.C.to(device=device),  # C from the current node layer
+                    "C_in": interaction_rotation.C.to(
+                        device=device
+                    ),  # C from the current node layer
                     "module_hat": module_hat_partial,
                     "n_intervals": n_intervals,
-                    "dataset_size": data_set_size if data_set_size is not None else len(data_loader.dataset),  # type: ignore
+                    "dataset_size": data_set_size or len(data_loader.dataset),  # type: ignore
                     "edge_formula": edge_formula,
                     "n_stochastic_sources": n_stochastic_sources,
                 },
             )
         )
-        # Initialise the edge matrices to zeros(out_dim, in_dim). These get accumulated in the
-        # forward hook.
-        hooked_model.hooked_data[C_info.node_layer_name] = {
-            "edge": torch.zeros(Cs[idx + 1].out_dim, C_info.out_dim, dtype=dtype, device=device)
+        # Get the output edge dimension from the next node layer
+        C_out = interaction_rotations[idx + 1].C
+        out_rib_dim = (
+            C_out.shape[1] if C_out is not None else interaction_rotations[idx + 1].orig_dim
+        )
+
+        C_in = interaction_rotations[idx].C
+        assert C_in is not None, "C_in is None."
+        # Initialise the edge matrices to zeros(out_rib_dim, in_rib_dim). These get accumulated in
+        # the forward hook.
+        hooked_model.hooked_data[interaction_rotation.node_layer] = {
+            "edge": torch.zeros(
+                out_rib_dim,
+                C_in.shape[1],
+                dtype=dtype,
+                device=device,
+            )
         }
 
     run_dataset_through_model(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    module_ids = [C.node_layer_name for C in Cs]
+    module_ids = [info.node_layer for info in interaction_rotations]
     all_edges: list[Edges] = []
     for start, end in zip(module_ids[:-1], module_ids[1:]):
         E_hat: Float[Tensor, "rib_out rib_in"] = hooked_model.hooked_data[start]["edge"]
@@ -412,9 +434,7 @@ def collect_interaction_edges(
             logger.warning(
                 f"Edges for node layer {start}-{end} are still zero, must be an error somewhere."
             )
-        all_edges.append(
-            Edges(in_node_layer_name=start, out_node_layer_name=end, E_hat=E_hat.detach().cpu())
-        )
+        all_edges.append(Edges(in_node_layer=start, out_node_layer=end, E_hat=E_hat.detach().cpu()))
     hooked_model.clear_hooked_data()
 
     return all_edges

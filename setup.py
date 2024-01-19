@@ -9,7 +9,7 @@ else:
 
 setup(
     name="rib",
-    version="0.2",
+    version="1.0",
     description="Library for the Rotation into the Interaction Basis (RIB) method.",
     long_description=Path("README.md").read_text("utf-8"),
     author="Dan Braun",

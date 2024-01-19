@@ -114,7 +114,7 @@ class RibBuildConfig(BaseModel):
     )
     node_layers: list[str] = Field(
         ...,
-        description="Names of the modules whose inputs correspond to node layers in the graph."
+        description="Module ids whose inputs correspond to node layers in the graph."
         "`output` is a special node layer that corresponds to the output of the model.",
     )
     rotate_final_node_layer: bool = Field(
@@ -479,7 +479,7 @@ def rib_build(
     else:
         gram_matrices, interaction_rotations = load_interaction_rotations(config=config)
         edge_interaction_rotations = [
-            obj for obj in interaction_rotations if obj.node_layer_name in config.node_layers
+            obj for obj in interaction_rotations if obj.node_layer in config.node_layers
         ]
 
     if not config.calculate_edges:

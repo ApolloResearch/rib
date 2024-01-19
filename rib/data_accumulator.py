@@ -29,11 +29,11 @@ if TYPE_CHECKING:  # Prevent circular import to import type annotations
 
 
 class Edges(BaseModel):
-    """Stores a matrix of edges of shape (out_dim, in_dim) between two node layers."""
+    """Stores a matrix of edges of shape (rib_out, rib_in) between two node layers."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
-    in_node_layer_name: str
-    out_node_layer_name: str
+    in_node_layer: str
+    out_node_layer: str
     E_hat: Annotated[Float[Tensor, "rib_out rib_in"], AfterValidator(check_device_is_cpu)]
 
 
@@ -339,8 +339,8 @@ def collect_interaction_edges(
     final section name in section_names when calculating the edges.
 
     Args:
-        interaction_rotations: InteractionRotation objects containing C, C_pinv, node_layer_name and
-            out_dim, order by node layer.
+        interaction_rotations: InteractionRotation objects containing C, C_pinv, node_layer and
+            orig_dim, order by node layer.
         hooked_model: The hooked model.
         n_intervals: The number of integrated gradient intervals to use.
         section_names: The names of the modules to apply the hooks to.
@@ -362,9 +362,7 @@ def collect_interaction_edges(
     assert hooked_model.model.has_folded_bias, "Biases must be folded in to calculate edges."
 
     edge_modules = (
-        section_names
-        if interaction_rotations[-1].node_layer_name == "output"
-        else section_names[:-1]
+        section_names if interaction_rotations[-1].node_layer == "output" else section_names[:-1]
     )
     assert (
         len(edge_modules) == len(interaction_rotations) - 1
@@ -389,7 +387,7 @@ def collect_interaction_edges(
         )
         edge_hooks.append(
             Hook(
-                name=interaction_rotation.node_layer_name,
+                name=interaction_rotation.node_layer,
                 data_key="edge",
                 fn=interaction_edge_pre_forward_hook_fn,
                 module_name=module_name,
@@ -407,17 +405,17 @@ def collect_interaction_edges(
         )
         # Get the output edge dimension from the next node layer
         C_out = interaction_rotations[idx + 1].C
-        edge_out_dim = (
-            C_out.shape[1] if C_out is not None else interaction_rotations[idx + 1].out_dim
+        out_rib_dim = (
+            C_out.shape[1] if C_out is not None else interaction_rotations[idx + 1].orig_dim
         )
 
         C_in = interaction_rotations[idx].C
         assert C_in is not None, "C_in is None."
-        # Initialise the edge matrices to zeros(out_dim, in_dim). These get accumulated in the
-        # forward hook.
-        hooked_model.hooked_data[interaction_rotation.node_layer_name] = {
+        # Initialise the edge matrices to zeros(out_rib_dim, in_rib_dim). These get accumulated in
+        # the forward hook.
+        hooked_model.hooked_data[interaction_rotation.node_layer] = {
             "edge": torch.zeros(
-                edge_out_dim,
+                out_rib_dim,
                 C_in.shape[1],
                 dtype=dtype,
                 device=device,
@@ -428,7 +426,7 @@ def collect_interaction_edges(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True
     )
 
-    module_ids = [info.node_layer_name for info in interaction_rotations]
+    module_ids = [info.node_layer for info in interaction_rotations]
     all_edges: list[Edges] = []
     for start, end in zip(module_ids[:-1], module_ids[1:]):
         E_hat: Float[Tensor, "rib_out rib_in"] = hooked_model.hooked_data[start]["edge"]
@@ -436,9 +434,7 @@ def collect_interaction_edges(
             logger.warning(
                 f"Edges for node layer {start}-{end} are still zero, must be an error somewhere."
             )
-        all_edges.append(
-            Edges(in_node_layer_name=start, out_node_layer_name=end, E_hat=E_hat.detach().cpu())
-        )
+        all_edges.append(Edges(in_node_layer=start, out_node_layer=end, E_hat=E_hat.detach().cpu()))
     hooked_model.clear_hooked_data()
 
     return all_edges

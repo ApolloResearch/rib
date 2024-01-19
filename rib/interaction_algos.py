@@ -4,7 +4,7 @@ from typing import Callable, Literal, Optional
 
 import torch
 from jaxtyping import Float, Int
-from pydantic import AfterValidator, BaseModel, ConfigDict, ValidationInfo
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationInfo
 from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -17,49 +17,50 @@ from rib.models import MLP, SequentialTransformer
 from rib.utils import check_device_is_cpu
 
 
-def wrap_check_dim_is_out_dim(
+def wrap_check_dim_is_orig_dim(
     dim: int,
 ) -> Callable[[Optional[torch.Tensor], ValidationInfo], Optional[torch.Tensor]]:
-    """Returns a function that checks whether `dim` of a tensor is equal to out_dim."""
+    """Returns a function that checks whether `dim` of a tensor is equal to orig_dim."""
 
-    def check_dim_is_out_dim(
+    def check_dim_is_orig_dim(
         X: Optional[torch.Tensor], info: ValidationInfo
     ) -> Optional[torch.Tensor]:
         if X is not None:
             assert (
-                X.shape[dim] == info.data["out_dim"]
-            ), f"Expected dim {dim} to be {info.data['out_dim']}. Got {X.shape[dim]}."
+                X.shape[dim] == info.data["orig_dim"]
+            ), f"Expected dim {dim} to be {info.data['orig_dim']}. Got {X.shape[dim]}."
         return X
 
-    return check_dim_is_out_dim
+    return check_dim_is_orig_dim
 
 
 class InteractionRotation(BaseModel):
     """Stores useful matrices that are computed in `calculate_interaction_rotations`."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
-    node_layer_name: str
-    out_dim: int  # Size of the concatenated embeddings at node_layer_name (denoted 'orig')
+    node_layer: str = Field(..., description="The module_id representing the node layer.")
+    orig_dim: int = Field(..., description="Size of the concatenated embeddings at node_layer")
     # if centering was used, C[:, 0] is the constant direction
     C: Annotated[
         Optional[Float[Tensor, "orig rib"]],
-        AfterValidator(wrap_check_dim_is_out_dim(dim=0)),
+        AfterValidator(wrap_check_dim_is_orig_dim(dim=0)),
         AfterValidator(check_device_is_cpu),
     ] = None
     # pseudoinverse of C, not needed for the output node layer
     C_pinv: Annotated[
         Optional[Float[Tensor, "rib orig"]],
-        AfterValidator(wrap_check_dim_is_out_dim(dim=1)),
+        AfterValidator(wrap_check_dim_is_orig_dim(dim=1)),
         AfterValidator(check_device_is_cpu),
     ] = None
     W: Annotated[
         Optional[Float[Tensor, "orig orig_trunc"]],
-        AfterValidator(wrap_check_dim_is_out_dim(dim=0)),
+        AfterValidator(wrap_check_dim_is_orig_dim(dim=0)),
         AfterValidator(check_device_is_cpu),
     ] = None
+    # pseudoinverse of W, not needed for the output node layer
     W_pinv: Annotated[
         Optional[Float[Tensor, "orig_trunc orig"]],
-        AfterValidator(wrap_check_dim_is_out_dim(dim=1)),
+        AfterValidator(wrap_check_dim_is_orig_dim(dim=1)),
         AfterValidator(check_device_is_cpu),
     ] = None
     V: Annotated[
@@ -206,8 +207,9 @@ def calculate_interaction_rotations(
             # If no centering, Y is the identity matrix
             Y_output = torch.eye(U_output.shape[0], dtype=U_output.dtype, device=U_output.device)
 
-        ### FIRST ROTATION MATRIX (R) to eigenbasis
-        # Combines Y, U, D. This centers (if Y is not an identity), then orthogonalizes and scales.
+        ### ROTATION MATRIX (W) to eigenbasis
+        # Combines Y and U. We don't include D as our best guess of importance here is the size of
+        # the output activations. Thus there's no reason to scale.
         W_output = (Y_output @ U_output).cpu()
 
     # Get the out_dim of the final node layer
@@ -226,8 +228,8 @@ def calculate_interaction_rotations(
 
     interaction_rotations.append(
         InteractionRotation(
-            node_layer_name=node_layers[-1],
-            out_dim=out_dim,
+            node_layer=node_layers[-1],
+            orig_dim=out_dim,
             C=W_output.detach().clone() if W_output is not None else None,
             W=W_output,
         )
@@ -252,8 +254,8 @@ def calculate_interaction_rotations(
             # Use identity matrix as C and W since we don't rotate
             interaction_rotations.append(
                 InteractionRotation(
-                    node_layer_name=node_layer,
-                    out_dim=out_dim,
+                    node_layer=node_layer,
+                    orig_dim=out_dim,
                     C=torch.eye(out_dim, dtype=dtype),
                     C_pinv=torch.eye(out_dim, dtype=dtype),
                     W=torch.eye(out_dim, dtype=dtype),
@@ -298,8 +300,8 @@ def calculate_interaction_rotations(
             # Use W as C, with centering matrix
             interaction_rotations.append(
                 InteractionRotation(
-                    node_layer_name=node_layer,
-                    out_dim=out_dim,
+                    node_layer=node_layer,
+                    orig_dim=out_dim,
                     C=W.cpu().detach().clone(),
                     C_pinv=W_pinv.cpu().detach().clone(),
                     W=W.cpu(),
@@ -359,8 +361,8 @@ def calculate_interaction_rotations(
 
         interaction_rotations.append(
             InteractionRotation(
-                node_layer_name=node_layer,
-                out_dim=out_dim,
+                node_layer=node_layer,
+                orig_dim=out_dim,
                 C=C,
                 C_pinv=C_pinv,
                 W=W.cpu(),

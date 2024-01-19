@@ -327,7 +327,7 @@ def load_basis_matrices(
 
     # Get the basis vecs and their pseudoinverses using the module_names as keys
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
-    basis_infos_dict = {info.node_layer_name: info for info in rib_results.interaction_rotations}
+    basis_infos_dict = {info.node_layer: info for info in rib_results.interaction_rotations}
     for module_name in ablation_node_layers:
         basis_info = basis_infos_dict[module_name]
         if ablation_type == "rib":

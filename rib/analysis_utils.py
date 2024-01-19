@@ -11,8 +11,8 @@ from rib.interaction_algos import InteractionRotation
 
 
 def rotation_list_to_dict(rotations: list[InteractionRotation]) -> dict[str, InteractionRotation]:
-    """Converts a list of InteractionRotation objects to a dict keyed by node_layer_name."""
-    return {info.node_layer_name: info for info in rotations}
+    """Converts a list of InteractionRotation objects to a dict keyed by node_layer."""
+    return {info.node_layer: info for info in rotations}
 
 
 def get_rib_acts(
@@ -36,9 +36,9 @@ def get_rib_acts(
     hooks = [
         Hook(
             name="rotated_acts",
-            data_key=info.node_layer_name,
+            data_key=info.node_layer,
             fn=rotate_pre_forward_hook_fn,
-            module_name=get_module_name(info.node_layer_name),
+            module_name=get_module_name(info.node_layer),
             fn_kwargs={"rotation_matrix": info.C.to(device=device, dtype=dtype), "mode": "cache"},
         )
         for info in interaction_rotations

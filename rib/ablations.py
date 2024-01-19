@@ -316,7 +316,26 @@ def ablate_node_layers_and_eval(
 def _get_edge_mask(
     edge_weights: Float[Tensor, "rib_out rib_in"], num_edges_kept: int, keep_const_edges: bool
 ) -> Bool[Tensor, "rib_out rib_in"]:
-    """ """
+    """
+    Returns a mask over edge weights, which keeps the largest edges.
+
+    Args:
+        edge_weights: A tensor representing edge weights.
+        num_edges_kept: The number of edges to keep. If this number is greater than the total
+            number of edges, all edges are kept.
+        keep_const_edges: A flag to indicate if we should keep all edges in the first row and col.
+            These edges are 'free', in that they don't count towards num_edges_kept.
+
+    Returns:
+        Bool tensor of the same shape as the edge edges.
+
+    Example:
+        >>> edge_weights = torch.tensor([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]])
+        >>> _get_edge_mask(edge_weights, 2, True)
+        tensor([[True, True,  True],
+                [True, False, False],
+                [True, True,  True]])
+    """
     sub_weights = edge_weights[1:, 1:] if keep_const_edges else edge_weights
     if num_edges_kept > sub_weights.numel():  # keep all edges
         return torch.ones_like(edge_weights, dtype=torch.bool)

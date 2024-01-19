@@ -13,7 +13,12 @@ import pytest
 import torch
 import yaml
 
-from rib.ablations import AblationAccuracies, AblationConfig, load_bases_and_ablate
+from rib.ablations import (
+    AblationAccuracies,
+    AblationConfig,
+    _get_edge_mask,
+    load_bases_and_ablate,
+)
 
 
 def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool = False) -> bool:
@@ -202,3 +207,27 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, edge_ablation):
         return
     accuracies = load_bases_and_ablate(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)
+
+
+class TestEdgeMask:
+    def test_all_edges_kept(self):
+        edge_weights = torch.rand(5, 5)
+        assert _get_edge_mask(edge_weights, 26, False).all()
+        assert _get_edge_mask(edge_weights, 20, True).all()
+
+    def test_no_edges_kept(self):
+        edge_weights = torch.rand(5, 5)
+        assert not _get_edge_mask(edge_weights, 0, False).any()
+
+    def test_large_edges_kept(self):
+        edge_weights = torch.rand(5, 5)
+        edge_weights[range(5), range(5)] += 1.0
+        mask = _get_edge_mask(edge_weights, 5, False)
+        assert mask.diag().all()
+        assert mask.sum() == 5
+
+        mask_keep_const = _get_edge_mask(edge_weights, 4, True)
+        assert mask_keep_const.diag().all()
+        assert mask_keep_const[0, :].all()
+        assert mask_keep_const[:, 0].all()
+        assert mask_keep_const[1:, 1:].sum() == 4

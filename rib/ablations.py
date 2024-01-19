@@ -393,6 +393,7 @@ def ablate_edges_and_eval(
 
     Returns:
         A dictionary mapping node layers to ablation accuracies/losses.
+        A dictionary mapping node layers to edge masks.
     """
     base_score = eval_fn(hooked_model, data_loader, hooks=[], dtype=dtype, device=device)
 
@@ -403,7 +404,7 @@ def ablate_edges_and_eval(
         ablation_node_layers[:-1], module_names[:-1], basis_pairs, edges, strict=True
     ):
         (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
-        total_possible_edges = in_C.shape[0] * out_C.shape[1]
+        total_possible_edges = in_C.shape[1] * out_C.shape[1]
         ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=total_possible_edges)
         results[ablation_node_layer] = {}
         edge_masks[ablation_node_layer] = {}
@@ -524,7 +525,7 @@ def load_bases_and_ablate(
 
     Args:
         config_path_or_obj: The path to the config file or the config object itself.
-        force: Whether to overwrite existing output files.`
+        force: Whether to overwrite existing output files.
 
     Returns:
         A dictionary mapping node layers to accuracies/losses. If the config has an out_dir, the

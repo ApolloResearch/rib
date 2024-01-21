@@ -152,7 +152,6 @@ def test_run_mnist_ablations(ablation_type, edge_ablation):
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
 
 
-@pytest.mark.xfail(reason="Need to retrain RIB after centering PR.")
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
 @pytest.mark.parametrize("edge_ablation", [False, True])
 def test_run_modular_arithmetic_rib_ablations(ablation_type, edge_ablation):
@@ -179,10 +178,10 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, edge_ablation):
     rib_results_path: rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
     schedule:
         schedule_type: exponential
-        early_stopping_threshold: 0.2
+        early_stopping_threshold: 0.3
         ablate_every_vec_cutoff: 2
         exp_base: 2.0
-        specific_points: [30, 31]
+        specific_points: [101, 100]
     dataset:
         dataset_type: modular_arithmetic
         return_set: train
@@ -206,6 +205,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, edge_ablation):
             load_bases_and_ablate(config)
         return
     accuracies = load_bases_and_ablate(config)
+    print(accuracies)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)
 
 

@@ -506,7 +506,7 @@ def load_bases_and_ablate(
     """Load basis matrices and run ablation experiments.
 
     The process is as follows:
-        1. Load pre-saved basis matrices (typcially RIB bases (Cs) or orthogonal bases (Us)).
+        1. Load pre-saved basis matrices (typcially RIB bases (Cs) or orthogonal bases (Ws)).
         2. Load the corresponding model and dataset (the dataset may be non-overlapping with
             that used to create the basis matrices).
         3. For each number of ablated nodes `n`, create a rotation matrix that has the effect of
@@ -549,15 +549,12 @@ def load_bases_and_ablate(
         ), "node_layers in the config must be a subsequence of the node layers in the RIB graph."
         assert (
             config.ablation_type == "rib"
-        ), "Can't do edge ablation with Us, as we don't have edges for U basis"
+        ), "Can't do edge ablation with Ws as we don't have edges. Run rib with svd basis isntead."
         assert len(rib_results.edges) > 0, "No edges found in the RIB results."
         assert rib_results.contains_all_edges
     else:
         assert "output" not in config.ablation_node_layers, "Cannot ablate the output node layer."
 
-    assert not (
-        config.ablation_type == "orthogonal" and rib_results.config.center
-    ), "Cannot use orthogonal ablations with a centered RIB, as Us don't include centering matrix"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = TORCH_DTYPES[config.dtype]
 

@@ -86,17 +86,17 @@ def combine_edges(*inputs: str) -> None:
             isinstance(edges, Edges) for edges in node_layer_edges
         ), f"node_layer_edges is not a tuple of Edges: {node_layer_edges}"
         assert (
-            len(set(edges.in_node_layer_name for edges in node_layer_edges)) == 1
-        ), f"in_node_layer_names are not all the same across edges: {node_layer_edges}"
+            len(set(edges.in_node_layer for edges in node_layer_edges)) == 1
+        ), f"in_node_layers are not all the same across edges: {node_layer_edges}"
 
         assert (
-            len(set(edges.out_node_layer_name for edges in node_layer_edges)) == 1
-        ), f"out_node_layer_names are not all the same across edges: {node_layer_edges}"
+            len(set(edges.out_node_layer for edges in node_layer_edges)) == 1
+        ), f"out_node_layers are not all the same across edges: {node_layer_edges}"
 
         combined_edges.append(
             Edges(
-                in_node_layer_name=node_layer_edges[0].in_node_layer_name,
-                out_node_layer_name=node_layer_edges[0].out_node_layer_name,
+                in_node_layer=node_layer_edges[0].in_node_layer,
+                out_node_layer=node_layer_edges[0].out_node_layer,
                 E_hat=torch.stack([e.E_hat for e in node_layer_edges], dim=0).sum(dim=0),
             )
         )

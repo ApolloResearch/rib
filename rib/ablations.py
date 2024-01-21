@@ -1,6 +1,5 @@
 import json
 import time
-from pathlib import Path
 from typing import Callable, Literal, Optional, Union
 
 import numpy as np
@@ -19,12 +18,13 @@ from rib.data import (
 from rib.data_accumulator import Edges
 from rib.hook_fns import edge_ablation_forward_hook_fn, rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
-from rib.interaction_algos import Eigenvectors, InteractionRotation
+from rib.interaction_algos import InteractionRotation
 from rib.linalg import calc_rotation_matrix
 from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import MLP, SequentialTransformer
 from rib.rib_builder import RibBuildResults
+from rib.settings import REPO_ROOT
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
@@ -34,8 +34,8 @@ from rib.utils import (
     set_seed,
 )
 
-BasisVecs = Union[Float[Tensor, "orig orig_trunc"], Float[Tensor, "orig orig"]]
-BasisVecsPinv = Union[Float[Tensor, "orig_trunc orig"], Float[Tensor, "orig orig"]]
+BasisVecs = Union[Float[Tensor, "orig rib"], Float[Tensor, "orig orig"]]
+BasisVecsPinv = Union[Float[Tensor, "rib orig"], Float[Tensor, "orig orig"]]
 AblationAccuracies = dict[str, dict[int, float]]
 EdgeMasks = dict[str, dict[int, Bool[Tensor, "rib_out rib_in"]]]
 
@@ -176,7 +176,7 @@ class AblationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     exp_name: str
     out_dir: Optional[RootPath] = Field(
-        Path(__file__).parent / "out",
+        REPO_ROOT / "rib_scripts/ablations/out",
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
@@ -461,46 +461,41 @@ def load_basis_matrices(
 ) -> list[tuple[BasisVecs, BasisVecsPinv]]:
     """Load the basis matrices and their pseudoinverses.
 
-    Supports both rib and orthogonal basis matrices. Converts each matrix to the specified dtype
-    and device.
+    Uses C and C_pinv for 'rib' ablations and W and W_pinv for 'orthogonal' ablations.
 
     By default asserts that all basis matrices are non-None. If none_ok is True then an identity
     matrix is returned in place of None matricies.
+
+    Args:
+        rib_results: The results of building the RIB graph.
+        ablation_node_layers: The node layers to ablate.
+        ablation_type: The type of ablation to perform ('rib' or 'orthogonal').
+        dtype: The data type to cast the basis matrices to.
+        device: The device to load the basis matrices to.
+
+    Returns:
+        - A list of basis matrices.
+        - A list of pseudoinverse basis matrices.
     """
-    if ablation_type == "rib":
-        basis_matrix_key = "interaction_rotations"
-    elif ablation_type == "orthogonal":
-        basis_matrix_key = "eigenvectors"
-    else:
-        raise ValueError(f"ablation_type must be one of ['rib', 'orthogonal']")
 
     # Get the basis vecs and their pseudoinverses using the module_names as keys
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
-    basis_infos_list = getattr(rib_results, basis_matrix_key)
-    basis_infos_dict = {info.node_layer_name: info for info in basis_infos_list}
+    basis_infos_dict = {info.node_layer: info for info in rib_results.interaction_rotations}
+
+    def get_matrix_or_identity(basis_info: InteractionRotation, attr) -> Tensor:
+        if getattr(basis_info, attr) is None:
+            assert none_ok, f"{basis_info.node_layer} has no {attr} matrix."
+            return torch.eye(basis_info.orig_dim, dtype=dtype, device=device)
+        return getattr(basis_info, attr).to(dtype=dtype, device=device)
+
     for module_name in ablation_node_layers:
         basis_info = basis_infos_dict[module_name]
         if ablation_type == "rib":
-            assert isinstance(basis_info, InteractionRotation)
-            if none_ok and basis_info.C is None:
-                assert basis_info.C_pinv is None, f"{module_name} has a C_pinv matrix."
-                basis_vecs = torch.eye(basis_info.out_dim, dtype=dtype, device=device)
-                basis_vecs_pinv = torch.eye(basis_info.out_dim, dtype=dtype, device=device)
-            else:
-                assert basis_info.C is not None, f"{module_name} has no C matrix."
-                assert basis_info.C_pinv is not None, f"{module_name} has no C_pinv matrix."
-                basis_vecs = basis_info.C.to(dtype=dtype, device=device)
-                basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
+            basis_vecs = get_matrix_or_identity(basis_info, "C")
+            basis_vecs_pinv = get_matrix_or_identity(basis_info, "C_pinv")
         elif ablation_type == "orthogonal":
-            assert isinstance(basis_info, Eigenvectors)
-            if none_ok and basis_info.U is None:
-                basis_vecs = torch.eye(basis_info.out_dim, dtype=dtype, device=device)
-                basis_vecs_pinv = torch.eye(basis_info.out_dim, dtype=dtype, device=device)
-            else:
-                assert basis_info.U is not None, f"{module_name} has no U matrix."
-                basis_vecs = basis_info.U.to(dtype=dtype, device=device)
-                # Pseudoinverse of an orthonormal matrix is its transpose
-                basis_vecs_pinv = basis_vecs.T.detach().clone()
+            basis_vecs = get_matrix_or_identity(basis_info, "W")
+            basis_vecs_pinv = get_matrix_or_identity(basis_info, "W_pinv")
         basis_matrices.append((basis_vecs, basis_vecs_pinv))
     return basis_matrices
 
@@ -600,7 +595,7 @@ def load_bases_and_ablate(
         module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
     if config.edge_ablation:
-        edges_dict = {info.in_node_layer_name: info for info in rib_results.edges}
+        edges_dict = {info.in_node_layer: info for info in rib_results.edges}
         edges = [edges_dict[layer] for layer in config.ablation_node_layers[:-1]]
         ablation_results, edge_masks = ablate_edges_and_eval(
             basis_matrices=basis_matrices,

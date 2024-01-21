@@ -10,15 +10,15 @@ from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import InteractionRotation
 
 
-def parse_c_infos(c_infos: list[InteractionRotation]) -> dict[str, InteractionRotation]:
-    """Converts the list of dicts from loading rib results into a dict of InteractionRotations."""
-    return {c_info.node_layer_name: c_info for c_info in c_infos}
+def rotation_list_to_dict(rotations: list[InteractionRotation]) -> dict[str, InteractionRotation]:
+    """Converts a list of InteractionRotation objects to a dict keyed by node_layer."""
+    return {info.node_layer: info for info in rotations}
 
 
 def get_rib_acts(
     hooked_model: HookedModel,
     data_loader: DataLoader,
-    c_infos: Iterable[InteractionRotation],
+    interaction_rotations: Iterable[InteractionRotation],
     device: str = "cuda",
     dtype: torch.dtype = torch.float32,
 ) -> dict[str, Float[torch.Tensor, "batch ... rotated"]]:
@@ -36,13 +36,13 @@ def get_rib_acts(
     hooks = [
         Hook(
             name="rotated_acts",
-            data_key=c_info.node_layer_name,
+            data_key=info.node_layer,
             fn=rotate_pre_forward_hook_fn,
-            module_name=get_module_name(c_info.node_layer_name),
-            fn_kwargs={"rotation_matrix": c_info.C.to(device=device, dtype=dtype), "mode": "cache"},
+            module_name=get_module_name(info.node_layer),
+            fn_kwargs={"rotation_matrix": info.C.to(device=device, dtype=dtype), "mode": "cache"},
         )
-        for c_info in c_infos
-        if c_info.C is not None
+        for info in interaction_rotations
+        if info.C is not None
     ]
 
     with torch.inference_mode():

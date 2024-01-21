@@ -10,7 +10,7 @@ import yaml
 
 from rib.ablations import AblationConfig, load_bases_and_ablate
 from rib.log import logger
-from rib.rib_builder import RibBuildConfig, rib_build
+from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 
 
 @pytest.mark.slow
@@ -21,8 +21,8 @@ class TestPythiaFloatingPointErrors:
         return tempfile.TemporaryDirectory()
 
     @pytest.fixture(scope="class")
-    def rib_results(self, temp_object) -> dict:
-        """Run RIB build with float32 and float64 and return the results."""
+    def rib_results(self, temp_object) -> dict[str, RibBuildResults]:
+        """Run RIB build with float32 and float64 and return the results keyed by dtype."""
         rib_config_str = """
             tlens_pretrained: pythia-14m
             tlens_model_path: null
@@ -66,23 +66,23 @@ class TestPythiaFloatingPointErrors:
                 ("Running RIB build with batch size", rib_config["batch_size"], "for", dtype)
             )
             rib_build(RibBuildConfig(**rib_config))
-            basis_matrices = torch.load(
-                f"{temp_dir}/float-precision-test-pythia-14m-{dtype}_rib_Cs.pt"
+            interaction_rotations = RibBuildResults(
+                **torch.load(f"{temp_dir}/float-precision-test-pythia-14m-{dtype}_rib_Cs.pt")
             )
-            rib_results[dtype] = basis_matrices
+            rib_results[dtype] = interaction_rotations
 
         return rib_results
 
-    def test_gram_matrices(self, rib_results: dict) -> None:
+    def test_gram_matrices(self, rib_results: dict[str, RibBuildResults]) -> None:
         """Test that all the gram matrices are similar between float32 and float64."""
-        for node_layer in rib_results["float32"]["gram_matrices"].keys():
-            float32_gram_matrix = rib_results["float32"]["gram_matrices"][node_layer]
-            float64_gram_matrix = rib_results["float64"]["gram_matrices"][node_layer]
+        for node_layer in rib_results["float32"].gram_matrices.keys():
+            float32_gram_matrix = rib_results["float32"].gram_matrices[node_layer]
+            float64_gram_matrix = rib_results["float64"].gram_matrices[node_layer]
             assert torch.allclose(
                 float32_gram_matrix.to(torch.float64), float64_gram_matrix, atol=1e-4
             ), f"Gram matrix difference {node_layer} between float32 and float64."
 
-    def test_interaction_rotations(self, rib_results: dict) -> None:
+    def test_interaction_rotations(self, rib_results: dict[str, RibBuildResults]) -> None:
         """Test that some (n_max) of the interaction rotations are identical between float32 and float64."""
         # FIXME This test is absolutely awful at the moment. We'd love to have a code that is consistent
         #       enough to run this test with tigher tolerances & all settings (GPU, batch size)
@@ -91,23 +91,19 @@ class TestPythiaFloatingPointErrors:
         if not torch.cuda.is_available():
             pytest.skip("CUDA is not available. This test does not work on CPU.")
 
-        if not rib_results["float32"]["config"]["batch_size"] > 1:
+        if not rib_results["float32"].config.batch_size > 1:
             pytest.skip("This test does not work with batch size 1.")
 
-        if rib_results["float32"]["config"]["basis_formula"] == "(1-0)*alpha":
+        if rib_results["float32"].config.basis_formula == "(1-0)*alpha":
             pytest.skip('This test does not work with the new "(1-0)*alpha" basis.')
 
-        for node_layer_index in range(len(rib_results["float32"]["interaction_rotations"])):
+        for node_layer_index in range(len(rib_results["float32"].interaction_rotations)):
             # This only tests the first column, would like to improve in the future!
             n_max = 1
-            if rib_results["float32"]["interaction_rotations"][node_layer_index]["C"] is None:
+            if rib_results["float32"].interaction_rotations[node_layer_index].C is None:
                 continue
-            float32_C = rib_results["float32"]["interaction_rotations"][node_layer_index]["C"][
-                :, :n_max
-            ]
-            float64_C = rib_results["float64"]["interaction_rotations"][node_layer_index]["C"][
-                :, :n_max
-            ]
+            float32_C = rib_results["float32"].interaction_rotations[node_layer_index].C[:, :n_max]
+            float64_C = rib_results["float64"].interaction_rotations[node_layer_index].C[:, :n_max]
             # This is a super weak test, would like to improve in the future!
             assert torch.allclose(
                 float32_C.to(torch.float64),
@@ -115,18 +111,18 @@ class TestPythiaFloatingPointErrors:
                 atol=0.5 * float64_C.max(),
             ), f"Interaction rotation {node_layer_index} difference between float32 and float64."
 
-    def test_eigenvectors(self, rib_results: dict) -> None:
+    def test_eigenvectors(self, rib_results: dict[str, RibBuildResults]) -> None:
         """Test that some (n_max) of the eigenvectors are identical between float32 and float64."""
         # This tests is pretty approximate (especially we only test the first n_max=10 columns)
         # but not absolutely awful.
-        for node_layer_index in range(len(rib_results["float32"]["eigenvectors"])):
+        for node_layer_index in range(len(rib_results["float32"].interaction_rotations)):
             n_max = 10
-            if rib_results["float32"]["eigenvectors"][node_layer_index]["U"] is None:
+            if rib_results["float32"].interaction_rotations[node_layer_index].W is None:
                 continue
-            float_32_U = rib_results["float32"]["eigenvectors"][node_layer_index]["U"][:, :n_max]
-            float_64_U = rib_results["float64"]["eigenvectors"][node_layer_index]["U"][:, :n_max]
+            float_32_W = rib_results["float32"].interaction_rotations[node_layer_index].W[:, :n_max]
+            float_64_W = rib_results["float64"].interaction_rotations[node_layer_index].W[:, :n_max]
             assert torch.allclose(
-                float_32_U.to(torch.float64), float_64_U, atol=1e-3 * float_64_U.max()
+                float_32_W.to(torch.float64), float_64_W, atol=1e-3 * float_64_W.max()
             ), f"Eigenvector difference {node_layer_index} between float32 and float64."
 
     @pytest.fixture(scope="class")
@@ -176,7 +172,7 @@ class TestPythiaFloatingPointErrors:
                 ("Running ablations with batch size", ablation_config["batch_size"], "for", dtype)
             )
             load_bases_and_ablate(AblationConfig(**ablation_config))
-            ablation_result = json.load(open(f"{temp_dir}/{exp_name}_ablation_results.json"))[
+            ablation_result = json.load(open(f"{temp_dir}/{exp_name}_node_ablation_results.json"))[
                 "results"
             ]
             ablation_results[dtype] = ablation_result
@@ -200,7 +196,12 @@ class TestPythiaFloatingPointErrors:
                     torch.tensor(float32_ablation_result),
                     torch.tensor(float64_ablation_result),
                     atol=1e-3,
-                ), f"Float difference {node_layer} {n_vecs_ablated}: {float32_ablation_result} (float32) != {float64_ablation_result} (float64), full results: {ablation_results['float32'][node_layer]} (float32) != {ablation_results['float64'][node_layer]} (float64)"
+                ), (
+                    f"Float difference {node_layer} {n_vecs_ablated}: {float32_ablation_result} "
+                    f"(float32) != {float64_ablation_result} (float64), full results: "
+                    f"{ablation_results['float32'][node_layer]} (float32) != "
+                    f"{ablation_results['float64'][node_layer]} (float64)"
+                )
 
     @pytest.mark.parametrize("dtype", ["float32", "float64"])
     def test_ablation_result_flatness(self, ablation_results: dict, dtype: str) -> None:
@@ -213,4 +214,8 @@ class TestPythiaFloatingPointErrors:
                     torch.tensor(ablation_result_128),
                     torch.tensor(ablation_result_642),
                     atol=1e-3,
-                ), f"MLP non-flat ablation curve {dtype} {node_layer}: {ablation_result_128} (128) != {ablation_result_642} (642), full results: {ablation_results[dtype][node_layer]}"
+                ), (
+                    f"MLP flatness ablation curve {dtype} {node_layer}: {ablation_result_128} "
+                    f"(128) != {ablation_result_642} (642), full results: "
+                    f"{ablation_results[dtype][node_layer]}"
+                )

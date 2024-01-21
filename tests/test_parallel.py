@@ -73,10 +73,10 @@ class TestDistributed:
         for s_edges, d_edges in zip(all_single_edges, all_double_edges):
             assert (
                 s_edges.E_hat.shape == d_edges.E_hat.shape
-            ), f"mismatching shape for {s_edges.in_node_layer_name}, {s_edges.shape}!={d_edges.shape}"
+            ), f"mismatching shape for {s_edges.in_node_layer}, {s_edges.shape}!={d_edges.shape}"
             assert torch.allclose(
                 s_edges.E_hat, d_edges.E_hat, atol=1e-9
-            ), f"on {s_edges.in_node_layer_name} mean error {(s_edges.E_hat-d_edges.E_hat).abs().mean().item()}"
+            ), f"on {s_edges.in_node_layer} mean error {(s_edges.E_hat-d_edges.E_hat).abs().mean().item()}"
 
 
 @pytest.mark.parametrize("num_chunks", [1, 3, 5, 7, 10])

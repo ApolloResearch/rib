@@ -18,7 +18,6 @@ from rib.data import (
 from rib.data_accumulator import Edges
 from rib.hook_fns import edge_ablation_forward_hook_fn, rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
-from rib.interaction_algos import InteractionRotation
 from rib.linalg import calc_rotation_matrix
 from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
@@ -180,11 +179,10 @@ class AblationConfig(BaseModel):
         description="Directory for the output files. Defaults to `./out/`. If None, no output "
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
-    ablation_type: Literal["rib", "orthogonal"]
-    edge_ablation: bool = Field(
-        False,
-        description="Whether to perform edge ablation experiments. If False, we perform node "
-        "ablation experiments.",
+    ablation_type: Literal["rib", "orthogonal", "edge"] = Field(
+        description="The type of ablation to perform. 'rib' ablates nodes from the RIB basis (C)."
+        "'orthogonal' ablates nodes from the svd/pca basis (W, or YU). Edge ablation ablates edges"
+        "connecting RIB nodes. It uses the C matrices as we don't have edges for W."
     )
     rib_results_path: RootPath
     schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
@@ -454,22 +452,21 @@ def ablate_edges_and_eval(
 def load_basis_matrices(
     rib_results: RibBuildResults,
     ablation_node_layers: list[str],
-    ablation_type: Literal["rib", "orthogonal"],
+    ablation_type: Literal["rib", "orthogonal", "edge"],
     dtype: torch.dtype,
     device: str,
-    none_ok: bool = False,
 ) -> list[tuple[BasisVecs, BasisVecsPinv]]:
     """Load the basis matrices and their pseudoinverses.
 
     Uses C and C_pinv for 'rib' ablations and W and W_pinv for 'orthogonal' ablations.
 
-    By default asserts that all basis matrices are non-None. If none_ok is True then an identity
-    matrix is returned in place of None matricies.
+    If ablation type is 'edge' will return idenity matricies in place of None matricies. Otherwise
+    assert all matricies are non-None.
 
     Args:
         rib_results: The results of building the RIB graph.
         ablation_node_layers: The node layers to ablate.
-        ablation_type: The type of ablation to perform ('rib' or 'orthogonal').
+        ablation_type: The type of ablation to perform ('rib', 'orthogonal', 'edge').
         dtype: The data type to cast the basis matrices to.
         device: The device to load the basis matrices to.
 
@@ -482,20 +479,28 @@ def load_basis_matrices(
     basis_matrices: list[tuple[BasisVecs, BasisVecsPinv]] = []
     basis_infos_dict = {info.node_layer: info for info in rib_results.interaction_rotations}
 
-    def get_matrix_or_identity(basis_info: InteractionRotation, attr) -> Tensor:
-        if getattr(basis_info, attr) is None:
-            assert none_ok, f"{basis_info.node_layer} has no {attr} matrix."
-            return torch.eye(basis_info.orig_dim, dtype=dtype, device=device)
-        return getattr(basis_info, attr).to(dtype=dtype, device=device)
-
     for module_name in ablation_node_layers:
         basis_info = basis_infos_dict[module_name]
         if ablation_type == "rib":
-            basis_vecs = get_matrix_or_identity(basis_info, "C")
-            basis_vecs_pinv = get_matrix_or_identity(basis_info, "C_pinv")
+            assert basis_info.C is not None, f"{module_name} has no C matrix."
+            assert basis_info.C_pinv is not None, f"{module_name} has no C_pinv matrix."
+            basis_vecs = basis_info.C.to(dtype=dtype, device=device)
+            basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
         elif ablation_type == "orthogonal":
-            basis_vecs = get_matrix_or_identity(basis_info, "W")
-            basis_vecs_pinv = get_matrix_or_identity(basis_info, "W_pinv")
+            assert basis_info.W is not None, f"{module_name} has no W matrix."
+            assert basis_info.W_pinv is not None, f"{module_name} has no W_pinv matrix."
+            basis_vecs = basis_info.W.to(dtype=dtype, device=device)
+            basis_vecs_pinv = basis_info.W_pinv.to(dtype=dtype, device=device)
+        else:
+            assert ablation_type == "edge"
+            if basis_info.C is None:
+                assert basis_info.C_pinv is None
+                basis_vecs = torch.eye(basis_info.orig_dim, dtype=dtype, device=device)
+                basis_vecs_pinv = torch.eye(basis_info.orig_dim, dtype=dtype, device=device)
+            else:
+                assert basis_info.C_pinv is not None
+                basis_vecs = basis_info.C.to(dtype=dtype, device=device)
+                basis_vecs_pinv = basis_info.C_pinv.to(dtype=dtype, device=device)
         basis_matrices.append((basis_vecs, basis_vecs_pinv))
     return basis_matrices
 
@@ -531,8 +536,9 @@ def load_bases_and_ablate(
 
     if config.out_dir is not None:
         config.out_dir.mkdir(parents=True, exist_ok=True)
-        edge_node = "edge" if config.edge_ablation else "node"
-        out_file = config.out_dir / f"{config.exp_name}_{edge_node}_ablation_results.json"
+        out_file = (
+            config.out_dir / f"{config.exp_name}_{config.ablation_type}_ablation_results.json"
+        )
         if not check_outfile_overwrite(out_file, force):
             raise FileExistsError("Not overwriting output file")
 
@@ -542,14 +548,11 @@ def load_bases_and_ablate(
     assert set(config.ablation_node_layers) <= set(
         rib_results.config.node_layers
     ), "The node layers in the config must be a subset of the node layers in the RIB graph."
-    if config.edge_ablation:
+    if config.ablation_type == "edge":
         # config.node_layers must be a subsequence of loaded_config.node_layers
         assert "|".join(config.ablation_node_layers) in "|".join(
             rib_results.config.node_layers
         ), "node_layers in the config must be a subsequence of the node layers in the RIB graph."
-        assert (
-            config.ablation_type == "rib"
-        ), "Can't do edge ablation with Ws as we don't have edges. Run rib with svd basis isntead."
         assert len(rib_results.edges) > 0, "No edges found in the RIB results."
         assert rib_results.contains_all_edges
     else:
@@ -564,7 +567,6 @@ def load_bases_and_ablate(
         ablation_type=config.ablation_type,
         dtype=dtype,
         device=device,
-        none_ok=config.edge_ablation,
     )
 
     model, dataset = load_model_and_dataset_from_rib_config(
@@ -591,7 +593,7 @@ def load_bases_and_ablate(
         assert isinstance(model, SequentialTransformer)
         module_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
 
-    if config.edge_ablation:
+    if config.ablation_type == "edge":
         edges_dict = {info.in_node_layer: info for info in rib_results.edges}
         edges = [edges_dict[layer] for layer in config.ablation_node_layers[:-1]]
         ablation_results, edge_masks = ablate_edges_and_eval(
@@ -629,7 +631,7 @@ def load_bases_and_ablate(
         "time_taken": time_taken,
         "no_ablation_result": no_ablation_result,
     }
-    if config.edge_ablation:
+    if config.ablation_type == "edge":
         results["edge_masks"] = edge_masks
 
     if config.out_dir is not None:

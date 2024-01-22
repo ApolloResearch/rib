@@ -62,9 +62,9 @@ def check_accuracies(
             accuracies are roughly sorted.
     """
     # Check that there are accuracies returned
-    expected_layers = (
-        config.ablation_node_layers[:-1] if config.edge_ablation else config.ablation_node_layers
-    )
+    expected_layers = config.ablation_node_layers
+    if config.ablation_type == "edge":
+        expected_layers = expected_layers[:-1]
     assert list(accuracies.keys()) == expected_layers, (
         f"Expected accuracies for {expected_layers}, but got " f"{list(accuracies.keys())}"
     )
@@ -98,9 +98,8 @@ def check_accuracies(
         assert _is_roughly_sorted(accuracy_vals, k=sort_tolerance, reverse=True)
 
 
-@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
-@pytest.mark.parametrize("edge_ablation", [False, True])
-def test_run_mnist_ablations(ablation_type, edge_ablation):
+@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
+def test_run_mnist_ablations(ablation_type):
     """Test various ablation result properties for ablations on MNIST.
 
     The ablation rib_scripts load model from the config of the RIB graph. To run on ci
@@ -140,21 +139,15 @@ def test_run_mnist_ablations(ablation_type, edge_ablation):
     seed: 0
     out_dir: null
     eval_type: accuracy
-    edge_ablation: {edge_ablation}
     """
     config_dict = yaml.safe_load(config_str)
     config = AblationConfig(**config_dict)
-    if edge_ablation and ablation_type == "orthogonal":
-        with pytest.raises(AssertionError):
-            load_bases_and_ablate(config)
-        return
     accuracies = load_bases_and_ablate(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
 
 
-@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
-@pytest.mark.parametrize("edge_ablation", [False, True])
-def test_run_modular_arithmetic_rib_ablations(ablation_type, edge_ablation):
+@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
+def test_run_modular_arithmetic_rib_ablations(ablation_type):
     """Test various ablation result properties on modular arithmetic.
 
     The ablation rib_scripts load model from the config of the RIB graph. To run on ci
@@ -196,16 +189,10 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, edge_ablation):
     seed: 0
     eval_type: accuracy
     out_dir: null
-    edge_ablation: {edge_ablation}
     """
     config_dict = yaml.safe_load(config_str)
     config = AblationConfig(**config_dict)
-    if edge_ablation and ablation_type == "orthogonal":
-        with pytest.raises(AssertionError):
-            load_bases_and_ablate(config)
-        return
     accuracies = load_bases_and_ablate(config)
-    print(accuracies)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)
 
 

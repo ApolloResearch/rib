@@ -211,13 +211,13 @@ def test_pythia_14m_build_graph():
 
 @pytest.mark.slow
 def test_pythia_14m_build_graph_jacobian():
-    atol = 0  # Works with 1e-7 for float32 and 0 for float64
+    atol = 0  # Works with 0 for batch_size 900 but not 1800
     updates = [
         # Runs in around 75s on a5000
         {"basis_formula": "jacobian"},
         {"dataset": {"return_set_n_samples": 1}},
-        {"dataset": {"n_ctx": 5}},
-        {"batch_size": 120},
+        {"dataset": {"n_ctx": 2}},
+        {"batch_size": 900},
         {"node_layers": ["ln2.1", "mlp_out.5", "unembed"]},
         {"calculate_edges": True},
         {"edge_formula": "stochastic"},

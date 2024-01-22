@@ -73,6 +73,7 @@ class InteractionRotation(BaseModel):
 def build_sorted_lambda_matrices(
     Lambda_abs: Float[Tensor, "orig_trunc"],
     truncation_threshold: float,
+    preserve_0_position: bool = False,
 ) -> tuple[Float[Tensor, "orig_trunc rib"], Float[Tensor, "rib orig_trunc"],]:
     """Build the sqrt sorted Lambda matrix and its pseudoinverse.
 
@@ -87,7 +88,14 @@ def build_sorted_lambda_matrices(
 
     """
     # Get the sort indices in descending order
-    idxs: Int[Tensor, "orig_trunc"] = torch.argsort(Lambda_abs, descending=True)
+    idxs: Int[Tensor, "orig_trunc"]
+    if preserve_0_position:
+        zero = torch.tensor([0], device=Lambda_abs.device)
+        other_idxs = torch.argsort(Lambda_abs[1:], descending=True) + 1
+        idxs = torch.concatenate([zero, other_idxs])
+        assert Lambda_abs[0] > truncation_threshold, "Lambda[0] is too small."
+    else:
+        idxs = torch.argsort(Lambda_abs, descending=True)
 
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
@@ -353,7 +361,9 @@ def calculate_interaction_rotations(
         Lambda: Float[Tensor, "orig_trunc"] = (V.T @ R_pinv @ Lambda_dash @ R @ V).diag().abs()
         # Build a matrix for scaling by sqrt(Lambda).
         # This function prunes directions with small Lambdas. This is our second trunctaion.
-        L, L_inv = build_sorted_lambda_matrices(Lambda, truncation_threshold)
+        L, L_inv = build_sorted_lambda_matrices(
+            Lambda, truncation_threshold, preserve_0_position=center
+        )
 
         ### FINAL ROTATION MATRIX (C)
         C: Float[Tensor, "orig rib"] = (R @ V @ L).detach().cpu()

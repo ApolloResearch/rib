@@ -402,7 +402,7 @@ def ablate_edges_and_eval(
         ablation_node_layers[:-1], module_names[:-1], basis_pairs, edges, strict=True
     ):
         (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
-        total_possible_edges = in_C.shape[1] * out_C.shape[1]
+        total_possible_edges = in_C.shape[0] * out_C.shape[0]
         ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=total_possible_edges)
         results[ablation_node_layer] = {}
         edge_masks[ablation_node_layer] = {}

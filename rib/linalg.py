@@ -434,6 +434,127 @@ def calc_edge_squared(
     edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1) if has_pos else 0)
 
 
+def calc_basis_jacobian(
+    module: torch.nn.Module,
+    inputs: Union[
+        tuple[Float[Tensor, "batch in_hidden"]],
+        tuple[Float[Tensor, "batch pos _"], ...],
+    ],
+    C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
+    n_intervals: int,
+) -> Float[Tensor, "batch out_hidden_trunc out_pos in_pos in_hidden"]:
+    # Ensure that the inputs have requires_grad=True
+    for x in inputs:
+        x.requires_grad_(True)
+
+    alphas, interval_size = _calc_integration_intervals(n_intervals)
+
+    has_pos = inputs[0].ndim == 3
+    batch_size = inputs[0].shape[0]
+    in_pos_size = inputs[0].shape[1] if has_pos else None
+    in_hidden_size = sum(x.shape[-1] for x in inputs)
+    # Compute out sizes
+    with torch.inference_mode():
+        f_out_dummy = module(*inputs)
+        f_out_dummy = (f_out_dummy,) if isinstance(f_out_dummy, torch.Tensor) else f_out_dummy
+
+    out_hidden_size = sum(x.shape[-1] for x in f_out_dummy)
+    out_hat_hidden_size = out_hidden_size if C_out is None else C_out.shape[1]
+    out_pos_size = f_out_dummy[0].shape[1] if has_pos else None
+    if C_out is not None:
+        assert out_hidden_size == C_out.shape[0], "C_out has wrong shape"
+    assert batch_size == f_out_dummy[0].shape[0], "batch size mismatch"
+
+    if has_pos:
+        assert in_pos_size is not None  # needed for mypy
+        # in_grads.shape: batch, i (out_hidden), t (out_pos), s (in_pos), j (in_hidden)
+        in_grads = torch.zeros(
+            batch_size,
+            out_hat_hidden_size,
+            out_pos_size,
+            in_pos_size,
+            in_hidden_size,
+            dtype=inputs[0].dtype,
+            device=inputs[0].device,
+        )
+
+        for alpha_index, alpha in enumerate(alphas):
+            # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
+            # point estimate at alpha=0.5) and multiply by the interval size.
+            if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+                trapezoidal_scaler = 0.5 * interval_size
+            else:
+                trapezoidal_scaler = interval_size
+            # Compute f^{l+1}(f^l(alpha x))
+            f_in_alpha = tuple(alpha * x for x in inputs)
+            outputs_alpha = module(*f_in_alpha)
+            f_out_alpha = (
+                outputs_alpha
+                if isinstance(outputs_alpha, torch.Tensor)
+                else torch.cat(outputs_alpha, dim=-1)
+            )
+            f_out_hat_alpha = f_out_alpha @ C_out if C_out is not None else f_out_alpha
+
+            # Shapes of inputs and outputs, that lead to in_grads.shape = batch, i, t, s, j/jprime
+            # f_out_hat_alpha.shape: batch t i
+            # f_in_alpha: batch, s, j
+            for i in range(out_hat_hidden_size):
+                for t in range(out_pos_size):
+                    # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
+                    # times (for each i and t, in a for loop) aka we're doing a jacobian.
+                    # Sum over batch is a trick to get the grad for every batch index vectorized.
+                    alpha_in_grads = torch.cat(
+                        torch.autograd.grad(
+                            f_out_hat_alpha[:, t, i].sum(dim=0), f_in_alpha, retain_graph=True
+                        ),
+                        dim=-1,
+                    )
+                    in_grads[:, i, t, :, :] += alpha_in_grads * trapezoidal_scaler
+                    # Contraction over batch, i, t, s happens after the integral, but we cannot
+                    # contract earlier because we have to finish the integral sum (+=) first.
+    else:
+        # in_grads.shape: batch, i (out_hidden), j (in_hidden)
+        in_grads = torch.zeros(
+            batch_size,
+            out_hat_hidden_size,
+            in_hidden_size,
+            dtype=inputs[0].dtype,
+            device=inputs[0].device,
+        )
+
+        for alpha_index, alpha in enumerate(alphas):
+            # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
+            # point estimate at alpha=0.5) and multiply by the interval size.
+            if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
+                trapezoidal_scaler = 0.5 * interval_size
+            else:
+                trapezoidal_scaler = interval_size
+            # Compute f^{l+1}(f^l(alpha x))
+            f_in_alpha = tuple(alpha * x for x in inputs)
+            outputs_alpha = module(*f_in_alpha)
+            f_out_alpha = (
+                outputs_alpha
+                if isinstance(outputs_alpha, torch.Tensor)
+                else torch.cat(outputs_alpha, dim=-1)
+            )
+            f_out_hat_alpha = f_out_alpha @ C_out if C_out is not None else f_out_alpha
+
+            # Calculate the grads, numerator index i
+            for i in range(out_hat_hidden_size):
+                # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
+                # times (for each i in a for loop) aka we're doing a jacobian.
+                # Sum over batch is a trick to get the grad for every batch index vectorized.
+                alpha_in_grads = torch.cat(
+                    torch.autograd.grad(
+                        f_out_hat_alpha[:, i].sum(dim=0), f_in_alpha, retain_graph=True
+                    ),
+                    dim=-1,
+                )
+                in_grads[:, i] += alpha_in_grads * trapezoidal_scaler
+
+    return in_grads
+
+
 def calc_edge_stochastic(
     module_hat: Callable[[Float[Tensor, "... rib_in"], list[int]], Float[Tensor, "... rib_out"]],
     f_in_hat: Float[Tensor, "... pos rib_out"],

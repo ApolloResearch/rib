@@ -73,6 +73,7 @@ class InteractionRotation(BaseModel):
 def build_sorted_lambda_matrices(
     Lambda_abs: Float[Tensor, "orig_trunc"],
     truncation_threshold: float,
+    ignore_first_index: bool = False,
 ) -> tuple[Float[Tensor, "orig_trunc rib"], Float[Tensor, "rib orig_trunc"],]:
     """Build the sqrt sorted Lambda matrix and its pseudoinverse.
 
@@ -87,7 +88,12 @@ def build_sorted_lambda_matrices(
 
     """
     # Get the sort indices in descending order
-    idxs: Int[Tensor, "orig_trunc"] = torch.argsort(Lambda_abs, descending=True)
+    if not ignore_first_index:
+        idxs: Int[Tensor, "orig_trunc"] = torch.argsort(Lambda_abs, descending=True)
+    else:
+        idxs_excl_first = torch.argsort(Lambda_abs[1:], descending=True) + 1
+        zero = torch.tensor([0], device=idxs_excl_first.device)
+        idxs = torch.cat([zero, idxs_excl_first])
 
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
@@ -126,7 +132,9 @@ def calculate_interaction_rotations(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
     rotate_final_node_layer: bool = True,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = "(1-0)*alpha",
+    basis_formula: Literal[
+        "jacobian", "(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"
+    ] = "(1-0)*alpha",
     center: bool = False,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
 ) -> list[InteractionRotation]:
@@ -340,20 +348,31 @@ def calculate_interaction_rotations(
         if center:
             # We don't want to rotate the constant direction (in the 0th position).
             # We thus eigendecompose a submatrix ignoring the first row and col
-            sub_V = eigendecompose(M[1:, 1:])[1]
+            sub_eigenvalues, sub_V = eigendecompose(M[1:, 1:])
             V = torch.zeros_like(M)
             V[0, 0] = 1
             V[1:, 1:] = sub_V
+            # The eigenvalues are used in the jacobian basis to set the correct Lambdas.
+            # For the constant direction set Lambda to M[0,0], though it should not affect
+            # the result for all edges except those connecting to the const direction.
+            eigenvalues = torch.cat([M[0, 0].unsqueeze(0), sub_eigenvalues])
         else:
-            V = eigendecompose(M)[1]
+            eigenvalues, V = eigendecompose(M)
+
         V = V.to(dtype)
 
         ### SCALING MATRIX (Lambda)
-        # Transform lambda_dash (computed in the neuron basis) into our new basis with R and V
-        Lambda: Float[Tensor, "orig_trunc"] = (V.T @ R_pinv @ Lambda_dash @ R @ V).diag().abs()
+        if basis_formula == "jacobian":
+            # Lambdas for jacobian basis are the eigenvalues of the jacobian-basis-M
+            Lambda: Float[Tensor, "orig_trunc"] = eigenvalues.to(dtype)
+        else:
+            # Transform lambda_dash (computed in the neuron basis) into our new basis with R and V
+            Lambda = (V.T @ R_pinv @ Lambda_dash @ R @ V).diag().abs()
         # Build a matrix for scaling by sqrt(Lambda).
         # This function prunes directions with small Lambdas. This is our second trunctaion.
-        L, L_inv = build_sorted_lambda_matrices(Lambda, truncation_threshold)
+        L, L_inv = build_sorted_lambda_matrices(
+            Lambda, truncation_threshold, ignore_first_index=center
+        )
 
         ### FINAL ROTATION MATRIX (C)
         C: Float[Tensor, "orig rib"] = (R @ V @ L).detach().cpu()

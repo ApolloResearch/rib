@@ -176,6 +176,7 @@ def plot_rib_graph(
     nodes_per_layer: Union[int, list[int]],
     out_file: Path,
     node_labels: Optional[list[list[str]]] = None,
+    hide_const_edges: bool = False,
 ) -> None:
     """Plot the RIB graph for the given edges.
 
@@ -196,6 +197,17 @@ def plot_rib_graph(
     max_layer_height = max(nodes_per_layer)
 
     edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
+
+    if hide_const_edges:
+        for layer_index in range(len(edges)):
+            const_node_index = 0
+            # Set edges *outgoing* from this node to zero (edges.shape ~ l+1, l)
+            edges[layer_index][:, const_node_index] = 0
+            # Set edges *incoming* to this node to zero (edges.shape ~ l+1, l)
+            if layer_index > 0:
+                edges[layer_index - 1][const_node_index, :] = 0
+            # Normalize edges again as done in _prepare_edges_for_plotting
+            edges[layer_index] /= torch.sum(torch.abs(edges[layer_index]))
 
     # Create the undirected graph
     graph = nx.Graph()

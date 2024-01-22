@@ -27,6 +27,7 @@ def main(
     labels_file: Optional[str] = None,
     out_file: Optional[Union[str, Path]] = None,
     force: bool = False,
+    hide_const_edges: bool = False,
 ) -> None:
     """Plot an RIB graph given a results file contain the graph edges."""
     results = RibBuildResults(**torch.load(results_file))
@@ -63,6 +64,7 @@ def main(
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,
         node_labels=node_labels,
+        hide_const_edges=hide_const_edges,
     )
 
     logger.info(f"Saved plot to {out_file}")

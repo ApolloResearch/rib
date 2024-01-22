@@ -12,11 +12,13 @@ Otherwise, the hook function operates like a regular pytorch hook function.
 
 from typing import Any, Callable, Literal, Optional, Union
 
+import einops
 import torch
 from jaxtyping import Float
 from torch import Tensor
 
 from rib.linalg import (
+    calc_basis_jacobian,
     calc_edge_functional,
     calc_edge_squared,
     calc_edge_stochastic,
@@ -344,7 +346,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
-    basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
+    basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -376,41 +378,74 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module._forward_pre_hooks.popitem()
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
-    in_grads = integrated_gradient_trapezoidal_norm(
-        module=module,
-        inputs=inputs,
-        C_out=C_out,
-        n_intervals=n_intervals,
-        basis_formula=basis_formula,
-    )
-    in_dtype = in_grads.dtype
-
-    has_pos = inputs[0].dim() == 3
-
-    einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
-    normalization_factor = in_grads.shape[1] * dataset_size if has_pos else dataset_size
-
-    with torch.inference_mode():
-        M_dash = torch.einsum(
-            einsum_pattern,
-            in_grads.to(M_dtype) / normalization_factor,
-            in_grads.to(M_dtype),
+    if basis_formula == "(1-alpha)^2" or basis_formula == "(1-0)*alpha":
+        in_grads = integrated_gradient_trapezoidal_norm(
+            module=module,
+            inputs=inputs,
+            C_out=C_out,
+            n_intervals=n_intervals,
+            basis_formula=basis_formula,
         )
-        # Concatenate the inputs over the final dimension
-        in_acts = torch.cat(inputs, dim=-1)
-        Lambda_dash = torch.einsum(
-            einsum_pattern,
-            in_grads.to(Lambda_einsum_dtype) / normalization_factor,
-            in_acts.to(Lambda_einsum_dtype),
+        in_dtype = in_grads.dtype
+
+        has_pos = inputs[0].dim() == 3
+
+        einsum_pattern = "bpj,bpJ->jJ" if has_pos else "bj,bJ->jJ"
+        normalization_factor = in_grads.shape[1] * dataset_size if has_pos else dataset_size
+
+        with torch.inference_mode():
+            M_dash = torch.einsum(
+                einsum_pattern,
+                in_grads.to(M_dtype) / normalization_factor,
+                in_grads.to(M_dtype),
+            )
+            # Concatenate the inputs over the final dimension
+            in_acts = torch.cat(inputs, dim=-1)
+            Lambda_dash = torch.einsum(
+                einsum_pattern,
+                in_grads.to(Lambda_einsum_dtype) / normalization_factor,
+                in_acts.to(Lambda_einsum_dtype),
+            )
+            Lambda_dash = Lambda_dash.to(in_dtype)
+
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
+
+            assert (
+                Lambda_dash.std() > 0
+            ), "Lambda_dash cannot be all zeros otherwise everything will be truncated"
+
+    elif basis_formula == "jacobian":
+        # in_grads.shape: batch, i (out_hidden), t (out_pos), s (in_pos), j/jprime (in_hidden)
+        in_grads = calc_basis_jacobian(
+            module=module,
+            inputs=inputs,
+            C_out=C_out,
+            n_intervals=n_intervals,
         )
-        Lambda_dash = Lambda_dash.to(in_dtype)
+        has_pos = inputs[0].dim() == 3
+        einsum_pattern = (
+            "batch i t s j, batch i t s jprime -> j jprime"
+            if has_pos
+            else "batch i j, batch i jprime -> j jprime"
+        )
+        pos_size = in_grads.shape[2] if has_pos else 1
+        normalization_factor = pos_size * dataset_size
+        with torch.inference_mode():
+            # M_dash.shape: j jprime
+            M_dash = einops.einsum(
+                in_grads.to(M_dtype) / normalization_factor, in_grads.to(M_dtype), einsum_pattern
+            )
+            # In the jacobian basis, Lambda is not computed here but from the M eigenvalues later.
+            # Set a placeholder to maintain the same function signature.
+            Lambda_dash = torch.tensor(torch.nan)
 
-        _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
-        _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
-
-    assert (
-        Lambda_dash.std() > 0
-    ), "Lambda_dash cannot be all zeros otherwise everything will be truncated"
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
+            _add_to_hooked_matrix(hooked_data, hook_name, data_key[1], Lambda_dash)
+    else:
+        raise ValueError(
+            f"basis_formula must be one of '(1-alpha)^2', '(1-0)*alpha', or 'jacobian', got {basis_formula}"
+        )
 
 
 def interaction_edge_pre_forward_hook_fn(

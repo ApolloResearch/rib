@@ -1,4 +1,4 @@
-exp_name: modular_arithmetic
+exp_name: modular_arithmetic-stochastic_500
 seed: 0
 tlens_pretrained: null
 tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
@@ -13,10 +13,14 @@ node_layers:
   - unembed
   - output
 rotate_final_node_layer: false
-batch_size: 256
+batch_size: 99999
 truncation_threshold: 1e-15
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
-n_intervals: 50
+n_intervals: 5
 dtype: float64
 calculate_edges: true
 eval_type: accuracy
+basis_formula: jacobian
+edge_formula: squared
+center: true
+n_stochastic_sources_basis: 500

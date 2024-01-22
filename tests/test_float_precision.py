@@ -172,7 +172,7 @@ class TestPythiaFloatingPointErrors:
                 ("Running ablations with batch size", ablation_config["batch_size"], "for", dtype)
             )
             load_bases_and_ablate(AblationConfig(**ablation_config))
-            ablation_result = json.load(open(f"{temp_dir}/{exp_name}_node_ablation_results.json"))[
+            ablation_result = json.load(open(f"{temp_dir}/{exp_name}_rib_ablation_results.json"))[
                 "results"
             ]
             ablation_results[dtype] = ablation_result

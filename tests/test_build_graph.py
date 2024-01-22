@@ -31,6 +31,7 @@ from rib.utils import replace_pydantic_model
 from tests.utils import (
     assert_is_close,
     assert_is_zeros,
+    get_cifar_config,
     get_mnist_config,
     get_modular_arithmetic_config,
     get_modular_mlp_config,
@@ -459,6 +460,22 @@ def test_centered_rib_mnist(basis_formula):
     """Test that centred rib works for MNIST."""
     config = get_mnist_config(
         {"basis_formula": basis_formula, "edge_formula": "functional", "center": True}
+    )
+    results = rib_build(config)
+    centered_rib_test(results, atol=1e-6)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
+def test_centered_rib_cifar(basis_formula):
+    """Test that centred rib works for MNIST."""
+    config = get_cifar_config(
+        {
+            "basis_formula": basis_formula,
+            "edge_formula": "functional",
+            "center": True,
+            "truncation_threshold": 1e-10,
+        }
     )
     results = rib_build(config)
     centered_rib_test(results, atol=1e-6)

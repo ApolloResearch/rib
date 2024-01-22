@@ -95,6 +95,33 @@ def get_mnist_config(*updates: dict) -> RibBuildConfig:
     return RibBuildConfig(**config_dict)
 
 
+def get_cifar_config(*updates: dict) -> RibBuildConfig:
+    config_str = f"""
+    exp_name: test
+    mlp_path: "rib_scripts/train_mlp/sample_checkpoints/cifar-60-60-from-2023-12-18/model_epoch_12.pt"
+    batch_size: 256
+    seed: 0
+    truncation_threshold: 1e-15  # we've been using 1e-6 previously but this increases needed atol
+    rotate_final_node_layer: false
+    n_intervals: 0
+    dtype: float64
+    node_layers:
+        - layers.0
+        - layers.1
+        - layers.2
+        - output
+    dataset:
+        dataset_type: torchvision
+        name: CIFAR10
+        return_set_frac: 0.01  # 3 batches (with batch_size=256)
+    out_dir: null
+    basis_formula: (1-0)*alpha
+    edge_formula: squared
+    """
+    config_dict = deep_update(yaml.safe_load(config_str), *updates)
+    return RibBuildConfig(**config_dict)
+
+
 def get_modular_mlp_config(*updates: dict) -> RibBuildConfig:
     config_str = f"""
     exp_name: test

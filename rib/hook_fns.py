@@ -258,6 +258,81 @@ def rotate_pre_forward_hook_fn(
         return adjusted_inputs
 
 
+def edge_ablation_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: InputActType,
+    output: OutputActType,
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    edge_mask: Float[Tensor, "out in"],
+    in_C: Float[Tensor, "orig rib"],
+    in_C_inv: Float[Tensor, "rib orig"],
+    out_C: Float[Tensor, "orig rib"],
+    out_C_inv: Float[Tensor, "rib orig"],
+):
+    """
+    Intervenes on the forward pass of the model by zero-ablating some edges.
+
+    In particular, calculates the output activations in the RIB basis. The activation in each output
+    RIB direction will be computed separately by ablating some set of RIB directions in the input.
+
+    Args:
+        module: Module that the hook is attached to.
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one input.
+        output: Output of the module. Handles modules with one or two outputs of varying d_hiddens
+            and positional indices. If no positional indices, assumes one output.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of 2nd-level keys to store in `hooked_data`.
+        edge_mask: Mask of edges to ablate. Has shape (out_hidden, in_hidden).
+        in_C: The C matrix for the pre-edge layer.
+        in_C_inv: The inverse of the C matrix for the pre-edge layer.
+        out_C: The C matrix for the post-edge layer.
+        out_C_inv: The inverse of the C matrix for the post-edge layer.
+    """
+    # Remove this forward hook from the module to avoid recursion.
+    module._forward_hooks.popitem()
+    assert not module._forward_hooks, "Module has multiple forward hooks"
+
+    # prep activations and matricies
+    in_acts = torch.cat([x for x in inputs], dim=-1)
+    orig_out_acts = torch.cat([x for x in _to_tuple(output)], dim=-1)
+
+    in_shape = [part.shape[-1] for part in inputs]
+    out_shape = [part.shape[-1] for part in _to_tuple(output)]
+
+    in_rib_acts: Float[Tensor, "... rib"] = in_acts @ in_C
+    orig_out_rib_acts = orig_out_acts @ out_C
+
+    # We set all output RIB activations to zero and compute them one set at a time.
+    new_out_rib_acts: Float[Tensor, "... rib"] = torch.zeros_like(orig_out_rib_acts)
+    # In particular we can compute all output directions that share the same unablated input nodes.
+    # Below we iterate over sets of input nodes (`in_mask`) and the output nodes that share this set
+    # (`out_mask`). Worst case, we need to compute run this for every output node.
+    unique_in_masks, out_node_to_in_mask_map = edge_mask.unique(dim=0, return_inverse=True)
+    for i, in_mask in enumerate(unique_in_masks):
+        # find output nodes that match in_mask
+        out_mask = out_node_to_in_mask_map == i
+        # project out some rib dirs in input
+        ablated_in_rib_acts = torch.where(in_mask, in_rib_acts, 0.0)
+        ablated_in_acts = ablated_in_rib_acts @ in_C_inv
+        # pass through the hooked module
+        raw_out = module(*ablated_in_acts.split(in_shape, dim=-1))
+        ablated_out_acts = torch.cat(_to_tuple(raw_out), dim=-1)
+        # rotate into rib and get the right component
+        ablated_out_rib_acts_in_dir = ablated_out_acts @ out_C[:, out_mask]
+        new_out_rib_acts[..., out_mask] = ablated_out_rib_acts_in_dir
+
+    # rotate output RIB acts back to neuron basis
+    new_out_acts: Float[Tensor, "... orig"] = new_out_rib_acts @ out_C_inv
+    if isinstance(output, tuple):
+        return new_out_acts.split(out_shape, dim=-1)
+    else:
+        return new_out_acts
+
+
 def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: InputActType,

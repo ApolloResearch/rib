@@ -13,7 +13,12 @@ import pytest
 import torch
 import yaml
 
-from rib.ablations import AblationAccuracies, AblationConfig, load_bases_and_ablate
+from rib.ablations import (
+    AblationAccuracies,
+    AblationConfig,
+    _get_edge_mask,
+    load_bases_and_ablate,
+)
 
 
 def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool = False) -> bool:
@@ -57,11 +62,13 @@ def check_accuracies(
             accuracies are roughly sorted.
     """
     # Check that there are accuracies returned
-    assert list(accuracies.keys()) == config.ablation_node_layers, (
-        f"Expected accuracies for {config.ablation_node_layers}, but got "
-        f"{list(accuracies.keys())}"
+    expected_layers = config.ablation_node_layers
+    if config.ablation_type == "edge":
+        expected_layers = expected_layers[:-1]
+    assert list(accuracies.keys()) == expected_layers, (
+        f"Expected accuracies for {expected_layers}, but got " f"{list(accuracies.keys())}"
     )
-    for layer_key in config.ablation_node_layers:
+    for layer_key in expected_layers:
         vecs_remaining = list(accuracies[layer_key].keys())
         accuracy_vals = list(accuracies[layer_key].values())
 
@@ -91,7 +98,7 @@ def check_accuracies(
         assert _is_roughly_sorted(accuracy_vals, k=sort_tolerance, reverse=True)
 
 
-@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
+@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
 def test_run_mnist_ablations(ablation_type):
     """Test various ablation result properties for ablations on MNIST.
 
@@ -139,7 +146,7 @@ def test_run_mnist_ablations(ablation_type):
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
 
 
-@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib"])
+@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
 def test_run_modular_arithmetic_rib_ablations(ablation_type):
     """Test various ablation result properties on modular arithmetic.
 
@@ -164,16 +171,18 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     rib_results_path: rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
     schedule:
         schedule_type: exponential
-        early_stopping_threshold: 0.2
+        early_stopping_threshold: 0.3
         ablate_every_vec_cutoff: 2
         exp_base: 2.0
-        specific_points: [30, 31]
+        specific_points: [101, 100]
     dataset:
         dataset_type: modular_arithmetic
-        return_set: test
+        return_set: train
         return_set_n_samples: 1000
     ablation_node_layers:
         - ln1.0
+        - ln2.0
+        - mlp_out.0
         - unembed
     batch_size: 1000  # single batch
     dtype: float32
@@ -185,3 +194,27 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type):
     config = AblationConfig(**config_dict)
     accuracies = load_bases_and_ablate(config)
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)
+
+
+class TestEdgeMask:
+    def test_all_edges_kept(self):
+        edge_weights = torch.rand(5, 5)
+        assert _get_edge_mask(edge_weights, 26, False).all()
+        assert _get_edge_mask(edge_weights, 20, True).all()
+
+    def test_no_edges_kept(self):
+        edge_weights = torch.rand(5, 5)
+        assert not _get_edge_mask(edge_weights, 0, False).any()
+
+    def test_large_edges_kept(self):
+        edge_weights = torch.rand(5, 5)
+        edge_weights[range(5), range(5)] += 1.0
+        mask = _get_edge_mask(edge_weights, 5, False)
+        assert mask.diag().all()
+        assert mask.sum() == 5
+
+        mask_keep_const = _get_edge_mask(edge_weights, 4, True)
+        assert mask_keep_const.diag().all()
+        assert mask_keep_const[0, :].all()
+        assert mask_keep_const[:, 0].all()
+        assert mask_keep_const[1:, 1:].sum() == 4

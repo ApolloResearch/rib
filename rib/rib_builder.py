@@ -176,6 +176,10 @@ class RibBuildConfig(BaseModel):
         "functional",
         description="The attribution method to use to calculate the edges.",
     )
+    n_stochastic_sources_basis: Optional[int] = Field(
+        None,
+        description="The number of stochastic sources to use when calculating stochastic Cs.",
+    )
     n_stochastic_sources: Optional[int] = Field(
         None,
         description="The number of stochastic sources to use when calculating stochastic edges.",
@@ -470,6 +474,7 @@ def rib_build(
             basis_formula=config.basis_formula,
             center=config.center,
             means=means,
+            n_stochastic_sources=config.n_stochastic_sources_basis,
         )
         # InteractionRotation objects used to calculate edges
         edge_interaction_rotations = interaction_rotations

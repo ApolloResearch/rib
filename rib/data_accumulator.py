@@ -255,6 +255,7 @@ def collect_M_dash_and_Lambda_dash(
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
+    n_stochastic_sources: Optional[int] = None,
 ) -> tuple[Float[Tensor, "orig_in orig_in"], Float[Tensor, "orig_in orig_in"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -300,6 +301,7 @@ def collect_M_dash_and_Lambda_dash(
             "M_dtype": M_dtype,
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
             "basis_formula": basis_formula,
+            "n_stochastic_sources": n_stochastic_sources,
         },
     )
 

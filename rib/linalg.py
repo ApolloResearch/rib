@@ -478,7 +478,9 @@ def calc_basis_jacobian(
             device=inputs[0].device,
         )
 
-        for alpha_index, alpha in enumerate(alphas):
+        for alpha_index, alpha in tqdm(
+            enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
+        ):
             # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
             # point estimate at alpha=0.5) and multiply by the interval size.
             if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
@@ -498,7 +500,12 @@ def calc_basis_jacobian(
             # Shapes of inputs and outputs, that lead to in_grads.shape = batch, i, t, s, j/jprime
             # f_out_hat_alpha.shape: batch t i
             # f_in_alpha: batch, s, j
-            for i in range(out_hat_hidden_size):
+            for i in tqdm(
+                range(out_hat_hidden_size),
+                total=out_hat_hidden_size,
+                desc="Iteration over output dims",
+                leave=False,
+            ):
                 for t in range(out_pos_size):
                     # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
                     # times (for each i and t, in a for loop) aka we're doing a jacobian.

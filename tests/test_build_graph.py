@@ -56,7 +56,7 @@ def graph_build_test(config: RibBuildConfig, atol: float):
     for i, module_name in enumerate(comparison_layers):
         # Get the module names from the grams
         act_size = (Cs[i].C.T @ grams[module_name] @ Cs[i].C).diag()
-        if edges:
+        if config.calculate_edges:
             if config.edge_formula == "squared":
                 assert (edges[i].E_hat >= 0).all(), f"edges not >= 0 for {module_name}"
             assert (edges[i].E_hat != 0).any(), f"edges all zero for {module_name}"
@@ -75,7 +75,11 @@ def graph_build_test(config: RibBuildConfig, atol: float):
                     atol=atol,
                 )
 
-        if config.basis_formula not in ["svd", "neuron"]:  # We don't have Lambdas for these
+        if config.basis_formula not in [
+            "svd",
+            "neuron",
+            "jacobian",
+        ]:  # We don't have Lambdas for these / Lambdas for jacobian basis don't fulfill this
             # Check that the Lambdas are also the same as the act_size and edge_size
             # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
             # `rib.interaction_algos.build_sort_lambda_matrix)
@@ -201,6 +205,25 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
 def test_pythia_14m_build_graph():
     atol = 0  # Works with 1e-7 for float32 and 0 for float64
     config = get_pythia_config()
+    results = graph_build_test(config=config, atol=atol)
+    get_rib_acts_test(results, atol=0)
+
+
+@pytest.mark.slow
+def test_pythia_14m_build_graph_jacobian():
+    atol = 0  # Works with 1e-7 for float32 and 0 for float64
+    updates = [
+        # Runs in around 75s on a5000
+        {"basis_formula": "jacobian"},
+        {"dataset": {"return_set_n_samples": 1}},
+        {"dataset": {"n_ctx": 5}},
+        {"batch_size": 120},
+        {"node_layers": ["ln2.1", "mlp_out.5", "unembed"]},
+        {"calculate_edges": True},
+        {"edge_formula": "stochastic"},
+        {"n_stochastic_sources": 1},
+    ]
+    config = get_pythia_config(*updates)
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=0)
 

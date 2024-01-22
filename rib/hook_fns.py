@@ -347,6 +347,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
+    n_stochastic_sources: Optional[int] = None,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -371,6 +372,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             latter is a new (November) version that should be used from now on. The latter makes
             sense especially in light of the new attribution (edge_formula="squared") but is
             generally good and does not change results much. Defaults to "(1-0)*alpha".
+        n_stochastic_sources: Stochastic sources for i and t. If None (default).
+
     """
     assert isinstance(data_key, list), "data_key must be a list of strings."
     assert len(data_key) == 2, "data_key must be a list of length 2 to store M' and Lambda'."
@@ -422,15 +425,18 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             inputs=inputs,
             C_out=C_out,
             n_intervals=n_intervals,
+            n_stochastic_sources=n_stochastic_sources,
         )
         has_pos = inputs[0].dim() == 3
         einsum_pattern = (
-            "batch i t s j, batch i t s jprime -> j jprime"
+            "batch source s j, batch source s jprime -> j jprime"
             if has_pos
-            else "batch i j, batch i jprime -> j jprime"
+            else "batch source j, batch source jprime -> j jprime"
         )
         pos_size = in_grads.shape[2] if has_pos else 1
         normalization_factor = pos_size * dataset_size
+        if n_stochastic_sources is not None:
+            normalization_factor *= n_stochastic_sources
         with torch.inference_mode():
             # M_dash.shape: j jprime
             M_dash = einops.einsum(

@@ -442,6 +442,7 @@ def calc_basis_jacobian(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
+    n_stochastic_sources: Optional[int] = None,
 ) -> Float[Tensor, "batch out_hidden_trunc out_pos in_pos in_hidden"]:
     # Ensure that the inputs have requires_grad=True
     for x in inputs:
@@ -467,11 +468,11 @@ def calc_basis_jacobian(
 
     if has_pos:
         assert in_pos_size is not None  # needed for mypy
+        n_sources = n_stochastic_sources or out_hat_hidden_size * out_pos_size
         # in_grads.shape: batch, i (out_hidden), t (out_pos), s (in_pos), j (in_hidden)
         in_grads = torch.zeros(
             batch_size,
-            out_hat_hidden_size,
-            out_pos_size,
+            n_sources,
             in_pos_size,
             in_hidden_size,
             dtype=inputs[0].dtype,
@@ -500,25 +501,50 @@ def calc_basis_jacobian(
             # Shapes of inputs and outputs, that lead to in_grads.shape = batch, i, t, s, j/jprime
             # f_out_hat_alpha.shape: batch t i
             # f_in_alpha: batch, s, j
-            for i in tqdm(
-                range(out_hat_hidden_size),
-                total=out_hat_hidden_size,
-                desc="Iteration over output dims",
+
+            if n_stochastic_sources is not None:
+                # Introduce stochastic sources: Don't iterate over all i and t, but a random direction
+                # in the i and t space. Create phis that are -1 or 1 with equal probability
+                phi_shape = (batch_size, n_sources, out_pos_size, out_hat_hidden_size)
+                phi = torch.where(
+                    torch.randn(phi_shape) < 0.0, -1 * torch.ones(phi_shape), torch.ones(phi_shape)
+                ).to(dtype=in_grads.dtype, device=in_grads.device)
+            else:
+                # Full dimensions
+                phi_shape = (
+                    batch_size,
+                    n_sources,
+                    out_pos_size,
+                    out_hat_hidden_size,
+                )
+                phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
+                for t in range(out_pos_size):
+                    for i in range(out_hat_hidden_size):
+                        phi[:, t * out_hat_hidden_size + i, t, i] = 1.0
+
+            for source in tqdm(
+                range(n_sources),
+                total=n_sources,
+                desc="Iteration over stochastic sources",
                 leave=False,
             ):
-                for t in range(out_pos_size):
-                    # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
-                    # times (for each i and t, in a for loop) aka we're doing a jacobian.
-                    # Sum over batch is a trick to get the grad for every batch index vectorized.
-                    alpha_in_grads = torch.cat(
-                        torch.autograd.grad(
-                            f_out_hat_alpha[:, t, i].sum(dim=0), f_in_alpha, retain_graph=True
-                        ),
-                        dim=-1,
-                    )
-                    in_grads[:, i, t, :, :] += alpha_in_grads * trapezoidal_scaler
-                    # Contraction over batch, i, t, s happens after the integral, but we cannot
-                    # contract earlier because we have to finish the integral sum (+=) first.
+                phi_f_out_hat_alpha = einsum(
+                    "batch out_pos out_hidden, batch out_pos out_hidden -> batch",
+                    phi[:, source, :, :],
+                    f_out_hat_alpha,
+                )
+                # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
+                # times (for each i and t, in a for loop) aka we're doing a jacobian.
+                # Sum over batch is a trick to get the grad for every batch index vectorized.
+                alpha_in_grads = torch.cat(
+                    torch.autograd.grad(
+                        phi_f_out_hat_alpha.sum(dim=0), f_in_alpha, retain_graph=True
+                    ),
+                    dim=-1,
+                )
+                in_grads[:, source, :, :] += alpha_in_grads * trapezoidal_scaler
+                # Contraction over batch, i, t, s happens after the integral, but we cannot
+                # contract earlier because we have to finish the integral sum (+=) first.
     else:
         # in_grads.shape: batch, i (out_hidden), j (in_hidden)
         in_grads = torch.zeros(

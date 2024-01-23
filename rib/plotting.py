@@ -67,7 +67,7 @@ def _add_edges_to_graph(
 
 
 def _prepare_edges_for_plotting(
-    raw_edges: list[torch.Tensor], nodes_per_layer: list[int]
+    raw_edges: list[torch.Tensor], nodes_per_layer: list[int], hide_const_edges: bool = False
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
@@ -83,6 +83,13 @@ def _prepare_edges_for_plotting(
     for i, weight_matrix in enumerate(raw_edges):
         # Convert edges to float32 (bfloat16 will cause errors and we don't need higher precision)
         weight_matrix = weight_matrix.float()
+        if hide_const_edges:
+            const_node_index = 0
+            # Set edges *outgoing* from this node to zero (edges.shape ~ l+1, l)
+            weight_matrix[i][:, const_node_index] = 0
+            # Set edges *incoming* to this node to zero (edges.shape ~ l+1, l)
+            if i > 0:
+                weight_matrix[i - 1][const_node_index, :] = 0
         # Normalize the edge weights by the sum of the absolute values of the weights
         weight_matrix /= torch.sum(torch.abs(weight_matrix))
         # Only keep the desired number of nodes in each layer
@@ -196,18 +203,9 @@ def plot_rib_graph(
 
     max_layer_height = max(nodes_per_layer)
 
-    edges = _prepare_edges_for_plotting(raw_edges, nodes_per_layer)
-
-    if hide_const_edges:
-        for layer_index in range(len(edges)):
-            const_node_index = 0
-            # Set edges *outgoing* from this node to zero (edges.shape ~ l+1, l)
-            edges[layer_index][:, const_node_index] = 0
-            # Set edges *incoming* to this node to zero (edges.shape ~ l+1, l)
-            if layer_index > 0:
-                edges[layer_index - 1][const_node_index, :] = 0
-            # Normalize edges again as done in _prepare_edges_for_plotting
-            edges[layer_index] /= torch.sum(torch.abs(edges[layer_index]))
+    edges = _prepare_edges_for_plotting(
+        raw_edges, nodes_per_layer, hide_const_edges=hide_const_edges
+    )
 
     # Create the undirected graph
     graph = nx.Graph()

@@ -483,7 +483,7 @@ def centered_rib_test(results: RibBuildResults, atol=1e-6):
 @pytest.mark.slow
 @pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
 def test_centered_rib_mnist(basis_formula):
-    """Test that centred rib works for MNIST."""
+    """Test that centered rib works for MNIST."""
     config = get_mnist_config(
         {"basis_formula": basis_formula, "edge_formula": "functional", "center": True}
     )
@@ -493,16 +493,16 @@ def test_centered_rib_mnist(basis_formula):
 
 @pytest.mark.slow
 def test_centered_rib_pythia():
-    """Test that the centred rib works for pythia."""
+    """Test that the centered rib works for pythia."""
     config = get_pythia_config({"basis_formula": "(1-0)*alpha", "center": True})
     results = rib_build(config)
     centered_rib_test(results, atol=1e-9)
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd", "jacobian"])
 def test_centered_rib_modadd(basis_formula):
-    """Test that centred rib & pca works for modadd."""
+    """Test that centered rib & pca works for modadd."""
     # we set a lower truncation threshold as there are some directions w/ small eigenvals that
     # violate our assumption. I think this is a precision error that shouldn't be a problem
     # elsewhere. See https://apolloresearchhq.slack.com/archives/C06484S5UF9/p1704966880983049

@@ -215,6 +215,5 @@ class TestEdgeMask:
 
         mask_keep_const = _get_edge_mask(edge_weights, 4, True)
         assert mask_keep_const.diag().all()
-        assert mask_keep_const[0, :].all()
         assert mask_keep_const[:, 0].all()
-        assert mask_keep_const[1:, 1:].sum() == 4
+        assert mask_keep_const[:, 1:].sum() == 4

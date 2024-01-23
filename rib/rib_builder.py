@@ -180,7 +180,7 @@ class RibBuildConfig(BaseModel):
         None,
         description="The number of stochastic sources to use when calculating stochastic Cs.",
     )
-    n_stochastic_sources: Optional[int] = Field(
+    n_stochastic_sources_edges: Optional[int] = Field(
         None,
         description="The number of stochastic sources to use when calculating stochastic edges.",
     )
@@ -214,11 +214,11 @@ class RibBuildConfig(BaseModel):
 
     @model_validator(mode="after")
     def verify_n_stochastic_sources(self) -> "RibBuildConfig":
-        if self.edge_formula != "stochastic" and self.n_stochastic_sources is not None:
+        if self.edge_formula != "stochastic" and self.n_stochastic_sources_edges is not None:
             raise ValueError(
                 "n_stochastic_sources should only be set when edge_formula is stochastic"
             )
-        if self.edge_formula == "stochastic" and self.n_stochastic_sources is None:
+        if self.edge_formula == "stochastic" and self.n_stochastic_sources_edges is None:
             raise ValueError("n_stochastic_sources must be set when edge_formula is stochastic")
         return self
 
@@ -516,7 +516,7 @@ def rib_build(
             device=device,
             data_set_size=full_dataset_len,  # includes data for other processes
             edge_formula=config.edge_formula,
-            n_stochastic_sources=config.n_stochastic_sources,
+            n_stochastic_sources=config.n_stochastic_sources_edges,
         )
 
         calc_edges_time = (time.time() - edges_start_time) / 60

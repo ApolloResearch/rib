@@ -62,6 +62,27 @@ There are four basis formulas and two edges formulas implemented. Sensible combi
 * `(1-alpha)^2` basis with `functional` edges: Old functional-based approach. Self-consistent (and
   working Lambdas) but we know counterexampes where this method would give wrong results.
 
+### Math equations
+`jacobian` basis:
+
+![image](https://github.com/ApolloResearch/rib/assets/148209923/931e8851-6bf3-47c6-a7b1-faef8a7d02a7)
+
+with Lambda TODO
+
+`(1-0)*alpha` basis:
+
+![image](https://github.com/ApolloResearch/rib/assets/148209923/130433bf-57ce-47f0-9201-3c7009ecbfd4)
+
+with Lambda
+
+![image](https://github.com/ApolloResearch/rib/assets/148209923/c46243aa-b076-44d1-9d75-6662041caf8f)
+
+`squared` attribution:
+
+![image](https://github.com/ApolloResearch/rib/assets/148209923/d46933bf-be93-4270-a732-830c8fe446ca)
+
+`functional` attribution and `(1-alpha)^2` basis are deprecated and not documented in the current version of the LaTeX doc.
+
 ## Development
 
 To install the development dependencies that includes formatters, linters, and type checkers, run

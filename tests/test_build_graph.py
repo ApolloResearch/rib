@@ -213,7 +213,7 @@ def test_pythia_14m_build_graph():
 def test_pythia_14m_build_graph_jacobian():
     atol = 0  # Works with 0 for batch_size 900 but not 1800
     updates = [
-        # Runs in around 75s on a5000
+        # Runs in around 30s on a5000
         {"basis_formula": "jacobian"},
         {"dataset": {"return_set_n_samples": 1}},
         {"dataset": {"n_ctx": 2}},
@@ -481,7 +481,7 @@ def centered_rib_test(results: RibBuildResults, atol=1e-6):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd", "jacobian"])
 def test_centered_rib_mnist(basis_formula):
     """Test that centered rib works for MNIST."""
     config = get_mnist_config(

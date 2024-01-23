@@ -1,9 +1,14 @@
-# Disclosure Level - Private
+# Disclosure Level - Secret
 
 # Persons/Groups with access
 
-- Apollo
-- Jörn Stöhler
-- Avery Griffin
+- Dan Braun
+- Nix Goldowsky-Dill
+- Stefan Heimersheim
+- Lucius Bushnaq
+- Jake Mendel
+- Marius Hobbhahn
+- Lee Sharkey
+- Avery Griffin (had access to early versions)
 
 See Apollo's privacy levels [here](https://www.apolloresearch.ai/blog/security)

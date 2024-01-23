@@ -41,7 +41,7 @@ EdgeMasks = dict[str, dict[int, Bool[Tensor, "rib_out rib_in"]]]
 
 class ScheduleConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    schedule_type: Literal["exponential", "linear"]
+    schedule_type: Literal["exponential", "linear", "bisect"]
     early_stopping_threshold: Optional[float] = Field(
         None,
         description="The threshold to use for stopping the ablation calculations early. The"
@@ -54,9 +54,11 @@ class ScheduleConfig(BaseModel):
         "the default schedule.",
     )
 
+    # Replace with iter and init
     def get_ablation_schedule(self, n_vecs: int) -> list[int]:
         raise NotImplementedError("This method should be implemented in subclasses.")
 
+    # Not supported for bisect, move to individual classes
     def _add_specific_ablation_points(self, ablation_schedule: list[int], n_vecs: int) -> list[int]:
         """Add each number of vecs remaining in self.specific_points to the ablation schedule."""
         if self.specific_points is not None:
@@ -67,6 +69,39 @@ class ScheduleConfig(BaseModel):
                 list(set(ablation_schedule + specific_ablated_vecs)), reverse=True
             )
         return ablation_schedule
+
+
+class BisectScheduler:
+    def __init__(
+        self,
+        n_vecs,
+        loss_target: float,
+        scaling: Literal["linear", "logarithmic"] = "linear",
+    ):
+        self.scaling = scaling
+        self.loss_target = loss_target
+        self.upper_bound = n_vecs
+        self.lower_bound = 0
+
+    def _get_proposal(self) -> int:
+        if self.scaling == "linear":
+            return (self.upper_bound + self.lower_bound) // 2
+        elif self.scaling == "logarithmic":
+            return int(np.exp((np.log(self.upper_bound) + np.log(self.lower_bound)) / 2))
+        else:
+            raise ValueError(f"Unknown scaling {self.scaling}")
+
+    def step(self, loss: float):
+        proposal = self._get_proposal()
+        if loss < self.loss_target:
+            self.upper_bound = proposal
+        else:
+            self.lower_bound = proposal
+
+    def __iter__(self):
+        while self.upper_bound - self.lower_bound > 1:
+            proposal = self._get_proposal()
+            yield proposal
 
 
 class ExponentialScheduleConfig(ScheduleConfig):

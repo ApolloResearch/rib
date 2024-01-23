@@ -348,6 +348,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
     n_stochastic_sources: Optional[int] = None,
+    dim_stochastic_sources: Optional[Literal["both", "out_pos", "out_hidden"]] = None,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -426,12 +427,13 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             C_out=C_out,
             n_intervals=n_intervals,
             n_stochastic_sources=n_stochastic_sources,
+            dim_stochastic_sources=dim_stochastic_sources,
         )
         has_pos = inputs[0].dim() == 3
         einsum_pattern = (
-            "batch source s j, batch source s jprime -> j jprime"
+            "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"
             if has_pos
-            else "batch source j, batch source jprime -> j jprime"
+            else "batch i j, batch i jprime -> j jprime"
         )
         pos_size = in_grads.shape[2] if has_pos else 1
         normalization_factor = pos_size * dataset_size

@@ -67,7 +67,7 @@ There are four basis formulas and two edges formulas implemented. Sensible combi
 
 ![image](https://github.com/ApolloResearch/rib/assets/148209923/931e8851-6bf3-47c6-a7b1-faef8a7d02a7)
 
-with Lambda TODO
+with Lambda equal to the eigenvalues of M.
 
 `(1-0)*alpha` basis:
 

@@ -200,6 +200,9 @@ def calculate_interaction_rotations(
     # last layer
     if rotate_final_node_layer:
         assert node_layers[-1] != "output", "Cannot rotate the output layer."
+        # Note: we use the basis_formula "svd" as this is our best guess of a basis when running
+        # RIB from an intermediate point. This excludes D, V, and Lambda.
+        # many of these arguments will be ignored, therefore.
         last_layer_ir = _calculate_one_interaction_rotation(
             gram_matrix=gram_matrices[node_layers[-1]],
             node_layer=node_layers[-1],
@@ -312,7 +315,8 @@ def _calculate_one_interaction_rotation(
             this is last C matrix we calculated but the next C matrix in in model order. Will be
             None the first time this fn is called (for the last layer of the model).
         section_name: The section that starts with node_layer
-        See `calculate_interaction_rotations` for other arguments
+        See `calculate_interaction_rotations` for all other arguments. The only differences is
+            that we take a single tensor for gram_matrix and means instead of a dictionary.
     """
     out_dim = gram_matrix.shape[0]
     if basis_formula == "neuron":

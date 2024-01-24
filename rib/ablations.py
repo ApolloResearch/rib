@@ -55,9 +55,17 @@ class ScheduleConfig(BaseModel):
     )
 
     # Replace with iter and init
-    def get_ablation_schedule(self, n_vecs: int) -> list[int]:
+    def _get_ablation_schedule(self, n_vecs: int) -> list[int]:
         raise NotImplementedError("This method should be implemented in subclasses.")
 
+    def __len__(self):
+        return None
+
+    def step(self, *args):
+        pass
+
+
+class StaticScheduleConfig(ScheduleConfig):
     # Not supported for bisect, move to individual classes
     def _add_specific_ablation_points(self, ablation_schedule: list[int], n_vecs: int) -> list[int]:
         """Add each number of vecs remaining in self.specific_points to the ablation schedule."""
@@ -70,14 +78,30 @@ class ScheduleConfig(BaseModel):
             )
         return ablation_schedule
 
+    def _get_ablation_schedule(self, n_vecs: int) -> list[int]:
+        raise NotImplementedError("This method should be implemented in subclasses.")
 
-class BisectScheduler:
+    def __iter__(self):
+        ablation_schedule = self._get_ablation_schedule(n_vecs=self.model_config.n_vecs)[::-1]
+        for n_vecs_remaining in ablation_schedule:
+            yield n_vecs_remaining
+
+    def __len__(self):
+        return len(self._get_ablation_schedule(n_vecs=self.model_config.n_vecs)[::-1])
+
+
+class BisectScheduleConfig(ScheduleConfig):
     def __init__(
         self,
         n_vecs,
         loss_target: float,
         scaling: Literal["linear", "logarithmic"] = "linear",
     ):
+        super().__init__(
+            schedule_type="bisect",
+            early_stopping_threshold=None,
+            specific_points=None,
+        )
         self.scaling = scaling
         self.loss_target = loss_target
         self.upper_bound = n_vecs
@@ -104,7 +128,7 @@ class BisectScheduler:
             yield proposal
 
 
-class ExponentialScheduleConfig(ScheduleConfig):
+class ExponentialScheduleConfig(StaticScheduleConfig):
     schedule_type: Literal["exponential"]
     ablate_every_vec_cutoff: Optional[int] = Field(
         None,
@@ -113,7 +137,7 @@ class ExponentialScheduleConfig(ScheduleConfig):
     )
     exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
 
-    def get_ablation_schedule(self, n_vecs: int) -> list[int]:
+    def _get_ablation_schedule(self, n_vecs: int) -> list[int]:
         """Create an exponential schedule for the number of vectors to ablate.
 
         The schedule is exponential with a base of 2, with the exception that from
@@ -171,7 +195,7 @@ class ExponentialScheduleConfig(ScheduleConfig):
         return ablation_schedule
 
 
-class LinearScheduleConfig(ScheduleConfig):
+class LinearScheduleConfig(StaticScheduleConfig):
     schedule_type: Literal["linear"]
     n_points: int = Field(
         ...,
@@ -181,7 +205,7 @@ class LinearScheduleConfig(ScheduleConfig):
         ),
     )
 
-    def get_ablation_schedule(self, n_vecs: int) -> list[int]:
+    def _get_ablation_schedule(self, n_vecs: int) -> list[int]:
         """Create a linear schedule for the number of vectors to ablate.
 
         The points are evenly spaced between `n_vecs` and 0, including the endpoints and any points
@@ -248,7 +272,7 @@ def ablate_node_layers_and_eval(
     data_loader: DataLoader,
     eval_fn: Callable,
     module_names: list[str],
-    schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
+    schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig, BisectScheduleConfig],
     device: str,
     dtype: Optional[torch.dtype] = None,
 ) -> AblationAccuracies:
@@ -281,7 +305,7 @@ def ablate_node_layers_and_eval(
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
         ablation_node_layers, module_names, basis_matrices, strict=True
     ):
-        ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=basis_vecs.shape[0])
+        ablation_schedule = schedule_config(n_vecs=basis_vecs.shape[0])
 
         base_score: Optional[float] = None
 
@@ -293,7 +317,7 @@ def ablate_node_layers_and_eval(
         # Iterate through possible number of ablated vectors, starting from no ablated vectors
         for i, n_ablated_vecs in enumerate(
             tqdm(
-                ablation_schedule[::-1],
+                ablation_schedule,
                 total=len(ablation_schedule),
                 desc=f"Ablating {module_name}",
             )
@@ -331,6 +355,8 @@ def ablate_node_layers_and_eval(
             )
             results[ablation_node_layer][n_vecs_remaining] = score
 
+            ablation_schedule.step()
+            # TODO Implement early stopping in step() method
             if schedule_config.early_stopping_threshold is not None:
                 if i == 0:
                     base_score = score

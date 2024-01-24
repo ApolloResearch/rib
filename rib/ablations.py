@@ -43,17 +43,9 @@ class ScheduleConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schedule_type: Literal["exponential", "linear", "bisect"]
 
-    def __len__(self):
-        return None
-
-    def __iter__(self):
-        raise NotImplementedError("This method should be implemented in subclasses.")
-
-    def step(self, score):
-        raise NotImplementedError("This method should be implemented in subclasses.")
-
 
 class StaticScheduleConfig(ScheduleConfig):
+    schedule_type: Literal["exponential", "linear"]
     early_stopping_threshold: Optional[float] = Field(
         None,
         description="The threshold to use for stopping the ablation calculations early. The"
@@ -65,8 +57,42 @@ class StaticScheduleConfig(ScheduleConfig):
         description="A list of number of vecs remaining to add to the schedule. If None, we use"
         "the default schedule.",
     )
-    base_score = None
-    _stop_iteration = False
+
+
+class ExponentialScheduleConfig(StaticScheduleConfig):
+    schedule_type: Literal["exponential"]
+    ablate_every_vec_cutoff: Optional[int] = Field(
+        None,
+        description="The point in the exponential schedule at which we start ablating every"
+        "individual vector. If None, always ablate every vector.",
+    )
+    exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
+
+
+class LinearScheduleConfig(StaticScheduleConfig):
+    schedule_type: Literal["linear"]
+    n_points: int = Field(
+        ...,
+        description=(
+            "The number of points to use in the linear ablation schedule. Must be specified if "
+            "schedule_type is linear and cannot be specified if schedule_type is exponential."
+        ),
+    )
+
+class BisectScheduleConfig(ScheduleConfig):
+
+class StaticSchedule(Schedule):
+    def __init__(
+        self,
+        schedule_type: Literal["exponential", "linear", "bisect"],
+        early_stopping_threshold: Optional[float] = None,
+        specific_points: Optional[list[int]] = None,
+    ):
+        self.schedule_type = schedule_type
+        self.early_stopping_threshold = early_stopping_threshold
+        self.specific_points = specific_points
+        self._base_score = None
+        self._stop_iteration = False
 
     def _add_specific_ablation_points(self, ablation_schedule: list[int], n_vecs: int) -> list[int]:
         """Add each number of vecs remaining in self.specific_points to the ablation schedule."""
@@ -83,13 +109,13 @@ class StaticScheduleConfig(ScheduleConfig):
         raise NotImplementedError("This method should be implemented in subclasses.")
 
     def _check_early_stopping(self, score: float) -> bool:
-        if self.base_score is None:
-            self.base_score = score
+        if self._base_score is None:
+            self._base_score = score
 
         # If the score is more than `early_stopping_threshold` away from the base result,
         # then we stop ablating vectors.
-        if abs(score - self.base_score) > self.early_stopping_threshold:
-            logger.info(f"Stopping early with {score=}, {self.base_score=} ")
+        if abs(score - self._base_score) > self.early_stopping_threshold:
+            logger.info(f"Stopping early with {score=}, {self._base_score=} ")
             return True
         else:
             return False
@@ -108,6 +134,17 @@ class StaticScheduleConfig(ScheduleConfig):
 
     def __len__(self):
         return len(self._get_ablation_schedule(n_vecs=self.model_config.n_vecs)[::-1])
+
+
+class Schedule:
+    def __len__(self):
+        return None
+
+    def __iter__(self):
+        raise NotImplementedError("This method should be implemented in subclasses.")
+
+    def step(self, score):
+        raise NotImplementedError("This method should be implemented in subclasses.")
 
 
 class BisectScheduleConfig(ScheduleConfig):

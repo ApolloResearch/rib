@@ -103,7 +103,7 @@ class StaticSchedule:
     def _get_initial_ablation_schedule(self) -> list[int]:
         raise NotImplementedError("This method should be implemented in subclasses.")
 
-    def __len__(self):
+    def size(self):
         return len(self._ablation_schedule)
 
     def __iter__(self):
@@ -318,7 +318,7 @@ class BisectSchedule:
         self._most_recent_proposal = proposal
         return proposal
 
-    def __len__(self):
+    def size(self):
         return None
 
     def __iter__(self):
@@ -439,7 +439,7 @@ def ablate_node_layers_and_eval(
         for i, n_ablated_vecs in enumerate(
             tqdm(
                 ablation_schedule,
-                total=len(ablation_schedule),
+                total=ablation_schedule.size(),
                 desc=f"Ablating {module_name}",
             )
         ):
@@ -477,6 +477,11 @@ def ablate_node_layers_and_eval(
             results[ablation_node_layer][n_vecs_remaining] = score
 
             ablation_schedule.step(score)
+
+        # Sort the results by the number of edges kept, descending
+        results[ablation_node_layer] = dict(
+            sorted(results[ablation_node_layer].items(), reverse=True)
+        )
 
     return results
 
@@ -580,7 +585,7 @@ def ablate_edges_and_eval(
         edge_masks[ablation_node_layer] = {}
         # Iterate through possible number of ablated edges, starting from no ablated edges
         for num_edges_ablated in tqdm(
-            ablation_schedule, total=len(ablation_schedule), desc=f"Ablating {module_name}"
+            ablation_schedule, total=ablation_schedule.size(), desc=f"Ablating {module_name}"
         ):
             num_edges_kept = total_possible_edges - num_edges_ablated
             edge_mask = _get_edge_mask(
@@ -612,6 +617,12 @@ def ablate_edges_and_eval(
             results[ablation_node_layer][num_edges_kept] = score
 
             ablation_schedule.step(score)
+
+        # Sort the results by the number of edges kept, descending
+        results[ablation_node_layer] = dict(
+            sorted(results[ablation_node_layer].items(), reverse=True)
+        )
+
     return results, edge_masks
 
 

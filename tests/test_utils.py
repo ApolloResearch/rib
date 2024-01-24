@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from torch import nn
 from torch.utils.data import DataLoader
 
-from rib.ablations import ExponentialScheduleConfig
+from rib.ablations import ExponentialSchedule, ExponentialScheduleConfig
 from rib.models import MLP, MLPConfig, MLPLayer
 from rib.models.utils import gelu_new, get_model_attr
 from rib.utils import eval_model_accuracy, find_root, replace_pydantic_model
@@ -98,10 +98,11 @@ def test_calc_exponential_ablation_schedule(
     n_eigenvecs: int,
     expected: list[int],
 ):
-    schedule = ExponentialScheduleConfig(
+    schedule_config = ExponentialScheduleConfig(
         schedule_type="exponential", ablate_every_vec_cutoff=ablate_every_vec_cutoff
-    ).get_ablation_schedule(n_eigenvecs)
-    assert schedule == expected
+    )
+    schedule = ExponentialSchedule(n_eigenvecs, schedule_config)
+    assert schedule._ablation_schedule == expected
 
 
 class TestFindRoot:

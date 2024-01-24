@@ -156,8 +156,9 @@ class LinearSchedule(StaticSchedule):
         super().__init__(n_vecs, config)
         # We'd like to move this _add_specific_ablation_points() logic to the parent class, but
         # we can't because it depends on n_points via _get_initial_ablation_schedule().
+        initial_ablation_schedule = self._get_initial_ablation_schedule()
         self._ablation_schedule: list[int] = self._add_specific_ablation_points(
-            self._get_initial_ablation_schedule()
+            initial_ablation_schedule
         )
 
     def _get_initial_ablation_schedule(self) -> list[int]:

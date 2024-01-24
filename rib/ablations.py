@@ -65,6 +65,8 @@ class StaticScheduleConfig(ScheduleConfig):
         description="A list of number of vecs remaining to add to the schedule. If None, we use"
         "the default schedule.",
     )
+    base_score = np.nan
+    _stop_iteration = False
 
     def _add_specific_ablation_points(self, ablation_schedule: list[int], n_vecs: int) -> list[int]:
         """Add each number of vecs remaining in self.specific_points to the ablation schedule."""
@@ -80,10 +82,32 @@ class StaticScheduleConfig(ScheduleConfig):
     def _get_ablation_schedule(self, n_vecs: int) -> list[int]:
         raise NotImplementedError("This method should be implemented in subclasses.")
 
+    def _check_early_stopping(self, score: float) -> bool:
+        if self.base_score is None:
+            self.base_score = score
+
+        # If the score is more than `early_stopping_threshold` away from the base result,
+        # then we stop ablating vectors.
+        if abs(score - self.base_score) > self.early_stopping_threshold:
+            logger.info(
+                f"Stopping early with {score=}, {self.base_score=} "
+            )
+            return True
+        else:
+            return False
+
+    def step(self, score):
+        if self.early_stopping_threshold is not None and self._check_early_stopping(score):
+            self._stop_iteration = True
+
+
     def __iter__(self):
         ablation_schedule = self._get_ablation_schedule(n_vecs=self.model_config.n_vecs)[::-1]
         for n_vecs_remaining in ablation_schedule:
-            yield n_vecs_remaining
+            if self._stop_iteration:
+                break
+            else:
+                yield n_vecs_remaining
 
     def __len__(self):
         return len(self._get_ablation_schedule(n_vecs=self.model_config.n_vecs)[::-1])
@@ -354,19 +378,7 @@ def ablate_node_layers_and_eval(
             )
             results[ablation_node_layer][n_vecs_remaining] = score
 
-            ablation_schedule.step()
-            # TODO Implement early stopping in step() method
-            if schedule_config.early_stopping_threshold is not None:
-                if i == 0:
-                    base_score = score
-                else:
-                    # If the score is more than `early_stopping_threshold` away from the base result,
-                    # then we stop ablating vectors.
-                    if abs(score - base_score) > schedule_config.early_stopping_threshold:
-                        logger.info(
-                            f"Stopping early at {n_vecs_remaining} with {score=}, {base_score=} "
-                        )
-                        break
+            ablation_schedule.step(score)
 
     return results
 

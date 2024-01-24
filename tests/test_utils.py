@@ -115,6 +115,7 @@ def test_calc_exponential_ablation_schedule(
 @pytest.mark.parametrize(
     "n_points, n_eigenvecs, expected",
     [
+        (3, 12, [12, 6, 0]),
         (11, 10, [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]),
         (11, 20, [20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 0]),
     ],

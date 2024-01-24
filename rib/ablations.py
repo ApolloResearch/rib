@@ -81,6 +81,16 @@ class StaticSchedule:
         return ablation_schedule
 
     def _check_early_stopping(self, score: float, early_stopping_threshold: float) -> bool:
+        """Check if we should stop early.
+
+        Stop if the score is more than `early_stopping_threshold` away from the base (no ablationbs)
+        result, i.e. once we ablated to many vecs that the model output is crap, don't bother
+        ablating even more vecs.
+
+        Note that this functionality assumes that the first call to this method is the base result,
+        and that later steps are ablating more vecs than earlier steps.
+        """
+        # This assumes that the first call is the base result (n_vecs_ablated = 0)
         if self._base_score is None:
             self._base_score = score
         # Stop if the score is more than `early_stopping_threshold` away from the base result.
@@ -97,6 +107,7 @@ class StaticSchedule:
         return len(self._ablation_schedule)
 
     def __iter__(self):
+        # For early stopping we need to iterate from low to high n_vecs_ablated, thus [::-1].
         for n_vecs_remaining in self._ablation_schedule[::-1]:
             if self._stop_iteration:
                 break
@@ -124,6 +135,24 @@ class LinearSchedule(StaticSchedule):
     config: LinearScheduleConfig
 
     def __init__(self, n_vecs: int, config: LinearScheduleConfig):
+        """Create a linear schedule for the number of vectors to ablate.
+
+        The points are evenly spaced between `n_vecs` and 0, including the endpoints and any points
+        in `self.specific_points` are also added.
+
+        Args:
+            n_vecs: Total number of vectors.
+            config: The ablation schedule config containing n_points, the number of points to use,
+                specific_points, and early_stopping_threshold.
+
+        Returns:
+            An iterable schedule for the number of vectors to ablate.
+
+        Examples:
+            n_points = 3, n_vecs = 12 --> [12, 6, 0]
+            n_points = 11, n_vecs = 120 --> [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+
+        """
         super().__init__(n_vecs, config)
         # We'd like to move this _add_specific_ablation_points() logic to the parent class, but
         # we can't because it depends on n_points via _get_initial_ablation_schedule().
@@ -132,21 +161,6 @@ class LinearSchedule(StaticSchedule):
         )
 
     def _get_initial_ablation_schedule(self) -> list[int]:
-        """Create a linear schedule for the number of vectors to ablate.
-
-        The points are evenly spaced between `n_vecs` and 0, including the endpoints and any points
-        in `self.specific_points` are also added.
-
-        Args:
-            n_vecs: Total number of vectors.
-
-        Returns:
-            The schedule for the number of vectors to ablate.
-
-        Examples:
-            >>> LinearSchedule(LinearScheduleConfig("linear", 3))._get_ablation_schedule(12)
-            [12, 6, 0]
-        """
         assert self.config.n_points >= 2, f"{self.config.n_points} must be at least 2."
         assert (
             self.config.n_points <= self._n_vecs + 1
@@ -171,6 +185,29 @@ class ExponentialSchedule(StaticSchedule):
     config: ExponentialScheduleConfig
 
     def __init__(self, n_vecs: int, config: ExponentialScheduleConfig):
+        """Create an exponential schedule for the number of vectors to ablate.
+
+        The schedule is exponential with a base of 2, with the exceptions
+        * we test all values of n_vecs_remaining from 0 to `self.ablate_every_vec_cutoff`
+        * we test ablating no vectors (n_vecs_remaining = n_vecs)
+        * we test manually specified points given in `config.specific_points`.
+
+        Args:
+            n_vecs: Total number of vectors.
+            config: The ablation schedule config containing exp_base, ablate_every_vec_cutoff,
+                specific_points, and early_stopping_threshold.
+
+        Returns:
+            The schedule for the number of vectors to ablate.
+
+        Examples (all with exp_base = 2):
+            ablate_every_vec_cutoff = None, n_vecs = 12 --> [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
+            0]
+            ablate_every_vec_cutoff = 0, n_vecs = 12 --> [12, 11, 9, 5, 0]
+            ablate_every_vec_cutoff = 1, n_vecs = 12 --> [12, 11, 10, 8, 4, 0]
+            ablate_every_vec_cutoff = 3, n_vecs = 12 --> [12, 11, 10, 9, 8, 6, 2, 0]
+            ablate_every_vec_cutoff = 3, n_vecs = 24 --> [24, 23, 22, 21, 20, 18, 14, 6, 0]
+        """
         super().__init__(n_vecs, config)
         # We'd like to move this _add_specific_ablation_points() logic to the parent class, but
         # we can't because it depends on ablate_every_vec_cutoff and exp_base via
@@ -181,31 +218,6 @@ class ExponentialSchedule(StaticSchedule):
         )
 
     def _get_initial_ablation_schedule(self) -> list[int]:
-        """Create an exponential schedule for the number of vectors to ablate.
-
-        The schedule is exponential with a base of 2, with the exception that from
-        `self.ablate_every_vec_cutoff` to `n_vecs` we ablate every vector. The schedule also
-        includes a run with no ablations as well as with the number of vecs remaining given in
-        `self.specific_points`.
-
-        Args:
-            n_vecs: Total number of vectors.
-
-        Returns:
-            The schedule for the number of vectors to ablate.
-
-        Examples:
-            >>> ExponentialSchedule(ExponentialScheduleConfig("exponential", None))._get_ablation_schedule(12)
-            [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
-            >>> ExponentialSchedule(ExponentialScheduleConfig("exponential", 0))._get_ablation_schedule(12)
-            [12, 11, 9, 5, 0]  # Exponential schedule (2^x) from the beginning.
-            >>> ExponentialSchedule(ExponentialScheduleConfig("exponential", 1))._get_ablation_schedule(12)
-            [12, 11, 10, 8, 4, 0]  # Exponential schedule (2^x) after the first 1 value
-            >>> ExponentialSchedule(ExponentialScheduleConfig("exponential", 3))._get_ablation_schedule(12)
-            [12, 11, 10, 9, 8, 6, 2, 0]
-            >>> ExponentialSchedule(ExponentialScheduleConfig("exponential", 3))._get_ablation_schedule(24)
-            [24, 23, 22, 21, 20, 18, 14, 6, 0]
-        """
         cutoff = self.config.ablate_every_vec_cutoff
         exp_base = self.config.exp_base
 
@@ -414,8 +426,6 @@ def ablate_node_layers_and_eval(
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
         ablation_node_layers, module_names, basis_matrices, strict=True
     ):
-        # TODO: I could package this functionality into a Schedule() class, worth it?
-
         ablation_schedule = _get_schedule_from_config(schedule_config, basis_vecs.shape[0])
         base_score: Optional[float] = None
 
@@ -542,7 +552,7 @@ def ablate_edges_and_eval(
             module in hooked_model.model. These typically correspond to section_names (e.g.
             "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
             "layers.2") when the model is an MLP.
-        schedule: The config for the ablation schedule.
+        schedule_config: The config for the ablation schedule.
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
         keep_const_edges: Used to always keep the constant edges (for free) when ablating a
@@ -552,7 +562,7 @@ def ablate_edges_and_eval(
         A dictionary mapping node layers to ablation accuracies/losses.
         A dictionary mapping node layers to edge masks.
     """
-    base_score = eval_fn(hooked_model, data_loader, hooks=[], dtype=dtype, device=device)  # TODO
+    base_score = eval_fn(hooked_model, data_loader, hooks=[], dtype=dtype, device=device)
 
     results: AblationAccuracies = {}
     edge_masks: EdgeMasks = {}
@@ -578,7 +588,7 @@ def ablate_edges_and_eval(
                 keep_const_edges=always_keep_const_dir,
             )
             if edge_mask.all():
-                results[ablation_node_layer][num_edges_kept] = base_score  # TODO
+                results[ablation_node_layer][num_edges_kept] = base_score
                 continue
 
             edge_masks[ablation_node_layer][num_edges_kept] = edge_mask

@@ -516,6 +516,15 @@ def calc_basis_jacobian(
                         ),
                         dim=-1,
                     )
+                    # alpha_in_grads.shape = batch, s, j
+                    # Save a sample of alpha_in_grads to a csv file, format alpha, sample
+                    with open(f"alpha_in_grads.csv", "a") as f:
+                        for b in range(1):
+                            for s in range(in_pos_size):
+                                for j in range(in_hidden_size):
+                                    val = alpha_in_grads[b, s, j].cpu().item()
+                                    f.write(f"{alpha},{i},{t},{s},{j},{b},{val}\n")
+
                     in_grads[:, i, t, :, :] += alpha_in_grads * trapezoidal_scaler
                     # Contraction over batch, i, t, s happens after the integral, but we cannot
                     # contract earlier because we have to finish the integral sum (+=) first.

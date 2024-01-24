@@ -221,7 +221,7 @@ def test_pythia_14m_build_graph_jacobian():
         {"node_layers": ["ln2.1", "mlp_out.5", "unembed"]},
         {"calculate_edges": True},
         {"edge_formula": "stochastic"},
-        {"n_stochastic_sources": 1},
+        {"n_stochastic_sources_edges": 1},
     ]
     config = get_pythia_config(*updates)
     results = graph_build_test(config=config, atol=atol)
@@ -596,7 +596,7 @@ def test_stochastic_source_single_pos_modadd():
             "edge_formula": "squared",
             "node_layers": node_layers,
             "last_pos_module_type": "add_resid1",
-            "n_stochastic_sources": None,
+            "n_stochastic_sources_edges": None,
         }
     )
     squared_edges = rib_build(config_squared).edges[0].E_hat
@@ -607,7 +607,7 @@ def test_stochastic_source_single_pos_modadd():
             "edge_formula": "stochastic",
             "node_layers": node_layers,
             "last_pos_module_type": "add_resid1",
-            "n_stochastic_sources": 1,
+            "n_stochastic_sources_edges": 1,
         }
     )
     stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
@@ -617,10 +617,10 @@ def test_stochastic_source_single_pos_modadd():
 
 @pytest.mark.slow
 def test_stochastic_source_modadd_convergence():
-    """Show that modadd after converges to squared edges as n_stochastic_sources increases.
+    """Show that modadd after converges to squared edges as n_stochastic_sources_edges increases.
 
     We measure the mean absolute difference between the squared edges and the stochastic edges as
-    n_stochastic_sources increases. We expect this to decrease monotonically.
+    n_stochastic_sources_edges increases. We expect this to decrease monotonically.
 
     Here, we set last_pos_module_type='unembed' so that we have multiple position dimensions in the
     mlp layer.
@@ -639,7 +639,7 @@ def test_stochastic_source_modadd_convergence():
             "edge_formula": "squared",
             "node_layers": node_layers,
             "last_pos_module_type": "unembed",
-            "n_stochastic_sources": None,
+            "n_stochastic_sources_edges": None,
         }
     )
     squared_edges = rib_build(config_squared).edges[0].E_hat
@@ -648,7 +648,7 @@ def test_stochastic_source_modadd_convergence():
     all_stochastic_edges = []
     abs_diffs = []
     # Ideally we'd use more sources, but that is very slow
-    for n_stochastic_sources in [1, 3, 7]:
+    for n_stochastic_sources_edges in [1, 3, 7]:
         config_stochastic = get_modular_arithmetic_config(
             {
                 "dataset": {"return_set_n_samples": return_set_n_samples},
@@ -656,14 +656,14 @@ def test_stochastic_source_modadd_convergence():
                 "edge_formula": "stochastic",
                 "node_layers": node_layers,
                 "last_pos_module_type": "unembed",
-                "n_stochastic_sources": n_stochastic_sources,
+                "n_stochastic_sources_edges": n_stochastic_sources_edges,
             }
         )
         stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
         all_stochastic_edges.append(stochastic_edges)
         abs_diffs.append(torch.abs(stochastic_edges - squared_edges).mean())
 
-    # Check that the mean absolute differences decrease as n_stochastic_sources increases.
+    # Check that the mean absolute differences decrease as n_stochastic_sources_edges increases.
     assert (
         torch.diff(torch.tensor(abs_diffs)) <= 0
     ).all(), "abs_diffs is not monotonically decreasing"

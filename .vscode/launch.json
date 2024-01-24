@@ -59,6 +59,15 @@
             "justMyCode": true
         },
         {
+            "name": "build tinystories",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/rib_scripts/rib_build/run_rib_build.py",
+            "args": "${workspaceFolder}/rib_scripts/rib_build/tinystories.yaml",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "build mnist",
             "type": "python",
             "request": "launch",

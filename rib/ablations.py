@@ -49,8 +49,8 @@ class ScheduleConfig(BaseModel):
     def __iter__(self):
         raise NotImplementedError("This method should be implemented in subclasses.")
 
-    def step(self, *args):
-        pass
+    def step(self, score):
+        raise NotImplementedError("This method should be implemented in subclasses.")
 
 
 class StaticScheduleConfig(ScheduleConfig):
@@ -65,7 +65,7 @@ class StaticScheduleConfig(ScheduleConfig):
         description="A list of number of vecs remaining to add to the schedule. If None, we use"
         "the default schedule.",
     )
-    base_score = np.nan
+    base_score = None
     _stop_iteration = False
 
     def _add_specific_ablation_points(self, ablation_schedule: list[int], n_vecs: int) -> list[int]:
@@ -89,9 +89,7 @@ class StaticScheduleConfig(ScheduleConfig):
         # If the score is more than `early_stopping_threshold` away from the base result,
         # then we stop ablating vectors.
         if abs(score - self.base_score) > self.early_stopping_threshold:
-            logger.info(
-                f"Stopping early with {score=}, {self.base_score=} "
-            )
+            logger.info(f"Stopping early with {score=}, {self.base_score=} ")
             return True
         else:
             return False
@@ -99,7 +97,6 @@ class StaticScheduleConfig(ScheduleConfig):
     def step(self, score):
         if self.early_stopping_threshold is not None and self._check_early_stopping(score):
             self._stop_iteration = True
-
 
     def __iter__(self):
         ablation_schedule = self._get_ablation_schedule(n_vecs=self.model_config.n_vecs)[::-1]

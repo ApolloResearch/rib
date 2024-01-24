@@ -55,6 +55,6 @@ def test_load_transformer(model_str):
         tlens_pretrained=model_str,
         last_pos_module_type=None,
         tlens_model_path=None,
-        device="cuda",
+        device="cpu",
         fold_bias=True,
     )

@@ -31,7 +31,7 @@ def get_modular_arithmetic_config(*updates: dict) -> RibBuildConfig:
     out_dir: null
     basis_formula: (1-0)*alpha
     edge_formula: squared
-    n_stochastic_sources: null
+    n_stochastic_sources_edges: null
     """
     config_dict = deep_update(yaml.safe_load(config_str), *updates)
     return RibBuildConfig(**config_dict)

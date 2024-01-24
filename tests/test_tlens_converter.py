@@ -16,44 +16,6 @@ def test_modular_arithmetic_conversion() -> None:
     """Test that a transformer with the same architecture as used in modular arithmetic maps from
     tlens to sequential transformer correctly.
 
-    The sequential transformer with node layer node_layers = ["mlp_act.0", "unembed"] has the
-    following architecture:
-    HookedModel(
-        (model): SequentialTransformer(
-            (sections): ModuleDict(
-            (pre): MultiSequential(
-                (0): Embed()
-                (1): PosEmbed()
-                (2): Add()
-                (3): LayerNormPre()
-                (4): AttentionIn()
-                (5): AttentionOut()
-                (6): Add()
-                (7): LayerNormPre()
-                (8): MLPIn()
-            )
-            (section_0): MultiSequential(
-                (0): MLPAct()
-                (1): MLPOut()
-                (2): Add()
-                (3): LayerNormPre()
-                (4): AttentionIn()
-                (5): AttentionOut()
-                (6): Add()
-                (7): LayerNormPre()
-                (8): MLPIn()
-                (9): MLPAct()
-                (10): MLPOut()
-                (11): Add()
-                (12): LayerNormPre()
-            )
-            (section_1): MultiSequential(
-                (0): Unembed()
-            )
-            )
-        )
-    )
-
     Floating point errors heavily accumulate here with float32 or less, so we use float64.
     """
     set_seed(42)
@@ -91,17 +53,18 @@ def test_modular_arithmetic_conversion() -> None:
     input_ids = torch.randint(0, tlens_model.cfg.d_vocab, size=(1, tlens_model.cfg.n_ctx))
 
     # Mapping from some tlens cache keys to SequentialTransformer cache keys (and their tuple index)
+    # Note that the output of the module given by section_id should correspond to the tlens
     mappings = {
         "blocks.0.hook_resid_pre": {
             "section_id": "sections.pre.2",
             "tuple_idx": 0,
         },
         "blocks.0.hook_resid_mid": {
-            "section_id": "sections.pre.6",
+            "section_id": "sections.pre.7",
             "tuple_idx": 0,
         },
         "blocks.1.hook_mlp_out": {
-            "section_id": "sections.section_0.10",
+            "section_id": "sections.section_0.12",
             "tuple_idx": 0,
         },
     }
@@ -176,47 +139,9 @@ def pretrained_lm_comparison(hf_model_str: str, mappings: dict[str, dict[str, st
 @pytest.mark.slow()
 @pytest.mark.parametrize("model_str", ["gpt2", "tiny-stories-1M"])
 def test_gpt_conversion(model_str):
-    """Test that gpt2 and tiny-stories have the same ouputs and inernal actiavtions in tlens as SequentialTransformer. The architecture of gpt2 and tiny-stories is close enough for the
+    """Test that gpt2 and tiny-stories have the same ouputs and inernal actiavtions in tlens as
+    SequentialTransformer. The architecture of gpt2 and tiny-stories is close enough for the
     mapping to be the same.
-
-    The SequentialTransformer with node layer node_layers = ["ln2.1", "unembed"] has the
-    following architecture:
-    HookedModel(
-        (model): SequentialTransformer(
-            (sections): ModuleDict(
-                (pre): MultiSequential(
-                    (0): Embed()
-                    (1): PosEmbed()
-                    (2): Add()
-                    (3): LayerNormPre()
-                    (4): AttentionIn()
-                    (5): AttentionOut()
-                    (6): Add()
-                    (7): LayerNormPre()
-                    (8): MLPIn()
-                    (9): MLPAct()
-                    (10): MLPOut()
-                    (11): Add()
-                    (12): LayerNormPre()
-                    (13): AttentionIn()
-                    (14): AttentionOut()
-                    (15): Add()
-                )
-                (section_0): MultiSequential(
-                    (0): LayerNormPre()
-                    (1): MLPIn()
-                    (2): MLPAct()
-                    (3): MLPOut()
-                    (4): Add()
-                    ...
-                    (95): LayerNormPre()
-                )
-                (section_1): MultiSequential(
-                    (0): Unembed()
-                )
-            )
-        )
-    )
 
     Floating point errors heavily accumulate here with float32 or less, so we use float64.
     """
@@ -229,11 +154,11 @@ def test_gpt_conversion(model_str):
             "tuple_idx": 0,
         },
         "blocks.3.hook_resid_mid": {
-            "section_id": "sections.section_0.17",
+            "section_id": "sections.section_0.21",
             "tuple_idx": 0,
         },
         "blocks.6.hook_resid_post": {
-            "section_id": "sections.section_0.49",
+            "section_id": "sections.section_0.60",
             "tuple_idx": 0,
         },
     }
@@ -244,44 +169,6 @@ def test_gpt_conversion(model_str):
 def test_pythia_conversion():
     """Test that pythia-14m in tlens and SequentialTransformer give the same outputs and internal
     activations.
-
-    The SequentialTransformer with node layer node_layers = ["ln2.1", "unembed"] has the
-    following architecture:
-    HookedModel(
-        (model): SequentialTransformer(
-            (sections): ModuleDict(
-                (pre): MultiSequential(
-                    (0): Embed()
-                    (1): LayerNormPre()
-                    (2): AttentionIn()
-                    (3): AttentionOut()
-                    (4): Add()
-                    (5): DualLayerNormPre()
-                    (6): MLPIn()
-                    (7): MLPAct()
-                    (8): MLPOut()
-                    (9): Add()
-                    (10): LayerNormPre()
-                    (11): AttentionIn()
-                    (12): AttentionOut()
-                    (13): Add()
-                )
-                (section_0): MultiSequential(
-                    (0): DualLayerNormPre()
-                    (1): MLPIn()
-                    (2): MLPAct()
-                    (3): MLPOut()
-                    (4): Add()
-                    (5): LayerNormPre()
-                    ...
-                    (41): LayerNormPre()
-                )
-                (section_1): MultiSequential(
-                    (0): Unembed()
-                )
-            )
-        )
-    )
 
     Floating point errors heavily accumulate here with float32 or less, so we use float64.
     """
@@ -294,11 +181,11 @@ def test_pythia_conversion():
             "tuple_idx": 0,
         },
         "blocks.3.hook_mlp_out": {
-            "section_id": "sections.section_0.21",
+            "section_id": "sections.section_0.26",
             "tuple_idx": 0,
         },
         "blocks.4.hook_resid_post": {
-            "section_id": "sections.section_0.31",
+            "section_id": "sections.section_0.38",
             "tuple_idx": 0,
         },
     }

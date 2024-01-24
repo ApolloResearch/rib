@@ -48,8 +48,8 @@ def test_get_data_subset(dataset_size, frac, n_samples, seed, expected_length, e
 def test_load_transformer(model_str):
     """Test load_sequential_transformer runs without error.
 
-    We test for equality with the tlens model in `test_tlens_converter but it doesn't run
-    load_sequential_transformer function."""
+    We test for equality with the tlens model in `test_tlens_converter` but it doesn't run
+    the load_sequential_transformer function."""
     _ = load_sequential_transformer(
         node_layers=["ln2.1", "unembed"],
         tlens_pretrained=model_str,

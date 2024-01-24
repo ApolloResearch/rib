@@ -153,6 +153,53 @@ def test_run_mnist_ablations(ablation_type):
 
 
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
+def test_run_mnist_ablations_bisect(ablation_type):
+    """Test various ablation result properties for ablations on MNIST.
+
+    The ablation rib_scripts load model from the config of the RIB graph. To run on ci
+    we need this path to be local. If that isn't the case you can manually fix this with:
+    ```
+    import torch
+    from pathlib import Path
+    from rib.settings import REPO_ROOT
+    rib_graph = torch.load("rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
+    mlp_path = Path(rib_graph['config']['mlp_path'])
+    rib_graph['config']['mlp_path'] = str(mlp_path.relative_to(REPO_ROOT))
+    torch.save(rib_graph, "rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
+    ```
+    """
+    graph_path = Path("rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
+    mlp_path = Path(torch.load(graph_path)["config"]["mlp_path"])
+    assert not mlp_path.is_absolute(), "must be relative to run in ci, see docstring"
+
+    config_str = f"""
+    exp_name: "test_ablation_mnist"
+    ablation_type: {ablation_type}
+    rib_results_path: rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
+    schedule:
+        schedule_type: bisect
+        score_target: 0.9
+        score_type: accuracy
+    dtype: float32
+    ablation_node_layers:
+        - layers.1
+        - layers.2
+    dataset:
+        dataset_type: torchvision
+        name: MNIST
+        return_set_n_samples: 100
+    batch_size: 64  # two batches
+    seed: 0
+    out_dir: null
+    eval_type: accuracy
+    """
+    config_dict = yaml.safe_load(config_str)
+    config = AblationConfig(**config_dict)
+    accuracies = load_bases_and_ablate(config)
+    check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
+
+
+@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
 def test_run_modular_arithmetic_rib_ablations(ablation_type):
     """Test various ablation result properties on modular arithmetic.
 

@@ -42,6 +42,18 @@ EdgeMasks = dict[str, dict[int, Bool[Tensor, "rib_out rib_in"]]]
 class ScheduleConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     schedule_type: Literal["exponential", "linear", "bisect"]
+
+    def __len__(self):
+        return None
+
+    def __iter__(self):
+        raise NotImplementedError("This method should be implemented in subclasses.")
+
+    def step(self, *args):
+        pass
+
+
+class StaticScheduleConfig(ScheduleConfig):
     early_stopping_threshold: Optional[float] = Field(
         None,
         description="The threshold to use for stopping the ablation calculations early. The"
@@ -54,19 +66,6 @@ class ScheduleConfig(BaseModel):
         "the default schedule.",
     )
 
-    # Replace with iter and init
-    def _get_ablation_schedule(self, n_vecs: int) -> list[int]:
-        raise NotImplementedError("This method should be implemented in subclasses.")
-
-    def __len__(self):
-        return None
-
-    def step(self, *args):
-        pass
-
-
-class StaticScheduleConfig(ScheduleConfig):
-    # Not supported for bisect, move to individual classes
     def _add_specific_ablation_points(self, ablation_schedule: list[int], n_vecs: int) -> list[int]:
         """Add each number of vecs remaining in self.specific_points to the ablation schedule."""
         if self.specific_points is not None:

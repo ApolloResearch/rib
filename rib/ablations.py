@@ -39,23 +39,9 @@ AblationAccuracies = dict[str, dict[int, float]]
 EdgeMasks = dict[str, dict[int, Bool[Tensor, "rib_out rib_in"]]]
 
 
-class ScheduleConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    schedule_type: Literal["exponential", "linear", "bisect"]
-
-
-class Schedule:
-    def __len__(self):
-        raise NotImplementedError("This method should be implemented in subclasses.")
-
-    def __iter__(self):
-        raise NotImplementedError("This method should be implemented in subclasses.")
-
-    def step(self, score):
-        raise NotImplementedError("This method should be implemented in subclasses.")
-
-
-class StaticScheduleConfig(ScheduleConfig):
+class StaticSchedule(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # not frozen because Schedules are mutable
+    # TODO Actually can I freeze the Static ones?
     schedule_type: Literal["exponential", "linear"]
     early_stopping_threshold: Optional[float] = Field(
         None,
@@ -69,17 +55,10 @@ class StaticScheduleConfig(ScheduleConfig):
         "the default schedule.",
     )
 
-
-class StaticSchedule(Schedule):
-    def __init__(
-        self,
-        config: StaticScheduleConfig,
-        n_vecs: int,
-    ):
-        self.n_vecs = n_vecs
-        self.specific_points = config.specific_points
-        # Early stopping tools
-        self.early_stopping_threshold = config.early_stopping_threshold
+    def __init__(self, n_vecs: int, **data):
+        super().__init__(**data)
+        self._n_vecs = n_vecs
+        # Early stopping variables
         self._base_score = None
         self._stop_iteration = False
 
@@ -88,7 +67,7 @@ class StaticSchedule(Schedule):
         if self.specific_points is not None:
             # Ignore the specific points that are greater than the number of vecs
             specific_ablated_vecs = [
-                self.n_vecs - x for x in self.specific_points if x <= self.n_vecs
+                self._n_vecs - x for x in self.specific_points if x <= self._n_vecs
             ]
             # Add our specific points for the number of vecs remaining to the ablation schedule
             ablation_schedule = sorted(
@@ -124,7 +103,7 @@ class StaticSchedule(Schedule):
             self._stop_iteration = True
 
 
-class LinearScheduleConfig(StaticScheduleConfig):
+class LinearSchedule(StaticSchedule):
     schedule_type: Literal["linear"]
     n_points: int = Field(
         ...,
@@ -134,15 +113,12 @@ class LinearScheduleConfig(StaticScheduleConfig):
         ),
     )
 
-
-class LinearSchedule(StaticSchedule):
-    def __init__(self, config: LinearScheduleConfig, n_vecs: int):
-        super().__init__(config, n_vecs)
-        self.n_points = config.n_points
+    def __init__(self, n_vecs: int, **data):
+        super().__init__(n_vecs, **data)
         # We'd like to move this _add_specific_ablation_points() logic to the parent class, but
         # we can't because it depends on n_points via _get_initial_ablation_schedule().
         initial_ablation_schedule = self._get_initial_ablation_schedule()
-        self.ablation_schedule = self._add_specific_ablation_points(initial_ablation_schedule)
+        self._ablation_schedule = self._add_specific_ablation_points(initial_ablation_schedule)
 
     def _get_initial_ablation_schedule(self) -> list[int]:
         """Create a linear schedule for the number of vectors to ablate.
@@ -161,14 +137,14 @@ class LinearSchedule(StaticSchedule):
             [12, 6, 0]
         """
         assert self.n_points >= 2, f"{self.n_points} must be at least 2."
-        assert self.n_points <= self.n_vecs, f"{self.n_points} must be <= {self.n_vecs}."
+        assert self.n_points <= self._n_vecs, f"{self.n_points} must be <= {self._n_vecs}."
 
-        ablation_schedule = [int(a) for a in np.linspace(self.n_vecs, 0, self.n_points, dtype=int)]
+        ablation_schedule = [int(a) for a in np.linspace(self._n_vecs, 0, self.n_points, dtype=int)]
 
         return ablation_schedule
 
 
-class ExponentialScheduleConfig(StaticScheduleConfig):
+class ExponentialSchedule(StaticSchedule):
     schedule_type: Literal["exponential"]
     ablate_every_vec_cutoff: Optional[int] = Field(
         None,
@@ -177,17 +153,13 @@ class ExponentialScheduleConfig(StaticScheduleConfig):
     )
     exp_base: Optional[float] = Field(2.0, description="The base of the exponential schedule.")
 
-
-class ExponentialSchedule(StaticSchedule):
-    def __init__(self, config: ExponentialScheduleConfig, n_vecs: int):
-        super().__init__(config, n_vecs)
-        self.ablate_every_vec_cutoff = config.ablate_every_vec_cutoff
-        self.exp_base = config.exp_base
+    def __init__(self, n_vecs: int, **data):
+        super().__init__(n_vecs, **data)
         # We'd like to move this _add_specific_ablation_points() logic to the parent class, but
         # we can't because it depends on ablate_every_vec_cutoff and exp_base via
         # _get_initial_ablation_schedule().
         initial_ablation_schedule = self._get_initial_ablation_schedule()
-        self.ablation_schedule = self._add_specific_ablation_points(initial_ablation_schedule)
+        self._ablation_schedule = self._add_specific_ablation_points(initial_ablation_schedule)
 
     def _get_initial_ablation_schedule(self) -> list[int]:
         """Create an exponential schedule for the number of vectors to ablate.
@@ -219,16 +191,16 @@ class ExponentialSchedule(StaticSchedule):
         exp_base = self.exp_base if self.exp_base is not None else 2.0
 
         if cutoff is None:
-            return list(range(self.n_vecs, -1, -1))
+            return list(range(self._n_vecs, -1, -1))
 
-        assert cutoff < self.n_vecs, "ablate_every_vec_cutoff must be smaller than n_vecs"
+        assert cutoff < self._n_vecs, "ablate_every_vec_cutoff must be smaller than n_vecs"
         assert cutoff >= 0, "ablate_every_vec_cutoff must be positive"
         # The section in which we ablate every vector.
-        ablate_every_vecs: list[int] = list(range(self.n_vecs, self.n_vecs - cutoff - 1, -1))
+        ablate_every_vecs: list[int] = list(range(self._n_vecs, self._n_vecs - cutoff - 1, -1))
         # The section in which we ablate according to 2^x.
         ablate_exponential: list[int] = []
         prev_val = ablate_every_vecs[-1]
-        for x in range(self.n_vecs):
+        for x in range(self._n_vecs):
             exp_val = int(prev_val - exp_base**x)
             if exp_val > 0:
                 ablate_exponential.append(exp_val)
@@ -241,14 +213,15 @@ class ExponentialSchedule(StaticSchedule):
         # combine the two sections
         ablation_schedule = ablate_every_vecs + ablate_exponential
         assert (
-            ablation_schedule[0] == self.n_vecs
+            ablation_schedule[0] == self._n_vecs
         ), "The first element of the schedule must be n_vecs."
         assert ablation_schedule[-1] == 0, "The last element of the schedule must be 0."
 
         return ablation_schedule
 
 
-class BisectScheduleConfig(ScheduleConfig):
+class BisectSchedule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     schedule_type: Literal["bisect"]
     loss_target: float = Field(
         ...,
@@ -256,27 +229,23 @@ class BisectScheduleConfig(ScheduleConfig):
     )
     scaling: Literal["linear", "logarithmic"] = Field(
         "linear",
-        description="The scaling to use for the bisect schedule.",
+        description="Whether to use the linear or logarithmic midpoint for bisect.",
     )
 
-
-class BisectSchedule(Schedule):
-    def __init__(self, config: BisectScheduleConfig, n_vecs: int):
-        super().__init__(config)
-        self.loss_target = config.loss_target
-        self.scaling = config.scaling
-        self.upper_bound = n_vecs
-        self.lower_bound = 0
+    def __init__(self, n_vecs: int, **data):
+        super().__init__(**data)
+        self._upper_bound = n_vecs
+        self._lower_bound = 0
 
     def _get_proposal(self) -> int:
         if self.scaling == "linear":
-            proposal = (self.upper_bound + self.lower_bound) // 2
+            proposal = (self._upper_bound + self._lower_bound) // 2
         elif self.scaling == "logarithmic":
-            proposal = int(np.exp((np.log(self.upper_bound) + np.log(self.lower_bound)) / 2))
+            proposal = int(np.exp((np.log(self._upper_bound) + np.log(self._lower_bound)) / 2))
         # Avoid getting stuck due to rounding
-        if proposal == self.lower_bound:
+        if proposal == self._lower_bound:
             proposal += 1
-        if proposal == self.upper_bound:
+        if proposal == self._upper_bound:
             proposal -= 1
         return proposal
 
@@ -284,15 +253,15 @@ class BisectSchedule(Schedule):
         return None
 
     def __iter__(self):
-        while self.upper_bound - self.lower_bound > 1:
+        while self._upper_bound - self._lower_bound > 1:
             yield self._get_proposal()
 
     def step(self, loss: float):
         proposal = self._get_proposal()
         if loss < self.loss_target:
-            self.upper_bound = proposal
+            self._upper_bound = proposal
         else:
-            self.lower_bound = proposal
+            self._lower_bound = proposal
 
 
 class AblationConfig(BaseModel):
@@ -309,7 +278,7 @@ class AblationConfig(BaseModel):
         "connecting RIB nodes. It uses the C matrices as we don't have edges for W."
     )
     rib_results_path: RootPath
-    schedule: Union[ExponentialScheduleConfig, LinearScheduleConfig] = Field(
+    schedule: Union[StaticSchedule, BisectSchedule] = Field(
         ...,
         discriminator="schedule_type",
         description="The schedule to use for ablations.",
@@ -337,7 +306,7 @@ def ablate_node_layers_and_eval(
     data_loader: DataLoader,
     eval_fn: Callable,
     module_names: list[str],
-    schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig, BisectScheduleConfig],
+    schedule: Union[StaticSchedule, BisectSchedule],
     device: str,
     dtype: Optional[torch.dtype] = None,
 ) -> AblationAccuracies:
@@ -359,7 +328,7 @@ def ablate_node_layers_and_eval(
             module in hooked_model.model. These typically correspond to section_names (e.g.
             "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
             "layers.2") when the model is an MLP.
-        schedule_config: The config for the ablation schedule.
+        schedule: The config for the ablation schedule.
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
 
@@ -370,10 +339,7 @@ def ablate_node_layers_and_eval(
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
         ablation_node_layers, module_names, basis_matrices, strict=True
     ):
-        ablation_schedule_config = schedule_config(n_vecs=basis_vecs.shape[0])
-        ablation_schedule = ablation_schedule_config.get_ablation_schedule(
-            n_vecs=basis_vecs.shape[0]
-        )
+        ablation_schedule = schedule(n_vecs=basis_vecs.shape[0])
 
         base_score: Optional[float] = None
 
@@ -477,7 +443,7 @@ def ablate_edges_and_eval(
     data_loader: DataLoader,
     eval_fn: Callable,
     module_names: list[str],
-    schedule_config: Union[ExponentialScheduleConfig, LinearScheduleConfig],
+    schedule: Union[StaticSchedule, BisectSchedule],
     device: str,
     dtype: Optional[torch.dtype] = None,
     always_keep_const_dir=False,
@@ -500,7 +466,7 @@ def ablate_edges_and_eval(
             module in hooked_model.model. These typically correspond to section_names (e.g.
             "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
             "layers.2") when the model is an MLP.
-        schedule_config: The config for the ablation schedule.
+        schedule: The config for the ablation schedule.
         device: The device to run the model on.
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
         keep_const_edges: Used to always keep the constant edges (for free) when ablating a
@@ -510,7 +476,7 @@ def ablate_edges_and_eval(
         A dictionary mapping node layers to ablation accuracies/losses.
         A dictionary mapping node layers to edge masks.
     """
-    base_score = eval_fn(hooked_model, data_loader, hooks=[], dtype=dtype, device=device)
+    base_score = eval_fn(hooked_model, data_loader, hooks=[], dtype=dtype, device=device)  # TODO
 
     results: AblationAccuracies = {}
     edge_masks: EdgeMasks = {}
@@ -520,7 +486,7 @@ def ablate_edges_and_eval(
     ):
         (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
         total_possible_edges = in_C.shape[0] * out_C.shape[0]
-        # ablation_schedule = schedule_config.get_ablation_schedule(n_vecs=total_possible_edges)
+        ablation_schedule = schedule(n_vecs=total_possible_edges)
         results[ablation_node_layer] = {}
         edge_masks[ablation_node_layer] = {}
         # Iterate through possible number of ablated vectors, starting from no ablated vectors
@@ -534,7 +500,7 @@ def ablate_edges_and_eval(
                 keep_const_edges=always_keep_const_dir,
             )
             if edge_mask.all():
-                results[ablation_node_layer][num_edges_kept] = base_score
+                results[ablation_node_layer][num_edges_kept] = base_score  # TODO
                 continue
 
             edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
@@ -556,13 +522,7 @@ def ablate_edges_and_eval(
             score = eval_fn(hooked_model, data_loader, hooks=[hook], dtype=dtype, device=device)
             results[ablation_node_layer][num_edges_kept] = score
 
-            if schedule_config.early_stopping_threshold is not None:
-                # If the score is more than `early_stopping_threshold` away from the base result,
-                # then we stop ablating vectors.
-                if abs(score - base_score) > schedule_config.early_stopping_threshold:
-                    logger.info(f"Stopping early at {num_edges_kept} with {score=}, {base_score=} ")
-                    break
-
+            schedule.step(score)  # TODO
     return results, edge_masks
 
 
@@ -734,7 +694,7 @@ def load_bases_and_ablate(
             data_loader=data_loader,
             eval_fn=eval_fn,
             module_names=module_names,
-            schedule_config=config.schedule,
+            schedule=config.schedule,
             device=device,
             dtype=dtype,
         )

@@ -199,7 +199,6 @@ def calculate_interaction_rotations(
 
     # last layer
     if rotate_final_node_layer:
-        assert node_layers[-1] != "output", "Cannot rotate the output layer."
         # Note: we use the basis_formula "svd" as this is our best guess of a basis when running
         # RIB from an intermediate point. This excludes D, V, and Lambda.
         # many of these arguments will be ignored, therefore.
@@ -333,7 +332,6 @@ def _calculate_one_interaction_rotation(
     ### SVD ROTATION (U)
     D_dash, U_dash = eigendecompose(gram_matrix)
     if center:
-        assert means is not None and node_layer in means
         D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
 
     # Trucate all directions with eigenvalues smaller than some threshold

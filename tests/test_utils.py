@@ -7,7 +7,14 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from torch import nn
 from torch.utils.data import DataLoader
 
-from rib.ablations import ExponentialSchedule, ExponentialScheduleConfig
+from rib.ablations import (
+    BisectSchedule,
+    BisectScheduleConfig,
+    ExponentialSchedule,
+    ExponentialScheduleConfig,
+    LinearSchedule,
+    LinearScheduleConfig,
+)
 from rib.models import MLP, MLPConfig, MLPLayer
 from rib.models.utils import gelu_new, get_model_attr
 from rib.utils import eval_model_accuracy, find_root, replace_pydantic_model
@@ -103,6 +110,84 @@ def test_calc_exponential_ablation_schedule(
     )
     schedule = ExponentialSchedule(n_eigenvecs, schedule_config)
     assert schedule._ablation_schedule == expected
+
+
+@pytest.mark.parametrize(
+    "n_points, n_eigenvecs, expected",
+    [
+        (11, 10, [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]),
+        (11, 20, [20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 0]),
+    ],
+)
+def test_calc_linear_ablation_schedule(
+    n_points: int,
+    n_eigenvecs: int,
+    expected: list[int],
+):
+    schedule_config = LinearScheduleConfig(schedule_type="linear", n_points=n_points)
+    schedule = LinearSchedule(n_eigenvecs, schedule_config)
+    assert schedule._ablation_schedule == expected
+
+
+@pytest.mark.parametrize(
+    "loss_fn, loss_target, n_eigenvecs, lower, upper",
+    [
+        (lambda x: -10.0 + x, -8.5, 10, 1, 2),
+        (lambda x: -10.0 + x, -5.1, 10, 4, 5),
+        (lambda x: -3.14 + x**2, -3, 10, 0, 1),
+    ],
+)
+def test_bisect_schedule(loss_fn, loss_target, n_eigenvecs, upper, lower):
+    """The schedule should have schedule._upper_bound == smallest n_vec_ablated with bad loss
+    (loss > loss_target), and schedule._lower_bound == largest n_vec_ablated with good loss
+    (loss <= loss_target).
+
+    The function assumes that ablating every vector returns a bad loss, and ablating no vectors
+    returns a good loss.
+    """
+    schedule_config = BisectScheduleConfig(
+        schedule_type="bisect",
+        score_type="loss",
+        score_target=loss_target,
+    )
+    schedule = BisectSchedule(n_eigenvecs, schedule_config)
+    for n_vec_ablated in schedule:
+        print(f"{n_vec_ablated=}")
+        loss = loss_fn(n_vec_ablated)
+        schedule.step(loss)
+    assert schedule._upper_bound == upper
+    assert schedule._lower_bound == lower
+
+
+@pytest.mark.parametrize(
+    "acc_fn, accuracy_target, n_eigenvecs, lower, upper",
+    [
+        (lambda x: (100 - x) / 100, 0.95, 100, 5, 6),
+        (lambda x: (3 - x), 1.5, 3, 1, 2),
+        (lambda x: (10 - x) / 10, 0.49, 10, 5, 6),
+        (lambda x: (10 - x) / 10, 0.5, 10, 5, 6),
+    ],
+)
+def test_bisect_schedule_accuracy(acc_fn, accuracy_target, n_eigenvecs, upper, lower):
+    """The schedule should have schedule._upper_bound == smallest n_vec_ablated with bad loss
+    (loss > loss_target), and schedule._lower_bound == largest n_vec_ablated with good loss
+    (loss <= loss_target).
+
+    The function assumes that ablating every vector returns a bad loss, and ablating no vectors
+    returns a good loss.
+    """
+    schedule_config = BisectScheduleConfig(
+        schedule_type="bisect",
+        score_type="accuracy",
+        score_target=accuracy_target,
+    )
+    schedule = BisectSchedule(n_eigenvecs, schedule_config)
+    for n_vec_ablated in schedule:
+        print(f"{n_vec_ablated=}")
+        score = acc_fn(n_vec_ablated)
+        schedule.step(score)
+    assert schedule._upper_bound == upper
+    assert schedule._lower_bound == lower
 
 
 class TestFindRoot:

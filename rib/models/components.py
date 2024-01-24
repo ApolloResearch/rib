@@ -12,7 +12,7 @@ from torch.nn import functional as F
 if TYPE_CHECKING:
     from rib.models import SequentialTransformerConfig
 
-from rib.models.utils import gelu_new, layer_norm
+from rib.models.utils import gelu_new, layer_norm, variance
 
 
 class MultiSequential(nn.Sequential):
@@ -617,8 +617,31 @@ class MLPOut(nn.Module):
         return out, residual
 
 
+class Variance(torch.nn.Module):
+    """Calculates the variance in preparation for the layer norm."""
+
+    def __init__(self, cfg: "SequentialTransformerConfig"):
+        super().__init__()
+        self.cfg = cfg
+        self._exclude_final_dim = False
+
+    def forward(
+        self, residual: Float[Tensor, "... d_model"]
+    ) -> tuple[Float[Tensor, "... 1"], Float[Tensor, "... d_model"]]:
+        residual_for_variance = residual[..., :-1] if self._exclude_final_dim else residual
+        var = variance(residual_for_variance, epsilon=self.cfg.eps)
+        return var, residual
+
+    def exclude_final_dim(self, exclude: bool = True):
+        """Exclude the final dimension from the variance calculation.
+
+        This is used when the model has a folded bias.
+        """
+        self._exclude_final_dim = exclude
+
+
 class LayerNormPre(torch.nn.Module):
-    """Sequential version of transformer-lens' LayerNormPre.
+    """Sequential version of transformer-lens' LayerNormPre that expects a pre-computed variance.
 
     A standard LayerNorm without the element-wise affine parameters.
     """
@@ -627,40 +650,96 @@ class LayerNormPre(torch.nn.Module):
         super().__init__()
         self.cfg = cfg
         self.return_residual = return_residual
+        self._exclude_final_dim = False
 
     def forward(
-        self,
-        residual: Float[Tensor, "... d_model"],
+        self, var: Float[Tensor, "... 1"], residual: Float[Tensor, "... d_model"]
     ) -> Union[
         Float[Tensor, "... d_model"],
         tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]],
     ]:
-        out = layer_norm(residual.clone(), self.cfg.eps)
+        residual_for_norm = residual[..., :-1] if self._exclude_final_dim else residual
+
+        out = layer_norm(residual_for_norm, var=var)
+
+        if self._exclude_final_dim:
+            # Add the final dimension back in
+            out = torch.cat([out, residual[..., -1:]], dim=-1)
+
         if self.return_residual:
             return out, residual
         else:
             return out
 
+    def exclude_final_dim(self, exclude: bool = True):
+        """Exclude the final dimension from the variance calculation.
+
+        This is used when the model has a folded bias.
+        """
+        self._exclude_final_dim = exclude
+
+
+class DualVariance(torch.nn.Module):
+    """A version of Variance that takes an attention residual stream and raw residual stream.
+
+    Simply passes through the attention residual as the new residual. This is used for models like
+    pythia that use parallel attention and mlp blocks.
+    """
+
+    def __init__(self, cfg: "SequentialTransformerConfig"):
+        super().__init__()
+        self.cfg = cfg
+        self._exclude_final_dim = False
+
+    def forward(
+        self, attn_resid: Float[Tensor, "... d_model"], residual: Float[Tensor, "... d_model"]
+    ) -> tuple[Float[Tensor, "... 1"], Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
+        """Forward through the module.
+
+        Args:
+            attn_resid: The residual stream after adding the attention block.
+            residual: The raw residual stream.
+
+        Returns:
+            - The variance of the raw residual stream.
+            - The raw residual stream
+            - The residual stream after adding the attention block. This will be considered the
+                "new" residual stream in the subsequent (MLP) layers.
+        """
+        residual_for_variance = residual[..., :-1] if self._exclude_final_dim else residual
+        var = variance(residual_for_variance, epsilon=self.cfg.eps)
+        return var, residual, attn_resid
+
+    def exclude_final_dim(self, exclude: bool = True):
+        """Exclude the final dimension from the variance calculation.
+
+        This is used when the model has a folded bias.
+        """
+        self._exclude_final_dim = exclude
+
 
 class DualLayerNormPre(torch.nn.Module):
-    """A version of LayerNormPre that handles two inputs.
+    """A version of LayerNormPre that takes expects a pre-computed variance.
 
-    Simply passes through the second input as the new residual. This is used for models like pythia
+    Simply passes through the attention residual thorough. This is used for models like pythia
     that use parallel attention and mlp blocks.
     """
 
     def __init__(self, cfg: "SequentialTransformerConfig"):
         super().__init__()
         self.cfg = cfg
+        self._exclude_final_dim = False
 
     def forward(
         self,
-        attn_resid: Float[Tensor, "... d_model"],
+        var: Float[Tensor, "... 1"],
         residual: Float[Tensor, "... d_model"],
+        attn_resid: Float[Tensor, "... d_model"],
     ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
         """Forward through the module.
 
         Args:
+            var: The variance of the raw residual stream.
             attn_resid: The residual stream after adding the attention block.
             residual: The raw residual stream.
 
@@ -669,63 +748,20 @@ class DualLayerNormPre(torch.nn.Module):
             - The residual stream after adding the attention block. This will be considered the
                 "new" residual stream in the subsequent (MLP) layers.
         """
-        out = layer_norm(residual.clone(), self.cfg.eps)
+        residual_for_norm = residual[..., :-1] if self._exclude_final_dim else residual
+
+        out = layer_norm(residual_for_norm, var=var)
+        if self._exclude_final_dim:
+            # Add the final dimension back in
+            out = torch.cat([out, residual[..., -1:]], dim=-1)
         return out, attn_resid
 
+    def exclude_final_dim(self, exclude: bool = True):
+        """Exclude the final dimension from the variance calculation.
 
-class LayerNormPreFolded(torch.nn.Module):
-    """A version of LayerNormPre where we assume the input has a constant final dimension."""
-
-    def __init__(self, cfg: "SequentialTransformerConfig", return_residual: bool = False):
-        super().__init__()
-        self.cfg = cfg
-        self.return_residual = return_residual
-
-    def forward(
-        self,
-        residual: Float[Tensor, "... d_model"],
-    ) -> Union[
-        Float[Tensor, "... d_model"],
-        tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]],
-    ]:
-        x0 = residual[..., :-1].clone()  # [..., length-1]
-
-        x0_out = layer_norm(x0, self.cfg.eps)
-        out = torch.cat([x0_out, residual[..., -1:]], dim=-1)  # [..., length]
-        if self.return_residual:
-            return out, residual
-        else:
-            return out
-
-
-class DualLayerNormPreFolded(torch.nn.Module):
-    """A version of LayerNormPreFolded that handles two inputs."""
-
-    def __init__(self, cfg: "SequentialTransformerConfig"):
-        super().__init__()
-        self.cfg = cfg
-
-    def forward(
-        self,
-        attn_resid: Float[Tensor, "... d_model"],
-        residual: Float[Tensor, "... d_model"],
-    ) -> tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]]:
-        """Forward through the module.
-
-        Args:
-            attn_resid: The residual stream after adding the attention block.
-            residual: The raw residual stream.
-
-        Returns:
-            - The application of layer norm to the raw residual stream.
-            - The residual stream after adding the attention block. This will be considered the
-                "new" residual stream in the subsequent (MLP) layers.
+        This is used when the model has a folded bias.
         """
-        x0 = residual[..., :-1].clone()  # [..., length-1]
-
-        x0_out = layer_norm(x0, self.cfg.eps)
-        out = torch.cat([x0_out, residual[..., -1:]], dim=-1)
-        return out, attn_resid
+        self._exclude_final_dim = exclude
 
 
 class IdentitySplit(torch.nn.Module):

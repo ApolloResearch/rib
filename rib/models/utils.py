@@ -296,11 +296,19 @@ def fold_unembed(weight: Float[Tensor, "d_model d_vocab"], bias: Float[Tensor, "
     bias.data = torch.zeros(1, bias.shape[0], device=bias.device, dtype=bias.dtype)  # (1, d_vocab)
 
 
-def layer_norm(x: Float[Tensor, "... d_model"], epsilon=1e-5) -> Float[Tensor, "... d_model"]:
+def variance(x: Float[Tensor, "... d_model"], epsilon=1e-5) -> Float[Tensor, "... 1"]:
+    dtype = x.dtype if x.dtype in [torch.float32, torch.float64] else torch.float32
+    var: Float[Tensor, "... 1"] = (x.to(dtype) - x.to(dtype).mean(-1, keepdim=True)).pow(2).mean(
+        -1, keepdim=True
+    ) + epsilon
+    return var
+
+
+def layer_norm(
+    x: Float[Tensor, "... d_model"], var: Float[Tensor, "... 1"]
+) -> Float[Tensor, "... d_model"]:
     in_dtype = x.dtype
     if in_dtype not in [torch.float32, torch.float64]:
         x = x.to(torch.float32)
-    x = x - x.mean(-1, keepdim=True)
-    scale: Float[Tensor, "... 1"] = (x.pow(2).mean(-1, keepdim=True) + epsilon).sqrt()
-    x = x / scale
+    x = (x - x.mean(-1, keepdim=True)) / var.sqrt()
     return x.to(in_dtype)

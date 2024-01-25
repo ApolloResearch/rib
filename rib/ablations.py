@@ -66,6 +66,12 @@ class StaticSchedule:
         # Early stopping variables
         self._base_score: Optional[float] = None
         self._stop_iteration: bool = False
+        # Generate the ablation schedule
+        initial_ablation_schedule = self._get_initial_ablation_schedule()
+        # Add specific points that were manually requested
+        self._ablation_schedule: list[int] = self._add_specific_ablation_points(
+            initial_ablation_schedule
+        )
 
     def _add_specific_ablation_points(self, ablation_schedule: list[int]) -> list[int]:
         """Add each number of vecs remaining in self.specific_points to the ablation schedule."""
@@ -154,12 +160,6 @@ class LinearSchedule(StaticSchedule):
 
         """
         super().__init__(config, n_vecs)
-        # We'd like to move this _add_specific_ablation_points() logic to the parent class, but
-        # we can't because it depends on n_points via _get_initial_ablation_schedule().
-        initial_ablation_schedule = self._get_initial_ablation_schedule()
-        self._ablation_schedule: list[int] = self._add_specific_ablation_points(
-            initial_ablation_schedule
-        )
 
     def _get_initial_ablation_schedule(self) -> list[int]:
         assert self.config.n_points >= 2, f"{self.config.n_points} must be at least 2."
@@ -210,13 +210,6 @@ class ExponentialSchedule(StaticSchedule):
             ablate_every_vec_cutoff = 3, n_vecs = 24 --> [24, 23, 22, 21, 20, 18, 14, 6, 0]
         """
         super().__init__(config, n_vecs)
-        # We'd like to move this _add_specific_ablation_points() logic to the parent class, but
-        # we can't because it depends on ablate_every_vec_cutoff and exp_base via
-        # _get_initial_ablation_schedule().
-        initial_ablation_schedule = self._get_initial_ablation_schedule()
-        self._ablation_schedule: list[int] = self._add_specific_ablation_points(
-            initial_ablation_schedule
-        )
 
     def _get_initial_ablation_schedule(self) -> list[int]:
         cutoff = self.config.ablate_every_vec_cutoff

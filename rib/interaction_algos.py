@@ -197,11 +197,10 @@ def calculate_interaction_rotations(
     # We start appending InteractionRotation from the output layer and work our way backwards
     interaction_rotations: list[InteractionRotation] = []
 
-    # last layer
+    # final node layer
     if rotate_final_node_layer:
         # Note: we use the basis_formula "svd" as this is our best guess of a basis when running
-        # RIB from an intermediate point. This excludes D, V, and Lambda.
-        # many of these arguments will be ignored, therefore.
+        # running RIB on a node layer with no subsequent layers. This excludes D, V, and Lambda.
         last_layer_ir = _calculate_one_interaction_rotation(
             gram_matrix=gram_matrices[node_layers[-1]],
             node_layer=node_layers[-1],
@@ -213,12 +212,11 @@ def calculate_interaction_rotations(
             M_dtype=M_dtype,
             Lambda_einsum_dtype=Lambda_einsum_dtype,
             truncation_threshold=truncation_threshold,
-            rotate_final_node_layer=rotate_final_node_layer,
             basis_formula="svd",
             center=center,
             means=means[node_layers[-1]] if means is not None else None,
             section_name="",
-            last_C=None,
+            C_next_layer=None,
         )
     else:
         if node_layers[-1] == "output":
@@ -256,8 +254,8 @@ def calculate_interaction_rotations(
         total=len(section_names_to_calculate),
         desc="Interaction rotations",
     ):
-        last_C = interaction_rotations[-1].C
-        last_C = last_C.to(device=device) if last_C is not None else None
+        C_next_layer = interaction_rotations[-1].C
+        C_next_layer = C_next_layer.to(device=device) if C_next_layer is not None else None
         interaction_rotations.append(
             _calculate_one_interaction_rotation(
                 gram_matrix=gram_matrices[node_layer],
@@ -270,12 +268,11 @@ def calculate_interaction_rotations(
                 M_dtype=M_dtype,
                 Lambda_einsum_dtype=Lambda_einsum_dtype,
                 truncation_threshold=truncation_threshold,
-                rotate_final_node_layer=rotate_final_node_layer,
                 basis_formula=basis_formula,
                 center=center,
                 means=means[node_layer] if means is not None else None,
                 section_name=section_name,
-                last_C=last_C,
+                C_next_layer=C_next_layer,
             )
         )
 
@@ -293,26 +290,20 @@ def _calculate_one_interaction_rotation(
     M_dtype: torch.dtype,
     Lambda_einsum_dtype: torch.dtype,
     truncation_threshold: float,
-    rotate_final_node_layer: bool,
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"],
     center: bool,
     means: Optional[Float[Tensor, "d_hidden"]],
     section_name: str,
-    last_C: Optional[Float[Tensor, "orig rib"]],
+    C_next_layer: Optional[Float[Tensor, "orig rib"]],
 ) -> InteractionRotation:
-    """Calculate a single interaction rotation matrices (denoted C) and their psuedo-inverses.
+    """Calculate a single interaction rotation matrix (C) and it's psuedo-inverse (C_pinv)
 
-    This function implements Algorithm 2 (Pseudocode for RIB in transformers) of the paper. We name
-    the variables as they are named in the paper.
-
-    We collect the interaction rotation matrices from the output layer backwards, as we need the
-    next layer's rotation to compute the current layer's rotation. We reverse the resulting Cs and
-    Us back to the original node order before returning.
+    Also stores other useful matrices (W, W_pinv, V, Lambda) that are computed in the process.
 
     Args:
-        last_C: The C matrix from layer l+1. Note we calculate layers from the output backwards, so
-            this is last C matrix we calculated but the next C matrix in in model order. Will be
-            None the first time this fn is called (for the last layer of the model).
+        C_next_layer: The C matrix from layer l+1. Note we calculate layers from the output
+            backwards, so this is last C matrix we calculated but the next C matrix in in model
+            order. Will be None the first time this fn is called (for the last layer of the model).
         section_name: The section that starts with node_layer
         See `calculate_interaction_rotations` for all other arguments. The only differences is
             that we take a single tensor for gram_matrix and means instead of a dictionary.
@@ -375,7 +366,7 @@ def _calculate_one_interaction_rotation(
     # This is an orthogonal rotation that attempts to sparsify the edges
     # Compute M_dash in the neuron basis
     M_dash, Lambda_dash = collect_M_dash_and_Lambda_dash(
-        C_out=last_C,
+        C_out=C_next_layer,
         hooked_model=hooked_model,
         n_intervals=n_intervals,
         data_loader=data_loader,

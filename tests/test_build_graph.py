@@ -442,11 +442,11 @@ def centered_rib_test(results: RibBuildResults, atol=1e-6):
     all_mean_acts = get_means(results, atol=atol)
     interaction_rotations = rotation_list_to_dict(results.interaction_rotations)
     # output and pre-unembed have no bias
-    m_names = [m_name for m_name in results.config.node_layers if m_name not in ["output"]]
+    m_names = [
+        m_name for m_name in results.config.node_layers if m_name not in ["output", "unembed"]
+    ]
     for m_name in m_names:
         C_inv = interaction_rotations[m_name].C_pinv  # [rib_dir, emb_pos]
-        if C_inv is None:  # this happens when rotate_final_layer is true
-            continue
         mean_acts = all_mean_acts[m_name].cpu()  # [emb_pos]
         rib_acts = all_rib_acts[m_name]  # [batch, (seqpos?), rib_dir]
 

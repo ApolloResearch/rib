@@ -148,10 +148,9 @@ def test_bisect_schedule(loss_fn, loss_target, n_eigenvecs, upper, lower):
     """
     schedule_config = BisectScheduleConfig(
         schedule_type="bisect",
-        score_type="ce_loss",
         score_target=loss_target,
     )
-    schedule = BisectSchedule(n_eigenvecs, schedule_config)
+    schedule = BisectSchedule(n_eigenvecs, "ce_loss", schedule_config)
     for n_vec_ablated in schedule:
         print(f"{n_vec_ablated=}")
         loss = loss_fn(n_vec_ablated)
@@ -179,10 +178,9 @@ def test_bisect_schedule_accuracy(acc_fn, accuracy_target, n_eigenvecs, upper, l
     """
     schedule_config = BisectScheduleConfig(
         schedule_type="bisect",
-        score_type="accuracy",
         score_target=accuracy_target,
     )
-    schedule = BisectSchedule(n_eigenvecs, schedule_config)
+    schedule = BisectSchedule(n_eigenvecs, "accuracy", schedule_config)
     for n_vec_ablated in schedule:
         print(f"{n_vec_ablated=}")
         score = acc_fn(n_vec_ablated)

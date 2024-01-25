@@ -179,7 +179,6 @@ def test_run_mnist_ablations_bisect(ablation_type):
     schedule:
         schedule_type: bisect
         score_target: 0.9
-        score_type: accuracy
     dtype: float32
     ablation_node_layers:
         - layers.1
@@ -275,7 +274,6 @@ def test_run_modular_arithmetic_rib_ablations_bisect(ablation_type):
     schedule:
         schedule_type: bisect
         score_target: 0.9
-        score_type: accuracy
     dataset:
         dataset_type: modular_arithmetic
         return_set: train

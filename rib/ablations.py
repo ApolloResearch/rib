@@ -275,7 +275,8 @@ class BisectSchedule:
     than the target_loss. "Find" here means that, after the run, self._upper_bound will be the
     largest n_vec_ablated where the loss is <= the target_loss, and self._lower_bound will be the
     smallest n_vec_ablated where the loss is > the target_loss.
-    To use an accuracy score rather than a loss, set score_type to "accuracy".
+    Whether an accuracy score or a loss-type score should be assumed is read frome eval_type
+    in the ablation config (passed via this classes init).
 
     Examples:
         n_eigenvecs = 20, target loss = -3, linear scaling

@@ -325,11 +325,16 @@ class BisectSchedule:
             yield self._get_proposal()
 
     def update_bounds(self, score: float):
+        """Bisect logic: update either the upper or lower bound based on the current score."""
+        # Loss: Lower is better. Check if the current loss is good, i.e. <= the target loss.
         if self._eval_type == "ce_loss":
             if score <= self.config.score_target:
+                # Good loss --> ablate more vectors. Set lower bound to current n_vecs_ablated.
                 self._lower_bound = self._most_recent_proposal
             else:
+                # Bad loss --> ablate fewer vectors. Set upper bound to current n_vecs_ablated.
                 self._upper_bound = self._most_recent_proposal
+        # The same as above but opposite if statements because higher accuracy is better.
         elif self._eval_type == "accuracy":
             if score >= self.config.score_target:
                 self._lower_bound = self._most_recent_proposal

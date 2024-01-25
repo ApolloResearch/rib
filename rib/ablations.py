@@ -445,12 +445,10 @@ def ablate_node_layers_and_eval(
 
         results[ablation_node_layer] = {}
         # Iterate through possible number of ablated vectors, starting from no ablated vectors
-        for i, n_ablated_vecs in enumerate(
-            tqdm(
-                ablation_schedule,
-                total=ablation_schedule.size(),
-                desc=f"Ablating {module_name}",
-            )
+        for n_ablated_vecs in tqdm(
+            ablation_schedule,
+            total=ablation_schedule.size(),
+            desc=f"Ablating {module_name}",
         ):
             # Note that we may have truncated vectors with small eigenvalues, so we make sure not to
             # ablate more vectors than we have remaining

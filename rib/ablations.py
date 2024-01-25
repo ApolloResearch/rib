@@ -83,7 +83,7 @@ class StaticSchedule:
     def _check_early_stopping(self, score: float, early_stopping_threshold: float) -> bool:
         """Check if we should stop early.
 
-        Stop if the score is more than `early_stopping_threshold` away from the base (no ablationbs)
+        Stop if the score is more than `early_stopping_threshold` away from the base (no ablations)
         result, i.e. once we ablated to many vecs that the model output is crap, don't bother
         ablating even more vecs.
 

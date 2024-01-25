@@ -120,10 +120,11 @@ class StaticSchedule:
             else:
                 yield n_vecs_remaining
 
-    def step(self, score):
+    def update_early_stopping_flag(self, score: float):
         if self.config.early_stopping_threshold is not None:
-            if self._check_early_stopping(score, self.config.early_stopping_threshold):
-                self._stop_iteration = True
+            self._stop_iteration = self._check_early_stopping(
+                score, self.config.early_stopping_threshold
+            )
 
 
 class LinearScheduleConfig(StaticScheduleConfig):
@@ -310,9 +311,9 @@ class BisectSchedule:
             proposal += 1
         if proposal == self._upper_bound:
             proposal -= 1
-        # Check that we don't forget .step() somewhere
+        # Check that we don't forget .update_bounds() somewhere
         if proposal == self._most_recent_proposal:
-            raise RuntimeError("Ablation schedule stuck. Did you call .step(score)?")
+            raise RuntimeError("Ablation schedule stuck. Did you call .update_bounds(score)?")
         self._most_recent_proposal = proposal
         return proposal
 
@@ -323,7 +324,7 @@ class BisectSchedule:
         while self._upper_bound - self._lower_bound > 1:
             yield self._get_proposal()
 
-    def step(self, score: float):
+    def update_bounds(self, score: float):
         if self._eval_type == "ce_loss":
             if score <= self.config.score_target:
                 self._lower_bound = self._most_recent_proposal
@@ -479,7 +480,10 @@ def ablate_node_layers_and_eval(
             )
             results[ablation_node_layer][n_vecs_remaining] = score
 
-            ablation_schedule.step(score)
+            if isinstance(ablation_schedule, BisectSchedule):
+                ablation_schedule.update_bounds(score)
+            else:
+                ablation_schedule.update_early_stopping_flag(score)
 
         # Sort the results by the number of edges kept, descending
         results[ablation_node_layer] = dict(
@@ -600,30 +604,30 @@ def ablate_edges_and_eval(
                 keep_const_edges=always_keep_const_dir,
             )
             if edge_mask.all():
-                results[ablation_node_layer][num_edges_kept] = base_score
-                ablation_schedule.step(base_score)
-                continue
+                score = base_score
+            else:
+                edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
+                hook = Hook(
+                    name=module_name,
+                    data_key="edge_ablation",
+                    fn=edge_ablation_forward_hook_fn,
+                    module_name=module_name,
+                    fn_kwargs={
+                        "edge_mask": edge_mask.to(device),
+                        "in_C": in_C.to(device),
+                        "in_C_inv": in_C_inv.to(device),
+                        "out_C": out_C.to(device),
+                        "out_C_inv": out_C_inv.to(device),
+                    },
+                )
+                score = eval_fn(hooked_model, data_loader, hooks=[hook], dtype=dtype, device=device)
 
-            edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
-
-            hook = Hook(
-                name=module_name,
-                data_key="edge_ablation",
-                fn=edge_ablation_forward_hook_fn,
-                module_name=module_name,
-                fn_kwargs={
-                    "edge_mask": edge_mask.to(device),
-                    "in_C": in_C.to(device),
-                    "in_C_inv": in_C_inv.to(device),
-                    "out_C": out_C.to(device),
-                    "out_C_inv": out_C_inv.to(device),
-                },
-            )
-
-            score = eval_fn(hooked_model, data_loader, hooks=[hook], dtype=dtype, device=device)
             results[ablation_node_layer][num_edges_kept] = score
 
-            ablation_schedule.step(score)
+            if isinstance(ablation_schedule, BisectSchedule):
+                ablation_schedule.update_bounds(score)
+            else:
+                ablation_schedule.update_early_stopping_flag(score)
 
         # Sort the results by the number of edges kept, descending
         results[ablation_node_layer] = dict(

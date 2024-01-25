@@ -154,7 +154,7 @@ def test_bisect_schedule(loss_fn, loss_target, n_eigenvecs, upper, lower):
     for n_vec_ablated in schedule:
         print(f"{n_vec_ablated=}")
         loss = loss_fn(n_vec_ablated)
-        schedule.step(loss)
+        schedule.update_bounds(loss)
     assert schedule._upper_bound == upper
     assert schedule._lower_bound == lower
 
@@ -184,7 +184,7 @@ def test_bisect_schedule_accuracy(acc_fn, accuracy_target, n_eigenvecs, upper, l
     for n_vec_ablated in schedule:
         print(f"{n_vec_ablated=}")
         score = acc_fn(n_vec_ablated)
-        schedule.step(score)
+        schedule.update_bounds(score)
     assert schedule._upper_bound == upper
     assert schedule._lower_bound == lower
 

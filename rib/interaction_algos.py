@@ -138,6 +138,7 @@ def calculate_interaction_rotations(
     center: bool = False,
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     n_stochastic_sources: Optional[int] = None,
+    dim_stochastic_sources: Optional[Literal["both", "out_pos", "out_hidden"]] = None,
 ) -> list[InteractionRotation]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -340,6 +341,7 @@ def calculate_interaction_rotations(
             Lambda_einsum_dtype=Lambda_einsum_dtype,
             basis_formula=basis_formula,
             n_stochastic_sources=n_stochastic_sources,
+            dim_stochastic_sources=dim_stochastic_sources,
         )
         # Then convert it into the pca basis
         M: Float[Tensor, "orig_trunc orig_trunc"] = (

@@ -434,6 +434,23 @@ def calc_edge_squared(
     edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1) if has_pos else 0)
 
 
+def _generate_sources(shape, like_tensor):
+    """Generate a tensor of -1 or 1 with equal probability.
+
+    Args:
+        shape: The shape of the output tensor.
+        like_tensor: A tensor with the desired dtype and device (not modified).
+
+    Returns:
+        A tensor of shape `shape` with values -1 or 1 with equal probability.
+    """
+    return torch.where(
+        torch.randn(shape) < 0.0,
+        -1 * torch.ones(shape),
+        torch.ones(shape),
+    ).to(dtype=like_tensor.dtype, device=like_tensor.device)
+
+
 def calc_basis_jacobian(
     module: torch.nn.Module,
     inputs: Union[
@@ -443,6 +460,7 @@ def calc_basis_jacobian(
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
     n_stochastic_sources: Optional[int] = None,
+    dim_stochastic_sources: Optional[Literal["both", "out_pos", "out_hidden"]] = None,
 ) -> Float[Tensor, "batch out_hidden_trunc out_pos in_pos in_hidden"]:
     # Ensure that the inputs have requires_grad=True
     for x in inputs:
@@ -467,12 +485,27 @@ def calc_basis_jacobian(
     assert batch_size == f_out_dummy[0].shape[0], "batch size mismatch"
 
     if has_pos:
-        assert in_pos_size is not None  # needed for mypy
-        n_sources = n_stochastic_sources or out_hat_hidden_size * out_pos_size
+        if n_stochastic_sources is None:
+            n_sources_A = out_hat_hidden_size
+            n_sources_B = out_pos_size
+        elif dim_stochastic_sources == "both":
+            n_sources_A = n_stochastic_sources
+            n_sources_B = 1
+        elif dim_stochastic_sources == "out_pos":
+            n_sources_A = out_hat_hidden_size
+            n_sources_B = n_stochastic_sources
+        elif dim_stochastic_sources == "out_hidden":
+            n_sources_A = n_stochastic_sources
+            n_sources_B = out_pos_size
+        else:
+            raise ValueError("dim_stochastic_sources must be 'both', 'out_pos', or 'out_hidden'.")
+
         # in_grads.shape: batch, i (out_hidden), t (out_pos), s (in_pos), j (in_hidden)
+        assert in_pos_size is not None  # needed for mypy
         in_grads = torch.zeros(
             batch_size,
-            n_sources,
+            n_sources_A,
+            n_sources_B,
             in_pos_size,
             in_hidden_size,
             dtype=inputs[0].dtype,
@@ -502,35 +535,46 @@ def calc_basis_jacobian(
             # f_out_hat_alpha.shape: batch t i
             # f_in_alpha: batch, s, j
 
-            if n_stochastic_sources is not None:
-                # Introduce stochastic sources: Don't iterate over all i and t, but a random direction
-                # in the i and t space. Create phis that are -1 or 1 with equal probability
-                phi_shape = (batch_size, n_sources, out_pos_size, out_hat_hidden_size)
-                phi = torch.where(
-                    torch.randn(phi_shape) < 0.0, -1 * torch.ones(phi_shape), torch.ones(phi_shape)
-                ).to(dtype=in_grads.dtype, device=in_grads.device)
-            else:
+            phi_shape = (batch_size, n_sources_A, n_sources_B, out_hat_hidden_size, out_pos_size)
+            if n_stochastic_sources is None:
                 # Full dimensions
-                phi_shape = (
-                    batch_size,
-                    n_sources,
-                    out_pos_size,
-                    out_hat_hidden_size,
-                )
+                phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
+                for i in range(out_hat_hidden_size):
+                    for t in range(out_pos_size):
+                        phi[:, i, t, i, t] = 1.0
+            elif dim_stochastic_sources == "both":
+                # Introduce stochastic sources: Don't iterate over all i and/or t, but a random
+                # direction in the i and t space. Sources = -1 or 1 with equal probability.
+                phi = _generate_sources(phi_shape, like_tensor=in_grads)
+            elif dim_stochastic_sources == "out_pos":
+                phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
+                for i in range(out_hat_hidden_size):
+                    phi[:, i, :, i, :] = _generate_sources(
+                        (batch_size, n_stochastic_sources, out_pos_size),
+                        like_tensor=in_grads,
+                    )
+            elif dim_stochastic_sources == "out_hidden":
                 phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
                 for t in range(out_pos_size):
-                    for i in range(out_hat_hidden_size):
-                        phi[:, t * out_hat_hidden_size + i, t, i] = 1.0
+                    phi[:, :, t, :, t] = _generate_sources(
+                        (batch_size, n_stochastic_sources, out_hat_hidden_size),
+                        like_tensor=in_grads,
+                    )
+            else:
+                raise ValueError(
+                    "dim_stochastic_sources must be 'both', 'out_pos', or 'out_hidden'."
+                )
 
-            for source in tqdm(
-                range(n_sources),
-                total=n_sources,
-                desc="Iteration over stochastic sources",
+            for r_A, r_B in tqdm(
+                np.ndindex(n_sources_A, n_sources_B),
+                total=n_sources_A * n_sources_B,
+                desc="Iteration over sources",
                 leave=False,
             ):
+                # phi_shape = (batch_size, n_sources_A, n_sources_B, out_hat_hidden_size, out_pos_size)
                 phi_f_out_hat_alpha = einsum(
-                    "batch out_pos out_hidden, batch out_pos out_hidden -> batch",
-                    phi[:, source, :, :],
+                    "batch out_hidden out_pos, batch out_pos out_hidden -> batch",
+                    phi[:, r_A, r_B, :, :],
                     f_out_hat_alpha,
                 )
                 # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
@@ -542,7 +586,7 @@ def calc_basis_jacobian(
                     ),
                     dim=-1,
                 )
-                in_grads[:, source, :, :] += alpha_in_grads * trapezoidal_scaler
+                in_grads[:, r_A, r_B, :, :] += alpha_in_grads * trapezoidal_scaler
                 # Contraction over batch, i, t, s happens after the integral, but we cannot
                 # contract earlier because we have to finish the integral sum (+=) first.
     else:

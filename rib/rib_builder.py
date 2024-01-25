@@ -180,6 +180,11 @@ class RibBuildConfig(BaseModel):
         None,
         description="The number of stochastic sources to use when calculating stochastic Cs.",
     )
+    dim_stochastic_sources_basis: Optional[Literal["both", "out_pos", "out_hidden"]] = Field(
+        None,
+        description="Which dimension to apply stochasticity to when calculating basis. Defaults"
+        "to `both`, other options are `out_pos` and `out_hidden`.",
+    )
     n_stochastic_sources_edges: Optional[int] = Field(
         None,
         description="The number of stochastic sources to use when calculating stochastic edges.",
@@ -475,6 +480,7 @@ def rib_build(
             center=config.center,
             means=means,
             n_stochastic_sources=config.n_stochastic_sources_basis,
+            dim_stochastic_sources=config.dim_stochastic_sources_basis,
         )
         # InteractionRotation objects used to calculate edges
         edge_interaction_rotations = interaction_rotations

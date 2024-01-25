@@ -258,11 +258,6 @@ class BisectScheduleConfig(BaseModel):
         "bisect",
         description="The type of ablation schedule to use. 'bisect' uses a bisect schedule.",
     )
-    score_type: Literal["accuracy", "loss"] = Field(
-        "loss",
-        description="Whether the score is loss-like (lower is better) or accuracy-like (higher is "
-        "better).",
-    )
     score_target: float = Field(
         ...,
         description="The target loss value for the bisect schedule.",
@@ -296,8 +291,11 @@ class BisectSchedule:
                 We can ablate 11 vecs, and ablating 12 vecs is too much.
     """
 
-    def __init__(self, n_vecs: int, config: BisectScheduleConfig):
+    def __init__(
+        self, n_vecs: int, eval_type: Literal["accuracy", "ce_loss"], config: BisectScheduleConfig
+    ):
         self.config: BisectScheduleConfig = config
+        self._eval_type: Literal["accuracy", "ce_loss"] = eval_type
         self._upper_bound: int = n_vecs
         self._lower_bound: int = 0
         self._most_recent_proposal: int = -1
@@ -307,12 +305,14 @@ class BisectSchedule:
             proposal = (self._upper_bound + self._lower_bound) // 2
         elif self.config.scaling == "logarithmic":
             proposal = int(np.exp((np.log(self._upper_bound) + np.log(self._lower_bound)) / 2))
+        else:
+            raise ValueError(f"Invalid scaling: {self.config.scaling}")
         # Avoid getting stuck due to rounding
         if proposal == self._lower_bound:
             proposal += 1
         if proposal == self._upper_bound:
             proposal -= 1
-        # Check that the user didn't forget to call .step()
+        # Check that we don't forget .step() somewhere
         if proposal == self._most_recent_proposal:
             raise RuntimeError("Ablation schedule stuck. Did you call .step(score)?")
         self._most_recent_proposal = proposal
@@ -326,16 +326,18 @@ class BisectSchedule:
             yield self._get_proposal()
 
     def step(self, score: float):
-        if self.config.score_type == "loss":
+        if self._eval_type == "ce_loss":
             if score <= self.config.score_target:
                 self._lower_bound = self._most_recent_proposal
             else:
                 self._upper_bound = self._most_recent_proposal
-        elif self.config.score_type == "accuracy":
+        elif self._eval_type == "accuracy":
             if score >= self.config.score_target:
                 self._lower_bound = self._most_recent_proposal
             else:
                 self._upper_bound = self._most_recent_proposal
+        else:
+            raise ValueError(f"Invalid score_type: {self.config.score_type}")
 
 
 ScheduleConfig = Union[LinearScheduleConfig, ExponentialScheduleConfig, BisectScheduleConfig]
@@ -376,14 +378,14 @@ class AblationConfig(BaseModel):
 
 
 def _get_schedule_from_config(
-    schedule_config: ScheduleConfig, n_vecs: int
+    schedule_config: ScheduleConfig, n_vecs: int, eval_type: Literal["accuracy", "ce_loss"]
 ) -> Union[ExponentialSchedule, LinearSchedule, BisectSchedule]:
     if schedule_config.schedule_type == "linear":
         return LinearSchedule(n_vecs, schedule_config)
     elif schedule_config.schedule_type == "exponential":
         return ExponentialSchedule(n_vecs, schedule_config)
     elif schedule_config.schedule_type == "bisect":
-        return BisectSchedule(n_vecs, schedule_config)
+        return BisectSchedule(n_vecs, eval_type, schedule_config)
 
 
 @torch.inference_mode()
@@ -393,6 +395,7 @@ def ablate_node_layers_and_eval(
     hooked_model: HookedModel,
     data_loader: DataLoader,
     eval_fn: Callable,
+    eval_type: Literal["accuracy", "ce_loss"],
     module_names: list[str],
     schedule_config: ScheduleConfig,
     device: str,
@@ -427,7 +430,9 @@ def ablate_node_layers_and_eval(
     for ablation_node_layer, module_name, (basis_vecs, basis_vecs_pinv) in zip(
         ablation_node_layers, module_names, basis_matrices, strict=True
     ):
-        ablation_schedule = _get_schedule_from_config(schedule_config, basis_vecs.shape[0])
+        ablation_schedule = _get_schedule_from_config(
+            schedule_config, basis_vecs.shape[0], eval_type
+        )
         base_score: Optional[float] = None
 
         # Track the results for the case when there is no ablation. There may be many of these, so we
@@ -534,6 +539,7 @@ def ablate_edges_and_eval(
     hooked_model: HookedModel,
     data_loader: DataLoader,
     eval_fn: Callable,
+    eval_type: Literal["accuracy", "ce_loss"],
     module_names: list[str],
     schedule_config: ScheduleConfig,
     device: str,
@@ -579,7 +585,9 @@ def ablate_edges_and_eval(
         (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
         total_possible_edges = in_C.shape[0] * out_C.shape[0]
 
-        ablation_schedule = _get_schedule_from_config(schedule_config, total_possible_edges)
+        ablation_schedule = _get_schedule_from_config(
+            schedule_config, total_possible_edges, eval_type
+        )
 
         results[ablation_node_layer] = {}
         edge_masks[ablation_node_layer] = {}
@@ -595,6 +603,7 @@ def ablate_edges_and_eval(
             )
             if edge_mask.all():
                 results[ablation_node_layer][num_edges_kept] = base_score
+                ablation_schedule.step(base_score)
                 continue
 
             edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
@@ -780,6 +789,7 @@ def load_bases_and_ablate(
             hooked_model=hooked_model,
             data_loader=data_loader,
             eval_fn=eval_fn,
+            eval_type=config.eval_type,
             module_names=module_names,
             schedule_config=config.schedule,
             device=device,
@@ -793,6 +803,7 @@ def load_bases_and_ablate(
             hooked_model=hooked_model,
             data_loader=data_loader,
             eval_fn=eval_fn,
+            eval_type=config.eval_type,
             module_names=module_names,
             schedule_config=config.schedule,
             device=device,

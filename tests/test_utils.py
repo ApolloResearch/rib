@@ -148,7 +148,7 @@ def test_bisect_schedule(loss_fn, loss_target, n_eigenvecs, upper, lower):
     """
     schedule_config = BisectScheduleConfig(
         schedule_type="bisect",
-        score_type="loss",
+        score_type="ce_loss",
         score_target=loss_target,
     )
     schedule = BisectSchedule(n_eigenvecs, schedule_config)

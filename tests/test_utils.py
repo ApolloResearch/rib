@@ -108,7 +108,7 @@ def test_calc_exponential_ablation_schedule(
     schedule_config = ExponentialScheduleConfig(
         schedule_type="exponential", ablate_every_vec_cutoff=ablate_every_vec_cutoff
     )
-    schedule = ExponentialSchedule(n_eigenvecs, schedule_config)
+    schedule = ExponentialSchedule(schedule_config, n_eigenvecs)
     assert schedule._ablation_schedule == expected
 
 
@@ -126,7 +126,7 @@ def test_calc_linear_ablation_schedule(
     expected: list[int],
 ):
     schedule_config = LinearScheduleConfig(schedule_type="linear", n_points=n_points)
-    schedule = LinearSchedule(n_eigenvecs, schedule_config)
+    schedule = LinearSchedule(schedule_config, n_eigenvecs)
     assert schedule._ablation_schedule == expected
 
 
@@ -150,7 +150,7 @@ def test_bisect_schedule(loss_fn, loss_target, n_eigenvecs, upper, lower):
         schedule_type="bisect",
         score_target=loss_target,
     )
-    schedule = BisectSchedule(n_eigenvecs, "ce_loss", schedule_config)
+    schedule = BisectSchedule(schedule_config, n_eigenvecs, "ce_loss")
     for n_vec_ablated in schedule:
         print(f"{n_vec_ablated=}")
         loss = loss_fn(n_vec_ablated)
@@ -180,7 +180,7 @@ def test_bisect_schedule_accuracy(acc_fn, accuracy_target, n_eigenvecs, upper, l
         schedule_type="bisect",
         score_target=accuracy_target,
     )
-    schedule = BisectSchedule(n_eigenvecs, "accuracy", schedule_config)
+    schedule = BisectSchedule(schedule_config, n_eigenvecs, "accuracy")
     for n_vec_ablated in schedule:
         print(f"{n_vec_ablated=}")
         score = acc_fn(n_vec_ablated)

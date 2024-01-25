@@ -60,7 +60,7 @@ class StaticScheduleConfig(BaseModel):
 
 
 class StaticSchedule:
-    def __init__(self, n_vecs: int, config: StaticScheduleConfig):
+    def __init__(self, config: StaticScheduleConfig, n_vecs: int):
         self.config: StaticScheduleConfig = config
         self._n_vecs: int = n_vecs
         # Early stopping variables
@@ -134,7 +134,7 @@ class LinearScheduleConfig(StaticScheduleConfig):
 class LinearSchedule(StaticSchedule):
     config: LinearScheduleConfig
 
-    def __init__(self, n_vecs: int, config: LinearScheduleConfig):
+    def __init__(self, config: LinearScheduleConfig, n_vecs: int):
         """Create a linear schedule for the number of vectors to ablate.
 
         The points are evenly spaced between `n_vecs` and 0, including the endpoints and any points
@@ -153,7 +153,7 @@ class LinearSchedule(StaticSchedule):
             n_points = 11, n_vecs = 120 --> [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
 
         """
-        super().__init__(n_vecs, config)
+        super().__init__(config, n_vecs)
         # We'd like to move this _add_specific_ablation_points() logic to the parent class, but
         # we can't because it depends on n_points via _get_initial_ablation_schedule().
         initial_ablation_schedule = self._get_initial_ablation_schedule()
@@ -185,7 +185,7 @@ class ExponentialScheduleConfig(StaticScheduleConfig):
 class ExponentialSchedule(StaticSchedule):
     config: ExponentialScheduleConfig
 
-    def __init__(self, n_vecs: int, config: ExponentialScheduleConfig):
+    def __init__(self, config: ExponentialScheduleConfig, n_vecs: int):
         """Create an exponential schedule for the number of vectors to ablate.
 
         The schedule is exponential with a base of 2, with the exceptions
@@ -209,7 +209,7 @@ class ExponentialSchedule(StaticSchedule):
             ablate_every_vec_cutoff = 3, n_vecs = 12 --> [12, 11, 10, 9, 8, 6, 2, 0]
             ablate_every_vec_cutoff = 3, n_vecs = 24 --> [24, 23, 22, 21, 20, 18, 14, 6, 0]
         """
-        super().__init__(n_vecs, config)
+        super().__init__(config, n_vecs)
         # We'd like to move this _add_specific_ablation_points() logic to the parent class, but
         # we can't because it depends on ablate_every_vec_cutoff and exp_base via
         # _get_initial_ablation_schedule().
@@ -293,11 +293,15 @@ class BisectSchedule:
     """
 
     def __init__(
-        self, n_vecs: int, eval_type: Literal["accuracy", "ce_loss"], config: BisectScheduleConfig
+        self,
+        config: BisectScheduleConfig,
+        n_vecs: int,
+        eval_type: Literal["accuracy", "ce_loss"],
     ):
         self.config: BisectScheduleConfig = config
         self._eval_type: Literal["accuracy", "ce_loss"] = eval_type
         self._upper_bound: int = n_vecs
+        assert self._upper_bound > 0, "n_vecs must be positive"
         self._lower_bound: int = 0
         self._most_recent_proposal: int = -1
 
@@ -382,11 +386,11 @@ def _get_schedule_from_config(
     schedule_config: ScheduleConfig, n_vecs: int, eval_type: Literal["accuracy", "ce_loss"]
 ) -> Union[ExponentialSchedule, LinearSchedule, BisectSchedule]:
     if schedule_config.schedule_type == "linear":
-        return LinearSchedule(n_vecs, schedule_config)
+        return LinearSchedule(schedule_config, n_vecs)
     elif schedule_config.schedule_type == "exponential":
-        return ExponentialSchedule(n_vecs, schedule_config)
+        return ExponentialSchedule(schedule_config, n_vecs)
     elif schedule_config.schedule_type == "bisect":
-        return BisectSchedule(n_vecs, eval_type, schedule_config)
+        return BisectSchedule(schedule_config, n_vecs, eval_type)
 
 
 @torch.inference_mode()

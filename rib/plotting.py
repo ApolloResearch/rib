@@ -99,7 +99,7 @@ def _prepare_edges_for_plotting(
 
 def plot_ablation_results(
     results: list[dict[str, dict[str, float]]],
-    out_file: Path,
+    out_file: Optional[Path],
     exp_names: list[str],
     eval_type: Literal["accuracy", "ce_loss"],
     ablation_types: list[Literal["orthogonal", "rib"]],
@@ -170,8 +170,8 @@ def plot_ablation_results(
 
     # Adjust the spacing between subplots
     plt.subplots_adjust(hspace=0.4)
-
-    plt.savefig(out_file)
+    if out_file is not None:
+        plt.savefig(out_file)
 
 
 def plot_rib_graph(
@@ -179,7 +179,7 @@ def plot_rib_graph(
     layer_names: list[str],
     exp_name: str,
     nodes_per_layer: Union[int, list[int]],
-    out_file: Path,
+    out_file: Optional[Path] = None,
     node_labels: Optional[list[list[str]]] = None,
     hide_const_edges: bool = False,
 ) -> None:
@@ -257,4 +257,5 @@ def plot_rib_graph(
     plt.suptitle(exp_name)
     plt.tight_layout()
     ax.axis("off")
-    plt.savefig(out_file)
+    if out_file is not None:
+        plt.savefig(out_file)

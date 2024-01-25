@@ -141,16 +141,11 @@ class LinearScheduleConfig(StaticScheduleConfig):
 class LinearSchedule(StaticSchedule):
     config: LinearScheduleConfig
 
-    def __init__(self, config: LinearScheduleConfig, n_vecs: int):
+    def _get_initial_ablation_schedule(self) -> list[int]:
         """Create a linear schedule for the number of vectors to ablate.
 
         The points are evenly spaced between `n_vecs` and 0, including the endpoints and any points
         in `self.specific_points` are also added.
-
-        Args:
-            n_vecs: Total number of vectors.
-            config: The ablation schedule config containing n_points, the number of points to use,
-                specific_points, and early_stopping_threshold.
 
         Returns:
             An iterable schedule for the number of vectors to ablate.
@@ -160,9 +155,6 @@ class LinearSchedule(StaticSchedule):
             n_points = 11, n_vecs = 120 --> [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
 
         """
-        super().__init__(config, n_vecs)
-
-    def _get_initial_ablation_schedule(self) -> list[int]:
         assert self.config.n_points >= 2, f"{self.config.n_points} must be at least 2."
         assert (
             self.config.n_points <= self._n_vecs + 1
@@ -186,18 +178,13 @@ class ExponentialScheduleConfig(StaticScheduleConfig):
 class ExponentialSchedule(StaticSchedule):
     config: ExponentialScheduleConfig
 
-    def __init__(self, config: ExponentialScheduleConfig, n_vecs: int):
+    def _get_initial_ablation_schedule(self) -> list[int]:
         """Create an exponential schedule for the number of vectors to ablate.
 
         The schedule is exponential with a base of 2, with the exceptions
         * we test all values of n_vecs_remaining from 0 to `self.ablate_every_vec_cutoff`
         * we test ablating no vectors (n_vecs_remaining = n_vecs)
         * we test manually specified points given in `config.specific_points`.
-
-        Args:
-            n_vecs: Total number of vectors.
-            config: The ablation schedule config containing exp_base, ablate_every_vec_cutoff,
-                specific_points, and early_stopping_threshold.
 
         Returns:
             The schedule for the number of vectors to ablate.
@@ -210,9 +197,6 @@ class ExponentialSchedule(StaticSchedule):
             ablate_every_vec_cutoff = 3, n_vecs = 12 --> [12, 11, 10, 9, 8, 6, 2, 0]
             ablate_every_vec_cutoff = 3, n_vecs = 24 --> [24, 23, 22, 21, 20, 18, 14, 6, 0]
         """
-        super().__init__(config, n_vecs)
-
-    def _get_initial_ablation_schedule(self) -> list[int]:
         cutoff = self.config.ablate_every_vec_cutoff
         exp_base = self.config.exp_base
 

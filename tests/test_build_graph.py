@@ -56,7 +56,7 @@ def graph_build_test(config: RibBuildConfig, atol: float):
     for i, module_name in enumerate(comparison_layers):
         # Get the module names from the grams
         act_size = (Cs[i].C.T @ grams[module_name] @ Cs[i].C).diag()
-        if edges:
+        if config.calculate_edges:
             if config.edge_formula == "squared":
                 assert (edges[i].E_hat >= 0).all(), f"edges not >= 0 for {module_name}"
             assert (edges[i].E_hat != 0).any(), f"edges all zero for {module_name}"
@@ -75,7 +75,11 @@ def graph_build_test(config: RibBuildConfig, atol: float):
                     atol=atol,
                 )
 
-        if config.basis_formula not in ["svd", "neuron"]:  # We don't have Lambdas for these
+        if config.basis_formula not in [
+            "svd",
+            "neuron",
+            "jacobian",
+        ]:  # We don't have Lambdas for these / Lambdas for jacobian basis don't fulfill this
             # Check that the Lambdas are also the same as the act_size and edge_size
             # Note that the Lambdas need to be truncated to edge_size/act_size (this happens in
             # `rib.interaction_algos.build_sort_lambda_matrix)
@@ -185,6 +189,7 @@ def get_means(results: RibBuildResults, atol: float, batch_size=16):
         ("(1-0)*alpha", "functional"),
         ("(1-alpha)^2", "squared"),
         ("(1-0)*alpha", "squared"),
+        ("jacobian", "squared"),
     ],
 )
 def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
@@ -205,6 +210,25 @@ def test_pythia_14m_build_graph():
 
 
 @pytest.mark.slow
+def test_pythia_14m_build_graph_jacobian():
+    atol = 0  # Works with 0 for batch_size 900 but not 1800
+    updates = [
+        # Runs in around 30s on a5000
+        {"basis_formula": "jacobian"},
+        {"dataset": {"return_set_n_samples": 1}},
+        {"dataset": {"n_ctx": 2}},
+        {"batch_size": 900},
+        {"node_layers": ["ln2.1", "mlp_out.5", "unembed"]},
+        {"calculate_edges": True},
+        {"edge_formula": "stochastic"},
+        {"n_stochastic_sources": 1},
+    ]
+    config = get_pythia_config(*updates)
+    results = graph_build_test(config=config, atol=atol)
+    get_rib_acts_test(results, atol=0)
+
+
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "basis_formula, edge_formula",
     [
@@ -212,6 +236,7 @@ def test_pythia_14m_build_graph():
         ("(1-0)*alpha", "functional"),
         ("(1-alpha)^2", "squared"),
         ("(1-0)*alpha", "squared"),
+        ("jacobian", "squared"),
     ],
 )
 def test_mnist_build_graph(basis_formula, edge_formula):
@@ -289,6 +314,7 @@ def rotate_final_layer_invariance(
         ("(1-0)*alpha", "functional"),
         ("(1-alpha)^2", "squared"),
         ("(1-0)*alpha", "squared"),
+        ("jacobian", "squared"),
     ],
 )
 def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1e-7, atol=1e-8):
@@ -318,6 +344,7 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
         ("(1-0)*alpha", "functional"),
         ("(1-alpha)^2", "squared"),
         ("(1-0)*alpha", "squared"),
+        ("jacobian", "squared"),
     ],
 )
 def test_modular_mlp_rotate_final_layer_invariance(
@@ -415,11 +442,11 @@ def centered_rib_test(results: RibBuildResults, atol=1e-6):
     all_mean_acts = get_means(results, atol=atol)
     interaction_rotations = rotation_list_to_dict(results.interaction_rotations)
     # output and pre-unembed have no bias
-    m_names = [m_name for m_name in results.config.node_layers if m_name not in ["output"]]
+    m_names = [
+        m_name for m_name in results.config.node_layers if m_name not in ["output", "unembed"]
+    ]
     for m_name in m_names:
         C_inv = interaction_rotations[m_name].C_pinv  # [rib_dir, emb_pos]
-        if C_inv is None:  # this happens when rotate_final_layer is true
-            continue
         mean_acts = all_mean_acts[m_name].cpu()  # [emb_pos]
         rib_acts = all_rib_acts[m_name]  # [batch, (seqpos?), rib_dir]
 
@@ -454,9 +481,9 @@ def centered_rib_test(results: RibBuildResults, atol=1e-6):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd", "jacobian"])
 def test_centered_rib_mnist(basis_formula):
-    """Test that centred rib works for MNIST."""
+    """Test that centered rib works for MNIST."""
     config = get_mnist_config(
         {"basis_formula": basis_formula, "edge_formula": "functional", "center": True}
     )
@@ -466,16 +493,16 @@ def test_centered_rib_mnist(basis_formula):
 
 @pytest.mark.slow
 def test_centered_rib_pythia():
-    """Test that the centred rib works for pythia."""
+    """Test that the centered rib works for pythia."""
     config = get_pythia_config({"basis_formula": "(1-0)*alpha", "center": True})
     results = rib_build(config)
     centered_rib_test(results, atol=1e-9)
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd"])
+@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd", "jacobian"])
 def test_centered_rib_modadd(basis_formula):
-    """Test that centred rib & pca works for modadd."""
+    """Test that centered rib & pca works for modadd."""
     # we set a lower truncation threshold as there are some directions w/ small eigenvals that
     # violate our assumption. I think this is a precision error that shouldn't be a problem
     # elsewhere. See https://apolloresearchhq.slack.com/archives/C06484S5UF9/p1704966880983049

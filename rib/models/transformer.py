@@ -549,6 +549,11 @@ class SequentialTransformer(nn.Module):
                 state_dict[seq_param_name] = tlens_model.embed.W_E
             elif param_name == "W_pos":
                 state_dict[seq_param_name] = tlens_model.pos_embed.W_pos
+                if tlens_model.cfg.model_name.startswith("TinyStories"):
+                    # We special case n_ctx in tinystories due to this bug:
+                    # https://github.com/neelnanda-io/TransformerLens/issues/492
+                    # this gives the pos embed matrix a different shape
+                    state_dict[seq_param_name] = state_dict[seq_param_name][: self.cfg.n_ctx]
             elif param_name == "W_U":
                 state_dict[seq_param_name] = tlens_model.unembed.W_U
             elif param_name == "b_U":
@@ -563,6 +568,15 @@ class SequentialTransformer(nn.Module):
                     raise ValueError(
                         f"Param name not an embed, unembed, attn or mlp param: {param_name}"
                     )
+
+                if tlens_model.cfg.model_name.startswith("TinyStories") and seq_param_name.endswith(
+                    "attention_scores.mask"
+                ):
+                    # We special case n_ctx in tinystories due to this bug:
+                    # https://github.com/neelnanda-io/TransformerLens/issues/492
+                    # this gives the attn mask a different shape
+                    n_ctx = self.cfg.n_ctx
+                    tlens_param_val = tlens_param_val[:n_ctx, :n_ctx]
 
                 buffer_val = named_buffers.get(seq_param_name)
                 if buffer_val is not None:

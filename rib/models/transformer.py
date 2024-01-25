@@ -14,12 +14,12 @@ from transformer_lens import HookedTransformer
 
 from rib.models.components import (
     SEQUENTIAL_COMPONENT_REGISTRY,
-    DualLayerNormPre,
-    DualVariance,
+    DualLayerNormPreIn,
+    DualLayerNormPreOut,
     IdentitySplit,
-    LayerNormPre,
+    LayerNormPreIn,
+    LayerNormPreOut,
     MultiSequential,
-    Variance,
 )
 from rib.models.utils import (
     concat_ones,
@@ -191,38 +191,38 @@ class SequentialTransformer(nn.Module):
         (sections): ModuleDict(
             (pre): MultiSequential(
                 (0): Embed()
-                (1): Variance()
-                (2): LayerNormPre()
+                (1): LayerNormPreIn()
+                (2): LayerNormPreOut()
                 (3): AttentionIn()
                 (4): AttentionOut()
                 (5): Add()
-                (6): DualVariance()
-                (7): DualLayerNormPre()
+                (6): DualLayerNormPreIn()
+                (7): DualLayerNormPreOut()
                 (8): MLPIn()
                 (9): MLPAct()
             )
             (section_0): MultiSequential(
                 (0): MLPOut()
                 (1): Add()
-                (2): Variance()
-                (3): LayerNormPre()
+                (2): LayerNormPreIn()
+                (3): LayerNormPreOut()
                 ...
                 (27): AttentionOut()
                 (28): Add()
             )
             (section_1): MultiSequential(
-                (0): DualVariance()
-                (1): DualLayerNormPre()
+                (0): DualLayerNormPreIn()
+                (1): DualLayerNormPreOut()
                 (2): MLPIn()
                 (3): MLPAct()
             )
             (section_2): MultiSequential(
                 (0): MLPOut()
                 (1): Add()
-                (2): Variance()
+                (2): LayerNormPreIn()
                 ...
-                (222): Variance()
-                (223): LayerNormPre()
+                (222): LayerNormPreIn()
+                (223): LayerNormPreOut()
                 (224): Unembed()
             )
     )
@@ -352,20 +352,20 @@ class SequentialTransformer(nn.Module):
                     layer_idx = module_name.split(".")[-1]
                     kwargs["use_local_attn"] = (int(layer_idx) % 2) != 0  # odd layers use local
 
-                if module_type in ["ln1", "ln2", "ln_final"]:  # Variance modules
+                if module_type in ["ln1", "ln2", "ln_final"]:
                     if self.cfg.normalization_type == "LNPre":
                         if self.cfg.parallel_attn_mlp and module_type == "ln2":
-                            module_class = DualVariance
+                            module_class = DualLayerNormPreIn
                         else:
-                            module_class = Variance
+                            module_class = LayerNormPreIn
                     else:
                         module_class = nn.Identity
                 elif module_type in ["ln1_out", "ln2_out", "ln_final_out"]:
                     if self.cfg.normalization_type == "LNPre":
                         if self.cfg.parallel_attn_mlp and module_type == "ln2_out":
-                            module_class = DualLayerNormPre
+                            module_class = DualLayerNormPreOut
                         else:
-                            module_class = LayerNormPre
+                            module_class = LayerNormPreOut
                             # ln1_out and ln2_out need to output both the resid and normed resid
                             kwargs["return_residual"] = module_type in ["ln1_out", "ln2_out"]
                     else:
@@ -430,7 +430,7 @@ class SequentialTransformer(nn.Module):
                 fold_fn(*args)
 
         # We want to ensure that layernorm doesn't include the final dimension in its calcs
-        ln_classes = (LayerNormPre, DualLayerNormPre, Variance, DualVariance)
+        ln_classes = (LayerNormPreOut, DualLayerNormPreOut, LayerNormPreIn, DualLayerNormPreIn)
         ln_modules = [module for module in self.modules() if isinstance(module, ln_classes)]
         for module in ln_modules:
             module.exclude_final_dim(True)

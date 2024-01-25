@@ -617,7 +617,7 @@ class MLPOut(nn.Module):
         return out, residual
 
 
-class Variance(torch.nn.Module):
+class LayerNormPreIn(torch.nn.Module):
     """Calculates the variance in preparation for the layer norm."""
 
     def __init__(self, cfg: "SequentialTransformerConfig"):
@@ -640,7 +640,7 @@ class Variance(torch.nn.Module):
         self._exclude_final_dim = exclude
 
 
-class LayerNormPre(torch.nn.Module):
+class LayerNormPreOut(torch.nn.Module):
     """Sequential version of transformer-lens' LayerNormPre that expects a pre-computed variance.
 
     A standard LayerNorm without the element-wise affine parameters.
@@ -679,8 +679,8 @@ class LayerNormPre(torch.nn.Module):
         self._exclude_final_dim = exclude
 
 
-class DualVariance(torch.nn.Module):
-    """A version of Variance that takes an attention residual stream and raw residual stream.
+class DualLayerNormPreIn(torch.nn.Module):
+    """A version of LayerNormPreIn that takes an attention residual stream and raw residual stream.
 
     Simply passes through the attention residual as the new residual. This is used for models like
     pythia that use parallel attention and mlp blocks.
@@ -718,8 +718,8 @@ class DualVariance(torch.nn.Module):
         self._exclude_final_dim = exclude
 
 
-class DualLayerNormPre(torch.nn.Module):
-    """A version of LayerNormPre that takes expects a pre-computed variance.
+class DualLayerNormPreOut(torch.nn.Module):
+    """A version of LayerNormPreOut that takes expects a pre-computed variance.
 
     Simply passes through the attention residual thorough. This is used for models like pythia
     that use parallel attention and mlp blocks.

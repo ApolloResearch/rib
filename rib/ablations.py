@@ -813,7 +813,7 @@ def load_bases_and_ablate(
 
     if config.out_dir is not None:
         with open(out_file, "w") as f:
-            json.dump(results, f, default=lambda x: x.tolist())  # serialize edge_mask tensors
+            json.dump(results, f, default=lambda x: x.tolist(), indent=1)
         logger.info("Wrote results to %s", out_file)
 
     return ablation_results

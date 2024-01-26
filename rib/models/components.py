@@ -35,7 +35,9 @@ class Embed(nn.Module):
         )
         self.return_tokens = return_tokens
 
-    def forward(self, tokens: Int[Tensor, "..."]) -> Union[
+    def forward(
+        self, tokens: Int[Tensor, "..."]
+    ) -> Union[
         tuple[Float[Tensor, "d_vocab d_model"], Int[Tensor, "... d_model"]],
         Float[Tensor, "... d_model"],
     ]:

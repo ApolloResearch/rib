@@ -19,7 +19,7 @@ setup(
     install_requires=requirements,
     extras_require={
         "dev": [
-            "black~=24.1.0",
+            "black==23.10.1",
             "isort~=5.13.2",
             "mypy~=1.8.0",
             "pylint~=3.0.3",

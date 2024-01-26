@@ -740,7 +740,7 @@ def integrated_gradient_trapezoidal_norm(
             # for generality we put it here.
             f_hat_norm = -(f_hat_1_alpha**2).sum()
         elif basis_formula == "(1-0)*alpha":
-            # we clone out_acts_alpha as it was created in torch.inference_mode tensor
+            # clone out_acts_alpha and out_acts_const as they were created in torch.inference_mode
             f_hat_alpha = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha.clone()
             f_hat_1_0 = out_acts_const @ C_out if C_out is not None else out_acts_const.clone()
             f_hat_norm = (f_hat_alpha * f_hat_1_0).sum()

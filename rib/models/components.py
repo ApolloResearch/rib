@@ -685,6 +685,8 @@ class DualLayerNormIn(torch.nn.Module):
 
     Simply passes through the attention residual as the new residual. This is used for models like
     pythia that use parallel attention and mlp blocks.
+
+    This module "swaps" the two streams, as the attn output now becomes the new residual.
     """
 
     def __init__(self, cfg: "SequentialTransformerConfig"):

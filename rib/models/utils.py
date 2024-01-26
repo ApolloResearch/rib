@@ -301,6 +301,8 @@ def variance(x: Float[Tensor, "... d_model"], epsilon=1e-5) -> Float[Tensor, "..
     var: Float[Tensor, "... 1"] = (x.to(dtype) - x.to(dtype).mean(-1, keepdim=True)).pow(2).mean(
         -1, keepdim=True
     ) + epsilon
+    if torch.isnan(var).any():
+        raise ValueError("NaNs found in variance calculation.")
     return var
 
 

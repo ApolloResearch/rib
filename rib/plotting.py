@@ -87,7 +87,7 @@ def _prepare_edges_for_plotting(
             const_node_index = 0
             # Set edges outgoing from this node to zero (edges.shape ~ l+1, l). The incoming edges
             # should be zero except for a non-rotated last layer where they are important.
-            weight_matrix[i][:, const_node_index] = 0
+            weight_matrix[:, const_node_index] = 0
         # Normalize the edge weights by the sum of the absolute values of the weights
         weight_matrix /= torch.sum(torch.abs(weight_matrix))
         # Only keep the desired number of nodes in each layer

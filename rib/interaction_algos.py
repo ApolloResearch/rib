@@ -215,6 +215,8 @@ def calculate_interaction_rotations(
             Lambda_einsum_dtype=Lambda_einsum_dtype,
             truncation_threshold=truncation_threshold,
             basis_formula="svd",
+            n_stochastic_sources=None,
+            dim_stochastic_sources=None,
             center=center,
             means=means[node_layers[-1]] if means is not None else None,
             section_name="",
@@ -271,6 +273,8 @@ def calculate_interaction_rotations(
                 Lambda_einsum_dtype=Lambda_einsum_dtype,
                 truncation_threshold=truncation_threshold,
                 basis_formula=basis_formula,
+                n_stochastic_sources=n_stochastic_sources,
+                dim_stochastic_sources=dim_stochastic_sources,
                 center=center,
                 means=means[node_layer] if means is not None else None,
                 section_name=section_name,
@@ -293,6 +297,8 @@ def _calculate_one_interaction_rotation(
     Lambda_einsum_dtype: torch.dtype,
     truncation_threshold: float,
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"],
+    n_stochastic_sources: Optional[int],
+    dim_stochastic_sources: Optional[Literal["both", "out_pos", "out_hidden"]],
     center: bool,
     means: Optional[Float[Tensor, "d_hidden"]],
     section_name: str,
@@ -379,6 +385,8 @@ def _calculate_one_interaction_rotation(
         M_dtype=M_dtype,
         Lambda_einsum_dtype=Lambda_einsum_dtype,
         basis_formula=basis_formula,
+        n_stochastic_sources=n_stochastic_sources,
+        dim_stochastic_sources=dim_stochastic_sources,
     )
     # Then convert it into the pca basis
     M: Float[Tensor, "orig_trunc orig_trunc"] = (

@@ -494,7 +494,14 @@ def test_centered_rib_mnist(basis_formula):
 @pytest.mark.slow
 def test_centered_rib_pythia():
     """Test that the centered rib works for pythia."""
-    config = get_pythia_config({"basis_formula": "(1-0)*alpha", "center": True})
+    config = get_pythia_config(
+        {
+            "basis_formula": "(1-0)*alpha",
+            "center": True,
+            "node_layers": ["ln2.1", "ln2_out.1", "ln1.2"],
+            "rotate_final_node_layer": True,
+        }
+    )
     results = rib_build(config)
     centered_rib_test(results, atol=1e-9)
 

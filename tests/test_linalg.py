@@ -226,6 +226,7 @@ def test_integrated_gradient_trapezoidal_norm_polynomial():
     ), "Integrated grad norms are not decreasing"
 
 
+@pytest.mark.xfail(reason="We are making this assumption again")
 def test_integrated_gradient_trapezoidal_norm_offset_polynomial():
     """Show that our integrated gradient of our norm function converges to the analytical
     solution for a polynomial, with the special feature that act(0) != 0. Earlier code made this

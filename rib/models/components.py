@@ -1,4 +1,5 @@
 """Defines components to be used in a sequential transformer architecture."""
+
 from typing import TYPE_CHECKING, Callable, Union, cast
 
 import einops

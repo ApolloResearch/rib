@@ -1,5 +1,6 @@
 """Run the mnist train script and checks that accuracy is > 95%.
 """
+
 import pytest
 import yaml
 

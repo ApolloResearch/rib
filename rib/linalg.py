@@ -314,7 +314,7 @@ def calc_edge_functional(
         for i in tqdm(
             range(len(f_out_hat_norm)),
             total=len(f_out_hat_norm),
-            desc="Iteration over output dims",
+            desc="Iteration over output dims (functional edges)",
             leave=False,
         ):
             # Get the derivative of the ith output element w.r.t alpha_f_in_hat
@@ -393,7 +393,10 @@ def calc_edge_squared(
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output.
         for out_dim in tqdm(
-            range(rib_out_size), total=rib_out_size, desc="Iteration over output dims", leave=False
+            range(rib_out_size),
+            total=rib_out_size,
+            desc="Iteration over output dims (+token dims if has_pos)",
+            leave=False,
         ):
             if has_pos:
                 for output_pos_idx in range(out_pos_size):
@@ -702,7 +705,10 @@ def calc_edge_stochastic(
 
         # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
         for out_dim in tqdm(
-            range(rib_out_size), total=rib_out_size, desc="Iteration over output dims", leave=False
+            range(rib_out_size),
+            total=rib_out_size,
+            desc="Iteration over output dims (+stochastic sources)",
+            leave=False,
         ):
             for r in range(n_stochastic_sources):
                 # autograd gives us the derivative w.r.t. in_batch, in_pos, in_dim.

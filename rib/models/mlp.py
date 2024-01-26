@@ -1,6 +1,7 @@
 """
 Defines a generic MLP to be used for rib.
 """
+
 from typing import Literal, Optional, Tuple
 
 import torch

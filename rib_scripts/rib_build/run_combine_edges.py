@@ -7,6 +7,7 @@ Example usage with files:
 Example usage with a directory:
     python run_combined_edges.py out/pythia-14m
 """
+
 import fire
 
 from rib.edge_combiner import combine_edges

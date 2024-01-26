@@ -1,4 +1,5 @@
 """Define custom datasets."""
+
 from typing import Literal, Optional
 
 import torch

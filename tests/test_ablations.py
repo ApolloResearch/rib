@@ -73,7 +73,10 @@ def check_accuracies(
         vecs_remaining = list(accuracies[layer_key].keys())
         accuracy_vals = list(accuracies[layer_key].values())
 
-        if config.schedule.specific_points is not None:
+        if (
+            config.schedule.schedule_type != "bisect"
+            and config.schedule.specific_points is not None
+        ):
             for point in config.schedule.specific_points:
                 assert (
                     point in vecs_remaining
@@ -83,16 +86,19 @@ def check_accuracies(
         assert vecs_remaining == sorted(vecs_remaining, reverse=True)
 
         # Check that ablating 0 vectors gives at least max_accuracy_threshold
-        assert accuracy_vals[0] >= max_accuracy_threshold
-
-        if config.schedule.early_stopping_threshold is None:
-            # This means the final accuracy_val corresponds to all vecs ablated.
-            # Check that this is < 50%
-            assert accuracy_vals[-1] < 0.5
-        else:
-            # Check that the run which ablated the most vectors is all vectors is at least
-            # early_stopping_threshold worse than the max accuracy
-            assert accuracy_vals[0] - accuracy_vals[-1] >= config.schedule.early_stopping_threshold
+        # accuracy_vals[0] and [-1] only sensible in linear and exponential schedules
+        if config.schedule.schedule_type in ["linear", "exponential"]:
+            assert accuracy_vals[0] >= max_accuracy_threshold
+            if config.schedule.early_stopping_threshold is None:
+                # This means the final accuracy_val corresponds to all vecs ablated.
+                # Check that this is < 50%
+                assert accuracy_vals[-1] < 0.5
+            else:
+                # Check that the run which ablated the most vectors is all vectors is at least
+                # early_stopping_threshold worse than the max accuracy
+                assert (
+                    accuracy_vals[0] - accuracy_vals[-1] >= config.schedule.early_stopping_threshold
+                )
 
         # Check that the accuracies are sorted in descending order of the number of ablated
         # vectors
@@ -102,7 +108,12 @@ def check_accuracies(
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
 def test_run_mnist_ablations(ablation_type, tmp_path):
     build_config = get_mnist_config(
-        {"node_layers": ["layers.1", "layers.2", "output"], "batch_size": 1024, "dtype": "float32"}
+        {
+            "node_layers": ["layers.1", "layers.2", "output"],
+            "batch_size": 100,
+            "dtype": "float32",
+            "dataset": {"return_set_n_samples": 100, "return_set_frac": None},
+        }
     )
     results = rib_build(build_config)
     tempfile = tmp_path / "mnist_rib_graph.pt"
@@ -179,6 +190,89 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, tmp_path):
     ablation_config = AblationConfig(**ablation_config_dict)
     accuracies = load_bases_and_ablate(ablation_config)
     check_accuracies(accuracies, ablation_config, max_accuracy_threshold=0.998)
+
+
+@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
+def test_run_mnist_ablations_bisect(ablation_type, tmp_path):
+    build_config = get_mnist_config(
+        {
+            "node_layers": ["layers.1", "layers.2", "output"],
+            "batch_size": 100,
+            "dtype": "float32",
+            "dataset": {"return_set_n_samples": 100, "return_set_frac": None},
+        }
+    )
+    results = rib_build(build_config)
+    tempfile = tmp_path / "mnist_rib_graph.pt"
+    torch.save(results.model_dump(), tempfile)
+
+    config_str = f"""
+    exp_name: "test_ablation_mnist"
+    ablation_type: {ablation_type}
+    rib_results_path: {tempfile}
+    schedule:
+        schedule_type: bisect
+        score_target: 0.9
+    dtype: float32
+    ablation_node_layers:
+        - layers.1
+        - layers.2
+    dataset:
+        dataset_type: torchvision
+        name: MNIST
+        return_set_n_samples: 100
+    batch_size: 64  # two batches
+    seed: 0
+    out_dir: null
+    eval_type: accuracy
+    """
+    config_dict = yaml.safe_load(config_str)
+    config = AblationConfig(**config_dict)
+    accuracies = load_bases_and_ablate(config)
+    check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
+def test_run_modular_arithmetic_rib_ablations_bisect(ablation_type, tmp_path):
+    build_config = get_modular_arithmetic_config(
+        {
+            "node_layers": ["ln1.0", "ln2.0", "mlp_out.0", "unembed", "output"],
+            "batch_size": 100,
+            "dataset": {"return_set_n_samples": 100},
+        }
+    )
+    results = rib_build(build_config)
+    tempfile = tmp_path / "modular_arithmetic_rib_graph.pt"
+    torch.save(results.model_dump(), tempfile)
+
+    config_str = f"""
+    exp_name: "test_ablation_mod_add"
+    ablation_type: {ablation_type}
+    rib_results_path: {tempfile}
+    schedule:
+        schedule_type: bisect
+        score_target: 0.9
+    dataset:
+        dataset_type: modular_arithmetic
+        return_set: train
+        return_set_n_samples: 100
+    ablation_node_layers:
+        - ln1.0
+        - ln2.0
+        - mlp_out.0
+        - unembed
+    batch_size: 100  # single batch
+    dtype: float32
+    seed: 0
+    eval_type: accuracy
+    out_dir: null
+    """
+    config_dict = yaml.safe_load(config_str)
+
+    config = AblationConfig(**config_dict)
+    accuracies = load_bases_and_ablate(config)
+    check_accuracies(accuracies, config, max_accuracy_threshold=0.998)
 
 
 class TestEdgeMask:

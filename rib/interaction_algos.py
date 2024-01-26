@@ -74,10 +74,7 @@ def build_sorted_lambda_matrices(
     Lambda_abs: Float[Tensor, "orig_trunc"],
     truncation_threshold: float,
     ignore_first_index: bool = False,
-) -> tuple[
-    Float[Tensor, "orig_trunc rib"],
-    Float[Tensor, "rib orig_trunc"],
-]:
+) -> tuple[Float[Tensor, "orig_trunc rib"], Float[Tensor, "rib orig_trunc"]]:
     """Build the sqrt sorted Lambda matrix and its pseudoinverse.
 
     We truncate the Lambda matrix to remove small values.

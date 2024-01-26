@@ -70,7 +70,7 @@ def _folded_bias_comparison(
 
 
 def test_modular_arithmetic_folded_bias() -> None:
-    """Test that the folded bias trick works for a model used for modular arithmetic."""
+    """Test that folded and unfolded biases give the same activations for a model used for modular arithmetic."""
     set_seed(42)
     dtype = torch.float32
     # Works with atol=0 for float64 and atol=1e-3 for float32
@@ -120,7 +120,7 @@ def pretrained_lm_folded_bias_comparison(
     atol_attn_scores: Optional[float] = None,
     dtype: torch.dtype = torch.float64,
 ) -> None:
-    """Test that the folded bias trick works for a pretrained language model.
+    """Test that folded and unfolded biases give the same activations for a pretrained language model.
 
     Uses float64 to avoid floating point errors.
     """
@@ -146,7 +146,7 @@ def pretrained_lm_folded_bias_comparison(
 @pytest.mark.slow()
 @pytest.mark.parametrize("model_str", ["gpt2", "tiny-stories-1M"])
 def test_gpt_folded_bias(model_str) -> None:
-    """Test that the folded bias trick works for GPT2 and tiny-stories."""
+    """Test that folded and unfolded biases give the same activations for GPT2 and tiny-stories."""
     set_seed(42)
     dtype = torch.float32
     # float64 can do 1e-10, float32 can do 1e-3. We use float32 in this test because it's faster and
@@ -164,7 +164,7 @@ def test_gpt_folded_bias(model_str) -> None:
 
 @pytest.mark.slow()
 def test_pythia_folded_bias() -> None:
-    """Test that the folded bias trick works for Pythia."""
+    """Test that folded and unfolded biases give the same activations for Pythia."""
     set_seed(42)
     dtype = torch.float64
     # float64 can do atol=1e-11, float32 can do atol=1e2.

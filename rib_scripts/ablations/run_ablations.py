@@ -3,6 +3,7 @@
 Usage:
     python run_ablations.py <path/to/yaml_config_file> [--force]
 """
+
 import fire
 
 from rib.ablations import load_bases_and_ablate

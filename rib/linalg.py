@@ -782,14 +782,6 @@ def integrated_gradient_trapezoidal_norm(
             if isinstance(output_const, torch.Tensor)
             else torch.cat(output_const, dim=-1)
         )
-        if basis_formula == "(1-0)*alpha":
-            output_zero = module(*tuple(torch.zeros_like(x) for x in inputs))
-            # Concatenate the outputs over the final dimension
-            out_acts_zero = (
-                output_zero
-                if isinstance(output_zero, torch.Tensor)
-                else torch.cat(output_zero, dim=-1)
-            )
 
     # Ensure that the inputs have requires_grad=True from now on
     for x in inputs:
@@ -824,12 +816,9 @@ def integrated_gradient_trapezoidal_norm(
             # for generality we put it here.
             f_hat_norm = -(f_hat_1_alpha**2).sum()
         elif basis_formula == "(1-0)*alpha":
-            f_hat_alpha = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha
-            f_hat_1_0 = (
-                (out_acts_const - out_acts_zero) @ C_out
-                if C_out is not None
-                else (out_acts_const - out_acts_zero)
-            )
+            # clone out_acts_alpha and out_acts_const as they were created in torch.inference_mode
+            f_hat_alpha = out_acts_alpha @ C_out if C_out is not None else out_acts_alpha.clone()
+            f_hat_1_0 = out_acts_const @ C_out if C_out is not None else out_acts_const.clone()
             f_hat_norm = (f_hat_alpha * f_hat_1_0).sum()
         else:
             raise ValueError(

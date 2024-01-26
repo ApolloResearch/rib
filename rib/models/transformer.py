@@ -14,11 +14,11 @@ from transformer_lens import HookedTransformer
 
 from rib.models.components import (
     SEQUENTIAL_COMPONENT_REGISTRY,
-    DualLayerNormPre,
-    DualLayerNormPreFolded,
+    DualLayerNormIn,
+    DualLayerNormOut,
     IdentitySplit,
-    LayerNormPre,
-    LayerNormPreFolded,
+    LayerNormIn,
+    LayerNormOut,
     MultiSequential,
 )
 from rib.models.utils import (
@@ -34,7 +34,6 @@ from rib.models.utils import (
     get_model_attr,
 )
 from rib.types import TORCH_DTYPES, StrDtype
-from rib.utils import replace_pydantic_model
 
 
 class SequentialTransformerConfig(BaseModel):
@@ -115,16 +114,22 @@ class SequentialTransformer(nn.Module):
     - pos_embed (optional, not included if cfg.positional_embedding_type == "rotary")
     - add_embed (optional, only if pos_embed is present)
     - ln1 (may be an identity module if cfg.normalization_type is None)
+    - ln1_out (may be an identity module if cfg.normalization_type is None)
     - attn_in
     - attn_out
     - add_resid1
     - ln2 (may be an identity module if cfg.normalization_type is None)
+    - ln2_out (may be an identity module if cfg.normalization_type is None)
     - mlp_in
     - mlp_act
     - mlp_out
     - add_resid2
     - ln_final (may be an identity module if cfg.normalization_type is None)
+    - ln_final_out (may be an identity module if cfg.normalization_type is None)
     - unembed
+
+    Note that ln1 and ln2 just calculate the variance of the input, and ln1_out and ln2_out
+    calculate the layer norm given the variance.
 
     We use the term `module_id` to refer to the naming convention `module_name[.layer_idx]`. E.g.
     "mlp_in.0" refers to the MLP in module in the 0th transformer layer (zero-indexed), and "ln2.3"
@@ -186,46 +191,58 @@ class SequentialTransformer(nn.Module):
         (sections): ModuleDict(
             (pre): MultiSequential(
                 (0): Embed()
-                (1): LayerNormPreFolded()
-                (2): AttentionIn()
-                (3): AttentionOut()
-                (4): Add()
-                (5): DualLayerNormPreFolded()
-                (6): MLPIn()
-                (7): MLPAct()
+                (1): LayerNormIn()
+                (2): LayerNormOut()
+                (3): AttentionIn()
+                (4): AttentionOut()
+                (5): Add()
+                (6): DualLayerNormIn()
+                (7): DualLayerNormOut()
+                (8): MLPIn()
+                (9): MLPAct()
             )
             (section_0): MultiSequential(
                 (0): MLPOut()
                 (1): Add()
-                (2): LayerNormPreFolded()
+                (2): LayerNormIn()
+                (3): LayerNormOut()
                 ...
-                (22): AttentionOut()
-                (23): Add()
+                (27): AttentionOut()
+                (28): Add()
             )
             (section_1): MultiSequential(
-                (0): DualLayerNormPreFolded()
-                (1): MLPIn()
-                (2): MLPAct()
-                ...
-                (23): LayerNormPreFolded()
-                (24): Unembed()
+                (0): DualLayerNormIn()
+                (1): DualLayerNormOut()
+                (2): MLPIn()
+                (3): MLPAct()
             )
-        )
+            (section_2): MultiSequential(
+                (0): MLPOut()
+                (1): Add()
+                (2): LayerNormIn()
+                ...
+                (222): LayerNormIn()
+                (223): LayerNormOut()
+                (224): Unembed()
+            )
     )
     """
 
     LAYER_MODULE_NAMES: list[str] = [
         "ln1",
+        "ln1_out",
         "attn_in",
         "attn_out",
         "add_resid1",
         "ln2",
+        "ln2_out",
         "mlp_in",
         "mlp_act",
         "mlp_out",
         "add_resid2",
     ]
     LN_FINAL_NAME: str = "ln_final"
+    LN_FINAL_OUT_NAME: str = "ln_final_out"
     UNEMBED_MODULE_NAME: str = "unembed"
 
     def __init__(
@@ -238,7 +255,7 @@ class SequentialTransformer(nn.Module):
 
         assert cfg.normalization_type in [None, "LNPre"], (
             f"Normalization type {cfg.normalization_type} not supported. "
-            "Only LayerNormPre and None are currently supported."
+            "Only LayerNorm and None are currently supported."
         )
 
         self.cfg = cfg
@@ -334,16 +351,29 @@ class SequentialTransformer(nn.Module):
                     assert self.cfg.original_architecture == "GPTNeoForCausalLM"
                     layer_idx = module_name.split(".")[-1]
                     kwargs["use_local_attn"] = (int(layer_idx) % 2) != 0  # odd layers use local
+
                 if module_type in ["ln1", "ln2", "ln_final"]:
                     if self.cfg.normalization_type == "LNPre":
                         if self.cfg.parallel_attn_mlp and module_type == "ln2":
-                            module_class = DualLayerNormPre
+                            module_class = DualLayerNormIn
                         else:
-                            module_class = LayerNormPre
-                            # ln1 and ln2 need to output both the residual and normed residual
-                            kwargs["return_residual"] = module_type in ["ln1", "ln2"]
+                            module_class = LayerNormIn
                     else:
-                        module_class = nn.Identity if module_type == "ln_final" else IdentitySplit
+                        module_class = nn.Identity
+                elif module_type in ["ln1_out", "ln2_out", "ln_final_out"]:
+                    if self.cfg.normalization_type == "LNPre":
+                        if self.cfg.parallel_attn_mlp and module_type == "ln2_out":
+                            module_class = DualLayerNormOut
+                        else:
+                            module_class = LayerNormOut
+                            # ln1_out and ln2_out need to output both the resid and normed resid
+                            kwargs["return_residual"] = module_type in ["ln1_out", "ln2_out"]
+                    else:
+                        # Since ln1 and ln2 are identities, we need to split here (except for
+                        # ln_final_out which is always identity)
+                        module_class = (
+                            nn.Identity if module_type == "ln_final_out" else IdentitySplit
+                        )
                 else:
                     module_class = SEQUENTIAL_COMPONENT_REGISTRY[module_type]
                 module = module_class(self.cfg, **kwargs)
@@ -355,8 +385,7 @@ class SequentialTransformer(nn.Module):
     def fold_bias(self) -> None:
         """Fold the bias parameters into the weight parameters.
 
-        Also converts any instances of LayerNormPre into LayerNormPreFolded to ensure that the
-        layer norm does not consider the extra feature of ones when calculating the mean and std.
+        Also ensures that the final dimension is not calculated in layernorm modules.
 
         We define a mapping from each weight-bias pair to a function defining how to fold the bias.
 
@@ -400,20 +429,11 @@ class SequentialTransformer(nn.Module):
                 fold_fn = fold_fns[param_name]
                 fold_fn(*args)
 
-        # We also need to convert all instances of LayerNormPre into LayerNormPreFolded
-        lnpre_folded_cfg = replace_pydantic_model(
-            self.cfg, {"d_model": self.cfg.d_model + 1, "d_mlp": self.cfg.d_mlp + 1}
-        )
-        for section_name, section in self.sections.items():
-            for module_idx, module in enumerate(section):  # type: ignore
-                if isinstance(module, LayerNormPre):
-                    self.sections[section_name][module_idx] = LayerNormPreFolded(
-                        lnpre_folded_cfg, return_residual=module.return_residual
-                    )
-                elif isinstance(module, DualLayerNormPre):
-                    self.sections[section_name][module_idx] = DualLayerNormPreFolded(
-                        lnpre_folded_cfg
-                    )
+        # We want to ensure that layernorm doesn't include the final dimension in its calcs
+        ln_classes = (LayerNormOut, DualLayerNormOut, LayerNormIn, DualLayerNormIn)
+        ln_modules = [module for module in self.modules() if isinstance(module, ln_classes)]
+        for module in ln_modules:
+            module.exclude_final_dim(True)
 
         self.has_folded_bias = True
 
@@ -460,6 +480,7 @@ class SequentialTransformer(nn.Module):
                 [f"{module_name}.{i}" for module_name in SequentialTransformer.LAYER_MODULE_NAMES]
             )
         module_ids.append(SequentialTransformer.LN_FINAL_NAME)
+        module_ids.append(SequentialTransformer.LN_FINAL_OUT_NAME)
         module_ids.append(SequentialTransformer.UNEMBED_MODULE_NAME)
         return module_ids
 

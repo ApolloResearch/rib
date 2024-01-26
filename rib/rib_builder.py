@@ -34,6 +34,7 @@ To enable this, just preface the command with `mpirun -n [num_processes]`. These
 distribute as evenly as possible across all availible GPUs. The rank-0 process will gather all data
 and output it as a single file.
 """
+
 import time
 from pathlib import Path
 from typing import Literal, Optional, Union

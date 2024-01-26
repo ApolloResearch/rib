@@ -1,4 +1,5 @@
 """Run the modular arithmetic train script and check that train accuracy is >5%."""
+
 import pytest
 import yaml
 

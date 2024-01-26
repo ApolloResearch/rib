@@ -5,6 +5,7 @@ Will take 10 minutes for 60000 epochs (groks by ~30000 epochs) on GPU.
 Usage:
     python run_train_modular_arithmetic.py <path/to/config.yaml>
 """
+
 import json
 from datetime import datetime
 from pathlib import Path

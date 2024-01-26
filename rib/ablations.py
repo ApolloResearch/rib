@@ -621,6 +621,11 @@ def ablate_edges_and_eval(
             sorted(results[ablation_node_layer].items(), reverse=True)
         )
 
+        if isinstance(ablation_schedule, BisectSchedule):
+            # Store bounds to infer the bisect result, I find this useful
+            results[ablation_node_layer]["bisect_upper_bound"] = ablation_schedule._upper_bound
+            results[ablation_node_layer]["bisect_lower_bound"] = ablation_schedule._lower_bound
+
     return results, edge_masks
 
 

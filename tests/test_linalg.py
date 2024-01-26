@@ -3,12 +3,14 @@ from typing import Callable
 import numpy as np
 import pytest
 import torch
+from fancy_einsum import einsum
 from jaxtyping import Float
 from torch import Tensor
 from torch.func import jacrev
 
 from rib.linalg import (
     _calc_integration_intervals,
+    _generate_sources,
     calc_edge_functional,
     calc_edge_squared,
     calc_gram_matrix,
@@ -476,3 +478,49 @@ def test_centering_matrix(dim1: int, dim2: int) -> None:
     # Check that the inverse centered matrix correctly adds the mean back
     S_inv = centering_matrix(mean, inverse=True)
     assert torch.allclose(x, centered_S @ S_inv)
+
+
+def test_generate_sources():
+    # Simple setup: Just replace one dimension with stochastic sources
+    torch.manual_seed(0)
+    batch_size = 1000
+    n_stochastic_sources = 10
+    dim_actual = 100
+
+    tensor_to_use_for_dtype_and_device = torch.empty(1, 1)
+
+    shape = (batch_size, n_stochastic_sources, dim_actual)
+    phi = _generate_sources(shape, like_tensor=tensor_to_use_for_dtype_and_device)
+
+    out = einsum("batch source dim1, batch source dim2 -> batch dim1 dim2", phi, phi)
+    out /= n_stochastic_sources
+
+    diagonal_of_out = torch.diagonal(out, dim1=1, dim2=2)
+    deviation_from_identity = out - torch.eye(dim_actual)
+
+    assert torch.allclose(diagonal_of_out, torch.ones_like(diagonal_of_out))
+    assert deviation_from_identity.mean() < 0.001
+    assert deviation_from_identity.std() < 0.4  # Empirically around 0.3147 for these dims
+
+
+def test_generate_sources_2d():
+    # Simple setup: Just replace one dimension with stochastic sources
+    torch.manual_seed(0)
+    batch_size = 1000
+    n_stochastic_sources = 10
+    dim_actual = 100
+
+    tensor_to_use_for_dtype_and_device = torch.empty(1, 1)
+
+    shape = (batch_size, n_stochastic_sources, dim_actual)
+    phi = _generate_sources(shape, like_tensor=tensor_to_use_for_dtype_and_device)
+
+    out = einsum("batch source dim1, batch source dim2 -> batch dim1 dim2", phi, phi)
+    out /= n_stochastic_sources
+
+    diagonal_of_out = torch.diagonal(out, dim1=1, dim2=2)
+    deviation_from_identity = out - torch.eye(dim_actual)
+
+    assert torch.allclose(diagonal_of_out, torch.ones_like(diagonal_of_out))
+    assert deviation_from_identity.mean() < 0.001
+    assert deviation_from_identity.std() < 0.4  # Empirically around 0.3147 for these dims

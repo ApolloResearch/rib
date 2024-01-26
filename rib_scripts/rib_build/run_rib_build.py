@@ -20,6 +20,7 @@ Usage:
         --pod_rank: Rank of the current pod. Will be 0 unless this script was called as part of a
             distributed job over e.g. kubernetes.
 """
+
 import fire
 
 from rib.rib_builder import rib_build

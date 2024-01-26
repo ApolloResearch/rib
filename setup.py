@@ -19,13 +19,13 @@ setup(
     install_requires=requirements,
     extras_require={
         "dev": [
-            "black",
-            "isort",
-            "mypy",
-            "pylint",
-            "pytest",
-            "types-PyYAML",
-            "types-tqdm",
+            "black~=24.1.0",
+            "isort~=5.13.2",
+            "mypy~=1.8.0",
+            "pylint~=3.0.3",
+            "pytest~=7.4.4",
+            "types-PyYAML~=6.0.12.12",
+            "types-tqdm~=4.66.0.20240106",
         ]
     },
     classifiers=[

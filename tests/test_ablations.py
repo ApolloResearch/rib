@@ -141,9 +141,9 @@ def test_run_mnist_ablations(ablation_type, tmp_path):
 def test_run_modular_arithmetic_rib_ablations(ablation_type, tmp_path):
     build_config = get_modular_arithmetic_config(
         {
-            "node_layers": ["ln1.0", "mlp_out.0", "unembed", "output"],
-            "batch_size": 10,
-            "dataset": {"return_set_n_samples": 10},
+            "node_layers": ["ln1.0", "ln2.0", "mlp_out.0", "unembed", "output"],
+            "batch_size": 100,
+            "dataset": {"return_set_n_samples": 100},
         }
     )
     results = rib_build(build_config)
@@ -163,12 +163,13 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, tmp_path):
     dataset:
         dataset_type: modular_arithmetic
         return_set: train
-        return_set_n_samples: 10
+        return_set_n_samples: 100
     ablation_node_layers:
         - ln1.0
+        - ln2.0
         - mlp_out.0
         - unembed
-    batch_size: 10
+    batch_size: 100
     dtype: float32
     seed: 0
     eval_type: accuracy

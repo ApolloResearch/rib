@@ -6,7 +6,6 @@
 4. The accuracies are sorted roughly in descending order of the number of ablated vectors.
 """
 
-from pathlib import Path
 from typing import Union
 
 import pytest
@@ -19,6 +18,8 @@ from rib.ablations import (
     _get_edge_mask,
     load_bases_and_ablate,
 )
+from rib.rib_builder import rib_build
+from tests.utils import get_mnist_config, get_modular_arithmetic_config
 
 
 def _is_roughly_sorted(lst: list[Union[int, float]], k: int = 1, reverse: bool = False) -> bool:
@@ -105,29 +106,23 @@ def check_accuracies(
 
 
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
-def test_run_mnist_ablations(ablation_type):
-    """Test various ablation result properties for ablations on MNIST.
+def test_run_mnist_ablations(ablation_type, tmp_path):
+    build_config = get_mnist_config(
+        {
+            "node_layers": ["layers.1", "layers.2", "output"],
+            "batch_size": 100,
+            "dtype": "float32",
+            "dataset": {"return_set_n_samples": 100, "return_set_frac": None},
+        }
+    )
+    results = rib_build(build_config)
+    tempfile = tmp_path / "mnist_rib_graph.pt"
+    torch.save(results.model_dump(), tempfile)
 
-    The ablation rib_scripts load model from the config of the RIB graph. To run on ci
-    we need this path to be local. If that isn't the case you can manually fix this with:
-    ```
-    import torch
-    from pathlib import Path
-    from rib.settings import REPO_ROOT
-    rib_graph = torch.load("rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
-    mlp_path = Path(rib_graph['config']['mlp_path'])
-    rib_graph['config']['mlp_path'] = str(mlp_path.relative_to(REPO_ROOT))
-    torch.save(rib_graph, "rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
-    ```
-    """
-    graph_path = Path("rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
-    mlp_path = Path(torch.load(graph_path)["config"]["mlp_path"])
-    assert not mlp_path.is_absolute(), "must be relative to run in ci, see docstring"
-
-    config_str = f"""
+    ablation_config_str = f"""
     exp_name: "test_ablation_mnist"
     ablation_type: {ablation_type}
-    rib_results_path: rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
+    rib_results_path: {tempfile}
     schedule:
         schedule_type: exponential
         early_stopping_threshold: 0.05
@@ -141,41 +136,80 @@ def test_run_mnist_ablations(ablation_type):
         dataset_type: torchvision
         name: MNIST
         return_set_n_samples: 100
-    batch_size: 64  # two batches
+    batch_size: 64  # 2 batches
     seed: 0
     out_dir: null
     eval_type: accuracy
     """
-    config_dict = yaml.safe_load(config_str)
-    config = AblationConfig(**config_dict)
-    accuracies = load_bases_and_ablate(config)
-    check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
+    ablation_config_dict = yaml.safe_load(ablation_config_str)
+    ablation_config = AblationConfig(**ablation_config_dict)
+    accuracies = load_bases_and_ablate(ablation_config)
+    check_accuracies(accuracies, ablation_config, max_accuracy_threshold=0.95)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
+def test_run_modular_arithmetic_rib_ablations(ablation_type, tmp_path):
+    build_config = get_modular_arithmetic_config(
+        {
+            "node_layers": ["ln1.0", "ln2.0", "mlp_out.0", "unembed", "output"],
+            "batch_size": 100,
+            "dataset": {"return_set_n_samples": 100},
+        }
+    )
+    results = rib_build(build_config)
+    tempfile = tmp_path / "modular_arithmetic_rib_graph.pt"
+    torch.save(results.model_dump(), tempfile)
+
+    ablation_config_str = f"""
+    exp_name: "test_ablation_mod_add"
+    ablation_type: {ablation_type}
+    rib_results_path: {tempfile}
+    schedule:
+        schedule_type: exponential
+        early_stopping_threshold: 0.3
+        ablate_every_vec_cutoff: 2
+        exp_base: 2.0
+        specific_points: [101, 100]
+    dataset:
+        dataset_type: modular_arithmetic
+        return_set: train
+        return_set_n_samples: 100
+    ablation_node_layers:
+        - ln1.0
+        - ln2.0
+        - mlp_out.0
+        - unembed
+    batch_size: 100
+    dtype: float32
+    seed: 0
+    eval_type: accuracy
+    out_dir: null
+    """
+    ablation_config_dict = yaml.safe_load(ablation_config_str)
+    ablation_config = AblationConfig(**ablation_config_dict)
+    accuracies = load_bases_and_ablate(ablation_config)
+    check_accuracies(accuracies, ablation_config, max_accuracy_threshold=0.998)
 
 
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
-def test_run_mnist_ablations_bisect(ablation_type):
-    """Test various ablation result properties for ablations on MNIST.
-
-    The ablation rib_scripts load model from the config of the RIB graph. To run on ci
-    we need this path to be local. If that isn't the case you can manually fix this with:
-    ```
-    import torch
-    from pathlib import Path
-    from rib.settings import REPO_ROOT
-    rib_graph = torch.load("rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
-    mlp_path = Path(rib_graph['config']['mlp_path'])
-    rib_graph['config']['mlp_path'] = str(mlp_path.relative_to(REPO_ROOT))
-    torch.save(rib_graph, "rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
-    ```
-    """
-    graph_path = Path("rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt")
-    mlp_path = Path(torch.load(graph_path)["config"]["mlp_path"])
-    assert not mlp_path.is_absolute(), "must be relative to run in ci, see docstring"
+def test_run_mnist_ablations_bisect(ablation_type, tmp_path):
+    build_config = get_mnist_config(
+        {
+            "node_layers": ["layers.1", "layers.2", "output"],
+            "batch_size": 100,
+            "dtype": "float32",
+            "dataset": {"return_set_n_samples": 100, "return_set_frac": None},
+        }
+    )
+    results = rib_build(build_config)
+    tempfile = tmp_path / "mnist_rib_graph.pt"
+    torch.save(results.model_dump(), tempfile)
 
     config_str = f"""
     exp_name: "test_ablation_mnist"
     ablation_type: {ablation_type}
-    rib_results_path: rib_scripts/rib_build/sample_graphs/4-node-layers_rib_graph_sample.pt
+    rib_results_path: {tempfile}
     schedule:
         schedule_type: bisect
         score_target: 0.9
@@ -198,92 +232,37 @@ def test_run_mnist_ablations_bisect(ablation_type):
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
-def test_run_modular_arithmetic_rib_ablations(ablation_type):
-    """Test various ablation result properties on modular arithmetic.
-
-    The ablation rib_scripts load model from the config of the RIB graph. To run on ci
-    we need this path to be local. If that isn't the case you can manually fix this with:
-    ```
-    import torch
-    rib_graph = torch.load("rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
-    rib_graph['config']['tlens_model_path'] = "rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt"
-    torch.save(rib_graph, "rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
-    ```
-    """
-    rib_graph = torch.load(
-        "rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt"
+def test_run_modular_arithmetic_rib_ablations_bisect(ablation_type, tmp_path):
+    build_config = get_modular_arithmetic_config(
+        {
+            "node_layers": ["ln1.0", "ln2.0", "mlp_out.0", "unembed", "output"],
+            "batch_size": 100,
+            "dataset": {"return_set_n_samples": 100},
+        }
     )
-    model_path = Path(rib_graph["config"]["tlens_model_path"])
-    assert not model_path.is_absolute(), "must be relative to run in ci, see docstring"
+    results = rib_build(build_config)
+    tempfile = tmp_path / "modular_arithmetic_rib_graph.pt"
+    torch.save(results.model_dump(), tempfile)
 
     config_str = f"""
     exp_name: "test_ablation_mod_add"
     ablation_type: {ablation_type}
-    rib_results_path: rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
-    schedule:
-        schedule_type: exponential
-        early_stopping_threshold: 0.3
-        ablate_every_vec_cutoff: 2
-        exp_base: 2.0
-        specific_points: [101, 100]
-    dataset:
-        dataset_type: modular_arithmetic
-        return_set: train
-        return_set_n_samples: 1000
-    ablation_node_layers:
-        - ln1.0
-        - ln2.0
-        - mlp_out.0
-        - unembed
-    batch_size: 1000  # single batch
-    dtype: float32
-    seed: 0
-    eval_type: accuracy
-    out_dir: null
-    """
-    config_dict = yaml.safe_load(config_str)
-    config = AblationConfig(**config_dict)
-    accuracies = load_bases_and_ablate(config)
-    check_accuracies(accuracies, config, max_accuracy_threshold=0.998)
-
-
-@pytest.mark.parametrize("ablation_type", ["orthogonal", "rib", "edge"])
-def test_run_modular_arithmetic_rib_ablations_bisect(ablation_type):
-    """Test various ablation result properties on modular arithmetic.
-
-    The ablation rib_scripts load model from the config of the RIB graph. To run on ci
-    we need this path to be local. If that isn't the case you can manually fix this with:
-    ```
-    import torch
-    rib_graph = torch.load("rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
-    rib_graph['config']['tlens_model_path'] = "rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt"
-    torch.save(rib_graph, "rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt")
-    ```
-    """
-    rib_graph = torch.load(
-        "rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt"
-    )
-    model_path = Path(rib_graph["config"]["tlens_model_path"])
-    assert not model_path.is_absolute(), "must be relative to run in ci, see docstring"
-
-    config_str = f"""
-    exp_name: "test_ablation_mod_add"
-    ablation_type: {ablation_type}
-    rib_results_path: rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
+    rib_results_path: {tempfile}
     schedule:
         schedule_type: bisect
         score_target: 0.9
     dataset:
         dataset_type: modular_arithmetic
         return_set: train
-        return_set_n_samples: 1000
+        return_set_n_samples: 100
     ablation_node_layers:
         - ln1.0
         - ln2.0
         - mlp_out.0
         - unembed
-    batch_size: 1000  # single batch
+    batch_size: 100  # single batch
     dtype: float32
     seed: 0
     eval_type: accuracy

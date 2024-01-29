@@ -88,7 +88,7 @@ def _prepare_edges_for_plotting(
             const_node_index = 0
             # Set edges outgoing from this node to zero (edges.shape ~ l+1, l). The incoming edges
             # should be zero except for a non-rotated last layer where they are important.
-            weight_matrix[i][:, const_node_index] = 0
+            weight_matrix[:, const_node_index] = 0
         # Normalize the edge weights by the sum of the absolute values of the weights
         weight_matrix /= torch.sum(torch.abs(weight_matrix))
         # Only keep the desired number of nodes in each layer
@@ -100,7 +100,7 @@ def _prepare_edges_for_plotting(
 
 def plot_ablation_results(
     results: list[dict[str, dict[str, float]]],
-    out_file: Path,
+    out_file: Optional[Path],
     exp_names: list[str],
     eval_type: Literal["accuracy", "ce_loss"],
     ablation_types: list[Literal["orthogonal", "rib"]],
@@ -171,8 +171,8 @@ def plot_ablation_results(
 
     # Adjust the spacing between subplots
     plt.subplots_adjust(hspace=0.4)
-
-    plt.savefig(out_file)
+    if out_file is not None:
+        plt.savefig(out_file)
 
 
 def plot_rib_graph(
@@ -180,7 +180,7 @@ def plot_rib_graph(
     layer_names: list[str],
     exp_name: str,
     nodes_per_layer: Union[int, list[int]],
-    out_file: Path,
+    out_file: Optional[Path] = None,
     node_labels: Optional[list[list[str]]] = None,
     hide_const_edges: bool = False,
 ) -> None:
@@ -258,4 +258,5 @@ def plot_rib_graph(
     plt.suptitle(exp_name)
     plt.tight_layout()
     ax.axis("off")
-    plt.savefig(out_file)
+    if out_file is not None:
+        plt.savefig(out_file)

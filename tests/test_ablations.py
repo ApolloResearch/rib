@@ -143,7 +143,7 @@ def test_run_mnist_ablations(ablation_type, tmp_path):
     """
     ablation_config_dict = yaml.safe_load(ablation_config_str)
     ablation_config = AblationConfig(**ablation_config_dict)
-    accuracies = load_bases_and_ablate(ablation_config)
+    accuracies = load_bases_and_ablate(ablation_config)["results"]
     check_accuracies(accuracies, ablation_config, max_accuracy_threshold=0.95)
 
 
@@ -188,7 +188,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, tmp_path):
     """
     ablation_config_dict = yaml.safe_load(ablation_config_str)
     ablation_config = AblationConfig(**ablation_config_dict)
-    accuracies = load_bases_and_ablate(ablation_config)
+    accuracies = load_bases_and_ablate(ablation_config)["results"]
     check_accuracies(accuracies, ablation_config, max_accuracy_threshold=0.998)
 
 
@@ -228,7 +228,7 @@ def test_run_mnist_ablations_bisect(ablation_type, tmp_path):
     """
     config_dict = yaml.safe_load(config_str)
     config = AblationConfig(**config_dict)
-    accuracies = load_bases_and_ablate(config)
+    accuracies = load_bases_and_ablate(config)["results"]
     check_accuracies(accuracies, config, max_accuracy_threshold=0.95)
 
 
@@ -271,7 +271,7 @@ def test_run_modular_arithmetic_rib_ablations_bisect(ablation_type, tmp_path):
     config_dict = yaml.safe_load(config_str)
 
     config = AblationConfig(**config_dict)
-    accuracies = load_bases_and_ablate(config)
+    accuracies = load_bases_and_ablate(config)["results"]
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)
 
 

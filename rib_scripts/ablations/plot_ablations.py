@@ -13,21 +13,24 @@ Usage:
 
 import json
 from pathlib import Path
+from typing import Union
 
 import fire
 
 from rib.log import logger
 from rib.plotting import plot_ablation_results
+from rib.types import RootPath
 from rib.utils import check_outfile_overwrite
 
 
-def main(*results_files: str, force: bool = False) -> None:
+def main(*results_files: Union[str, Path], force: bool = False) -> RootPath:
     results_list = []
     exp_names = []
     ablation_types = []
     eval_type = None
 
     for results_file in results_files:
+        results_file = str(results_file)
         if not results_file.endswith(".json"):
             # Raise a warning to the user, but don't exit.
             logger.warning(f"Skipping {results_file} because it is not a JSON file.")
@@ -66,6 +69,7 @@ def main(*results_files: str, force: bool = False) -> None:
     )
 
     logger.info(f"Saved plot to {out_file}")
+    return out_file
 
 
 if __name__ == "__main__":

@@ -534,7 +534,7 @@ def ablate_edges_and_eval(
     device: str,
     dtype: Optional[torch.dtype] = None,
     always_keep_const_dir=False,
-) -> tuple[AblationAccuracies, EdgeMasks]:
+) -> tuple[AblationAccuracies, EdgeMasks, dict[str, int]]:
     """Perform a series of edge ablation experiments across layers and multiple # of edges to keep.
 
     Note that we want our ablation schedules for different bases to match up, even though different
@@ -567,6 +567,7 @@ def ablate_edges_and_eval(
 
     results: AblationAccuracies = {}
     edge_masks: EdgeMasks = {}
+    n_edges_required = {}
     basis_pairs = zip(basis_matrices[:-1], basis_matrices[1:])
     for ablation_node_layer, module_name, basis_pair, layer_edges in zip(
         ablation_node_layers[:-1], module_names[:-1], basis_pairs, edges, strict=True
@@ -622,13 +623,11 @@ def ablate_edges_and_eval(
         )
 
         if isinstance(ablation_schedule, BisectSchedule):
-            if not "n_edges_required" in results:
-                results["n_edges_required"] = {}
-            results["n_edges_required"][ablation_node_layer] = (
+            n_edges_required[ablation_node_layer] = (
                 total_possible_edges - ablation_schedule._upper_bound
             )
 
-    return results, edge_masks
+    return results, edge_masks, n_edges_required
 
 
 def load_basis_matrices(
@@ -778,7 +777,7 @@ def load_bases_and_ablate(
     if config.ablation_type == "edge":
         edges_dict = {info.in_node_layer: info for info in rib_results.edges}
         edges = [edges_dict[layer] for layer in config.ablation_node_layers[:-1]]
-        ablation_results, edge_masks = ablate_edges_and_eval(
+        ablation_results, edge_masks, n_edges_required = ablate_edges_and_eval(
             basis_matrices=basis_matrices,
             ablation_node_layers=config.ablation_node_layers,
             edges=edges,
@@ -816,6 +815,7 @@ def load_bases_and_ablate(
         "no_ablation_result": no_ablation_result,
     }
     if config.ablation_type == "edge":
+        results["n_edges_required"] = n_edges_required
         results["edge_masks"] = edge_masks
 
     if config.out_dir is not None:
@@ -823,4 +823,4 @@ def load_bases_and_ablate(
             json.dump(results, f, default=lambda x: x.tolist(), indent=1)
         logger.info("Wrote results to %s", out_file)
 
-    return ablation_results
+    return results

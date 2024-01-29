@@ -876,13 +876,13 @@ def test_stochastic_source_tinystories_full():
     for stochastic_edges in all_stochastic_edges:
         abs_diffs.append(torch.abs(stochastic_edges - squared_edges).mean())
 
-    # Check that the mean absolute differences decrease as n_stochastic_sources_edges increases.
-    assert (
-        torch.diff(torch.tensor(abs_diffs)) <= 0
-    ).all(), "abs_diffs is not monotonically decreasing"
     assert_is_close(
         all_stochastic_edges[-1] / squared_edges.max(),
         squared_edges / squared_edges.max(),
         atol=0.5,
         rtol=0,
     )
+    # Check that the mean absolute differences decrease as n_stochastic_sources_edges increases.
+    assert (
+        torch.diff(torch.tensor(abs_diffs)) <= 0
+    ).all(), "abs_diffs is not monotonically decreasing"

@@ -537,9 +537,7 @@ def calc_basis_jacobian(
                     like_tensor=in_grads,
                 )
         else:
-            raise ValueError(
-                "dim_stochastic_sources must be 'both', 'out_pos', or 'out_hidden'."
-            )
+            raise ValueError("dim_stochastic_sources must be 'both', 'out_pos', or 'out_hidden'.")
         for alpha_index, alpha in tqdm(
             enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
         ):
@@ -562,7 +560,6 @@ def calc_basis_jacobian(
             # Shapes of inputs and outputs, that lead to in_grads.shape = batch, i, t, s, j/jprime
             # f_out_hat_alpha.shape: batch t i
             # f_in_alpha: batch, s, j
-
 
             for r_A, r_B in tqdm(
                 np.ndindex(n_sources_A, n_sources_B),

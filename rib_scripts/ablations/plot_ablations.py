@@ -13,7 +13,7 @@ Usage:
 
 import json
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import fire
 
@@ -23,7 +23,7 @@ from rib.types import RootPath
 from rib.utils import check_outfile_overwrite
 
 
-def main(*results_files: Union[str, Path], force: bool = False) -> RootPath:
+def main(*results_files: Union[str, Path], force: bool = False) -> Optional[RootPath]:
     results_list = []
     exp_names = []
     ablation_types = []
@@ -55,7 +55,7 @@ def main(*results_files: Union[str, Path], force: bool = False) -> RootPath:
     out_file = Path(__file__).parent / "out" / f"{out_filename}_{eval_type}_vs_ablated_vecs.png"
 
     if not check_outfile_overwrite(out_file, force):
-        return
+        return None
 
     plot_ablation_results(
         results=results_list,

@@ -447,11 +447,7 @@ def _generate_sources(shape, like_tensor):
     Returns:
         A tensor of shape `shape` with values -1 or 1 with equal probability.
     """
-    return torch.where(
-        torch.randn(shape) < 0.0,
-        -1 * torch.ones(shape),
-        torch.ones(shape),
-    ).to(dtype=like_tensor.dtype, device=like_tensor.device)
+    return torch.where(torch.rand(shape) > 0.5, 1, -1).to(like_tensor)
 
 
 def calc_basis_jacobian(
@@ -580,7 +576,7 @@ def calc_basis_jacobian(
                     phi[:, r_A, r_B, :, :],
                     f_out_hat_alpha,
                 )
-                # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
+                # Need to retain_graph because we call autograd on f_out_hat_alpha multiple
                 # times (for each i and t, in a for loop) aka we're doing a jacobian.
                 # Sum over batch is a trick to get the grad for every batch index vectorized.
                 alpha_in_grads = torch.cat(

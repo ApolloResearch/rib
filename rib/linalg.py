@@ -447,11 +447,7 @@ def _generate_sources(shape, like_tensor):
     Returns:
         A tensor of shape `shape` with values -1 or 1 with equal probability.
     """
-    return torch.where(
-        torch.randn(shape) < 0.0,
-        -1 * torch.ones(shape),
-        torch.ones(shape),
-    ).to(dtype=like_tensor.dtype, device=like_tensor.device)
+    return torch.where(torch.rand(shape) > 0.5, 1, -1).to(like_tensor)
 
 
 def calc_basis_jacobian(

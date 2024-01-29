@@ -515,6 +515,35 @@ def calc_basis_jacobian(
             device=inputs[0].device,
         )
 
+        phi_shape = (batch_size, n_sources_A, n_sources_B, out_hat_hidden_size, out_pos_size)
+        if n_stochastic_sources is None:
+            # Full dimensions
+            phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
+            for i in range(out_hat_hidden_size):
+                for t in range(out_pos_size):
+                    phi[:, i, t, i, t] = 1.0
+        elif dim_stochastic_sources == "both":
+            # Introduce stochastic sources: Don't iterate over all i and/or t, but a random
+            # direction in the i and t space. Sources = -1 or 1 with equal probability.
+            phi = _generate_sources(phi_shape, like_tensor=in_grads)
+        elif dim_stochastic_sources == "out_pos":
+            phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
+            for i in range(out_hat_hidden_size):
+                phi[:, i, :, i, :] = _generate_sources(
+                    (batch_size, n_stochastic_sources, out_pos_size),
+                    like_tensor=in_grads,
+                )
+        elif dim_stochastic_sources == "out_hidden":
+            phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
+            for t in range(out_pos_size):
+                phi[:, :, t, :, t] = _generate_sources(
+                    (batch_size, n_stochastic_sources, out_hat_hidden_size),
+                    like_tensor=in_grads,
+                )
+        else:
+            raise ValueError(
+                "dim_stochastic_sources must be 'both', 'out_pos', or 'out_hidden'."
+            )
         for alpha_index, alpha in tqdm(
             enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
         ):
@@ -538,35 +567,6 @@ def calc_basis_jacobian(
             # f_out_hat_alpha.shape: batch t i
             # f_in_alpha: batch, s, j
 
-            phi_shape = (batch_size, n_sources_A, n_sources_B, out_hat_hidden_size, out_pos_size)
-            if n_stochastic_sources is None:
-                # Full dimensions
-                phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
-                for i in range(out_hat_hidden_size):
-                    for t in range(out_pos_size):
-                        phi[:, i, t, i, t] = 1.0
-            elif dim_stochastic_sources == "both":
-                # Introduce stochastic sources: Don't iterate over all i and/or t, but a random
-                # direction in the i and t space. Sources = -1 or 1 with equal probability.
-                phi = _generate_sources(phi_shape, like_tensor=in_grads)
-            elif dim_stochastic_sources == "out_pos":
-                phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
-                for i in range(out_hat_hidden_size):
-                    phi[:, i, :, i, :] = _generate_sources(
-                        (batch_size, n_stochastic_sources, out_pos_size),
-                        like_tensor=in_grads,
-                    )
-            elif dim_stochastic_sources == "out_hidden":
-                phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
-                for t in range(out_pos_size):
-                    phi[:, :, t, :, t] = _generate_sources(
-                        (batch_size, n_stochastic_sources, out_hat_hidden_size),
-                        like_tensor=in_grads,
-                    )
-            else:
-                raise ValueError(
-                    "dim_stochastic_sources must be 'both', 'out_pos', or 'out_hidden'."
-                )
 
             for r_A, r_B in tqdm(
                 np.ndindex(n_sources_A, n_sources_B),

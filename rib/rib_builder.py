@@ -226,6 +226,16 @@ class RibBuildConfig(BaseModel):
             )
         if self.edge_formula == "stochastic" and self.n_stochastic_sources_edges is None:
             raise ValueError("n_stochastic_sources must be set when edge_formula is stochastic")
+        if (
+            self.dim_stochastic_sources_basis is not None
+            and self.n_stochastic_sources_basis is None
+        ):
+            raise ValueError("n_stochastic_sources_basis needed for dim_stochastic_sources_basis")
+        if (
+            self.dim_stochastic_sources_basis is None
+            and self.n_stochastic_sources_basis is not None
+        ):
+            raise ValueError("dim_stochastic_sources_basis needed for n_stochastic_sources_basis")
         return self
 
 

@@ -68,6 +68,43 @@ def get_pythia_config(*updates: dict) -> RibBuildConfig:
     return RibBuildConfig(**config_dict)
 
 
+def get_tinystories_config(*updates: dict) -> RibBuildConfig:
+    config_str = f"""
+    exp_name: test
+    out_dir: null
+    seed: 0
+    tlens_pretrained: tiny-stories-1M
+    tlens_model_path: null
+    dataset:
+        dataset_type: huggingface
+        name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if part of training
+        tokenizer_name: EleutherAI/gpt-neo-125M
+        return_set: train
+        return_set_frac: null
+        return_set_n_samples: 1 # avg ~235 toks / story
+        return_set_portion: first
+        n_ctx: 10 # needs to be <= 511 for the model to behave reasonably
+    node_layers:
+        - ln1.3
+        - ln1.5
+        - unembed
+    gram_batch_size: 100
+    batch_size: 50
+    edge_batch_size: 500
+    truncation_threshold: 1e-15
+    rotate_final_node_layer: true
+    n_intervals: 2
+    dtype: float64
+    center: true
+    calculate_edges: true
+    eval_type: ce_loss
+    basis_formula: jacobian
+    edge_formula: squared
+    """
+    config_dict = deep_update(yaml.safe_load(config_str), *updates)
+    return RibBuildConfig(**config_dict)
+
+
 def get_mnist_config(*updates: dict) -> RibBuildConfig:
     config_str = f"""
     exp_name: test

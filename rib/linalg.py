@@ -580,7 +580,7 @@ def calc_basis_jacobian(
                     phi[:, r_A, r_B, :, :],
                     f_out_hat_alpha,
                 )
-                # Need to retain_graph because we call autpgrad on f_out_hat_alpha multiple
+                # Need to retain_graph because we call autograd on f_out_hat_alpha multiple
                 # times (for each i and t, in a for loop) aka we're doing a jacobian.
                 # Sum over batch is a trick to get the grad for every batch index vectorized.
                 alpha_in_grads = torch.cat(

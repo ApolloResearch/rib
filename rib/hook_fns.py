@@ -434,6 +434,9 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             einsum_pattern = "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"  # TODO Is this einsum right?
             in_pos_size = in_grads.shape[3]
             normalization_factor = in_pos_size * dataset_size
+            # It is intentional that normalization_factor is multiplied by both,
+            # n_stochastic_sources_pos and n_stochastic_sources_hidden when both are present. The
+            # total amount of stochastic sources in that case is the product.
             if n_stochastic_sources_pos is not None:
                 normalization_factor *= n_stochastic_sources_pos
             if n_stochastic_sources_hidden is not None:

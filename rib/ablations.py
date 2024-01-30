@@ -562,6 +562,8 @@ def ablate_edges_and_eval(
     Returns:
         A dictionary mapping node layers to ablation accuracies/losses.
         A dictionary mapping node layers to edge masks.
+        A dictionary mapping node layers to the number of edges required to achieve the target
+            accuracy/loss (for bisect schedule only, otherwise empty dict).
     """
     base_score = eval_fn(hooked_model, data_loader, hooks=[], dtype=dtype, device=device)
 
@@ -688,7 +690,7 @@ def load_basis_matrices(
 
 def load_bases_and_ablate(
     config_path_or_obj: Union[str, AblationConfig], force: bool = False
-) -> AblationAccuracies:
+) -> dict:
     """Load basis matrices and run ablation experiments.
 
     The process is as follows:
@@ -709,8 +711,14 @@ def load_bases_and_ablate(
         force: Whether to overwrite existing output files.
 
     Returns:
-        A dictionary mapping node layers to accuracies/losses. If the config has an out_dir, the
-        results are also written to a file in that directory.
+        A dictionary containing the results of the ablation experiments. The dictionary contains
+        "config" (json dump of the config), "results" (a dictionary mapping node layers to
+        accuracies/losses), "time_taken" (the time taken to run the ablations), and
+        "no_ablation_result" (numbering). If "edge" ablations were performed, the dictionary also
+        contains "n_edges_required" (the number of edges required to achieve the target accuracy/
+        loss, non-empty only if BisectSchedule was used) and "edge_masks" (a dictionary mapping
+        node layers to edge masks).
+        If the config has an out_dir, the results are also written to a file in that directory.
     """
     start_time = time.time()
     config = load_config(config_path_or_obj, config_model=AblationConfig)

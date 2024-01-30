@@ -429,16 +429,20 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             n_stochastic_sources=n_stochastic_sources,
             dim_stochastic_sources=dim_stochastic_sources,
         )
+        assert (dim_stochastic_sources is None) == (n_stochastic_sources is None)
         has_pos = inputs[0].dim() == 3
-        einsum_pattern = (
-            "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"
-            if has_pos
-            else "batch i j, batch i jprime -> j jprime"
-        )
-        pos_size = in_grads.shape[2] if has_pos else 1
-        normalization_factor = pos_size * dataset_size
-        if n_stochastic_sources is not None:
-            normalization_factor *= n_stochastic_sources
+        if has_pos:
+            einsum_pattern = "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"
+            in_pos_size = in_grads.shape[3]
+            normalization_factor = in_pos_size * dataset_size
+            if n_stochastic_sources is not None:
+                normalization_factor *= n_stochastic_sources
+        else:
+            assert n_stochastic_sources is None, "Stochastic sources only supported if has_pos=True"
+            einsum_pattern = "batch i j, batch i jprime -> j jprime"
+            in_pos_size = 1
+            normalization_factor = dataset_size
+
         with torch.inference_mode():
             # M_dash.shape: j jprime
             M_dash = einops.einsum(

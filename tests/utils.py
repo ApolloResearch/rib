@@ -93,7 +93,7 @@ def get_tinystories_config(*updates: dict) -> RibBuildConfig:
     edge_batch_size: 500
     truncation_threshold: 1e-15
     rotate_final_node_layer: true
-    n_intervals: 2
+    n_intervals: 0
     dtype: float64
     center: true
     calculate_edges: true

@@ -679,8 +679,13 @@ def test_stochastic_source_modadd_convergence():
     assert_is_close(all_stochastic_edges[-1], squared_edges, atol=1e1, rtol=1e-5)
 
 
+@pytest.fixture(scope="module")
+def no_stochastic_results():
+    return rib_build(get_tinystories_config())
+
+
 @pytest.mark.slow
-def test_stochastic_source_edges_tinystories():
+def test_stochastic_source_edges_tinystories(no_stochastic_results):
     """Test stochastic edges on TinyStories.
 
     NOTE: We find that with 10 stochastic sources (n_ctx==10) the edges still differ by up to 13.7%
@@ -700,8 +705,7 @@ def test_stochastic_source_edges_tinystories():
         all_stochastic_edges.append(stochastic_edges)
 
     # Calc squared edges
-    config_squared = get_tinystories_config()
-    squared_edges = rib_build(config_squared).edges[0].E_hat
+    squared_edges = no_stochastic_results.edges[0].E_hat
 
     for stochastic_edges in all_stochastic_edges:
         abs_diffs.append(torch.abs(stochastic_edges - squared_edges).mean())
@@ -729,7 +733,7 @@ def test_stochastic_source_edges_tinystories():
 
 
 @pytest.mark.slow
-def test_stochastic_source_basis_out_hidden_tinystories():
+def test_stochastic_source_basis_out_hidden_tinystories(no_stochastic_results):
     """Test stochastic basis in the hidden dimension on TinyStories.
 
     More sources allowed because they span 64 dims rather than 10 dims.
@@ -751,11 +755,16 @@ def test_stochastic_source_basis_out_hidden_tinystories():
         all_stochastic_edges.append(stochastic_edges)
 
     # Calc squared edges
-    config_squared = get_tinystories_config()
-    squared_edges = rib_build(config_squared).edges[0].E_hat
+    squared_edges = no_stochastic_results.edges[0].E_hat
 
     for stochastic_edges in all_stochastic_edges:
         abs_diffs.append(torch.abs(stochastic_edges - squared_edges).mean())
+    assert_is_close(
+        all_stochastic_edges[-1] / squared_edges.max(),
+        squared_edges / squared_edges.max(),
+        atol=0.05,
+        rtol=0,
+    )
 
     # Check that the sources are actually stochastic and change with seed
     config_stochastic42 = get_tinystories_config(
@@ -766,19 +775,11 @@ def test_stochastic_source_basis_out_hidden_tinystories():
         }
     )
     stochastic_edges_seed42 = rib_build(config_stochastic42).edges[0].E_hat
-
-    assert_is_close(
-        all_stochastic_edges[-1] / squared_edges.max(),
-        squared_edges / squared_edges.max(),
-        atol=0.05,
-        rtol=0,
-    )
-
     assert not torch.allclose(all_stochastic_edges[0], stochastic_edges_seed42, atol=0, rtol=0)
 
 
 @pytest.mark.slow
-def test_stochastic_source_basis_out_pos_tinystories():
+def test_stochastic_source_basis_out_pos_tinystories(no_stochastic_results):
     """Test stochastic basis over position dimension on TinyStories.
 
     We find that with 10 stochastic sources (n_ctx==10) the edges differ by up to
@@ -798,8 +799,7 @@ def test_stochastic_source_basis_out_pos_tinystories():
         all_stochastic_edges.append(stochastic_edges)
 
     # Calc squared edges
-    config_squared = get_tinystories_config()
-    squared_edges = rib_build(config_squared).edges[0].E_hat
+    squared_edges = no_stochastic_results.edges[0].E_hat
 
     for stochastic_edges in all_stochastic_edges:
         abs_diffs.append(torch.abs(stochastic_edges - squared_edges).mean())
@@ -825,7 +825,7 @@ def test_stochastic_source_basis_out_pos_tinystories():
 
 
 @pytest.mark.slow
-def test_stochastic_source_tinystories_full():
+def test_stochastic_source_tinystories_full(no_stochastic_results):
     """Test stochastic basis in the hidden + position dimension on TinyStories.
 
     More basis sources allowed because they span 64*10 dims rather than 10 dims.
@@ -853,9 +853,7 @@ def test_stochastic_source_tinystories_full():
         all_stochastic_results.append(stochastic_result)
 
     # Calc squared edges
-    config_squared = get_tinystories_config()
-    squared_result = rib_build(config_squared)
-    squared_edges = squared_result.edges[0].E_hat
+    squared_edges = no_stochastic_results.edges[0].E_hat
 
     for stochastic_result in all_stochastic_results:
         stochastic_edges = stochastic_result.edges[0].E_hat
@@ -866,7 +864,7 @@ def test_stochastic_source_tinystories_full():
     # Assert the normalization is the same
     assert_is_close(
         stochastic_edges_last.mean(),
-        squared_result.edges[0].E_hat.mean(),
+        squared_edges.mean(),
         atol=0,
         rtol=0.10,
     )

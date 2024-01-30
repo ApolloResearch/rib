@@ -204,26 +204,24 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
 @pytest.mark.slow
 def test_pythia_14m_build_graph():
     atol = 0  # Works with 1e-7 for float32 and 0 for float64
-    config = get_pythia_config()
+    config = get_pythia_config({"dataset": {"n_ctx": None}})
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=0)
 
 
 @pytest.mark.slow
-def test_pythia_14m_build_graph_jacobian():
+def test_pythia_14m_build_graph_jacobian_stochastic():
     atol = 0  # Works with 0 for batch_size 900 but not 1800
-    updates = [
-        # Runs in around 30s on a5000
-        {"basis_formula": "jacobian"},
-        {"dataset": {"return_set_n_samples": 1}},
-        {"dataset": {"n_ctx": 2}},
-        {"batch_size": 900},
-        {"node_layers": ["ln2.1", "mlp_out.5", "unembed"]},
-        {"calculate_edges": True},
-        {"edge_formula": "stochastic"},
-        {"n_stochastic_sources": 1},
-    ]
-    config = get_pythia_config(*updates)
+    config = get_pythia_config(
+        {
+            "basis_formula": "jacobian",
+            "dataset": {"return_set_n_documents": 10, "return_set_n_samples": 1, "n_ctx": 2},
+            "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
+            "calculate_edges": True,
+            "edge_formula": "stochastic",
+            "n_stochastic_sources": 1,
+        }
+    )
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=0)
 

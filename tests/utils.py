@@ -49,8 +49,11 @@ def get_pythia_config(*updates: dict) -> RibBuildConfig:
         tokenizer_name: EleutherAI/pythia-14m
         return_set: train
         return_set_frac: null
-        return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
+        return_set_n_documents: 20
+        return_set_n_samples: 3
         return_set_portion: first
+        n_ctx: 128
+        seed: 0
     node_layers:
         - ln2.1
         - unembed

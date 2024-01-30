@@ -218,6 +218,8 @@ def tokenize_dataset(
     dataset: Dataset,
     tokenizer: AutoTokenizer,
     n_ctx: int,
+    n_samples: Optional[int] = None,
+    seed: Optional[int] = None,
 ) -> TensorDataset:
     """Tokenize a dataset using the provided tokenizer.
 
@@ -229,35 +231,44 @@ def tokenize_dataset(
             dataset to tokenize. Created from `hf_load_dataset`.
         tokenizer (AutoTokenizer): The tokenizer to use.
         n_ctx (int): The context length to use.
+        n_samples (Optional[int]): The number of samples to use. If None, uses all samples.
+        seed (Optional[int]): The seed to use for sampling.
 
     Returns:
         TensorDataset: The tokenized dataset.
     """
-    # Tokenize all samples and merge them together
+    # Tokenize all samples and merge them into one long list of tokens
     all_tokens = []
     for example in dataset:  # type: ignore
         tokens = tokenizer(example["text"])["input_ids"]
-        all_tokens.extend(tokens)
+        # Add the eos token to the end of each sample as was done in the original training
+        # https://github.com/EleutherAI/pythia/issues/123#issuecomment-1791136253
+        all_tokens.extend(tokens + [tokenizer.eos_token_id])
 
     # Split the merged tokens into chunks that fit the context length
-    chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
+    raw_chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
 
-    # Convert chunks to input_ids and labels
-    # we ignore the final chunk, as it contains a token we don't have a label for
-    # and is also probably too short and we don't want to pad.
-    input_ids_list = []
-    labels_list = []
-    for i, chunk in enumerate(chunks[:-1]):
-        input_id = chunk
-        label = input_id[1:] + [chunks[i + 1][0]]  # with first token from next chunk
+    # Note that we ignore the final raw_chunk, as we get the label for the final token in a chunk
+    # from the subsequent chunk.
+    if n_samples is not None:
+        # Randomly select n_samples chunks
+        generator = torch.Generator() if seed is None else torch.Generator().manual_seed(seed)
+        chunk_idxs = torch.randperm(len(raw_chunks) - 1, generator=generator)[:n_samples].tolist()
+    else:
+        chunk_idxs = list(range(len(raw_chunks) - 1))
 
-        input_ids_list.append(input_id)
-        labels_list.append(label)
+    chunks = [raw_chunks[i] for i in chunk_idxs]
 
-    input_ids = torch.tensor(input_ids_list, dtype=torch.long)
-    labels = torch.tensor(labels_list, dtype=torch.long)
+    all_labels: list[list[int]] = []
+    for i, chunk in enumerate(chunks):
+        # Get the label for the last token using the next chunk in raw_chunks
+        final_token_label = raw_chunks[chunk_idxs[i] + 1][0]
+        labels = chunk[1:] + [final_token_label]
+        all_labels.append(labels)
 
-    return TensorDataset(input_ids, labels)
+    return TensorDataset(
+        torch.tensor(chunks, dtype=torch.long), torch.tensor(all_labels, dtype=torch.long)
+    )
 
 
 def create_hf_dataset(
@@ -300,22 +311,33 @@ def create_hf_dataset(
     assert dataset_config.return_set in ["train", "test"], "Only train and test sets are supported"
 
     if dataset_config.return_set_frac:
+        # Sample from all documents in return_set_frac% of return_set_portion
         percent = int(dataset_config.return_set_frac * 100)
         if dataset_config.return_set_portion == "first":
             data_split = f"{dataset_config.return_set}[:{percent}%]"
         elif dataset_config.return_set_portion == "last":
             data_split = f"{dataset_config.return_set}[-{percent}%:]"
-    elif dataset_config.return_set_n_samples:
+    elif dataset_config.return_set_n_documents:
+        # Only load the first/last n documents from return_set and sample return_set_n_samples.
         if dataset_config.return_set_portion == "first":
-            data_split = f"{dataset_config.return_set}[:{dataset_config.return_set_n_samples}]"
+            data_split = f"{dataset_config.return_set}[:{dataset_config.return_set_n_documents}]"
         elif dataset_config.return_set_portion == "last":
-            data_split = f"{dataset_config.return_set}[-{dataset_config.return_set_n_samples}:]"
+            data_split = f"{dataset_config.return_set}[-{dataset_config.return_set_n_documents}:]"
+    else:
+        # Sample return_set_n_samples from all documents in return_set
+        data_split = dataset_config.return_set
 
     raw_dataset = hf_load_dataset(dataset_config.name, split=data_split)
 
     tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
     tokenizer.pad_token = tokenizer.eos_token
-    return tokenize_dataset(dataset=raw_dataset, tokenizer=tokenizer, n_ctx=n_ctx)
+    return tokenize_dataset(
+        dataset=raw_dataset,
+        tokenizer=tokenizer,
+        n_ctx=n_ctx,
+        n_samples=dataset_config.return_set_n_samples,
+        seed=dataset_config.seed,
+    )
 
 
 def create_vision_dataset(dataset_config: VisionDatasetConfig) -> Dataset:

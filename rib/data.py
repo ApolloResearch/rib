@@ -76,11 +76,29 @@ class HFDatasetConfig(DatasetConfig):
     return_set_portion: Literal["first", "last"] = Field(
         "first", description="Whether to load the first or last portion of the return_set."
     )
+    return_set_n_documents: Optional[int] = Field(
+        None,
+        description="The number of documents to load from the dataset. If None and "
+        "return_set_n_samples is not None, will load all documents before sampling. If None and "
+        "return_set_n_samples is None, will load all possible samples in return_set_frac.",
+    )
     n_ctx: Optional[int] = Field(
         None,
         description="Dataset will be packed to sequences of this length. Should be <1024 for gpt2."
         "<2048 for most other models.",
     )
+    seed: Optional[int] = Field(0, description="The random seed value for reproducibility.")
+
+    @model_validator(mode="after")
+    def verify_return_n_documents(self) -> "HFDatasetConfig":
+        """Verify return_set_n_documents and related fields are set correctly."""
+        if self.return_set_n_documents is not None:
+            if self.return_set_n_samples is None or self.return_set_frac is not None:
+                raise ValueError(
+                    "If return_set_n_documents is not None, then return_set_n_samples must be "
+                    "not None and return_set_frac must be None."
+                )
+        return self
 
 
 class ModularArithmeticDatasetConfig(DatasetConfig):

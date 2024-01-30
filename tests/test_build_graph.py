@@ -744,8 +744,7 @@ def test_stochastic_source_basis_out_hidden_tinystories():
         config_stochastic = get_tinystories_config(
             {
                 "edge_formula": "squared",
-                "dim_stochastic_sources_basis": "out_hidden",
-                "n_stochastic_sources_basis": n_stochastic_sources,
+                "n_stochastic_sources_basis_hidden": n_stochastic_sources,
             }
         )
         stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
@@ -763,8 +762,7 @@ def test_stochastic_source_basis_out_hidden_tinystories():
         {
             "seed": 42,
             "edge_formula": "squared",
-            "dim_stochastic_sources_basis": "out_hidden",
-            "n_stochastic_sources_basis": 1,
+            "n_stochastic_sources_basis_hidden": 1,
         }
     )
     stochastic_edges_seed42 = rib_build(config_stochastic42).edges[0].E_hat
@@ -793,8 +791,7 @@ def test_stochastic_source_basis_out_pos_tinystories():
         config_stochastic = get_tinystories_config(
             {
                 "edge_formula": "squared",
-                "dim_stochastic_sources_basis": "out_pos",
-                "n_stochastic_sources_basis": n_stochastic_sources,
+                "n_stochastic_sources_basis_pos": n_stochastic_sources,
             }
         )
         stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
@@ -812,8 +809,7 @@ def test_stochastic_source_basis_out_pos_tinystories():
         {
             "seed": 42,
             "edge_formula": "squared",
-            "dim_stochastic_sources_basis": "out_pos",
-            "n_stochastic_sources_basis": 1,
+            "n_stochastic_sources_basis_pos": 1,
         }
     )
     stochastic_edges_seed42 = rib_build(config_stochastic42).edges[0].E_hat
@@ -840,13 +836,17 @@ def test_stochastic_source_tinystories_full():
     # Calc stochastic edges
     all_stochastic_results = []
     abs_diffs = []
-    for n_stochastic_sources_edges, n_stochastic_sources_basis in zip([1, 10], [1, 640]):
+    for (
+        n_stochastic_sources_edges,
+        n_stochastic_sources_basis_pos,
+        n_stochastic_sources_basis_hidden,
+    ) in zip([1, 10], [1, 10], [1, 64]):
         config_stochastic = get_tinystories_config(
             {
                 "n_stochastic_sources_edges": n_stochastic_sources_edges,
                 "edge_formula": "squared",
-                "dim_stochastic_sources_basis": "both",
-                "n_stochastic_sources_basis": n_stochastic_sources_basis,
+                "n_stochastic_sources_basis_pos": n_stochastic_sources_basis_pos,
+                "n_stochastic_sources_basis_hidden": n_stochastic_sources_basis_hidden,
             }
         )
         stochastic_result = rib_build(config_stochastic)

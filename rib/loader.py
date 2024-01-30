@@ -253,7 +253,12 @@ def tokenize_dataset(
     if n_samples is not None:
         # Randomly select n_samples chunks
         generator = torch.Generator() if seed is None else torch.Generator().manual_seed(seed)
-        chunk_idxs = torch.randperm(len(raw_chunks) - 1, generator=generator)[:n_samples].tolist()
+        raw_chunk_idxs = torch.randperm(len(raw_chunks) - 1, generator=generator)
+        assert len(raw_chunk_idxs) >= n_samples, (
+            f"Cannot sample {n_samples} chunks from dataset with {len(raw_chunks)} chunks of "
+            f"length {n_ctx}."
+        )
+        chunk_idxs = raw_chunk_idxs[:n_samples].tolist()
     else:
         chunk_idxs = list(range(len(raw_chunks) - 1))
 

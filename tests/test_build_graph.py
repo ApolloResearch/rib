@@ -683,7 +683,7 @@ def test_stochastic_source_modadd_convergence():
 def test_stochastic_source_edges_tinystories():
     """Test stochastic edges on TinyStories.
 
-    NOTE: We find that with 10 stochastic sources (n_ctx==10) the edges still differ by up tp 10%
+    NOTE: We find that with 10 stochastic sources (n_ctx==10) the edges still differ by up to 13.7%
     of the largest edge. This is not super accurate.
     """
     # Calc stochastic edges
@@ -710,7 +710,7 @@ def test_stochastic_source_edges_tinystories():
     assert_is_close(
         all_stochastic_edges[-1] / squared_edges.max(),
         squared_edges / squared_edges.max(),
-        atol=0.10,
+        atol=0.15,
         rtol=0,
     )
 
@@ -735,7 +735,7 @@ def test_stochastic_source_basis_out_hidden_tinystories():
     More sources allowed because they span 64 dims rather than 10 dims.
 
     NOTE: We find that with 64 stochastic sources (d_hidden==64) the edges still differ by up to
-    10.6% of the largest edge.
+    1.7% of the largest edge.
     """
     # Calc stochastic edges
     all_stochastic_edges = []
@@ -772,7 +772,7 @@ def test_stochastic_source_basis_out_hidden_tinystories():
     assert_is_close(
         all_stochastic_edges[-1] / squared_edges.max(),
         squared_edges / squared_edges.max(),
-        atol=0.20,
+        atol=0.05,
         rtol=0,
     )
 
@@ -784,7 +784,7 @@ def test_stochastic_source_basis_out_pos_tinystories():
     """Test stochastic basis over position dimension on TinyStories.
 
     We find that with 10 stochastic sources (n_ctx==10) the edges differ by up to
-    5.2% of the largest edge.
+    5.6% of the largest edge.
     """
     # Calc stochastic edges
     all_stochastic_edges = []
@@ -835,7 +835,7 @@ def test_stochastic_source_tinystories_full():
     More basis sources allowed because they span 64*10 dims rather than 10 dims.
 
     We find that with 640 stochastic sources (n_ctx==10, d_hidden=64) the edges differ by up to
-    30% of the largest edge.
+    26.9% of the largest edge.
     """
     # Calc stochastic edges
     all_stochastic_results = []

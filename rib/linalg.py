@@ -484,8 +484,6 @@ def calc_basis_jacobian(
     assert batch_size == f_out_dummy[0].shape[0], "batch size mismatch"
 
     if has_pos:
-        # TODO: Previously, in the "both" case, we used n_sources_pos = n_stochastic_sources_pos*n_stochastic_sources_hidden
-        # and n_sources_hidden = 1. Now we separate it. Does this make a difference?
         n_sources_pos = n_stochastic_sources_pos or out_pos_size
         n_sources_hidden = n_stochastic_sources_hidden or out_hat_hidden_size
 
@@ -501,18 +499,22 @@ def calc_basis_jacobian(
             device=inputs[0].device,
         )
 
+        # Introduce stochastic sources: Don't iterate over all i and/or t, but a random
+        # direction in the i and t space. Sources = -1 or 1 with equal probability.
         phi_shape = (batch_size, n_sources_hidden, n_sources_pos, out_hat_hidden_size, out_pos_size)
         if n_stochastic_sources_pos is None and n_stochastic_sources_hidden is None:
-            # Full dimensions
+            # Full dimensions -- no stochastic sources, phi_{b,i,t,i',t'} = delta_{i,i'} delta_{t,t'}
             phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
             for i in range(out_hat_hidden_size):
                 for t in range(out_pos_size):
                     phi[:, i, t, i, t] = 1.0
         elif (n_stochastic_sources_pos is not None) and (n_stochastic_sources_hidden is not None):
-            # Introduce stochastic sources: Don't iterate over all i and/or t, but a random
-            # direction in the i and t space. Sources = -1 or 1 with equal probability.
+            # Fully stochastic over i and t. Note that this is different from having two separate
+            # phi tensors for pos and hidden ("meshgrid like"). For a different r_h the same r_p
+            # can correspond to a different position vector etc.
             phi = _generate_sources(phi_shape, like_tensor=in_grads)
         elif n_stochastic_sources_pos is not None and n_stochastic_sources_hidden is None:
+            # Stochastic over t, but not i. Set phi_{b,i,t,i',t'} = delta_{i,i'} random_{b,t,t'}
             phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
             for i in range(out_hat_hidden_size):
                 phi[:, i, :, i, :] = _generate_sources(
@@ -520,6 +522,7 @@ def calc_basis_jacobian(
                     like_tensor=in_grads,
                 )
         elif n_stochastic_sources_pos is None and n_stochastic_sources_hidden is not None:
+            # Stochastic over i, but not t. Set phi_{b,i,t,i',t'} = random_{b,i,i'} delta_{t,t'}
             phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
             for t in range(out_pos_size):
                 phi[:, :, t, :, t] = _generate_sources(
@@ -551,7 +554,7 @@ def calc_basis_jacobian(
             # f_out_hat_alpha.shape: batch t i
             # f_in_alpha: batch, s, j
 
-            for r_A, r_B in tqdm(
+            for r_h, r_p in tqdm(
                 np.ndindex(n_sources_hidden, n_sources_pos),
                 total=n_sources_hidden * n_sources_pos,
                 desc="Iteration over sources",
@@ -560,7 +563,7 @@ def calc_basis_jacobian(
                 # phi_shape = (batch_size, n_sources_A, n_sources_B, out_hat_hidden_size, out_pos_size)
                 phi_f_out_hat_alpha = einsum(
                     "batch out_hidden out_pos, batch out_pos out_hidden -> batch",
-                    phi[:, r_A, r_B, :, :],
+                    phi[:, r_h, r_p, :, :],
                     f_out_hat_alpha,
                 )
                 # Need to retain_graph because we call autograd on f_out_hat_alpha multiple
@@ -572,7 +575,7 @@ def calc_basis_jacobian(
                     ),
                     dim=-1,
                 )
-                in_grads[:, r_A, r_B, :, :] += alpha_in_grads * trapezoidal_scaler
+                in_grads[:, r_h, r_p, :, :] += alpha_in_grads * trapezoidal_scaler
                 # Contraction over batch, i, t, s happens after the integral, but we cannot
                 # contract earlier because we have to finish the integral sum (+=) first.
     else:

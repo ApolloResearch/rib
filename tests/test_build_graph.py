@@ -481,7 +481,9 @@ def centered_rib_test(results: RibBuildResults, atol=1e-6):
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd", "jacobian"])
+@pytest.mark.parametrize(
+    "basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd", "jacobian", "neuron"]
+)
 def test_centered_rib_mnist(basis_formula):
     """Test that centered rib works for MNIST."""
     config = get_mnist_config(
@@ -507,7 +509,9 @@ def test_centered_rib_pythia():
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd", "jacobian"])
+@pytest.mark.parametrize(
+    "basis_formula", ["(1-alpha)^2", "(1-0)*alpha", "svd", "jacobian", "neuron"]
+)
 def test_centered_rib_modadd(basis_formula):
     """Test that centered rib & pca works for modadd."""
     # we set a lower truncation threshold as there are some directions w/ small eigenvals that

@@ -714,6 +714,8 @@ def test_stochastic_source_edges_tinystories():
         rtol=0,
     )
 
+    print("Seed check:", all_stochastic_edges[-1][1, 1])
+
     # Check that the sources are actually stochastic and change with seed
     config_stochastic42 = get_tinystories_config(
         {
@@ -832,10 +834,11 @@ def test_stochastic_source_tinystories_full():
 
     More basis sources allowed because they span 64*10 dims rather than 10 dims.
 
-    #TODO This test currently fails terribly (750% difference). Check if code is broken!
+    We find that with 640 stochastic sources (n_ctx==10, d_hidden=64) the edges differ by up to
+    30% of the largest edge.
     """
     # Calc stochastic edges
-    all_stochastic_edges = []
+    all_stochastic_results = []
     abs_diffs = []
     for n_stochastic_sources_edges, n_stochastic_sources_basis in zip([1, 10], [1, 640]):
         config_stochastic = get_tinystories_config(
@@ -846,19 +849,32 @@ def test_stochastic_source_tinystories_full():
                 "n_stochastic_sources_basis": n_stochastic_sources_basis,
             }
         )
-        stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
-        all_stochastic_edges.append(stochastic_edges)
+        stochastic_result = rib_build(config_stochastic)
+        all_stochastic_results.append(stochastic_result)
 
     # Calc squared edges
     config_squared = get_tinystories_config()
-    squared_edges = rib_build(config_squared).edges[0].E_hat
+    squared_result = rib_build(config_squared)
+    squared_edges = squared_result.edges[0].E_hat
 
-    for stochastic_edges in all_stochastic_edges:
+    for stochastic_result in all_stochastic_results:
+        stochastic_edges = stochastic_result.edges[0].E_hat
         abs_diffs.append(torch.abs(stochastic_edges - squared_edges).mean())
 
+    stochastic_edges_last = all_stochastic_results[-1].edges[0].E_hat
+
+    # Assert the normalization is the same
     assert_is_close(
-        all_stochastic_edges[-1] / squared_edges.max(),
+        stochastic_edges_last.mean(),
+        squared_result.edges[0].E_hat.mean(),
+        atol=0,
+        rtol=0.10,
+    )
+
+    # Assert edges are close, relative to the largest edge (30%)
+    assert_is_close(
+        stochastic_edges_last / squared_edges.max(),
         squared_edges / squared_edges.max(),
-        atol=0.5,
+        atol=0.30,
         rtol=0,
     )

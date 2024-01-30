@@ -191,9 +191,6 @@ def calculate_interaction_rotations(
         section_names
     ), "Must specify a hook name for each section (except the output section)."
 
-    if center and basis_formula == "neuron":
-        raise NotImplementedError("centering is not currently implemented for the neuron basis.")
-
     # We start appending InteractionRotation from the output layer and work our way backwards
     interaction_rotations: list[InteractionRotation] = []
 
@@ -309,26 +306,6 @@ def _calculate_one_interaction_rotation(
             that we take a single tensor for gram_matrix and means instead of a dictionary.
     """
     out_dim = gram_matrix.shape[0]
-    if basis_formula == "neuron":
-        # Use identity matrix as C and W since we don't rotate
-        return InteractionRotation(
-            node_layer=node_layer,
-            orig_dim=out_dim,
-            C=torch.eye(out_dim, dtype=dtype),
-            C_pinv=torch.eye(out_dim, dtype=dtype),
-            W=torch.eye(out_dim, dtype=dtype),
-            W_pinv=torch.eye(out_dim, dtype=dtype),
-        )
-
-    ### SVD ROTATION (U)
-    D_dash, U_dash = eigendecompose(gram_matrix)
-    if center:
-        D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
-
-    # Trucate all directions with eigenvalues smaller than some threshold
-    mask = D_dash > truncation_threshold  # true if we keep the direction
-    D: Float[Tensor, "orig_trunc orig_trunc"] = D_dash[mask].diag()
-    U: Float[Tensor, "orig orig_trunc"] = U_dash[:, mask]
 
     ### CENTERING MATRIX (Y)
     Y: Float[Tensor, "orig orig"]
@@ -340,8 +317,29 @@ def _calculate_one_interaction_rotation(
         Y_inv = centering_matrix(means, inverse=True)
     else:
         # If no centering, Y is the identity matrix
-        Id = torch.eye(U.shape[0], dtype=U.dtype, device=U.device)
+        Id = torch.eye(out_dim, dtype=dtype, device=device)
         Y, Y_inv = Id, Id.detach().clone()
+
+    if basis_formula == "neuron":
+        # Use identity matrix as C and W since we don't rotate
+        return InteractionRotation(
+            node_layer=node_layer,
+            orig_dim=out_dim,
+            C=Y.cpu(),
+            C_pinv=Y_inv.cpu(),
+            W=Y.cpu(),
+            W_pinv=Y_inv.cpu(),
+        )
+
+    ### SVD ROTATION (U)
+    D_dash, U_dash = eigendecompose(gram_matrix)
+    if center:
+        D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
+
+    # Trucate all directions with eigenvalues smaller than some threshold
+    mask = D_dash > truncation_threshold  # true if we keep the direction
+    D: Float[Tensor, "orig_trunc orig_trunc"] = D_dash[mask].diag()
+    U: Float[Tensor, "orig orig_trunc"] = U_dash[:, mask]
 
     # First, W combines Y and U. This centers (if Y is not an identity), then orthogonalizes.
     W: Float[Tensor, "orig orig_trunc"] = Y @ U

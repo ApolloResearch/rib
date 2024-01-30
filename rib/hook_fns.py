@@ -431,7 +431,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         )
         has_pos = inputs[0].dim() == 3
         if has_pos:
-            einsum_pattern = "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"  # TODO Is this einsum right?
+            einsum_pattern = "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"
             in_pos_size = in_grads.shape[3]
             normalization_factor = in_pos_size * dataset_size
             # It is intentional that normalization_factor is multiplied by both,

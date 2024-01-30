@@ -501,6 +501,10 @@ def calc_basis_jacobian(
 
         # Introduce stochastic sources: Don't iterate over all i and/or t, but a random
         # direction in the i and t space. Sources = -1 or 1 with equal probability.
+        # Note on odering: We need the alpha loop to be the outer loop, because each alpha requires
+        # a module() call. We also require the stochstic sources to map to the same i/t directions
+        # for each alpha step so that the integral makes sense. Thus we need to fix phi before the
+        # alpha loop and cannot generate it on the fly (which would have saved memory).
         phi_shape = (batch_size, n_sources_hidden, n_sources_pos, out_hat_hidden_size, out_pos_size)
         if n_stochastic_sources_pos is None and n_stochastic_sources_hidden is None:
             # Full dimensions -- no stochastic sources, phi_{b,i,t,i',t'} = delta_{i,i'} delta_{t,t'}

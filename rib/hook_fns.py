@@ -347,8 +347,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
-    n_stochastic_sources: Optional[int] = None,
-    dim_stochastic_sources: Optional[Literal["both", "out_pos", "out_hidden"]] = None,
+    n_stochastic_sources_pos: Optional[int] = None,
+    n_stochastic_sources_hidden: Optional[int] = None,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -426,19 +426,22 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             inputs=inputs,
             C_out=C_out,
             n_intervals=n_intervals,
-            n_stochastic_sources=n_stochastic_sources,
-            dim_stochastic_sources=dim_stochastic_sources,
+            n_stochastic_sources_pos=n_stochastic_sources_pos,
+            n_stochastic_sources_hidden=n_stochastic_sources_hidden,
         )
-        assert (dim_stochastic_sources is None) == (n_stochastic_sources is None)
         has_pos = inputs[0].dim() == 3
         if has_pos:
-            einsum_pattern = "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"
+            einsum_pattern = "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"  # TODO Is this einsum right?
             in_pos_size = in_grads.shape[3]
             normalization_factor = in_pos_size * dataset_size
-            if n_stochastic_sources is not None:
-                normalization_factor *= n_stochastic_sources
+            if n_stochastic_sources_pos is not None:
+                normalization_factor *= n_stochastic_sources_pos
+            if n_stochastic_sources_hidden is not None:
+                normalization_factor *= n_stochastic_sources_hidden
         else:
-            assert n_stochastic_sources is None, "Stochastic sources only supported if has_pos=True"
+            assert (
+                n_stochastic_sources_pos is None and n_stochastic_sources_hidden is None
+            ), "Stochastic sources only supported in case of has_pos=True"
             einsum_pattern = "batch i j, batch i jprime -> j jprime"
             in_pos_size = 1
             normalization_factor = dataset_size
@@ -470,7 +473,7 @@ def interaction_edge_pre_forward_hook_fn(
     module_hat: Callable[[Float[Tensor, "... rib_in"], list[int]], Float[Tensor, "... rib_out"]],
     n_intervals: int,
     dataset_size: int,
-    edge_formula: Literal["functional", "squared", "stochastic"] = "functional",
+    edge_formula: Literal["functional", "squared"] = "squared",
     n_stochastic_sources: Optional[int] = None,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the RIB graph.
@@ -498,9 +501,8 @@ def interaction_edge_pre_forward_hook_fn(
         edge_formula: The formula to use for the attribution.
             - "functional" is the old (October 23) functional version
             - "squared" is the version which iterates over the output dim and output pos dim
-            - "stochastic" is the version which iteratates over output dim and stochastic noise dim
-        n_stochastic_sources: The dimension of the stochastic noise. Only used if
-            edge_formula == "stochastic". Defaults to None.
+        n_stochastic_sources: The number of stochastic sources for positional dimension
+            (approximation). Defaults to None.
     """
     assert isinstance(data_key, str), "data_key must be a string."
 
@@ -528,28 +530,28 @@ def interaction_edge_pre_forward_hook_fn(
             tqdm_desc=tqdm_desc,
         )
     elif edge_formula == "squared":
-        calc_edge_squared(
-            module_hat=module_hat,
-            f_in_hat=f_hat,
-            in_tuple_dims=in_tuple_dims,
-            edge=edge,
-            dataset_size=dataset_size,
-            n_intervals=n_intervals,
-            tqdm_desc=tqdm_desc,
-        )
-    elif edge_formula == "stochastic":
-        assert n_stochastic_sources is not None, "n_stochastic_sources must be specified."
-        assert f_hat.dim() == 3, "f_hat must have a position dimension to use stochastic noise."
-        calc_edge_stochastic(
-            module_hat=module_hat,
-            f_in_hat=f_hat,
-            in_tuple_dims=in_tuple_dims,
-            edge=edge,
-            dataset_size=dataset_size,
-            n_intervals=n_intervals,
-            n_stochastic_sources=n_stochastic_sources,
-            tqdm_desc=tqdm_desc,
-        )
+        if n_stochastic_sources is None:
+            calc_edge_squared(
+                module_hat=module_hat,
+                f_in_hat=f_hat,
+                in_tuple_dims=in_tuple_dims,
+                edge=edge,
+                dataset_size=dataset_size,
+                n_intervals=n_intervals,
+                tqdm_desc=tqdm_desc,
+            )
+        else:
+            assert f_hat.dim() == 3, "f_hat must have a position dimension to use stochastic noise."
+            calc_edge_stochastic(
+                module_hat=module_hat,
+                f_in_hat=f_hat,
+                in_tuple_dims=in_tuple_dims,
+                edge=edge,
+                dataset_size=dataset_size,
+                n_intervals=n_intervals,
+                n_stochastic_sources=n_stochastic_sources,
+                tqdm_desc=tqdm_desc,
+            )
     else:
         raise ValueError(
             f"edge_formula must be one of 'functional' or 'squared', got {edge_formula}"

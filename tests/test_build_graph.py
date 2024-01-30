@@ -221,7 +221,7 @@ def test_pythia_14m_build_graph_jacobian():
         {"batch_size": 900},
         {"node_layers": ["ln2.1", "mlp_out.5", "unembed"]},
         {"calculate_edges": True},
-        {"edge_formula": "stochastic"},
+        {"edge_formula": "squared"},
         {"n_stochastic_sources_edges": 1},
     ]
     config = get_pythia_config(*updates)
@@ -612,7 +612,7 @@ def test_stochastic_source_single_pos_modadd():
     # Calc stochastic edges
     config_stochastic = get_modular_arithmetic_config(
         {
-            "edge_formula": "stochastic",
+            "edge_formula": "squared",
             "node_layers": node_layers,
             "last_pos_module_type": "add_resid1",
             "n_stochastic_sources_edges": 1,
@@ -661,7 +661,7 @@ def test_stochastic_source_modadd_convergence():
             {
                 "dataset": {"return_set_n_samples": return_set_n_samples},
                 "batch_size": batch_size,
-                "edge_formula": "stochastic",
+                "edge_formula": "squared",
                 "node_layers": node_layers,
                 "last_pos_module_type": "unembed",
                 "n_stochastic_sources_edges": n_stochastic_sources_edges,
@@ -693,7 +693,7 @@ def test_stochastic_source_edges_tinystories():
         config_stochastic = get_tinystories_config(
             {
                 "n_stochastic_sources_edges": n_stochastic_sources,
-                "edge_formula": "stochastic",
+                "edge_formula": "squared",
             }
         )
         stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
@@ -721,7 +721,7 @@ def test_stochastic_source_edges_tinystories():
         {
             "seed": 42,
             "n_stochastic_sources_edges": 1,
-            "edge_formula": "stochastic",
+            "edge_formula": "squared",
         }
     )
     stochastic_edges_seed42 = rib_build(config_stochastic42).edges[0].E_hat
@@ -844,7 +844,7 @@ def test_stochastic_source_tinystories_full():
         config_stochastic = get_tinystories_config(
             {
                 "n_stochastic_sources_edges": n_stochastic_sources_edges,
-                "edge_formula": "stochastic",
+                "edge_formula": "squared",
                 "dim_stochastic_sources_basis": "both",
                 "n_stochastic_sources_basis": n_stochastic_sources_basis,
             }

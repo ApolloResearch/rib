@@ -246,6 +246,12 @@ def tokenize_dataset(
         # https://github.com/EleutherAI/pythia/issues/123#issuecomment-1791136253
         all_tokens.extend(tokens + [tokenizer.eos_token_id])
 
+    # There shouldn't be any padding tokens, so ensure that there are len(dataset) eos tokens
+    len_dataset = len(dataset)  # type: ignore
+    assert all_tokens.count(tokenizer.eos_token_id) == len_dataset, (
+        f"Number of eos tokens ({all_tokens.count(tokenizer.eos_token_id)}) does not match "
+        f"number of samples ({len_dataset})."
+    )
     # Split the merged tokens into chunks that fit the context length
     raw_chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
 
@@ -337,13 +343,14 @@ def create_hf_dataset(
 
     tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
     tokenizer.pad_token = tokenizer.eos_token
-    return tokenize_dataset(
+    tokenized_dataset = tokenize_dataset(
         dataset=raw_dataset,
         tokenizer=tokenizer,
         n_ctx=n_ctx,
         n_samples=dataset_config.n_samples,
         seed=dataset_config.seed,
     )
+    return tokenized_dataset
 
 
 def create_vision_dataset(dataset_config: VisionDatasetConfig) -> Dataset:

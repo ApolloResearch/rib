@@ -3,7 +3,6 @@ from typing import Optional
 import torch
 import yaml
 from pydantic.v1.utils import deep_update
-from scipy.optimize import linear_sum_assignment
 from torch.nn.functional import cosine_similarity
 from torch.testing import assert_close
 
@@ -194,6 +193,25 @@ def assert_is_zeros(tensor, atol, **kwargs):
     assert_is_close(tensor, 0.0, atol=atol, rtol=0, **kwargs)
 
 
+def _assignment_permutations(sim: torch.Tensor) -> tuple[list[int], list[int]]:
+    """Return the indices of an assignment between rows and cols using a greedy algorithm.
+
+    For each column in order chooses the maximal row that hasn't been chosen yet.
+    Will return lists of even length, equal to the minimium of the number of rows and columns.
+
+    A replacement for `scipy.optimize.linear_sum_assignment` without a scipy dependancy."""
+    rows_selected = torch.zeros(sim.shape[0], dtype=torch.bool)
+    row_idxs = []
+    col_idxs = []
+    for col_idx in range(min(sim.shape)):
+        masked_col = torch.where(rows_selected, -torch.inf, sim[:, col_idx])
+        row_idx = masked_col.argmax().item()
+        row_idxs.append(row_idx)
+        col_idxs.append(col_idx)
+        rows_selected[row_idx] = True
+    return row_idxs, col_idxs
+
+
 def assert_basis_similarity(
     ir_A: InteractionRotation,
     ir_B: InteractionRotation,
@@ -212,7 +230,7 @@ def assert_basis_similarity(
         assert ir_B.C is None
         return None, None, None
     sim = cosine_similarity(ir_A.C.unsqueeze(1), ir_B.C.unsqueeze(2), dim=0).abs()
-    a_order, b_order = linear_sum_assignment(sim, maximize=True)
+    a_order, b_order = _assignment_permutations(sim)
     dir_sims = sim[a_order, b_order]
     dir_norm_ratios = torch.norm(ir_A.C, dim=0)[a_order] / torch.norm(ir_B.C, dim=0)[b_order]
     lambda_ratios = ir_A.Lambda[a_order] / ir_B.Lambda[b_order]

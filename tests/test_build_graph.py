@@ -217,7 +217,7 @@ def test_pythia_14m_build_graph_jacobian_stochastic():
     config = get_pythia_config(
         {
             "basis_formula": "jacobian",
-            "dataset": {"return_set_n_documents": 10, "return_set_n_samples": 1, "n_ctx": 2},
+            "dataset": {"n_documents": 10, "n_samples": 1, "n_ctx": 2},
             "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
             "calculate_edges": True,
             "edge_formula": "stochastic",
@@ -635,13 +635,13 @@ def test_stochastic_source_modadd_convergence():
     NOTE: This is quite a weak test, but the runs a slow so we're taking a hit on the test quality.
     """
     node_layers = ["mlp_in.0", "mlp_out.0"]
-    return_set_n_samples = 3
+    n_samples = 3
     batch_size = 3
 
     # Calc squared edges
     config_squared = get_modular_arithmetic_config(
         {
-            "dataset": {"return_set_n_samples": return_set_n_samples},
+            "dataset": {"n_samples": n_samples},
             "batch_size": batch_size,
             "edge_formula": "squared",
             "node_layers": node_layers,
@@ -658,7 +658,7 @@ def test_stochastic_source_modadd_convergence():
     for n_stochastic_sources_edges in [1, 3, 7]:
         config_stochastic = get_modular_arithmetic_config(
             {
-                "dataset": {"return_set_n_samples": return_set_n_samples},
+                "dataset": {"n_samples": n_samples},
                 "batch_size": batch_size,
                 "edge_formula": "squared",
                 "node_layers": node_layers,

@@ -9,8 +9,8 @@ dataset:
   tokenizer_name: EleutherAI/pythia-14m
   return_set: train  # pile-10k only has train, so we take the first 90% for building and last 10% for ablations
   return_set_frac: 0.1
-  return_set_n_documents: null
-  return_set_n_samples: null
+  n_documents: null
+  n_samples: null
   return_set_portion: first
   n_ctx: 50
 node_layers:

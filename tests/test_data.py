@@ -14,11 +14,11 @@ def test_invalid_hf_dataset_config():
     )
 
     with pytest.raises(ValueError):
-        # return_set_frac and return_set_n_samples cannot be used together
-        replace_pydantic_model(base_config, {"return_set_frac": 0.5, "return_set_n_samples": 10})
-        # return_set_n_documents and return_set_frac cannot be used
-        replace_pydantic_model(base_config, {"return_set_frac": 0.5, "return_set_n_documents": 10})
-        # If return_set_n_documents is used, return_set_n_samples must be not None
-        replace_pydantic_model(base_config, {"return_set_n_documents": 10})
-        # If return_set_n_documents is used, return_set_frac must be None
-        replace_pydantic_model(base_config, {"return_set_n_documents": 10, "return_set_frac": 0.5})
+        # return_set_frac and n_samples cannot be used together
+        replace_pydantic_model(base_config, {"return_set_frac": 0.5, "n_samples": 10})
+        # n_documents and return_set_frac cannot be used
+        replace_pydantic_model(base_config, {"return_set_frac": 0.5, "n_documents": 10})
+        # If n_documents is used, n_samples must be not None
+        replace_pydantic_model(base_config, {"n_documents": 10})
+        # If n_documents is used, return_set_frac must be None
+        replace_pydantic_model(base_config, {"n_documents": 10, "return_set_frac": 0.5})

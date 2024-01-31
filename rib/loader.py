@@ -208,7 +208,7 @@ def create_modular_arithmetic_dataset(
     dataset_subset = get_data_subset(
         dataset,
         frac=dataset_config.return_set_frac,
-        n_samples=dataset_config.return_set_n_samples,
+        n_samples=dataset_config.n_samples,
         seed=seed,
     )
     return dataset_subset
@@ -323,14 +323,14 @@ def create_hf_dataset(
             data_split = f"{dataset_config.return_set}[:{percent}%]"
         elif dataset_config.return_set_portion == "last":
             data_split = f"{dataset_config.return_set}[-{percent}%:]"
-    elif dataset_config.return_set_n_documents:
-        # Only load the first/last n documents from return_set and sample return_set_n_samples.
+    elif dataset_config.n_documents:
+        # Only load the first/last n documents from return_set and sample n_samples.
         if dataset_config.return_set_portion == "first":
-            data_split = f"{dataset_config.return_set}[:{dataset_config.return_set_n_documents}]"
+            data_split = f"{dataset_config.return_set}[:{dataset_config.n_documents}]"
         elif dataset_config.return_set_portion == "last":
-            data_split = f"{dataset_config.return_set}[-{dataset_config.return_set_n_documents}:]"
+            data_split = f"{dataset_config.return_set}[-{dataset_config.n_documents}:]"
     else:
-        # Sample return_set_n_samples from all documents in return_set
+        # Sample n_samples from all documents in return_set
         data_split = dataset_config.return_set
 
     raw_dataset = hf_load_dataset(dataset_config.name, split=data_split)
@@ -341,7 +341,7 @@ def create_hf_dataset(
         dataset=raw_dataset,
         tokenizer=tokenizer,
         n_ctx=n_ctx,
-        n_samples=dataset_config.return_set_n_samples,
+        n_samples=dataset_config.n_samples,
         seed=dataset_config.seed,
     )
 
@@ -359,7 +359,7 @@ def create_vision_dataset(dataset_config: VisionDatasetConfig) -> Dataset:
     dataset = get_data_subset(
         raw_dataset,
         frac=dataset_config.return_set_frac,
-        n_samples=dataset_config.return_set_n_samples,
+        n_samples=dataset_config.n_samples,
         seed=dataset_config.seed,
     )
     return dataset
@@ -371,7 +371,7 @@ def create_block_vector_dataset(dataset_config: BlockVectorDatasetConfig) -> Dat
     dataset = get_data_subset(
         raw_dataset,
         frac=dataset_config.return_set_frac,
-        n_samples=dataset_config.return_set_n_samples,
+        n_samples=dataset_config.n_samples,
         seed=dataset_config.seed,
     )
     return dataset

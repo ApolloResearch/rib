@@ -19,7 +19,7 @@ def get_modular_arithmetic_config(*updates: dict) -> RibBuildConfig:
     dataset:
         dataset_type: modular_arithmetic
         return_set: train
-        return_set_n_samples: 10
+        n_samples: 10
     node_layers:
         - ln1.0
         - mlp_in.0
@@ -53,8 +53,8 @@ def get_pythia_config(*updates: dict) -> RibBuildConfig:
         tokenizer_name: EleutherAI/pythia-14m
         return_set: train
         return_set_frac: null
-        return_set_n_documents: 20
-        return_set_n_samples: 3
+        n_documents: 20
+        n_samples: 3
         return_set_portion: first
         n_ctx: 128
         seed: 0
@@ -88,7 +88,7 @@ def get_tinystories_config(*updates: dict) -> RibBuildConfig:
         tokenizer_name: EleutherAI/gpt-neo-125M
         return_set: train
         return_set_frac: null
-        return_set_n_samples: 1 # avg ~235 toks / story
+        n_samples: 1 # avg ~235 toks / story
         return_set_portion: first
         n_ctx: 10 # needs to be <= 511 for the model to behave reasonably
     node_layers:

@@ -30,9 +30,9 @@ class DatasetConfig(BaseModel):
     return_set_frac: Optional[float] = Field(
         None,
         description="The fraction of the returned dataset (train/test/all) to use. Cannot be"
-        "used with return_set_n_samples.",
+        "used with n_samples.",
     )
-    return_set_n_samples: Optional[int] = Field(
+    n_samples: Optional[int] = Field(
         None,
         description="The number of raw samples to return from the dataset (train/test/all). "
         "Cannot be used with return_set_frac.",
@@ -40,14 +40,12 @@ class DatasetConfig(BaseModel):
 
     @model_validator(mode="after")
     def verify_return_set_frac_and_n_samples(self) -> "DatasetConfig":
-        """Verify not both return_set_frac and return_set_n_samples are set and check values."""
+        """Verify not both return_set_frac and n_samples are set and check values."""
         frac = self.return_set_frac
 
         if frac is not None:
-            if self.return_set_n_samples is not None:
-                raise ValueError(
-                    "Cannot have both return_set_frac and return_set_n_samples be non-None."
-                )
+            if self.n_samples is not None:
+                raise ValueError("Cannot have both return_set_frac and n_samples be non-None.")
             if isinstance(self, HFDatasetConfig) and (frac < 0.01 or frac > 1):
                 raise ValueError(
                     f"return_set_frac must be > 0.01 and < 1 since huggingface dataset `split` "
@@ -76,11 +74,11 @@ class HFDatasetConfig(DatasetConfig):
     return_set_portion: Literal["first", "last"] = Field(
         "first", description="Whether to load the first or last portion of the return_set."
     )
-    return_set_n_documents: Optional[int] = Field(
+    n_documents: Optional[int] = Field(
         None,
         description="The number of documents to load from the dataset. If None and "
-        "return_set_n_samples is not None, will load all documents before sampling. If None and "
-        "return_set_n_samples is None, will load all possible samples in return_set_frac.",
+        "n_samples is not None, will load all documents before sampling. If None and "
+        "n_samples is None, will load all possible samples in return_set_frac.",
     )
     n_ctx: Optional[int] = Field(
         None,
@@ -91,11 +89,11 @@ class HFDatasetConfig(DatasetConfig):
 
     @model_validator(mode="after")
     def verify_return_n_documents(self) -> "HFDatasetConfig":
-        """Verify return_set_n_documents and related fields are set correctly."""
-        if self.return_set_n_documents is not None:
-            if self.return_set_n_samples is None or self.return_set_frac is not None:
+        """Verify n_documents and related fields are set correctly."""
+        if self.n_documents is not None:
+            if self.n_samples is None or self.return_set_frac is not None:
                 raise ValueError(
-                    "If return_set_n_documents is not None, then return_set_n_samples must be "
+                    "If n_documents is not None, then n_samples must be "
                     "not None and return_set_frac must be None."
                 )
         return self
@@ -154,7 +152,7 @@ class VisionDatasetConfig(DatasetConfig):
     seed: Optional[int] = 0
     return_set: Literal["train", "test"] = "train"
     return_set_frac: Optional[float] = None  # Needed for some reason to avoid mypy errors
-    return_set_n_samples: Optional[int] = None  # Needed for some reason to avoid mypy errors
+    n_samples: Optional[int] = None  # Needed for some reason to avoid mypy errors
 
 
 class BlockVectorDatasetConfig(DatasetConfig):

@@ -237,6 +237,7 @@ def tokenize_dataset(
     Returns:
         TensorDataset: The tokenized dataset.
     """
+    assert tokenizer.eos_token_id is not None, "Tokenizer must have an eos token id"
     # Tokenize all samples and merge them into one long list of tokens
     all_tokens = []
     for example in dataset:  # type: ignore

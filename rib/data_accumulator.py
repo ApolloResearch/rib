@@ -21,6 +21,7 @@ from rib.hook_fns import (
 from rib.hook_manager import Hook, HookedModel
 from rib.linalg import module_hat
 from rib.log import logger
+from rib.models.components import LayerNormIn
 from rib.models.utils import get_model_attr
 from rib.utils import check_device_is_cpu
 
@@ -291,6 +292,12 @@ def collect_M_dash_and_Lambda_dash(
     if hook_name is None:
         hook_name = module_name
 
+    # Increase accuracy / change rule if certain modules
+    module = get_model_attr(hooked_model.model, module_name)
+    for index, child in module.named_children():
+        if isinstance(child, LayerNormIn):
+            pass
+
     interaction_hook = Hook(
         name=hook_name,
         data_key=["M_dash", "Lambda_dash"],
@@ -383,6 +390,12 @@ def collect_interaction_edges(
         C_out = interaction_rotations[idx + 1].C
         if C_out is not None:
             C_out = C_out.to(device=device)
+
+        # Increase accuracy / change rule if certain modules
+        module = get_model_attr(hooked_model.model, module_name)
+        for index, child in module.named_children():
+            if isinstance(child, LayerNormIn):
+                pass
 
         module_hat_partial = partial(
             module_hat,

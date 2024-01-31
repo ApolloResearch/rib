@@ -320,7 +320,11 @@ def create_hf_dataset(
         f"({model_n_ctx})."
     )
 
-    assert dataset_config.return_set in ["train", "test"], "Only train and test sets are supported"
+    assert dataset_config.return_set in [
+        "train",
+        "test",
+        "validation",
+    ], f"Invalid return_set: {dataset_config.return_set}. Must be one of train, test, validation."
 
     if dataset_config.return_set_frac:
         # Sample from all documents in return_set_frac% of return_set_portion

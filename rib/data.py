@@ -22,7 +22,7 @@ class DatasetConfig(BaseModel):
     """Base class for dataset configs."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    return_set: Literal["train", "test", "all"] = Field(
+    return_set: Literal["train", "test", "validation", "all"] = Field(
         "train",
         description="The dataset split to return. If 'all', returns the combined train and test "
         "datasets.",
@@ -68,7 +68,7 @@ class HFDatasetConfig(DatasetConfig):
         description="The HuggingFace name for the tokenizer. Please check whether the tokenizer is "
         "compatible with the model you are using.",
     )
-    return_set: Literal["train", "test"] = Field(
+    return_set: Literal["train", "test", "validation"] = Field(
         ..., description="The dataset split to return from HuggingFace."
     )
     return_set_portion: Literal["first", "last"] = Field(

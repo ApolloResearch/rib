@@ -168,13 +168,13 @@ class RibBuildConfig(BaseModel):
         "If None, skip evaluation.",
     )
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = Field(
-        "(1-0)*alpha",
+        "jacobian",
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
         "use Us as Cs, giving the eigendecomposition of the gram matrix. If 'neuron', will use "
         "the neuron-basis. Defaults to '(1-0)*alpha'",
     )
     edge_formula: Literal["functional", "squared", "stochastic"] = Field(
-        "functional",
+        "squared",
         description="The attribution method to use to calculate the edges.",
     )
     n_stochastic_sources: Optional[int] = Field(
@@ -182,7 +182,7 @@ class RibBuildConfig(BaseModel):
         description="The number of stochastic sources to use when calculating stochastic edges.",
     )
     center: bool = Field(
-        False,
+        True,
         description="Whether to center the activations before performing rib.",
     )
 

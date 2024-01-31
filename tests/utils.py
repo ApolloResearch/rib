@@ -1,8 +1,13 @@
+from typing import Optional
+
 import torch
 import yaml
 from pydantic.v1.utils import deep_update
+from scipy.optimize import linear_sum_assignment
+from torch.nn.functional import cosine_similarity
 from torch.testing import assert_close
 
+from rib.interaction_algos import InteractionRotation
 from rib.rib_builder import RibBuildConfig
 
 
@@ -187,3 +192,35 @@ def assert_is_ones(tensor, atol, **kwargs):
 def assert_is_zeros(tensor, atol, **kwargs):
     """Assert that all elements of a tensor are 0. **kwargs added in msg output"""
     assert_is_close(tensor, 0.0, atol=atol, rtol=0, **kwargs)
+
+
+def assert_basis_similarity(
+    ir_A: InteractionRotation,
+    ir_B: InteractionRotation,
+    error: Optional[float] = 0.02,
+):
+    """
+    Compare two InteractionRotations and assert similarity, allowing for permutations.
+
+    Returns:
+        dir_sims: cosine similarities of the permuted basis vectors
+        dir_norm_ratios: the ratio of basis vector norms
+        lambda_ratios: the ratio of lambda values for the basis directions
+    """
+    assert ir_A.node_layer == ir_B.node_layer
+    if ir_A.C is None:
+        assert ir_B.C is None
+        return None, None, None
+    sim = cosine_similarity(ir_A.C.unsqueeze(1), ir_B.C.unsqueeze(2), dim=0).abs()
+    a_order, b_order = linear_sum_assignment(sim, maximize=True)
+    dir_sims = sim[a_order, b_order]
+    dir_norm_ratios = torch.norm(ir_A.C, dim=0)[a_order] / torch.norm(ir_B.C, dim=0)[b_order]
+    lambda_ratios = ir_A.Lambda[a_order] / ir_B.Lambda[b_order]
+    if error is not None:
+        assert_is_ones(dir_sims.mean(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_zeros(dir_sims.std(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_ones(dir_norm_ratios.mean(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_zeros(dir_norm_ratios.std(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_ones(lambda_ratios.mean(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_zeros(lambda_ratios.std(), atol=error, node_layer=ir_A.node_layer)
+    return dir_sims, dir_norm_ratios, lambda_ratios

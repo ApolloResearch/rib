@@ -157,6 +157,10 @@ class RibBuildConfig(BaseModel):
         description="The number of intervals to use for the integrated gradient approximation."
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
+    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"] = Field(
+        "trapezoidal",
+        description="The integration rule to choose.",
+    )
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
     calculate_edges: bool = Field(
         True,
@@ -471,6 +475,7 @@ def rib_build(
             dtype=dtype,
             device=device,
             n_intervals=config.n_intervals,
+            integration_rule=config.integration_rule,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
@@ -513,6 +518,7 @@ def rib_build(
             interaction_rotations=edge_interaction_rotations,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
+            integration_rule=config.integration_rule,
             section_names=section_names,
             data_loader=edge_train_loader,
             dtype=dtype,

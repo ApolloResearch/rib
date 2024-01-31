@@ -216,7 +216,9 @@ def _gauss_legendre_weights(n_intervals: int, lower: float = 0, upper: float = 1
     x = (x + 1) * (upper - lower) / 2 + lower
     # Scale the weights to account for the change in x
     w = w * (upper - lower) / 2
-    assert np.all(x >= lower), f"Lower bound violated: {x} < {lower}"
+    # Make sure weights sum to upper-lower
+    assert np.allclose(w.sum(), upper - lower), f"Weights don't sum to {upper-lower}"
+
     return w, x
 
 
@@ -255,33 +257,28 @@ def _trapezoidal_weights(
 def _calc_integration_intervals(
     n_intervals: int,
     rule: Literal["gauss-legendre", "trapezoidal", "gradient"] = "gauss-legendre",
+    **kwargs,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Calculate the integration steps for n_intervals between 0+eps and 1-eps.
+    """Calculate the integration steps and weights for n_intervals.
 
     Args:
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
-            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
-            ill-defined derivatives at 0 and 1.
-            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
-
+        n_intervals: The number of intervals to use for the integral approximation.
+        rule: The
     Returns:
         alphas: The integration steps.
-        interval_size: The size of each integration step, including a correction factor to account
-            for integral_boundary_epsilon.
     """
     if rule == "gradient":
-        weights = np.array[1.0]
-        alphas = np.array[1.0]
+        # TODO Assert this in config validator
+        assert n_intervals == 0, "Rule 'gradient' uses only 1 point, set n_intervals to 1"
+        assert kwargs == {}, f"Got unexpected arguments {kwargs}"
+        weights = np.array([1.0])
+        alphas = np.array([1.0])
     elif rule == "gauss-legendre":
-        weights, alphas = _gauss_legendre_weights(n_intervals)
+        weights, alphas = _gauss_legendre_weights(n_intervals, **kwargs)
     elif rule == "trapezoidal":
-        weights, alphas = _trapezoidal_weights(n_intervals)
+        weights, alphas = _trapezoidal_weights(n_intervals, **kwargs)
     else:
         raise ValueError(f"Unknown rule {rule}")
-    # Make sure weights sum to 1
-    assert np.allclose(weights.sum(), 1), f"Weights don't sum to 1"
     return weights, alphas
 
 
@@ -292,6 +289,7 @@ def calc_edge_functional(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
+    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the functional method.
@@ -318,7 +316,7 @@ def calc_edge_functional(
     else:
         einsum_pattern = "batch in_dim, batch in_dim -> in_dim"
 
-    weights, alphas = _calc_integration_intervals(n_intervals)
+    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
 
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
@@ -367,6 +365,7 @@ def calc_edge_squared(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
+    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the squared method.
@@ -388,7 +387,7 @@ def calc_edge_squared(
 
     f_in_hat.requires_grad_(True)
 
-    weights, alphas = _calc_integration_intervals(n_intervals)
+    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
@@ -481,6 +480,7 @@ def calc_basis_jacobian(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
+    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
 ) -> Float[Tensor, "batch out_hidden_trunc out_pos in_pos in_hidden"]:
@@ -488,7 +488,7 @@ def calc_basis_jacobian(
     for x in inputs:
         x.requires_grad_(True)
 
-    weights, alphas = _calc_integration_intervals(n_intervals)
+    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
 
     has_pos = inputs[0].ndim == 3
     batch_size = inputs[0].shape[0]
@@ -644,6 +644,7 @@ def calc_edge_stochastic(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
+    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
     n_stochastic_sources: int,
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
@@ -668,7 +669,7 @@ def calc_edge_stochastic(
 
     f_in_hat.requires_grad_(True)
 
-    weights, alphas = _calc_integration_intervals(n_intervals)
+    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
@@ -732,7 +733,7 @@ def calc_edge_stochastic(
     edge += J_hat.sum(dim=(0, 1))
 
 
-def integrated_gradient_trapezoidal_norm(
+def calc_basis_integrated_gradient(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch emb_in"]],
@@ -741,6 +742,7 @@ def integrated_gradient_trapezoidal_norm(
     ],
     C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     n_intervals: int,
+    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
 ) -> Float[Tensor, "... orig_in"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
@@ -784,7 +786,7 @@ def integrated_gradient_trapezoidal_norm(
 
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    weights, alphas = _calc_integration_intervals(n_intervals)
+    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
     for weight, alpha in zip(weights, alphas):
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(alpha * x for x in inputs)

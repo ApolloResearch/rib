@@ -580,6 +580,8 @@ def calc_edge_stochastic(
     dataset_size: int,
     n_intervals: int,
     n_stochastic_sources: int,
+    out_dim_start_idx: int,
+    out_dim_end_idx: int,
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the stochastic method.
@@ -598,6 +600,8 @@ def calc_edge_stochastic(
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
         n_stochastic_sources: The number of stochastic sources to add to each input.
+        out_dim_start_idx: The index of the first output dimension to calculate.
+        out_dim_end_idx: The index of the last output dimension to calculate.
         tqdm_desc: The description to use for the tqdm progress bar.
     """
 
@@ -607,7 +611,9 @@ def calc_edge_stochastic(
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
-    rib_out_size, rib_in_size = edge.shape
+    rib_in_size = edge.shape[1]
+
+    chunk_size = out_dim_end_idx - out_dim_start_idx
 
     # Just run the model to see what the output pos size is
     with torch.inference_mode():
@@ -616,7 +622,7 @@ def calc_edge_stochastic(
     # Accumulate integral results for all x (batch) and r (stochastic dim) values.
     # We store values because we need to square the integral result before summing.
     J_hat = torch.zeros(
-        batch_size, n_stochastic_sources, rib_out_size, rib_in_size, device=f_in_hat.device
+        batch_size, n_stochastic_sources, chunk_size, rib_in_size, device=f_in_hat.device
     )
 
     # Create phis that are -1 or 1 with equal probability
@@ -640,9 +646,12 @@ def calc_edge_stochastic(
         alpha_f_in_hat = alpha * f_in_hat
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
-        # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
-        for out_dim in tqdm(
-            range(rib_out_size), total=rib_out_size, desc="Iteration over output dims", leave=False
+        # Take the derivative of the (i, t) element (output dim and output pos) of the output.
+        for idx_in_chunk, out_dim in tqdm(
+            enumerate(range(out_dim_start_idx, out_dim_end_idx)),
+            total=chunk_size,
+            desc=f"Iteration over output dims. Chunk_idxs: {out_dim_start_idx}-{out_dim_end_idx}",
+            leave=False,
         ):
             for r in range(n_stochastic_sources):
                 # autograd gives us the derivative w.r.t. in_batch, in_pos, in_dim.
@@ -660,7 +669,7 @@ def calc_edge_stochastic(
 
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat and sum over the input pos
-                    J_hat[:, r, out_dim, :] -= einsum(
+                    J_hat[:, r, idx_in_chunk, :] -= einsum(
                         "in_batch in_pos in_dim, in_batch in_pos in_dim -> in_batch in_dim",
                         i_grad,
                         f_in_hat,

@@ -15,20 +15,15 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "mpi: mark test to be run with MPI")
 
 
-def pytest_collection_modifyitems(config, items):
-    run_slow = config.getoption("--runslow")
-    run_mpi = config.getoption("--runmpi")
-
-    if run_mpi:
-        if len(items) > 1 or "mpi" not in items[0].keywords:
-            pytest.exit("--runmpi can only be used with a single test marked with @pytest.mark.mpi")
-        return
-
-    skip_slow = pytest.mark.skip(reason="need --runslow option to run")
-    skip_mpi = pytest.mark.skip(reason="need --runmpi option to run")
-
-    for item in items:
-        if not run_slow and "slow" in item.keywords:
-            item.add_marker(skip_slow)
-        if "mpi" in item.keywords:
-            item.add_marker(skip_mpi)
+def pytest_runtest_setup(item):
+    if "mpi" in item.keywords:
+        if item.config.getoption("--runmpi"):
+            # Check that there is only 1 test and it is an mpi test
+            if len(item.session.items) > 1 or "mpi" not in item.keywords:
+                pytest.exit(
+                    "--runmpi can only be used with a single test marked with @pytest.mark.mpi"
+                )
+        else:
+            pytest.skip("need --runmpi option to run MPI tests")
+    elif "slow" in item.keywords and not item.config.getoption("--runslow"):
+        pytest.skip("need --runslow option to run slow tests")

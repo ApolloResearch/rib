@@ -9,6 +9,7 @@ If adding a distributed test, manually add the test to the CI (.github/workflows
 import json
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 import pytest
 import torch
@@ -68,7 +69,9 @@ def get_double_edges(tmpdir: Path):
     return edges
 
 
-def compare_edges(dist_split_over: str, tmpdir: Path):
+def compare_edges(
+    dist_split_over: str, tmpdir: Path, edge_formula: str, n_stochastic_sources: Optional[int]
+):
     # first we compute the cs. we do this separately as there are occasional reproducibility
     # issues with computing them.
     cs_config = get_modular_arithmetic_config(
@@ -77,6 +80,8 @@ def compare_edges(dist_split_over: str, tmpdir: Path):
             "out_dir": tmpdir,
             "calculate_edges": False,
             "dist_split_over": dist_split_over,
+            "edge_formula": edge_formula,
+            "n_stochastic_sources": n_stochastic_sources,
         }
     )
     rib_build(cs_config)
@@ -94,10 +99,21 @@ def compare_edges(dist_split_over: str, tmpdir: Path):
 
 
 @pytest.mark.mpi
-def test_edges_are_same_dist_split_over_dataset(tmpdir):
-    compare_edges("dataset", tmpdir)
+def test_squared_edges_are_same_dist_split_over_dataset(tmpdir):
+    compare_edges(
+        dist_split_over="dataset", tmpdir=tmpdir, edge_formula="squared", n_stochastic_sources=None
+    )
 
 
 @pytest.mark.mpi
-def test_edges_are_same_dist_split_over_out_dim(tmpdir):
-    compare_edges("out_dim", tmpdir)
+def test_squared_edges_are_same_dist_split_over_out_dim(tmpdir):
+    compare_edges(
+        dist_split_over="out_dim", tmpdir=tmpdir, edge_formula="squared", n_stochastic_sources=None
+    )
+
+
+@pytest.mark.mpi
+def test_stochastic_edges_are_same_dist_split_over_out_dim(tmpdir):
+    compare_edges(
+        dist_split_over="out_dim", tmpdir=tmpdir, edge_formula="stochastic", n_stochastic_sources=3
+    )

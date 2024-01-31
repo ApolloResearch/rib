@@ -381,6 +381,7 @@ def _calculate_one_interaction_rotation(
         C_out=C_next_layer,
         hooked_model=hooked_model,
         n_intervals=n_intervals,
+        integration_rule=integration_rule,
         data_loader=data_loader,
         module_name=section_name,
         dtype=dtype,

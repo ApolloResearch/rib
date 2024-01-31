@@ -9,12 +9,12 @@ schedule:
 dataset:
   dataset_type: modular_arithmetic
   return_set: train
-ablation_node_layers:  # Rotate the input to these modules into the interaction basis
+ablation_node_layers: # Rotate the input to these modules into the interaction basis
   - ln1.0
   - ln2.0
   - mlp_out.0
   - unembed
-batch_size: 128
+batch_size: 20000 # full dataset
 dtype: float32
 eval_type: accuracy
 seed: 0

@@ -13,10 +13,17 @@ node_layers:
   - unembed
   - output
 rotate_final_node_layer: false
-batch_size: 256
-truncation_threshold: 1e-15
-last_pos_module_type: add_resid1  # module type in which to only output the last position index
-n_intervals: 50
-dtype: float64
-calculate_edges: true
+last_pos_module_type: add_resid1 # module type in which to only output the last position index
 eval_type: accuracy
+gram_batch_size: 20000 # full dataset
+batch_size: 20000 # full dataset
+edge_batch_size: 20000 # full dataset
+calculate_edges: true
+truncation_threshold: 1e-15
+dtype: float64
+n_intervals: 0
+basis_formula: jacobian
+edge_formula: squared
+n_stochastic_sources_basis_pos: null
+n_stochastic_sources_basis_hidden: null
+n_stochastic_sources_edges: null

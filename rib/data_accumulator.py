@@ -358,10 +358,8 @@ def collect_interaction_edges(
         edge_formula: The formula to use for the attribution.
             - "functional" is the old (October 23) functional version
             - "squared" is the version which iterates over the output dim and output pos dim
-            - "stochastic" is the version which iteratates over output dim and stochastic sources.
-                This is an approximation of the squared version.
-        n_stochastic_sources: The number of stochastic sources of noise. Only used when
-            `edge_formula="stochastic"`. Defaults to None.
+        n_stochastic_sources: The number of stochastic sources for positional dimension
+            (approximation). Defaults to None.
         out_dim_n_chunks: The number of chunks to split the out_dim into. 1 unless the script is
             parallelized over the out_dim.
         out_dim_chunk_idx: The index of the current chunk. 0 unless the script is parallelized over

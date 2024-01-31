@@ -182,14 +182,14 @@ class RibBuildConfig(BaseModel):
         description="The number of stochastic sources in the out_pos direction to use when"
         "calculating  stochastic Cs. If both `n_stochastic_sources_basis_pos` and"
         "`n_stochastic_sources_basis_hidden` are passed, the number of combined stochastic"
-        "sources if given by their product.",
+        "sources is given by their product.",
     )
     n_stochastic_sources_basis_hidden: Optional[int] = Field(
         None,
         description="The number of stochastic sources in the out_hat_hidden direction to use when"
         "calculating stochastic Cs. If both `n_stochastic_sources_basis_pos` and"
         "`n_stochastic_sources_basis_hidden` are passed, the number of combined stochastic"
-        "sources if given by their product.",
+        "sources is given by their product.",
     )
     n_stochastic_sources_edges: Optional[int] = Field(
         None,

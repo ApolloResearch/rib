@@ -697,7 +697,7 @@ def calc_edge_stochastic(
         for out_dim in tqdm(
             range(rib_out_size),
             total=rib_out_size,
-            desc="Iteration over output dims (+stochastic sources)",
+            desc="Iteration over output dims (and stochastic sources)",
             leave=False,
         ):
             for r in range(n_stochastic_sources):

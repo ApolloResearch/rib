@@ -337,6 +337,8 @@ def calc_edge_squared(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
+    out_dim_start_idx: int,
+    out_dim_end_idx: int,
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the squared method.
@@ -352,6 +354,8 @@ def calc_edge_squared(
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation. If 0, take a
             point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        out_dim_start_idx: The index of the first output dimension to calculate.
+        out_dim_end_idx: The index of the last output dimension to calculate.
         tqdm_desc: The description to use for the tqdm progress bar.
     """
     has_pos = f_in_hat.ndim == 3
@@ -362,7 +366,10 @@ def calc_edge_squared(
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
-    rib_out_size, rib_in_size = edge.shape
+    rib_in_size = edge.shape[1]
+
+    chunk_size = out_dim_end_idx - out_dim_start_idx
+
     if has_pos:
         # Just run the model to see what the output pos size is
         with torch.inference_mode():
@@ -371,9 +378,9 @@ def calc_edge_squared(
     # Accumulate integral results for all x (batch) and t (out position) values.
     # We store values because we need to square the integral result before summing.
     J_hat = (
-        torch.zeros(batch_size, out_pos_size, rib_out_size, rib_in_size, device=f_in_hat.device)
+        torch.zeros(batch_size, out_pos_size, chunk_size, rib_in_size, device=f_in_hat.device)
         if has_pos
-        else torch.zeros(batch_size, rib_out_size, rib_in_size, device=f_in_hat.device)
+        else torch.zeros(batch_size, chunk_size, rib_in_size, device=f_in_hat.device)
     )
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
@@ -392,8 +399,11 @@ def calc_edge_squared(
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output.
-        for out_dim in tqdm(
-            range(rib_out_size), total=rib_out_size, desc="Iteration over output dims", leave=False
+        for idx_in_chunk, out_dim in tqdm(
+            enumerate(range(out_dim_start_idx, out_dim_end_idx)),
+            total=chunk_size,
+            desc=f"Iteration over output dims. Chunk_idxs: {out_dim_start_idx}-{out_dim_end_idx}",
+            leave=False,
         ):
             if has_pos:
                 for output_pos_idx in range(out_pos_size):
@@ -412,7 +422,7 @@ def calc_edge_squared(
 
                     with torch.inference_mode():
                         # Element-wise multiply with f_in_hat and sum over the input pos
-                        J_hat[:, output_pos_idx, out_dim, :] -= einsum(
+                        J_hat[:, output_pos_idx, idx_in_chunk, :] -= einsum(
                             "batch in_pos in_dim, batch in_pos in_dim -> batch in_dim",
                             i_grad,
                             f_in_hat,
@@ -426,7 +436,7 @@ def calc_edge_squared(
                 )
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat
-                    J_hat[:, out_dim, :] -= einsum(
+                    J_hat[:, idx_in_chunk, :] -= einsum(
                         "batch in_dim, batch in_dim -> batch in_dim", i_grad, f_in_hat
                     )
 
@@ -657,8 +667,7 @@ def calc_edge_stochastic(
                     )
 
     # Square, and sum over batch size and output pos
-    J_hat = J_hat**2 / normalization_factor
-    edge += J_hat.sum(dim=(0, 1))
+    edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1))
 
 
 def integrated_gradient_trapezoidal_norm(

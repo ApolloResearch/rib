@@ -76,7 +76,7 @@ async def deploy_pod(args: argparse.Namespace, pod_idx: int):
     )
     deploy_command = (
         f"{PYTHON_EXECUTABLE_PATH} cli.py deploy {args.gpu_type} --name {job_name} "
-        f"--kill_time_london instantly --n_gpus {args.n_gpus} "
+        f"--kill_time_local instantly --n_gpus {args.n_gpus} "
         f"--post_init_command '{post_init_command}'"
     )
 

@@ -173,13 +173,28 @@ class RibBuildConfig(BaseModel):
         "use Us as Cs, giving the eigendecomposition of the gram matrix. If 'neuron', will use "
         "the neuron-basis. Defaults to '(1-0)*alpha'",
     )
-    edge_formula: Literal["functional", "squared", "stochastic"] = Field(
+    edge_formula: Literal["functional", "squared"] = Field(
         "functional",
         description="The attribution method to use to calculate the edges.",
     )
-    n_stochastic_sources: Optional[int] = Field(
+    n_stochastic_sources_basis_pos: Optional[int] = Field(
         None,
-        description="The number of stochastic sources to use when calculating stochastic edges.",
+        description="The number of stochastic sources in the out_pos direction to use when"
+        "calculating  stochastic Cs. If both `n_stochastic_sources_basis_pos` and"
+        "`n_stochastic_sources_basis_hidden` are passed, the number of combined stochastic"
+        "sources is given by their product.",
+    )
+    n_stochastic_sources_basis_hidden: Optional[int] = Field(
+        None,
+        description="The number of stochastic sources in the out_hat_hidden direction to use when"
+        "calculating stochastic Cs. If both `n_stochastic_sources_basis_pos` and"
+        "`n_stochastic_sources_basis_hidden` are passed, the number of combined stochastic"
+        "sources is given by their product.",
+    )
+    n_stochastic_sources_edges: Optional[int] = Field(
+        None,
+        description="The number of stochastic sources to use when calculating squared edges. Uses"
+        "normal deterministic formula when None.",
     )
     center: bool = Field(
         False,
@@ -207,16 +222,6 @@ class RibBuildConfig(BaseModel):
             assert (
                 self.mlp_path is None and self.modular_mlp_config is None
             ), "We don't support loading interaction matrices for mlp models"
-        return self
-
-    @model_validator(mode="after")
-    def verify_n_stochastic_sources(self) -> "RibBuildConfig":
-        if self.edge_formula != "stochastic" and self.n_stochastic_sources is not None:
-            raise ValueError(
-                "n_stochastic_sources should only be set when edge_formula is stochastic"
-            )
-        if self.edge_formula == "stochastic" and self.n_stochastic_sources is None:
-            raise ValueError("n_stochastic_sources must be set when edge_formula is stochastic")
         return self
 
 
@@ -471,6 +476,8 @@ def rib_build(
             basis_formula=config.basis_formula,
             center=config.center,
             means=means,
+            n_stochastic_sources_pos=config.n_stochastic_sources_basis_pos,
+            n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
         )
         # InteractionRotation objects used to calculate edges
         edge_interaction_rotations = interaction_rotations
@@ -512,7 +519,7 @@ def rib_build(
             device=device,
             data_set_size=full_dataset_len,  # includes data for other processes
             edge_formula=config.edge_formula,
-            n_stochastic_sources=config.n_stochastic_sources,
+            n_stochastic_sources=config.n_stochastic_sources_edges,
         )
 
         calc_edges_time = (time.time() - edges_start_time) / 60

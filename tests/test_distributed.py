@@ -22,12 +22,17 @@ from rib.settings import REPO_ROOT
 from tests.utils import get_modular_arithmetic_config
 
 
-def get_single_edges(tmpdir: Path):
+def get_single_edges(
+    tmpdir: Path, dist_split_over: str, edge_formula: str, n_stochastic_sources: Optional[int]
+):
     config = get_modular_arithmetic_config(
         {
             "exp_name": "test_single",
             "calculate_edges": True,
             "interaction_matrices_path": tmpdir / "compute_cs_rib_Cs.pt",
+            "dist_split_over": dist_split_over,
+            "edge_formula": edge_formula,
+            "n_stochastic_sources": n_stochastic_sources,
         }
     )
     return rib_build(config).edges
@@ -42,7 +47,9 @@ def run_distributed_edges(config_path: str, n_pods: int, pod_rank: int, n_proces
     subprocess.run(mpi_command, shell=True, capture_output=True)
 
 
-def get_double_edges(tmpdir: Path):
+def get_double_edges(
+    tmpdir: Path, dist_split_over: str, edge_formula: str, n_stochastic_sources: Optional[int]
+):
     exp_name = "test_double"
     double_config_path = tmpdir / "double_config.yaml"
     double_outdir_path = tmpdir / "double_out"
@@ -53,6 +60,9 @@ def get_double_edges(tmpdir: Path):
             "calculate_edges": True,
             "interaction_matrices_path": f"{tmpdir}/compute_cs_rib_Cs.pt",
             "out_dir": double_outdir_path,
+            "dist_split_over": dist_split_over,
+            "edge_formula": edge_formula,
+            "n_stochastic_sources": n_stochastic_sources,
         }
     )
     with open(double_config_path, "w") as f:
@@ -79,15 +89,22 @@ def compare_edges(
             "exp_name": "compute_cs",
             "out_dir": tmpdir,
             "calculate_edges": False,
-            "dist_split_over": dist_split_over,
-            "edge_formula": edge_formula,
-            "n_stochastic_sources": n_stochastic_sources,
         }
     )
     rib_build(cs_config)
     # not using fixtures as we need to compute Cs first
-    all_single_edges = get_single_edges(tmpdir)
-    all_double_edges = get_double_edges(tmpdir)
+    all_single_edges = get_single_edges(
+        tmpdir=tmpdir,
+        dist_split_over=dist_split_over,
+        edge_formula=edge_formula,
+        n_stochastic_sources=n_stochastic_sources,
+    )
+    all_double_edges = get_double_edges(
+        tmpdir=tmpdir,
+        dist_split_over=dist_split_over,
+        edge_formula=edge_formula,
+        n_stochastic_sources=n_stochastic_sources,
+    )
 
     for s_edges, d_edges in zip(all_single_edges, all_double_edges):
         assert (

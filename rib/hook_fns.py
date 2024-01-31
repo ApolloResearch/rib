@@ -543,6 +543,8 @@ def interaction_edge_pre_forward_hook_fn(
             dataset_size=dataset_size,
             n_intervals=n_intervals,
             n_stochastic_sources=n_stochastic_sources,
+            out_dim_start_idx=out_dim_start_idx,
+            out_dim_end_idx=out_dim_end_idx,
             tqdm_desc=tqdm_desc,
         )
     else:

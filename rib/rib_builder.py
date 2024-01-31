@@ -230,10 +230,12 @@ class RibBuildConfig(BaseModel):
             assert (
                 self.n_stochastic_sources_edges is None
             ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
-        return self
 
-    @model_validator(mode="after")
-    def verify_not_functional_and_out_dim_split(self) -> "RibBuildConfig":
+        if self.n_stochastic_sources_edges is not None:
+            assert (
+                self.edge_formula == "squared"
+            ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
+
         if self.edge_formula == "functional" and self.dist_split_over == "out_dim":
             raise ValueError("Cannot use functional edge formula with out_dim split")
         return self

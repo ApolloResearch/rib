@@ -22,17 +22,14 @@ from rib.settings import REPO_ROOT
 from tests.utils import get_modular_arithmetic_config
 
 
-def get_single_edges(
-    tmpdir: Path, dist_split_over: str, edge_formula: str, n_stochastic_sources: Optional[int]
-):
+def get_single_edges(tmpdir: Path, dist_split_over: str, n_stochastic_sources_edges: Optional[int]):
     config = get_modular_arithmetic_config(
         {
             "exp_name": "test_single",
             "calculate_edges": True,
             "interaction_matrices_path": tmpdir / "compute_cs_rib_Cs.pt",
             "dist_split_over": dist_split_over,
-            "edge_formula": edge_formula,
-            "n_stochastic_sources": n_stochastic_sources,
+            "n_stochastic_sources_edges": n_stochastic_sources_edges,
         }
     )
     return rib_build(config).edges
@@ -47,9 +44,7 @@ def run_distributed_edges(config_path: str, n_pods: int, pod_rank: int, n_proces
     subprocess.run(mpi_command, shell=True, capture_output=True)
 
 
-def get_double_edges(
-    tmpdir: Path, dist_split_over: str, edge_formula: str, n_stochastic_sources: Optional[int]
-):
+def get_double_edges(tmpdir: Path, dist_split_over: str, n_stochastic_sources_edges: Optional[int]):
     exp_name = "test_double"
     double_config_path = tmpdir / "double_config.yaml"
     double_outdir_path = tmpdir / "double_out"
@@ -61,8 +56,7 @@ def get_double_edges(
             "interaction_matrices_path": f"{tmpdir}/compute_cs_rib_Cs.pt",
             "out_dir": double_outdir_path,
             "dist_split_over": dist_split_over,
-            "edge_formula": edge_formula,
-            "n_stochastic_sources": n_stochastic_sources,
+            "n_stochastic_sources_edges": n_stochastic_sources_edges,
         }
     )
     with open(double_config_path, "w") as f:
@@ -79,9 +73,7 @@ def get_double_edges(
     return edges
 
 
-def compare_edges(
-    dist_split_over: str, tmpdir: Path, edge_formula: str, n_stochastic_sources: Optional[int]
-):
+def compare_edges(dist_split_over: str, tmpdir: Path, n_stochastic_sources_edges: Optional[int]):
     # first we compute the cs. we do this separately as there are occasional reproducibility
     # issues with computing them.
     cs_config = get_modular_arithmetic_config(
@@ -96,14 +88,12 @@ def compare_edges(
     all_single_edges = get_single_edges(
         tmpdir=tmpdir,
         dist_split_over=dist_split_over,
-        edge_formula=edge_formula,
-        n_stochastic_sources=n_stochastic_sources,
+        n_stochastic_sources_edges=n_stochastic_sources_edges,
     )
     all_double_edges = get_double_edges(
         tmpdir=tmpdir,
         dist_split_over=dist_split_over,
-        edge_formula=edge_formula,
-        n_stochastic_sources=n_stochastic_sources,
+        n_stochastic_sources_edges=n_stochastic_sources_edges,
     )
 
     for s_edges, d_edges in zip(all_single_edges, all_double_edges):
@@ -118,19 +108,25 @@ def compare_edges(
 @pytest.mark.mpi
 def test_squared_edges_are_same_dist_split_over_dataset(tmpdir):
     compare_edges(
-        dist_split_over="dataset", tmpdir=tmpdir, edge_formula="squared", n_stochastic_sources=None
+        dist_split_over="dataset",
+        tmpdir=tmpdir,
+        n_stochastic_sources_edges=None,
     )
 
 
 @pytest.mark.mpi
 def test_squared_edges_are_same_dist_split_over_out_dim(tmpdir):
     compare_edges(
-        dist_split_over="out_dim", tmpdir=tmpdir, edge_formula="squared", n_stochastic_sources=None
+        dist_split_over="out_dim",
+        tmpdir=tmpdir,
+        n_stochastic_sources_edges=None,
     )
 
 
 @pytest.mark.mpi
 def test_stochastic_edges_are_same_dist_split_over_out_dim(tmpdir):
     compare_edges(
-        dist_split_over="out_dim", tmpdir=tmpdir, edge_formula="stochastic", n_stochastic_sources=3
+        dist_split_over="out_dim",
+        tmpdir=tmpdir,
+        n_stochastic_sources_edges=3,
     )

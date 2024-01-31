@@ -255,6 +255,8 @@ def collect_M_dash_and_Lambda_dash(
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
+    n_stochastic_sources_pos: Optional[int] = None,
+    n_stochastic_sources_hidden: Optional[int] = None,
 ) -> tuple[Float[Tensor, "orig_in orig_in"], Float[Tensor, "orig_in orig_in"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -300,6 +302,8 @@ def collect_M_dash_and_Lambda_dash(
             "M_dtype": M_dtype,
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
             "basis_formula": basis_formula,
+            "n_stochastic_sources_pos": n_stochastic_sources_pos,
+            "n_stochastic_sources_hidden": n_stochastic_sources_hidden,
         },
     )
 
@@ -329,7 +333,7 @@ def collect_interaction_edges(
     dtype: torch.dtype,
     device: str,
     data_set_size: Optional[int] = None,
-    edge_formula: Literal["functional", "squared", "stochastic"] = "functional",
+    edge_formula: Literal["functional", "squared"] = "squared",
     n_stochastic_sources: Optional[int] = None,
     out_dim_n_chunks: int = 1,
     out_dim_chunk_idx: int = 0,

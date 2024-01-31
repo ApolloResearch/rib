@@ -226,6 +226,9 @@ def tokenize_dataset(
     Tokenizes the dataset and splits it into chunks that fit the context length. The labels are
     the input_ids shifted by one position.
 
+    The final chunk is not included in the dataset as it does not have a label for its final token.
+    Excluding it also means that we don't have to worry about padding.
+
     Args:
         raw_dataset (Union[DatasetDict, Dataset, IterableDatasetDict, IterableDataset]): The raw
             dataset to tokenize. Created from `hf_load_dataset`.
@@ -257,17 +260,18 @@ def tokenize_dataset(
 
     # Note that we ignore the final raw_chunk, as we get the label for the final token in a chunk
     # from the subsequent chunk.
+    n_raw_chunks = len(raw_chunks) - 1
     if n_samples is not None:
         # Randomly select n_samples chunks
         generator = torch.Generator() if seed is None else torch.Generator().manual_seed(seed)
-        raw_chunk_idxs = torch.randperm(len(raw_chunks) - 1, generator=generator)
+        raw_chunk_idxs = torch.randperm(n_raw_chunks, generator=generator)
         assert len(raw_chunk_idxs) >= n_samples, (
             f"Cannot sample {n_samples} chunks from dataset with {len(raw_chunks)} chunks of "
             f"length {n_ctx}."
         )
         chunk_idxs = raw_chunk_idxs[:n_samples].tolist()
     else:
-        chunk_idxs = list(range(len(raw_chunks) - 1))
+        chunk_idxs = list(range(n_raw_chunks))
 
     chunks = [raw_chunks[i] for i in chunk_idxs]
 

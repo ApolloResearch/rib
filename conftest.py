@@ -12,23 +12,23 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "slow: mark test as slow to run")
-    config.addinivalue_line("markers", "skip_ci: mark test to be skipped in CI")
     config.addinivalue_line("markers", "mpi: mark test to be run with MPI")
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("--runslow"):
-        # --runslow given in cli: do not skip slow tests
-        return
-    if config.getoption("--runmpi"):
-        # --runmpi given in cli: do not skip mpi tests
-        # Note that you should only run one mpi test at a time
+    run_slow = config.getoption("--runslow")
+    run_mpi = config.getoption("--runmpi")
+
+    if run_mpi:
+        if len(items) > 1 or "mpi" not in items[0].keywords:
+            pytest.exit("--runmpi can only be used with a single test marked with @pytest.mark.mpi")
         return
 
     skip_slow = pytest.mark.skip(reason="need --runslow option to run")
     skip_mpi = pytest.mark.skip(reason="need --runmpi option to run")
+
     for item in items:
-        if "slow" in item.keywords:
+        if not run_slow and "slow" in item.keywords:
             item.add_marker(skip_slow)
         if "mpi" in item.keywords:
             item.add_marker(skip_mpi)

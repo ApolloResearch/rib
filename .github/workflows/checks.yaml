@@ -71,6 +71,6 @@ jobs:
       # Note that we run need to run the distributed tests in separate processes
       run: |
         source /home/user/actions-runner/rib-env/bin/activate
-        pytest --runslow -m "not skip_ci" --durations=10
+        pytest --runslow --durations=10
         pytest --runmpi tests/test_distributed.py::test_edges_are_same_dist_split_over_dataset
         pytest --runmpi tests/test_distributed.py::test_edges_are_same_dist_split_over_out_dim

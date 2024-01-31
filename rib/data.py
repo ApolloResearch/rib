@@ -1,4 +1,4 @@
-"""Define custom datasets."""
+"""Defines the dataset configs and datasets used in RIB."""
 
 from typing import Literal, Optional
 

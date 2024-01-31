@@ -67,6 +67,7 @@ def get_pythia_config(*updates: dict) -> RibBuildConfig:
     n_intervals: 0
     dtype: float64
     calculate_edges: false
+    edge_formula: squared
     eval_type: ce_loss
     out_dir: null
     basis_formula: (1-0)*alpha

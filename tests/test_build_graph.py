@@ -220,7 +220,7 @@ def test_pythia_14m_build_graph_jacobian_stochastic():
             "dataset": {"n_documents": 10, "n_samples": 1, "n_ctx": 2},
             "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
             "calculate_edges": True,
-            "edge_formula": "stochastic",
+            "edge_formula": "squared",
             "n_stochastic_sources_edges": 1,
         }
     )

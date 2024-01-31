@@ -630,7 +630,7 @@ class LayerNormIn(torch.nn.Module):
         self, residual: Float[Tensor, "... d_model"]
     ) -> tuple[Float[Tensor, "... 1"], Float[Tensor, "... d_model"]]:
         residual_for_variance = residual[..., :-1] if self._exclude_final_dim else residual
-        var = variance(residual_for_variance, epsilon=self.cfg.eps)
+        var = variance(residual_for_variance)
         return var, residual
 
     def exclude_final_dim(self, exclude: bool = True):
@@ -661,7 +661,7 @@ class LayerNormOut(torch.nn.Module):
     ]:
         residual_for_norm = residual[..., :-1] if self._exclude_final_dim else residual
 
-        out = layer_norm(residual_for_norm, var=var)
+        out = layer_norm(residual_for_norm, var=var + self.cfg.eps)
 
         if self._exclude_final_dim:
             # Add the final dimension back in
@@ -710,7 +710,7 @@ class DualLayerNormIn(torch.nn.Module):
                 "new" residual stream in the subsequent (MLP) layers.
         """
         residual_for_variance = residual[..., :-1] if self._exclude_final_dim else residual
-        var = variance(residual_for_variance, epsilon=self.cfg.eps)
+        var = variance(residual_for_variance)
         return var, residual, attn_resid
 
     def exclude_final_dim(self, exclude: bool = True):
@@ -753,7 +753,7 @@ class DualLayerNormOut(torch.nn.Module):
         """
         residual_for_norm = residual[..., :-1] if self._exclude_final_dim else residual
 
-        out = layer_norm(residual_for_norm, var=var)
+        out = layer_norm(residual_for_norm, var=var + self.cfg.eps)
         if self._exclude_final_dim:
             # Add the final dimension back in
             out = torch.cat([out, residual[..., -1:]], dim=-1)

@@ -534,7 +534,7 @@ def ablate_edges_and_eval(
     device: str,
     dtype: Optional[torch.dtype] = None,
     always_keep_const_dir=False,
-) -> tuple[AblationAccuracies, EdgeMasks]:
+) -> tuple[AblationAccuracies, EdgeMasks, dict[str, int]]:
     """Perform a series of edge ablation experiments across layers and multiple # of edges to keep.
 
     Note that we want our ablation schedules for different bases to match up, even though different
@@ -562,11 +562,14 @@ def ablate_edges_and_eval(
     Returns:
         A dictionary mapping node layers to ablation accuracies/losses.
         A dictionary mapping node layers to edge masks.
+        A dictionary mapping node layers to the number of edges required to achieve the target
+            accuracy/loss (for bisect schedule only, otherwise empty dict).
     """
     base_score = eval_fn(hooked_model, data_loader, hooks=[], dtype=dtype, device=device)
 
     results: AblationAccuracies = {}
     edge_masks: EdgeMasks = {}
+    n_edges_required = {}
     basis_pairs = zip(basis_matrices[:-1], basis_matrices[1:])
     for ablation_node_layer, module_name, basis_pair, layer_edges in zip(
         ablation_node_layers[:-1], module_names[:-1], basis_pairs, edges, strict=True
@@ -621,7 +624,12 @@ def ablate_edges_and_eval(
             sorted(results[ablation_node_layer].items(), reverse=True)
         )
 
-    return results, edge_masks
+        if isinstance(ablation_schedule, BisectSchedule):
+            n_edges_required[ablation_node_layer] = (
+                total_possible_edges - ablation_schedule._upper_bound
+            )
+
+    return results, edge_masks, n_edges_required
 
 
 def load_basis_matrices(
@@ -682,7 +690,7 @@ def load_basis_matrices(
 
 def load_bases_and_ablate(
     config_path_or_obj: Union[str, AblationConfig], force: bool = False
-) -> AblationAccuracies:
+) -> dict:
     """Load basis matrices and run ablation experiments.
 
     The process is as follows:
@@ -703,8 +711,14 @@ def load_bases_and_ablate(
         force: Whether to overwrite existing output files.
 
     Returns:
-        A dictionary mapping node layers to accuracies/losses. If the config has an out_dir, the
-        results are also written to a file in that directory.
+        A dictionary containing the results of the ablation experiments. The dictionary contains
+        "config" (json dump of the config), "results" (a dictionary mapping node layers to
+        accuracies/losses), "time_taken" (the time taken to run the ablations), and
+        "no_ablation_result" (numbering). If "edge" ablations were performed, the dictionary also
+        contains "n_edges_required" (the number of edges required to achieve the target accuracy/
+        loss, non-empty only if BisectSchedule was used) and "edge_masks" (a dictionary mapping
+        node layers to edge masks).
+        If the config has an out_dir, the results are also written to a file in that directory.
     """
     start_time = time.time()
     config = load_config(config_path_or_obj, config_model=AblationConfig)
@@ -771,7 +785,7 @@ def load_bases_and_ablate(
     if config.ablation_type == "edge":
         edges_dict = {info.in_node_layer: info for info in rib_results.edges}
         edges = [edges_dict[layer] for layer in config.ablation_node_layers[:-1]]
-        ablation_results, edge_masks = ablate_edges_and_eval(
+        ablation_results, edge_masks, n_edges_required = ablate_edges_and_eval(
             basis_matrices=basis_matrices,
             ablation_node_layers=config.ablation_node_layers,
             edges=edges,
@@ -809,6 +823,7 @@ def load_bases_and_ablate(
         "no_ablation_result": no_ablation_result,
     }
     if config.ablation_type == "edge":
+        results["n_edges_required"] = n_edges_required
         results["edge_masks"] = edge_masks
 
     if config.out_dir is not None:
@@ -816,4 +831,4 @@ def load_bases_and_ablate(
             json.dump(results, f, default=lambda x: x.tolist(), indent=1)
         logger.info("Wrote results to %s", out_file)
 
-    return ablation_results
+    return results

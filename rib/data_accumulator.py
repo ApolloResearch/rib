@@ -255,6 +255,8 @@ def collect_M_dash_and_Lambda_dash(
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
+    n_stochastic_sources_pos: Optional[int] = None,
+    n_stochastic_sources_hidden: Optional[int] = None,
 ) -> tuple[Float[Tensor, "orig_in orig_in"], Float[Tensor, "orig_in orig_in"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -300,6 +302,8 @@ def collect_M_dash_and_Lambda_dash(
             "M_dtype": M_dtype,
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
             "basis_formula": basis_formula,
+            "n_stochastic_sources_pos": n_stochastic_sources_pos,
+            "n_stochastic_sources_hidden": n_stochastic_sources_hidden,
         },
     )
 
@@ -329,7 +333,7 @@ def collect_interaction_edges(
     dtype: torch.dtype,
     device: str,
     data_set_size: Optional[int] = None,
-    edge_formula: Literal["functional", "squared", "stochastic"] = "functional",
+    edge_formula: Literal["functional", "squared"] = "squared",
     n_stochastic_sources: Optional[int] = None,
 ) -> list[Edges]:
     """Collect interaction edges between each node layer in Cs.
@@ -352,10 +356,8 @@ def collect_interaction_edges(
         edge_formula: The formula to use for the attribution.
             - "functional" is the old (October 23) functional version
             - "squared" is the version which iterates over the output dim and output pos dim
-            - "stochastic" is the version which iteratates over output dim and stochastic sources.
-                This is an approximation of the squared version.
-        n_stochastic_sources: The number of stochastic sources of noise. Only used when
-            `edge_formula="stochastic"`. Defaults to None.
+        n_stochastic_sources: The number of stochastic sources for positional dimension
+            (approximation). Defaults to None.
     Returns:
         A list of Edges objects, which contain a matrix of edges between two node layers.
     """

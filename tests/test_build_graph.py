@@ -29,12 +29,14 @@ from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 from rib.types import TORCH_DTYPES
 from rib.utils import replace_pydantic_model
 from tests.utils import (
+    assert_basis_similarity,
     assert_is_close,
     assert_is_zeros,
     get_mnist_config,
     get_modular_arithmetic_config,
     get_modular_mlp_config,
     get_pythia_config,
+    get_tinystories_config,
 )
 
 
@@ -219,7 +221,7 @@ def test_pythia_14m_build_graph_jacobian_stochastic():
             "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
             "calculate_edges": True,
             "edge_formula": "stochastic",
-            "n_stochastic_sources": 1,
+            "n_stochastic_sources_edges": 1,
         }
     )
     results = graph_build_test(config=config, atol=atol)
@@ -601,7 +603,7 @@ def test_stochastic_source_single_pos_modadd():
             "edge_formula": "squared",
             "node_layers": node_layers,
             "last_pos_module_type": "add_resid1",
-            "n_stochastic_sources": None,
+            "n_stochastic_sources_edges": None,
         }
     )
     squared_edges = rib_build(config_squared).edges[0].E_hat
@@ -609,10 +611,10 @@ def test_stochastic_source_single_pos_modadd():
     # Calc stochastic edges
     config_stochastic = get_modular_arithmetic_config(
         {
-            "edge_formula": "stochastic",
+            "edge_formula": "squared",
             "node_layers": node_layers,
             "last_pos_module_type": "add_resid1",
-            "n_stochastic_sources": 1,
+            "n_stochastic_sources_edges": 1,
         }
     )
     stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
@@ -622,10 +624,10 @@ def test_stochastic_source_single_pos_modadd():
 
 @pytest.mark.slow
 def test_stochastic_source_modadd_convergence():
-    """Show that modadd after converges to squared edges as n_stochastic_sources increases.
+    """Show that modadd after converges to squared edges as n_stochastic_sources_edges increases.
 
     We measure the mean absolute difference between the squared edges and the stochastic edges as
-    n_stochastic_sources increases. We expect this to decrease monotonically.
+    n_stochastic_sources_edges increases. We expect this to decrease monotonically.
 
     Here, we set last_pos_module_type='unembed' so that we have multiple position dimensions in the
     mlp layer.
@@ -644,7 +646,7 @@ def test_stochastic_source_modadd_convergence():
             "edge_formula": "squared",
             "node_layers": node_layers,
             "last_pos_module_type": "unembed",
-            "n_stochastic_sources": None,
+            "n_stochastic_sources_edges": None,
         }
     )
     squared_edges = rib_build(config_squared).edges[0].E_hat
@@ -653,24 +655,97 @@ def test_stochastic_source_modadd_convergence():
     all_stochastic_edges = []
     abs_diffs = []
     # Ideally we'd use more sources, but that is very slow
-    for n_stochastic_sources in [1, 3, 7]:
+    for n_stochastic_sources_edges in [1, 3, 7]:
         config_stochastic = get_modular_arithmetic_config(
             {
                 "dataset": {"return_set_n_samples": return_set_n_samples},
                 "batch_size": batch_size,
-                "edge_formula": "stochastic",
+                "edge_formula": "squared",
                 "node_layers": node_layers,
                 "last_pos_module_type": "unembed",
-                "n_stochastic_sources": n_stochastic_sources,
+                "n_stochastic_sources_edges": n_stochastic_sources_edges,
             }
         )
         stochastic_edges = rib_build(config_stochastic).edges[0].E_hat
         all_stochastic_edges.append(stochastic_edges)
         abs_diffs.append(torch.abs(stochastic_edges - squared_edges).mean())
 
-    # Check that the mean absolute differences decrease as n_stochastic_sources increases.
+    # Check that the mean absolute differences decrease as n_stochastic_sources_edges increases.
     assert (
         torch.diff(torch.tensor(abs_diffs)) <= 0
     ).all(), "abs_diffs is not monotonically decreasing"
     # Check that the final relative and absolute differences are small.
     assert_is_close(all_stochastic_edges[-1], squared_edges, atol=1e1, rtol=1e-5)
+
+
+@pytest.fixture(scope="module")
+def no_stoc_result():
+    return rib_build(get_tinystories_config({"calculate_edges": False}))
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    ["pos_sources", "hidden_sources", "error"],
+    [
+        [None, 10, 0.2],
+        [None, 40, 0.07],
+        [2, None, 0.07],
+        [2, 40, 0.1],
+    ],
+)
+def test_stochastic_basis_tinystories(no_stoc_result, pos_sources, hidden_sources, error):
+    """Test stochastic basis in the hidden + position dimension on TinyStories.
+
+    More basis sources allowed because they span 64*10 dims rather than 10 dims.
+
+    We find that with 640 stochastic sources (n_ctx==10, d_hidden=64) the edges differ by up to
+    26.9% of the largest edge.
+    """
+    config_stochastic = get_tinystories_config(
+        {
+            "n_stochastic_sources_basis_pos": pos_sources,
+            "n_stochastic_sources_basis_hidden": hidden_sources,
+            "calculate_edges": False,
+        }
+    )
+    stoc_result = rib_build(config_stochastic)
+
+    for stoc_ir, no_stoc_ir in zip(
+        stoc_result.interaction_rotations[:-1], no_stoc_result.interaction_rotations[:-1]
+    ):
+        assert_basis_similarity(stoc_ir, no_stoc_ir, error=error)
+
+
+@pytest.mark.slow()
+@pytest.mark.parametrize(
+    ["pos_sources", "hidden_sources"],
+    [
+        [None, 1],
+        [1, None],
+    ],
+)
+def test_stoc_seed_changes(pos_sources, hidden_sources):
+    # Check that the sources are actually stochastic and change with seed
+    config_stoc_0 = get_tinystories_config(
+        {
+            "n_stochastic_sources_basis_pos": pos_sources,
+            "n_stochastic_sources_basis_hidden": hidden_sources,
+            "calculate_edges": False,
+        }
+    )
+    config_stoc_42 = get_tinystories_config(
+        {
+            "n_stochastic_sources_basis_pos": pos_sources,
+            "n_stochastic_sources_basis_hidden": hidden_sources,
+            "calculate_edges": False,
+            "seed": 42,
+        }
+    )
+    stoc_result_0 = rib_build(config_stoc_0)
+    stoc_result_42 = rib_build(config_stoc_42)
+    assert not torch.allclose(
+        stoc_result_0.interaction_rotations[0].C,
+        stoc_result_42.interaction_rotations[0].C,
+        atol=0,
+        rtol=0,
+    )

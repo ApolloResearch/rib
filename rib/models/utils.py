@@ -296,11 +296,11 @@ def fold_unembed(weight: Float[Tensor, "d_model d_vocab"], bias: Float[Tensor, "
     bias.data = torch.zeros(1, bias.shape[0], device=bias.device, dtype=bias.dtype)  # (1, d_vocab)
 
 
-def variance(x: Float[Tensor, "... d_model"], epsilon=1e-5) -> Float[Tensor, "... 1"]:
+def variance(x: Float[Tensor, "... d_model"]) -> Float[Tensor, "... 1"]:
     dtype = x.dtype if x.dtype in [torch.float32, torch.float64] else torch.float32
-    var: Float[Tensor, "... 1"] = (x.to(dtype) - x.to(dtype).mean(-1, keepdim=True)).pow(2).mean(
-        -1, keepdim=True
-    ) + epsilon
+    var: Float[Tensor, "... 1"] = (
+        (x.to(dtype) - x.to(dtype).mean(-1, keepdim=True)).pow(2).mean(-1, keepdim=True)
+    )
     if torch.isnan(var).any():
         raise ValueError("NaNs found in variance calculation.")
     return var

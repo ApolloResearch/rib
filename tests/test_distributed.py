@@ -1,9 +1,9 @@
 """
-NOTE: Distributed tests are not run by default. To run them, use the --runmpi flag.
+NOTE: If adding a distributed test, manually add the test to `tests/run_distributed_tests.sh`.
 
-The reason is that each distributed test needs to run in a separate process from other tests.
-
-If adding a distributed test, manually add the test to the CI (.github/workflows/checks.yaml)
+Distributed tests are not run by default. To run them, use the --runmpi flag, and only run one test
+at a time. The reason is that each distributed test needs to run in a separate process from other
+tests.
 """
 
 import json

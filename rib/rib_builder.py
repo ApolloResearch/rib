@@ -224,6 +224,12 @@ class RibBuildConfig(BaseModel):
             raise ValueError("n_stochastic_sources must be set when edge_formula is stochastic")
         return self
 
+    @model_validator(mode="after")
+    def verify_not_functional_and_out_dim_split(self) -> "RibBuildConfig":
+        if self.edge_formula == "functional" and self.dist_split_over == "out_dim":
+            raise ValueError("Cannot use functional edge formula with out_dim split")
+        return self
+
 
 class RibBuildResults(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)

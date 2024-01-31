@@ -89,7 +89,8 @@ def get_tinystories_config(*updates: dict) -> RibBuildConfig:
         tokenizer_name: EleutherAI/gpt-neo-125M
         return_set: train
         return_set_frac: null
-        n_samples: 1 # avg ~235 toks / story
+        n_documents: 1 # avg ~235 toks / story
+        n_samples: 15
         return_set_portion: first
         n_ctx: 10 # needs to be <= 511 for the model to behave reasonably
     node_layers:
@@ -217,9 +218,7 @@ def _assignment_permutations(sim: torch.Tensor) -> tuple[list[int], list[int]]:
 
 
 def assert_basis_similarity(
-    ir_A: InteractionRotation,
-    ir_B: InteractionRotation,
-    error: Optional[float] = 0.02,
+    ir_A: InteractionRotation, ir_B: InteractionRotation, error: Optional[float] = 0.02
 ):
     """
     Compare two InteractionRotations and assert similarity, allowing for permutations.

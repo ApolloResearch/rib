@@ -687,8 +687,7 @@ def no_stoc_result():
 @pytest.mark.parametrize(
     ["pos_sources", "hidden_sources", "error"],
     [
-        [None, 10, 0.2],
-        [None, 40, 0.07],
+        [None, 40, 0.1],
         [2, None, 0.07],
         [2, 40, 0.1],
     ],

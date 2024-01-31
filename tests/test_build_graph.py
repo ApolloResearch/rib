@@ -184,19 +184,24 @@ def get_means(results: RibBuildResults, atol: float, batch_size=16):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "basis_formula, edge_formula",
+    "basis_formula, edge_formula, integration_rule",
     [
-        ("(1-alpha)^2", "functional"),
-        ("(1-0)*alpha", "functional"),
-        ("(1-alpha)^2", "squared"),
-        ("(1-0)*alpha", "squared"),
-        ("jacobian", "squared"),
+        ("(1-alpha)^2", "functional", "trapezoidal"),
+        ("(1-0)*alpha", "functional", "trapezoidal"),
+        ("(1-alpha)^2", "squared", "trapezoidal"),
+        ("(1-0)*alpha", "squared", "trapezoidal"),
+        ("jacobian", "squared", "trapezoidal"),
+        ("jacobian", "squared", "gauss-legendre"),
     ],
 )
-def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
+def test_modular_arithmetic_build_graph(basis_formula, edge_formula, integration_rule):
     atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
     config = get_modular_arithmetic_config(
-        {"basis_formula": basis_formula, "edge_formula": edge_formula}
+        {
+            "basis_formula": basis_formula,
+            "edge_formula": edge_formula,
+            "integration_rule": integration_rule,
+        }
     )
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32

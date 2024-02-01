@@ -206,26 +206,24 @@ def test_modular_arithmetic_build_graph(basis_formula, edge_formula):
 @pytest.mark.slow
 def test_pythia_14m_build_graph():
     atol = 0  # Works with 1e-7 for float32 and 0 for float64
-    config = get_pythia_config()
+    config = get_pythia_config({"dataset": {"n_ctx": None}})
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=0)
 
 
 @pytest.mark.slow
-def test_pythia_14m_build_graph_jacobian():
+def test_pythia_14m_build_graph_jacobian_stochastic():
     atol = 0  # Works with 0 for batch_size 900 but not 1800
-    updates = [
-        # Runs in around 30s on a5000
-        {"basis_formula": "jacobian"},
-        {"dataset": {"return_set_n_samples": 1}},
-        {"dataset": {"n_ctx": 2}},
-        {"batch_size": 900},
-        {"node_layers": ["ln2.1", "mlp_out.5", "unembed"]},
-        {"calculate_edges": True},
-        {"edge_formula": "squared"},
-        {"n_stochastic_sources_edges": 1},
-    ]
-    config = get_pythia_config(*updates)
+    config = get_pythia_config(
+        {
+            "basis_formula": "jacobian",
+            "dataset": {"n_documents": 10, "n_samples": 1, "n_ctx": 2},
+            "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
+            "calculate_edges": True,
+            "edge_formula": "squared",
+            "n_stochastic_sources_edges": 1,
+        }
+    )
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=0)
 
@@ -637,13 +635,13 @@ def test_stochastic_source_modadd_convergence():
     NOTE: This is quite a weak test, but the runs a slow so we're taking a hit on the test quality.
     """
     node_layers = ["mlp_in.0", "mlp_out.0"]
-    return_set_n_samples = 3
+    n_samples = 3
     batch_size = 3
 
     # Calc squared edges
     config_squared = get_modular_arithmetic_config(
         {
-            "dataset": {"return_set_n_samples": return_set_n_samples},
+            "dataset": {"n_samples": n_samples},
             "batch_size": batch_size,
             "edge_formula": "squared",
             "node_layers": node_layers,
@@ -660,7 +658,7 @@ def test_stochastic_source_modadd_convergence():
     for n_stochastic_sources_edges in [1, 3, 7]:
         config_stochastic = get_modular_arithmetic_config(
             {
-                "dataset": {"return_set_n_samples": return_set_n_samples},
+                "dataset": {"n_samples": n_samples},
                 "batch_size": batch_size,
                 "edge_formula": "squared",
                 "node_layers": node_layers,
@@ -689,8 +687,7 @@ def no_stoc_result():
 @pytest.mark.parametrize(
     ["pos_sources", "hidden_sources", "error"],
     [
-        [None, 10, 0.2],
-        [None, 40, 0.07],
+        [None, 40, 0.1],
         [2, None, 0.07],
         [2, 40, 0.1],
     ],

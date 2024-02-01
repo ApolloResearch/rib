@@ -299,11 +299,11 @@ def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildCo
             assert (
                 config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
             ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
-        elif config.dataset.return_set_n_samples is not None:
-            assert loaded_config.dataset.return_set_n_samples is not None
+        elif config.dataset.n_samples is not None:
+            assert loaded_config.dataset.n_samples is not None
             assert (
-                config.dataset.return_set_n_samples <= loaded_config.dataset.return_set_n_samples
-            ), "Cannot use a larger return_set_n_samples for edges than to calculate the Cs"
+                config.dataset.n_samples <= loaded_config.dataset.n_samples
+            ), "Cannot use a larger n_samples for edges than to calculate the Cs"
 
 
 def load_interaction_rotations(

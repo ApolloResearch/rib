@@ -19,7 +19,7 @@ def get_modular_arithmetic_config(*updates: dict) -> RibBuildConfig:
     dataset:
         dataset_type: modular_arithmetic
         return_set: train
-        return_set_n_samples: 10
+        n_samples: 10
     node_layers:
         - ln1.0
         - mlp_in.0
@@ -53,8 +53,11 @@ def get_pythia_config(*updates: dict) -> RibBuildConfig:
         tokenizer_name: EleutherAI/pythia-14m
         return_set: train
         return_set_frac: null
-        return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
+        n_documents: 20
+        n_samples: 3
         return_set_portion: first
+        n_ctx: 128
+        seed: 0
     node_layers:
         - ln2.1
         - unembed
@@ -64,6 +67,7 @@ def get_pythia_config(*updates: dict) -> RibBuildConfig:
     n_intervals: 0
     dtype: float64
     calculate_edges: false
+    edge_formula: squared
     eval_type: ce_loss
     out_dir: null
     basis_formula: (1-0)*alpha
@@ -85,7 +89,8 @@ def get_tinystories_config(*updates: dict) -> RibBuildConfig:
         tokenizer_name: EleutherAI/gpt-neo-125M
         return_set: train
         return_set_frac: null
-        return_set_n_samples: 1 # avg ~235 toks / story
+        n_documents: 1 # avg ~235 toks / story
+        n_samples: 15
         return_set_portion: first
         n_ctx: 10 # needs to be <= 511 for the model to behave reasonably
     node_layers:
@@ -213,9 +218,7 @@ def _assignment_permutations(sim: torch.Tensor) -> tuple[list[int], list[int]]:
 
 
 def assert_basis_similarity(
-    ir_A: InteractionRotation,
-    ir_B: InteractionRotation,
-    error: Optional[float] = 0.02,
+    ir_A: InteractionRotation, ir_B: InteractionRotation, error: Optional[float] = 0.02
 ):
     """
     Compare two InteractionRotations and assert similarity, allowing for permutations.

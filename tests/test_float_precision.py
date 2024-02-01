@@ -32,7 +32,8 @@ class TestPythiaFloatingPointErrors:
                 tokenizer_name: EleutherAI/pythia-14m
                 return_set: train  # pile-10k only has train, so we take the first 90% for building and last 10% for ablations
                 return_set_frac: null
-                return_set_n_samples: 10
+                n_documents: 30
+                n_samples: 3
                 return_set_portion: first
             node_layers:
                 - mlp_out.0
@@ -140,9 +141,10 @@ class TestPythiaFloatingPointErrors:
             dataset_type: huggingface
             name: NeelNanda/pile-10k
             tokenizer_name: EleutherAI/pythia-14m
-            return_set: train  # pile-10k only has train, so we take the first 90% for building and last 10% for ablations
+            return_set: train
             return_set_frac: null
-            return_set_n_samples: 10
+            n_documents: 30
+            n_samples: 3
             return_set_portion: first
         ablation_node_layers:
             - mlp_out.0

@@ -25,16 +25,23 @@ def test_hf_dataset_config_validation():
         {"return_set_frac": 0.5, "n_samples": None, "n_documents": None},
         {"return_set_frac": None, "n_samples": 10, "n_documents": None},
         {"return_set_frac": None, "n_samples": None, "n_documents": 10},
-        {"return_set_frac": 0.5, "n_samples": None, "n_documents": 10},
+        {"return_set_frac": 0.1, "n_samples": 10, "n_documents": None},
+        {"return_set_frac": None, "n_samples": 10, "n_documents": 10},
     ]
     for combination in valid_combinations:
         replace_pydantic_model(base_config, combination)
 
     with pytest.raises(ValueError):
-        # invalid combination
+        # Can't have both return_set_frac and n_documents be non-None
         replace_pydantic_model(
             base_config, {"return_set_frac": 0.5, "n_samples": 10, "n_documents": 10}
         )
+    with pytest.raises(ValueError):
+        # Frac is < 0.01
+        replace_pydantic_model(base_config, {"return_set_frac": 0.001, "n_samples": None})
+    with pytest.raises(ValueError):
+        # Frac is > 1
+        replace_pydantic_model(base_config, {"return_set_frac": 1.1, "n_samples": None})
 
 
 def test_non_hf_dataset_config_validation():

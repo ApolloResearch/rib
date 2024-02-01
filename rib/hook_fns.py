@@ -343,7 +343,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     data_key: Union[str, list[str]],
     C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     n_intervals: int,
-    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     dataset_size: int,
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
@@ -389,7 +389,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             inputs=inputs,
             C_out=C_out,
             n_intervals=n_intervals,
-            integration_rule=integration_rule,
+            integration_method=integration_method,
             basis_formula=basis_formula,
         )
         in_dtype = in_grads.dtype
@@ -428,7 +428,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             inputs=inputs,
             C_out=C_out,
             n_intervals=n_intervals,
-            integration_rule=integration_rule,
+            integration_method=integration_method,
             n_stochastic_sources_pos=n_stochastic_sources_pos,
             n_stochastic_sources_hidden=n_stochastic_sources_hidden,
         )
@@ -478,7 +478,7 @@ def interaction_edge_pre_forward_hook_fn(
     C_in: Float[Tensor, "orig_in rib_in"],
     module_hat: Callable[[Float[Tensor, "... rib_in"], list[int]], Float[Tensor, "... rib_out"]],
     n_intervals: int,
-    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     dataset_size: int,
     edge_formula: Literal["functional", "squared"] = "squared",
     n_stochastic_sources: Optional[int] = None,
@@ -534,7 +534,7 @@ def interaction_edge_pre_forward_hook_fn(
             edge=edge,
             dataset_size=dataset_size,
             n_intervals=n_intervals,
-            integration_rule=integration_rule,
+            integration_method=integration_method,
             tqdm_desc=tqdm_desc,
         )
     elif edge_formula == "squared":
@@ -546,7 +546,7 @@ def interaction_edge_pre_forward_hook_fn(
                 edge=edge,
                 dataset_size=dataset_size,
                 n_intervals=n_intervals,
-                integration_rule=integration_rule,
+                integration_method=integration_method,
                 tqdm_desc=tqdm_desc,
             )
         else:
@@ -558,7 +558,7 @@ def interaction_edge_pre_forward_hook_fn(
                 edge=edge,
                 dataset_size=dataset_size,
                 n_intervals=n_intervals,
-                integration_rule=integration_rule,
+                integration_method=integration_method,
                 n_stochastic_sources=n_stochastic_sources,
                 tqdm_desc=tqdm_desc,
             )

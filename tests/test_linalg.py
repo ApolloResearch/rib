@@ -137,8 +137,8 @@ def test_pinv_diag_failure(x):
         y = pinv_diag(x)
 
 
-@pytest.mark.parametrize("integration_rule", ["trapezoidal", "gauss-legendre"])
-def test_calc_basis_integrated_gradient_linear(integration_rule):
+@pytest.mark.parametrize("integration_method", ["trapezoidal", "gauss-legendre"])
+def test_calc_basis_integrated_gradient_linear(integration_method):
     """Check integrated gradient values over a linear module without bias for different intervals.
 
     We check three cases:
@@ -161,13 +161,25 @@ def test_calc_basis_integrated_gradient_linear(integration_rule):
     linear = torch.nn.Linear(in_dim, out_dim, bias=False)
 
     result_point_estimate = calc_basis_integrated_gradient(
-        module=linear, inputs=inputs, C_out=C_out, n_intervals=0, integration_rule=integration_rule
+        module=linear,
+        inputs=inputs,
+        C_out=C_out,
+        n_intervals=0,
+        integration_method=integration_method,
     )
     result_1 = calc_basis_integrated_gradient(
-        module=linear, inputs=inputs, C_out=C_out, n_intervals=1, integration_rule=integration_rule
+        module=linear,
+        inputs=inputs,
+        C_out=C_out,
+        n_intervals=1,
+        integration_method=integration_method,
     )
     result_5 = calc_basis_integrated_gradient(
-        module=linear, inputs=inputs, C_out=C_out, n_intervals=5, integration_rule=integration_rule
+        module=linear,
+        inputs=inputs,
+        C_out=C_out,
+        n_intervals=5,
+        integration_method=integration_method,
     )
 
     assert torch.allclose(
@@ -178,8 +190,8 @@ def test_calc_basis_integrated_gradient_linear(integration_rule):
     ), "n_intervals==1 and n_intervals==5 are not close enough"
 
 
-@pytest.mark.parametrize("integration_rule", ["trapezoidal", "gauss-legendre"])
-def test_calc_basis_integrated_gradient_polynomial(integration_rule):
+@pytest.mark.parametrize("integration_method", ["trapezoidal", "gauss-legendre"])
+def test_calc_basis_integrated_gradient_polynomial(integration_method):
     """Show that our integrated gradient converges to the analytical solution for a polynomial.
 
     Assume we have a polynomial function f = x^3. Our normed function for the integrated gradient
@@ -212,14 +224,14 @@ def test_calc_basis_integrated_gradient_polynomial(integration_rule):
         inputs=inputs,
         C_out=C_out,
         n_intervals=2,
-        integration_rule=integration_rule,
+        integration_method=integration_method,
     )
     result_20 = calc_basis_integrated_gradient(
         module=poly_module,
         inputs=inputs,
         C_out=C_out,
         n_intervals=20,
-        integration_rule=integration_rule,
+        integration_method=integration_method,
     )
 
     result_200 = calc_basis_integrated_gradient(
@@ -227,11 +239,11 @@ def test_calc_basis_integrated_gradient_polynomial(integration_rule):
         inputs=inputs,
         C_out=C_out,
         n_intervals=200,
-        integration_rule=integration_rule,
+        integration_method=integration_method,
     )
     differences = [(r - analytical_result).abs().sum() for r in [result_2, result_20, result_200]]
 
-    if integration_rule == "trapezoidal":
+    if integration_method == "trapezoidal":
         # Trapezoidal rule check 1% accuracy
         assert torch.allclose(
             result_200, analytical_result, atol=1e-2
@@ -283,9 +295,9 @@ def test_integration_methods_hard_function():
     assert_is_close(gl_result_50, true_result, atol=0, rtol=0.02)
 
 
-@pytest.mark.parametrize("integration_rule", ["trapezoidal", "gauss-legendre"])
+@pytest.mark.parametrize("integration_method", ["trapezoidal", "gauss-legendre"])
 @pytest.mark.xfail(reason="We are making this assumption again in (1-0)*alpha IG for basis")
-def test_calc_basis_integrated_gradient_offset_polynomial(integration_rule):
+def test_calc_basis_integrated_gradient_offset_polynomial(integration_method):
     """Show that our integrated gradient of our norm function converges to the analytical
     solution for a polynomial, with the special feature that act(0) != 0. Earlier code made this
     assumption, and this test checks that our new code also holds without the assumption
@@ -315,14 +327,14 @@ def test_calc_basis_integrated_gradient_offset_polynomial(integration_rule):
         inputs=inputs,
         C_out=C_out,
         n_intervals=2,
-        integration_rule=integration_rule,
+        integration_method=integration_method,
     )
     result_20 = calc_basis_integrated_gradient(
         module=poly_module,
         inputs=inputs,
         C_out=C_out,
         n_intervals=20,
-        integration_rule=integration_rule,
+        integration_method=integration_method,
     )
 
     result_200 = calc_basis_integrated_gradient(
@@ -330,7 +342,7 @@ def test_calc_basis_integrated_gradient_offset_polynomial(integration_rule):
         inputs=inputs,
         C_out=C_out,
         n_intervals=200,
-        integration_rule=integration_rule,
+        integration_method=integration_method,
     )
 
     analytical_result = inputs[0] ** 5 @ C_out**2
@@ -349,8 +361,8 @@ def test_calc_basis_integrated_gradient_offset_polynomial(integration_rule):
     ), "Integrated grad norms are not decreasing"
 
 
-@pytest.mark.parametrize("integration_rule", ["trapezoidal", "gauss-legendre"])
-def test_calc_edge_n_intervals(integration_rule, edge_formula="squared"):
+@pytest.mark.parametrize("integration_method", ["trapezoidal", "gauss-legendre"])
+def test_calc_edge_n_intervals(integration_method, edge_formula="squared"):
     """Check independence of n_intervals for integrated gradient jacobian over a linear module
     without bias.
 
@@ -381,7 +393,7 @@ def test_calc_edge_n_intervals(integration_rule, edge_formula="squared"):
         f_in_hat=in_tensor,
         in_tuple_dims=(in_dim,),
         n_intervals=0,
-        integration_rule=integration_rule,
+        integration_method=integration_method,
         edge=result_point_estimate,
         dataset_size=batch_size,
     )
@@ -391,7 +403,7 @@ def test_calc_edge_n_intervals(integration_rule, edge_formula="squared"):
         f_in_hat=in_tensor,
         in_tuple_dims=(in_dim,),
         n_intervals=1,
-        integration_rule=integration_rule,
+        integration_method=integration_method,
         edge=result_1,
         dataset_size=batch_size,
     )
@@ -402,7 +414,7 @@ def test_calc_edge_n_intervals(integration_rule, edge_formula="squared"):
         f_in_hat=in_tensor,
         in_tuple_dims=(in_dim,),
         n_intervals=5,
-        integration_rule=integration_rule,
+        integration_method=integration_method,
         edge=result_5,
         dataset_size=batch_size,
     )
@@ -464,7 +476,7 @@ def test_calc_edge_jacrev(edge_formula):
         f_in_hat=in_tensor,
         in_tuple_dims=(in_dim,),
         n_intervals=5,
-        integration_rule="trapezoidal",
+        integration_method="trapezoidal",
         edge=result_ours,
         dataset_size=batch_size,
     )

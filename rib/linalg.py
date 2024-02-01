@@ -307,7 +307,7 @@ def calc_edge_functional(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
-    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat. Updates the edge in-place.
@@ -338,7 +338,7 @@ def calc_edge_functional(
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
-    int_points = _calc_integration_points(n_intervals, integration_rule)
+    int_points = _calc_integration_points(n_intervals, integration_method)
     for point in tqdm(int_points, desc=tqdm_desc, leave=False):
         # Need to define alpha_f_in_hat for autograd
         alpha_f_in_hat = point.alpha * f_in_hat
@@ -376,7 +376,7 @@ def calc_edge_squared(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
-    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat, updating edges in-place.
@@ -389,7 +389,7 @@ def calc_edge_squared(
         edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation.
-        integration_rule: Method to choose integration points.
+        integration_method: Method to choose integration points.
         tqdm_desc: The description to use for the tqdm progress bar.
     """
     has_pos = f_in_hat.ndim == 3
@@ -414,7 +414,7 @@ def calc_edge_squared(
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
-    int_points = _calc_integration_points(n_intervals, integration_rule)
+    int_points = _calc_integration_points(n_intervals, integration_method)
     for point in tqdm(int_points, desc=tqdm_desc, leave=False):
         # We have to compute inputs from f_hat to make autograd work
         alpha_f_in_hat = point.alpha * f_in_hat
@@ -484,7 +484,7 @@ def calc_basis_jacobian(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
-    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
 ) -> Float[Tensor, "batch out_hidden_trunc out_pos in_pos in_hidden"]:
@@ -492,7 +492,7 @@ def calc_basis_jacobian(
     for x in inputs:
         x.requires_grad_(True)
 
-    int_points = _calc_integration_points(n_intervals, integration_rule)
+    int_points = _calc_integration_points(n_intervals, integration_method)
 
     has_pos = inputs[0].ndim == 3
     batch_size = inputs[0].shape[0]
@@ -646,7 +646,7 @@ def calc_edge_stochastic(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
-    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     n_stochastic_sources: int,
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
@@ -664,7 +664,7 @@ def calc_edge_stochastic(
         edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
         n_intervals: The number of intervals to use for the integral approximation.
-        integration_rule: Method to choose integration points.
+        integration_method: Method to choose integration points.
         n_stochastic_sources: The number of stochastic sources to add to each input.
         tqdm_desc: The description to use for the tqdm progress bar.
     """
@@ -693,7 +693,7 @@ def calc_edge_stochastic(
 
     normalization_factor = f_in_hat.shape[1] * dataset_size * n_stochastic_sources
 
-    int_points = _calc_integration_points(n_intervals, integration_rule)
+    int_points = _calc_integration_points(n_intervals, integration_method)
     for point in tqdm(int_points, desc=tqdm_desc, leave=False):
         # We have to compute inputs from f_hat to make autograd work
         alpha_f_in_hat = point.alpha * f_in_hat
@@ -742,7 +742,7 @@ def calc_basis_integrated_gradient(
     ],
     C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     n_intervals: int,
-    integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
 ) -> Float[Tensor, "... orig_in"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
@@ -760,7 +760,7 @@ def calc_basis_integrated_gradient(
         inputs: The inputs to the module. May or may not include a position dimension.
         C_out: The truncated interaction rotation matrix for the module's outputs.
         n_intervals: The number of intervals to use for the integral approximation.
-        integration_rule: Method to choose integration points.
+        integration_method: Method to choose integration points.
         basis_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
             latter is a new (November) version that should be used from now on. The latter makes
@@ -786,7 +786,7 @@ def calc_basis_integrated_gradient(
 
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    for point in _calc_integration_points(n_intervals, integration_rule):
+    for point in _calc_integration_points(n_intervals, integration_method):
         # Compute f^{l+1}(f^l(alpha x))
         alpha_inputs = tuple(point.alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)

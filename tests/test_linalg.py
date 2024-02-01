@@ -5,8 +5,6 @@ import pytest
 import torch
 from fancy_einsum import einsum
 from jaxtyping import Float
-from scipy.integrate import quad
-from scipy.special import roots_legendre
 from torch import Tensor
 from torch.func import jacrev
 
@@ -24,6 +22,7 @@ from rib.linalg import (
     pinv_diag,
 )
 from rib.utils import set_seed
+from tests.utils import assert_is_close
 
 
 @pytest.mark.parametrize("descending", [True, False])
@@ -262,27 +261,26 @@ def _integrate(f, points: list[IntegrationPoint]):
 )
 def test_integration_methods_complicated_function(rule, n_intervals, error_lim):
     f = lambda x: np.exp(x) + x ** np.sin(x)
-    quad_result, error = quad(f, 0, 1)
-    assert error < 1e-10
+    true_result = 2.5096861280  # says wolfram-alpha
     result = _integrate(f, _calc_integration_points(n_intervals=n_intervals, rule=rule))
-    assert np.abs(result - quad_result) < error_lim
+    assert_is_close(result, true_result, atol=error_lim, rtol=0)
 
 
 def test_integration_methods_hard_function():
     """Trapezoidal rule cannot integrate 1/sqrt(x) to appreciable accuracy, Gauss-Legendre is
     insanely better"""
     f = lambda x: 1 / np.sqrt(x)
-    quad_result, error = quad(f, 0, 1)
-    assert error < 1e-10
-    # Trapezoidal error  @ 5 samples > 50%
+    true_result = 2
+    # Trapezoidal error @ 5 samples > 50%
     trapezoidal_result_50 = _integrate(f, _calc_integration_points(50, "trapezoidal"))
-    assert np.abs(trapezoidal_result_50 - quad_result) / quad_result > 0.5
+    with pytest.raises(AssertionError):
+        assert_is_close(trapezoidal_result_50, true_result, atol=0, rtol=0.5)
     # Gauss-Legendre error @ 5 samples < 20%
     gl_result_5 = _integrate(f, _calc_integration_points(5, "gauss-legendre"))
-    assert np.abs(gl_result_5 - quad_result) / quad_result < 0.2
+    assert_is_close(gl_result_5, true_result, atol=0, rtol=0.2)
     # Gauss-Legendre error @ 50 samples < 2%
     gl_result_50 = _integrate(f, _calc_integration_points(50, "gauss-legendre"))
-    assert np.abs(gl_result_50 - quad_result) / quad_result < 0.02
+    assert_is_close(gl_result_50, true_result, atol=0, rtol=0.02)
 
 
 @pytest.mark.parametrize("integration_rule", ["trapezoidal", "gauss-legendre"])
@@ -486,7 +484,7 @@ def test_calc_integration_points_gauss_legendre():
         lower=-1,
         upper=1,
     )
-    x, w = roots_legendre(5)
+    x, w = np.polynomial.legendre.leggauss(5)
     assert np.allclose(x, [p.alpha for p in points])
     assert np.allclose(w, [p.weight for p in points])
 

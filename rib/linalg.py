@@ -5,7 +5,6 @@ import torch
 from einops import rearrange
 from fancy_einsum import einsum
 from jaxtyping import Float
-from scipy.special import roots_legendre
 from torch import Tensor
 from tqdm import tqdm
 
@@ -215,8 +214,8 @@ def _gauss_legendre_weights(n_intervals: int, lower: float = 0, upper: float = 1
 
     See https://en.wikipedia.org/wiki/Gauss%E2%80%93Legendre_quadrature.
     """
-    # Get the roots and weights of the Legendre polynomial of degree n_intervals
-    x, w = roots_legendre(n_intervals + 1)
+    # Get the roots and weights of the Legendre polynomial of degree n_points
+    x, w = np.polynomial.legendre.leggauss(n_intervals + 1)
     # Scale the x values from [-1, 1] to [lower_bound, upper_bound]
     x = (x + 1) * (upper - lower) / 2 + lower
     # Scale the weights to account for the change in x

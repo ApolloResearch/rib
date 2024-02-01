@@ -203,13 +203,13 @@ class RibBuildConfig(BaseModel):
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "RibBuildConfig":
-        """Exactly one of tlens_pretrained, tlens_model_path, mlp_path, modular_mlp_config must be
-        set.
-
-        In addition, we don't support loading interaction matrices for mlp models (they're so small
-        we shouldn't need to).
-
-        Checks that `n_stochastic_sources_edges` is None for non-squared edge_formula.
+        """Checks:
+        - Exactly one of tlens_pretrained, tlens_model_path, mlp_path, modular_mlp_config must
+            be set.
+        - We don't try to load interaction matrices for mlp models (they're so small we
+            shouldn't need to).
+        - `n_stochastic_sources_edges` is None for non-squared edge_formula.
+        - `n_intervals` must be 0 for gradient integration rule.
         """
         model_options = [
             self.tlens_pretrained,
@@ -229,6 +229,9 @@ class RibBuildConfig(BaseModel):
             assert (
                 self.n_stochastic_sources_edges is None
             ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
+
+        if self.integration_rule == "gradient":
+            assert self.n_intervals == 0, "n_intervals must be 0 for gradient integration rule"
         return self
 
 

@@ -284,8 +284,7 @@ def _calc_integration_points(
         A list of IntegrationPoint objects, each defining an alpha and weight.
     """
     if rule == "gradient":
-        # TODO Assert this in config validator
-        assert n_intervals == 0, "Rule 'gradient' uses only 1 point, set n_intervals to 1"
+        assert n_intervals == 0
         assert kwargs == {}, f"Got unexpected arguments {kwargs}"
         weights = np.array([1.0])
         alphas = np.array([1.0])

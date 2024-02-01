@@ -21,23 +21,17 @@ def test_hf_dataset_config_validation():
         tokenizer_name="test",
         return_set="train",
     )
+    valid_combinations = [
+        {"return_set_frac": 0.5, "n_samples": None, "n_documents": None},
+        {"return_set_frac": None, "n_samples": 10, "n_documents": None},
+        {"return_set_frac": None, "n_samples": None, "n_documents": 10},
+        {"return_set_frac": 0.5, "n_samples": None, "n_documents": 10},
+    ]
+    for combination in valid_combinations:
+        replace_pydantic_model(base_config, combination)
 
-    # valid combinations
-    replace_pydantic_model(
-        base_config, {"return_set_frac": 0.5, "n_samples": 10, "n_documents": None}
-    )
-    replace_pydantic_model(
-        base_config, {"return_set_frac": None, "n_samples": 10, "n_documents": 10}
-    )
-    replace_pydantic_model(
-        base_config, {"return_set_frac": None, "n_samples": None, "n_documents": 10}
-    )
-    replace_pydantic_model(
-        base_config, {"return_set_frac": 0.5, "n_samples": None, "n_documents": None}
-    )
-
-    # invalid combination
     with pytest.raises(ValueError):
+        # invalid combination
         replace_pydantic_model(
             base_config, {"return_set_frac": 0.5, "n_samples": 10, "n_documents": 10}
         )
@@ -53,11 +47,14 @@ def test_non_hf_dataset_config_validation():
         VisionDatasetConfig(dataset_type="torchvision"),
         ModularArithmeticDatasetConfig(dataset_type="modular_arithmetic"),
     ]:
-        # valid combinations
-        replace_pydantic_model(base_config, {"return_set_frac": 0.5, "n_samples": None})
-        replace_pydantic_model(base_config, {"return_set_frac": None, "n_samples": 10})
-        replace_pydantic_model(base_config, {"return_set_frac": None, "n_samples": None})
+        valid_combinations = [
+            {"return_set_frac": 0.5, "n_samples": None},
+            {"return_set_frac": None, "n_samples": 10},
+            {"return_set_frac": None, "n_samples": None},
+        ]
+        for combination in valid_combinations:
+            replace_pydantic_model(base_config, combination)
 
-        # invalid combination
         with pytest.raises(ValueError):
+            # invalid combination
             replace_pydantic_model(base_config, {"return_set_frac": 0.5, "n_samples": 10})

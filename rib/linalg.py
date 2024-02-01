@@ -1,4 +1,4 @@
-from typing import Callable, Literal, Optional, Union
+from typing import Callable, Literal, NamedTuple, Optional, Union
 
 import numpy as np
 import torch
@@ -254,11 +254,16 @@ def _trapezoidal_weights(
     return weights, alphas
 
 
-def _calc_integration_intervals(
+class IntegrationPoint(NamedTuple):
+    alpha: float
+    weight: float
+
+
+def _calc_integration_points(
     n_intervals: int,
     rule: Literal["gauss-legendre", "trapezoidal", "gradient"] = "gauss-legendre",
     **kwargs,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> list[IntegrationPoint]:
     """Calculate the integration steps and weights for n_intervals.
 
     Args:
@@ -279,7 +284,8 @@ def _calc_integration_intervals(
         weights, alphas = _trapezoidal_weights(n_intervals, **kwargs)
     else:
         raise ValueError(f"Unknown rule {rule}")
-    return weights, alphas
+
+    return [IntegrationPoint(alpha=alpha, weight=weight) for alpha, weight in zip(alphas, weights)]
 
 
 def calc_edge_functional(
@@ -316,18 +322,16 @@ def calc_edge_functional(
     else:
         einsum_pattern = "batch in_dim, batch in_dim -> in_dim"
 
-    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
-
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         f_out_hat_const = module_hat(f_in_hat, in_tuple_dims)
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
-    # Integration with the trapzoidal rule
-    for weight, alpha in tqdm(zip(weights, alphas), total=len(alphas), desc=tqdm_desc, leave=False):
+    int_points = _calc_integration_points(n_intervals, integration_rule)
+    for point in tqdm(int_points, desc=tqdm_desc, leave=False):
         # Need to define alpha_f_in_hat for autograd
-        alpha_f_in_hat = alpha * f_in_hat
+        alpha_f_in_hat = point.alpha * f_in_hat
         f_out_hat_alpha = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         f_out_hat_norm: Float[Tensor, "... rib_out"] = (f_out_hat_const - f_out_hat_alpha) ** 2
@@ -346,11 +350,8 @@ def calc_edge_functional(
             leave=False,
         ):
             # Get the derivative of the ith output element w.r.t alpha_f_in_hat
-            i_grad = (
-                torch.autograd.grad(f_out_hat_norm[i], alpha_f_in_hat, retain_graph=True)[0]
-                / normalization_factor
-                * weight
-            )
+            i_grad = torch.autograd.grad(f_out_hat_norm[i], alpha_f_in_hat, retain_graph=True)[0]
+            i_grad *= point.weight / normalization_factor
             with torch.inference_mode():
                 E = einsum(einsum_pattern, i_grad, f_in_hat)
                 # Note that edge is initialised to zeros in
@@ -387,8 +388,6 @@ def calc_edge_squared(
 
     f_in_hat.requires_grad_(True)
 
-    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
-
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
     rib_out_size, rib_in_size = edge.shape
@@ -407,10 +406,10 @@ def calc_edge_squared(
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
-    # Integration with the trapzoidal rule
-    for weight, alpha in tqdm(zip(weights, alphas), total=len(alphas), desc=tqdm_desc, leave=False):
+    int_points = _calc_integration_points(n_intervals, integration_rule)
+    for point in tqdm(int_points, desc=tqdm_desc, leave=False):
         # We have to compute inputs from f_hat to make autograd work
-        alpha_f_in_hat = alpha * f_in_hat
+        alpha_f_in_hat = point.alpha * f_in_hat
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output.
@@ -426,14 +425,12 @@ def calc_edge_squared(
                     # j (input dim).
                     # The sum over the batch dimension before passing to autograd is just a trick
                     # to get the grad for every batch index vectorized.
-                    i_grad = (
-                        torch.autograd.grad(
-                            f_out_alpha_hat[:, output_pos_idx, out_dim].sum(dim=0),
-                            alpha_f_in_hat,
-                            retain_graph=True,
-                        )[0]
-                        * weight
-                    )
+                    i_grad = torch.autograd.grad(
+                        f_out_alpha_hat[:, output_pos_idx, out_dim].sum(dim=0),
+                        alpha_f_in_hat,
+                        retain_graph=True,
+                    )[0]
+                    i_grad *= point.weight
 
                     with torch.inference_mode():
                         # Element-wise multiply with f_in_hat and sum over the input pos
@@ -443,12 +440,11 @@ def calc_edge_squared(
                             f_in_hat,
                         )
             else:
-                i_grad = (
-                    torch.autograd.grad(
-                        f_out_alpha_hat[:, out_dim].sum(dim=0), alpha_f_in_hat, retain_graph=True
-                    )[0]
-                    * weight
-                )
+                i_grad = torch.autograd.grad(
+                    f_out_alpha_hat[:, out_dim].sum(dim=0), alpha_f_in_hat, retain_graph=True
+                )[0]
+                i_grad *= point.weight
+
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat
                     J_hat[:, out_dim, :] -= einsum(
@@ -488,7 +484,7 @@ def calc_basis_jacobian(
     for x in inputs:
         x.requires_grad_(True)
 
-    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
+    int_points = _calc_integration_points(n_intervals, integration_rule)
 
     has_pos = inputs[0].ndim == 3
     batch_size = inputs[0].shape[0]
@@ -559,11 +555,9 @@ def calc_basis_jacobian(
         else:
             raise AssertionError("This else branch cannot be reached.")
 
-        for weight, alpha in tqdm(
-            zip(weights, alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
-        ):
+        for point in tqdm(int_points, desc="Integration steps (alphas)", leave=False):
             # Compute f^{l+1}(f^l(alpha x))
-            f_in_alpha = tuple(alpha * x for x in inputs)
+            f_in_alpha = tuple(point.alpha * x for x in inputs)
             outputs_alpha = module(*f_in_alpha)
             f_out_alpha = (
                 outputs_alpha
@@ -597,7 +591,7 @@ def calc_basis_jacobian(
                     ),
                     dim=-1,
                 )
-                in_grads[:, r_h, r_p, :, :] += alpha_in_grads * weight
+                in_grads[:, r_h, r_p, :, :] += alpha_in_grads * point.weight
                 # Contraction over batch, i, t, s happens after the integral, but we cannot
                 # contract earlier because we have to finish the integral sum (+=) first.
     else:
@@ -610,9 +604,9 @@ def calc_basis_jacobian(
             device=inputs[0].device,
         )
 
-        for alpha_index, alpha in enumerate(alphas):
+        for point in tqdm(int_points, desc="Integration steps (alphas)", leave=False):
             # Compute f^{l+1}(f^l(alpha x))
-            f_in_alpha = tuple(alpha * x for x in inputs)
+            f_in_alpha = tuple(point.alpha * x for x in inputs)
             outputs_alpha = module(*f_in_alpha)
             f_out_alpha = (
                 outputs_alpha
@@ -632,7 +626,7 @@ def calc_basis_jacobian(
                     ),
                     dim=-1,
                 )
-                in_grads[:, i] += alpha_in_grads * weight
+                in_grads[:, i] += alpha_in_grads * point.weight
 
     return in_grads
 
@@ -669,8 +663,6 @@ def calc_edge_stochastic(
 
     f_in_hat.requires_grad_(True)
 
-    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
-
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
     rib_out_size, rib_in_size = edge.shape
@@ -693,10 +685,10 @@ def calc_edge_stochastic(
 
     normalization_factor = f_in_hat.shape[1] * dataset_size * n_stochastic_sources
 
-    # Integration with the trapzoidal rule
-    for weight, alpha in tqdm(zip(weights, alphas), total=len(alphas), desc=tqdm_desc, leave=False):
+    int_points = _calc_integration_points(n_intervals, integration_rule)
+    for point in tqdm(int_points, desc=tqdm_desc, leave=False):
         # We have to compute inputs from f_hat to make autograd work
-        alpha_f_in_hat = alpha * f_in_hat
+        alpha_f_in_hat = point.alpha * f_in_hat
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
@@ -715,10 +707,10 @@ def calc_edge_stochastic(
                     phi[:, r, :],
                     f_out_alpha_hat[:, :, out_dim],
                 )
-                i_grad = (
-                    torch.autograd.grad(phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True)[0]
-                    * weight
-                )
+                i_grad = torch.autograd.grad(
+                    phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True
+                )[0]
+                i_grad *= point.weight
 
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat and sum over the input pos
@@ -786,10 +778,9 @@ def calc_basis_integrated_gradient(
 
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    weights, alphas = _calc_integration_intervals(n_intervals, integration_rule)
-    for weight, alpha in zip(weights, alphas):
+    for point in _calc_integration_points(n_intervals, integration_rule):
         # Compute f^{l+1}(f^l(alpha x))
-        alpha_inputs = tuple(alpha * x for x in inputs)
+        alpha_inputs = tuple(point.alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
         # Concatenate the outputs over the final dimension
         out_acts_alpha = (
@@ -824,8 +815,8 @@ def calc_basis_integrated_gradient(
         # Accumulate the grad of f_hat_norm w.r.t the input tensors
         f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
 
-        alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
-        in_grads += alpha_in_grads * weight
+        alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)  # type: ignore
+        in_grads += alpha_in_grads * point.weight
 
         for x in alpha_inputs:
             assert x.grad is not None, "Input grad should not be None."

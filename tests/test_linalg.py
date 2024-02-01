@@ -11,7 +11,8 @@ from torch import Tensor
 from torch.func import jacrev
 
 from rib.linalg import (
-    _calc_integration_intervals,
+    IntegrationPoint,
+    _calc_integration_points,
     _generate_sources,
     calc_basis_integrated_gradient,
     calc_edge_functional,
@@ -249,20 +250,22 @@ def test_calc_basis_integrated_gradient_polynomial(integration_rule):
         assert differences[2] < 1e-5
 
 
-def test_integration_methods_complicated_function():
+def _integrate(f, points: list[IntegrationPoint]):
+    xs = np.array([p.alpha for p in points])
+    weights = np.array([p.weight for p in points])
+    return np.sum(weights * f(xs))
+
+
+@pytest.mark.parametrize(
+    "rule, n_intervals, error_lim",
+    [("trapezoidal", 50, 0.0003), ("gauss-legendre", 5, 0.0002), ("gauss-legendre", 50, 1e-7)],
+)
+def test_integration_methods_complicated_function(rule, n_intervals, error_lim):
     f = lambda x: np.exp(x) + x ** np.sin(x)
     quad_result, error = quad(f, 0, 1)
     assert error < 1e-10
-    w, x = _calc_integration_intervals(n_intervals=50, rule="trapezoidal")
-    trapezoidal_result_50 = np.sum(w * f(x))
-    assert np.abs(trapezoidal_result_50 - quad_result) < 0.0003
-    w, x = _calc_integration_intervals(n_intervals=5, rule="gauss-legendre")
-    gl_result_5 = np.sum(w * f(x))
-    assert np.abs(gl_result_5 - quad_result) < 0.0002
-    w, x = _calc_integration_intervals(n_intervals=50, rule="gauss-legendre")
-    gl_result_50 = np.sum(w * f(x))
-    assert np.abs(gl_result_50 - quad_result) < 1e-7
-    # TODO maybe invert w and x
+    result = _integrate(f, _calc_integration_points(n_intervals=n_intervals, rule=rule))
+    assert np.abs(result - quad_result) < error_lim
 
 
 def test_integration_methods_hard_function():
@@ -272,16 +275,13 @@ def test_integration_methods_hard_function():
     quad_result, error = quad(f, 0, 1)
     assert error < 1e-10
     # Trapezoidal error  @ 5 samples > 50%
-    w, x = _calc_integration_intervals(n_intervals=50, rule="trapezoidal")
-    trapezoidal_result_50 = np.sum(w * f(x))
+    trapezoidal_result_50 = _integrate(f, _calc_integration_points(50, "trapezoidal"))
     assert np.abs(trapezoidal_result_50 - quad_result) / quad_result > 0.5
     # Gauss-Legendre error @ 5 samples < 20%
-    w, x = _calc_integration_intervals(n_intervals=5, rule="gauss-legendre")
-    gl_result_5 = np.sum(w * f(x))
+    gl_result_5 = _integrate(f, _calc_integration_points(5, "gauss-legendre"))
     assert np.abs(gl_result_5 - quad_result) / quad_result < 0.2
     # Gauss-Legendre error @ 50 samples < 2%
-    w, x = _calc_integration_intervals(n_intervals=50, rule="gauss-legendre")
-    gl_result_50 = np.sum(w * f(x))
+    gl_result_50 = _integrate(f, _calc_integration_points(50, "gauss-legendre"))
     assert np.abs(gl_result_50 - quad_result) / quad_result < 0.02
 
 
@@ -422,10 +422,9 @@ def _integrated_gradient_jacobian_with_jacrev(
     module_hat: Callable, x: Float[Tensor, "batch in_dim"], n_intervals: int, dataset_size: int
 ) -> Float[Tensor, "out_dim in_dim"]:
     """Compute the integrated gradient jacobian using jacrev."""
-    weights, alphas = _calc_integration_intervals(n_intervals, rule="trapezoidal")
     edge = None
-    for weight, alpha in zip(weights, alphas):
-        alpha_x = alpha * x
+    for point in _calc_integration_points(n_intervals, rule="trapezoidal"):
+        alpha_x = point.alpha * x
         fn_norm = lambda f: ((module_hat(x) - module_hat(f)) ** 2).sum(
             dim=0
         )  # Sum over batch dimension
@@ -433,9 +432,9 @@ def _integrated_gradient_jacobian_with_jacrev(
         # No pos dim for this test
         E = torch.einsum("ibj,bj->ij", alpha_edge / dataset_size, x)
         if edge is None:
-            edge = -E * weight
+            edge = -E * point.weight
         else:
-            edge -= E * weight
+            edge -= E * point.weight
 
     return edge
 
@@ -480,26 +479,24 @@ def test_calc_edge_jacrev(edge_formula):
     assert torch.allclose(result_ours, result_jacrev), "calc_edge and jacrev are not close enough"
 
 
-def test_calc_integration_intervals_gauss_legendre():
-    weights, alphas = _calc_integration_intervals(
+def test_calc_integration_points_gauss_legendre():
+    points = _calc_integration_points(
         4,
         rule="gauss-legendre",
         lower=-1,
         upper=1,
     )
-    # TODO maybe swap return arguments of _calc_integration_intervals to follow scipy?
     x, w = roots_legendre(5)
-    assert np.allclose(x, alphas)
-    assert np.allclose(w, weights)
+    assert np.allclose(x, [p.alpha for p in points])
+    assert np.allclose(w, [p.weight for p in points])
 
 
-def test_calc_integration_intervals_gauss_legendre():
-    weights, alphas = _calc_integration_intervals(
+def test_calc_integration_points_gradient():
+    points = _calc_integration_points(
         0,
         rule="gradient",
     )
-    assert weights == [1.0]
-    assert alphas == [1.0]
+    assert points == [IntegrationPoint(alpha=1.0, weight=1.0)]
 
 
 @pytest.mark.parametrize(
@@ -513,19 +510,21 @@ def test_calc_integration_intervals_gauss_legendre():
         (2, 1e-4, [1e-4 / 3, 0.5, 1 - 1e-4 / 3], [0.25, 0.5, 0.25]),
     ],
 )
-def test_calc_integration_intervals_trapezoidal(
+def test_calc_integration_points_trapezoidal(
     n_intervals, integral_boundary_relative_epsilon, expected_alphas, expected_weights
 ):
-    weights, alphas = _calc_integration_intervals(
+    points = _calc_integration_points(
         n_intervals,
         rule="trapezoidal",
         integral_boundary_relative_epsilon=integral_boundary_relative_epsilon,
     )
 
     # Assert that the returned alphas are close to the expected values
+    alphas = [p.alpha for p in points]
     assert np.allclose(alphas, expected_alphas), f"alphas: {alphas} != {expected_alphas}"
 
     # Assert that the returned interval_size is close to the expected value
+    weights = [p.weight for p in points]
     assert np.allclose(weights, expected_weights), f"interval_size: {weights} != {expected_weights}"
 
 

@@ -184,21 +184,17 @@ class RibBuildConfig(BaseModel):
     n_stochastic_sources_basis_pos: Optional[int] = Field(
         None,
         description="The number of stochastic sources in the out_pos direction to use when"
-        "calculating  stochastic Cs. If both `n_stochastic_sources_basis_pos` and"
-        "`n_stochastic_sources_basis_hidden` are passed, the number of combined stochastic"
-        "sources if given by their product.",
+        "calculating  stochastic Cs. When None, no stochasticity over position is used.",
     )
     n_stochastic_sources_basis_hidden: Optional[int] = Field(
         None,
         description="The number of stochastic sources in the out_hat_hidden direction to use when"
-        "calculating stochastic Cs. If both `n_stochastic_sources_basis_pos` and"
-        "`n_stochastic_sources_basis_hidden` are passed, the number of combined stochastic"
-        "sources if given by their product.",
+        "calculating stochastic Cs. When None, no stochasticity over hidden dim is used.",
     )
     n_stochastic_sources_edges: Optional[int] = Field(
         None,
         description="The number of stochastic sources to use when calculating squared edges. Uses"
-        "normal deterministic formula when None.",
+        "normal deterministic formula when None. Must be None for other edge formulas.",
     )
     center: bool = Field(
         False,
@@ -212,6 +208,8 @@ class RibBuildConfig(BaseModel):
 
         In addition, we don't support loading interaction matrices for mlp models (they're so small
         we shouldn't need to).
+
+        Checks that `n_stochastic_sources_edges` is None for non-squared edge_formula.
         """
         model_options = [
             self.tlens_pretrained,
@@ -226,6 +224,11 @@ class RibBuildConfig(BaseModel):
             assert (
                 self.mlp_path is None and self.modular_mlp_config is None
             ), "We don't support loading interaction matrices for mlp models"
+
+        if self.edge_formula != "squared":
+            assert (
+                self.n_stochastic_sources_edges is None
+            ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
         return self
 
 
@@ -300,11 +303,11 @@ def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildCo
             assert (
                 config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
             ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
-        elif config.dataset.return_set_n_samples is not None:
-            assert loaded_config.dataset.return_set_n_samples is not None
+        elif config.dataset.n_samples is not None:
+            assert loaded_config.dataset.n_samples is not None
             assert (
-                config.dataset.return_set_n_samples <= loaded_config.dataset.return_set_n_samples
-            ), "Cannot use a larger return_set_n_samples for edges than to calculate the Cs"
+                config.dataset.n_samples <= loaded_config.dataset.n_samples
+            ), "Cannot use a larger n_samples for edges than to calculate the Cs"
 
 
 def load_interaction_rotations(

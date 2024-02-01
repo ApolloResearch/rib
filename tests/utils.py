@@ -1,8 +1,12 @@
+from typing import Optional
+
 import torch
 import yaml
 from pydantic.v1.utils import deep_update
+from torch.nn.functional import cosine_similarity
 from torch.testing import assert_close
 
+from rib.interaction_algos import InteractionRotation
 from rib.rib_builder import RibBuildConfig
 
 
@@ -15,7 +19,7 @@ def get_modular_arithmetic_config(*updates: dict) -> RibBuildConfig:
     dataset:
         dataset_type: modular_arithmetic
         return_set: train
-        return_set_n_samples: 10
+        n_samples: 10
     node_layers:
         - ln1.0
         - mlp_in.0
@@ -49,8 +53,11 @@ def get_pythia_config(*updates: dict) -> RibBuildConfig:
         tokenizer_name: EleutherAI/pythia-14m
         return_set: train
         return_set_frac: null
-        return_set_n_samples: 10  # 10 samples gives 3x2048 tokens
+        n_documents: 20
+        n_samples: 3
         return_set_portion: first
+        n_ctx: 128
+        seed: 0
     node_layers:
         - ln2.1
         - unembed
@@ -60,6 +67,7 @@ def get_pythia_config(*updates: dict) -> RibBuildConfig:
     n_intervals: 0
     dtype: float64
     calculate_edges: false
+    edge_formula: squared
     eval_type: ce_loss
     out_dir: null
     basis_formula: (1-0)*alpha
@@ -81,7 +89,8 @@ def get_tinystories_config(*updates: dict) -> RibBuildConfig:
         tokenizer_name: EleutherAI/gpt-neo-125M
         return_set: train
         return_set_frac: null
-        return_set_n_samples: 1 # avg ~235 toks / story
+        n_documents: 1 # avg ~235 toks / story
+        n_samples: 15
         return_set_portion: first
         n_ctx: 10 # needs to be <= 511 for the model to behave reasonably
     node_layers:
@@ -93,7 +102,7 @@ def get_tinystories_config(*updates: dict) -> RibBuildConfig:
     edge_batch_size: 500
     truncation_threshold: 1e-15
     rotate_final_node_layer: true
-    n_intervals: 2
+    n_intervals: 0
     dtype: float64
     center: true
     calculate_edges: true
@@ -187,3 +196,52 @@ def assert_is_ones(tensor, atol, **kwargs):
 def assert_is_zeros(tensor, atol, **kwargs):
     """Assert that all elements of a tensor are 0. **kwargs added in msg output"""
     assert_is_close(tensor, 0.0, atol=atol, rtol=0, **kwargs)
+
+
+def _assignment_permutations(sim: torch.Tensor) -> tuple[list[int], list[int]]:
+    """Return the indices of an assignment between rows and cols using a greedy algorithm.
+
+    For each column in order chooses the maximal row that hasn't been chosen yet.
+    Will return lists of even length, equal to the minimium of the number of rows and columns.
+
+    A replacement for `scipy.optimize.linear_sum_assignment` without a scipy dependancy."""
+    rows_selected = torch.zeros(sim.shape[0], dtype=torch.bool)
+    row_idxs = []
+    col_idxs = []
+    for col_idx in range(min(sim.shape)):
+        masked_col = torch.where(rows_selected, -torch.inf, sim[:, col_idx])
+        row_idx = masked_col.argmax().item()
+        row_idxs.append(row_idx)
+        col_idxs.append(col_idx)
+        rows_selected[row_idx] = True
+    return row_idxs, col_idxs
+
+
+def assert_basis_similarity(
+    ir_A: InteractionRotation, ir_B: InteractionRotation, error: Optional[float] = 0.02
+):
+    """
+    Compare two InteractionRotations and assert similarity, allowing for permutations.
+
+    Returns:
+        dir_sims: cosine similarities of the permuted basis vectors
+        dir_norm_ratios: the ratio of basis vector norms
+        lambda_ratios: the ratio of lambda values for the basis directions
+    """
+    assert ir_A.node_layer == ir_B.node_layer
+    if ir_A.C is None:
+        assert ir_B.C is None
+        return None, None, None
+    sim = cosine_similarity(ir_A.C.unsqueeze(1), ir_B.C.unsqueeze(2), dim=0).abs()
+    a_order, b_order = _assignment_permutations(sim)
+    dir_sims = sim[a_order, b_order]
+    dir_norm_ratios = torch.norm(ir_A.C, dim=0)[a_order] / torch.norm(ir_B.C, dim=0)[b_order]
+    lambda_ratios = ir_A.Lambda[a_order] / ir_B.Lambda[b_order]
+    if error is not None:
+        assert_is_ones(dir_sims.mean(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_zeros(dir_sims.std(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_ones(dir_norm_ratios.mean(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_zeros(dir_norm_ratios.std(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_ones(lambda_ratios.mean(), atol=error, node_layer=ir_A.node_layer)
+        assert_is_zeros(lambda_ratios.std(), atol=error, node_layer=ir_A.node_layer)
+    return dir_sims, dir_norm_ratios, lambda_ratios

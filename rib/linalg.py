@@ -208,7 +208,9 @@ def module_hat(
     return f_out_hat
 
 
-def _gauss_legendre_weights(n_intervals: int, lower: float = 0, upper: float = 1) -> tuple:
+def _gauss_legendre_weights(
+    n_intervals: int, lower: float = 0, upper: float = 1
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Returns the weights and points for Gauss-Legendre quadrature.
 
@@ -229,13 +231,12 @@ def _gauss_legendre_weights(n_intervals: int, lower: float = 0, upper: float = 1
 def _trapezoidal_weights(
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
-) -> tuple:
-    """Calculate the integration steps for n_intervals between 0 and 1.
+) -> tuple[np.ndarray, np.ndarray]:
+    """Returns n_intervals + 1 evenly spaced integration points, half weigted at the end points.
 
-    If n_intervals > 0 select equally spaced integration steps between 0+eps and 1-eps to avoid
-    numerical problems near 0 and 1, and weights that make up for the smaller integration range.
-    Eps goes to 0 as n_intervals goes to infinity. End points are half-weighted to account for the
-    trapezoidal rule.
+    Samples points between [eps, 1-eps], where
+    `eps = integral_boundary_relative_epsilon / (n_intervals + 1)`. This ensures that eps goes to 0
+    as n_intervals goes to infinity.
     """
     if n_intervals == 0:
         alphas = np.array([0.5])

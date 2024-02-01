@@ -284,7 +284,7 @@ def test_integration_methods_hard_function():
 
 
 @pytest.mark.parametrize("integration_rule", ["trapezoidal", "gauss-legendre"])
-@pytest.mark.xfail(reason="We are making this assumption again")  # TODO where?
+@pytest.mark.xfail(reason="We are making this assumption again in (1-0)*alpha IG for basis")
 def test_calc_basis_integrated_gradient_offset_polynomial(integration_rule):
     """Show that our integrated gradient of our norm function converges to the analytical
     solution for a polynomial, with the special feature that act(0) != 0. Earlier code made this

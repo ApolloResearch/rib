@@ -210,6 +210,11 @@ def module_hat(
 
 
 def _gauss_legendre_weights(n_intervals: int, lower: float = 0, upper: float = 1) -> tuple:
+    """
+    Returns the weights and points for Gauss-Legendre quadrature.
+
+    See https://en.wikipedia.org/wiki/Gauss%E2%80%93Legendre_quadrature.
+    """
     # Get the roots and weights of the Legendre polynomial of degree n_intervals
     x, w = roots_legendre(n_intervals + 1)
     # Scale the x values from [-1, 1] to [lower_bound, upper_bound]
@@ -230,7 +235,8 @@ def _trapezoidal_weights(
 
     If n_intervals > 0 select equally spaced integration steps between 0+eps and 1-eps to avoid
     numerical problems near 0 and 1, and weights that make up for the smaller integration range.
-    Includes the division by 2 at the end to account for the trapezoidal rule.
+    Eps goes to 0 as n_intervals goes to infinity. End points are half-weighted to account for the
+    trapezoidal rule.
     """
     if n_intervals == 0:
         alphas = np.array([0.5])
@@ -268,9 +274,15 @@ def _calc_integration_points(
 
     Args:
         n_intervals: The number of intervals to use for the integral approximation.
-        rule: The
+        rule: The integration method to use. One of:
+            - gauss-legendre: choose some generically good points to evaluate the integrand at
+                https://en.wikipedia.org/wiki/Gauss%E2%80%93Legendre_quadrature
+            - trapezoidal: choose equally spaced points in [ε, 1-ε], with endpoints half-weighted.
+            - gradient: use only one point at α=1. This replaces Integrated Gradients with
+                normal gradients.
+
     Returns:
-        alphas: The integration steps.
+        A list of IntegrationPoint objects, each defining an alpha and weight.
     """
     if rule == "gradient":
         # TODO Assert this in config validator
@@ -285,7 +297,8 @@ def _calc_integration_points(
     else:
         raise ValueError(f"Unknown rule {rule}")
 
-    return [IntegrationPoint(alpha=alpha, weight=weight) for alpha, weight in zip(alphas, weights)]
+    pts = [IntegrationPoint(alpha=alpha, weight=weight) for alpha, weight in zip(alphas, weights)]
+    return pts
 
 
 def calc_edge_functional(
@@ -298,9 +311,7 @@ def calc_edge_functional(
     integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
-    """Calculate the interaction attribution (edge) for module_hat using the functional method.
-
-    Uses the trapezoidal rule for integration. Updates the edge in-place.
+    """Calculate the interaction attribution (edge) for module_hat. Updates the edge in-place.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
@@ -369,9 +380,7 @@ def calc_edge_squared(
     integration_rule: Literal["trapezoidal", "gauss-legendre", "gradient"],
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
-    """Calculate the interaction attribution (edge) for module_hat using the squared method.
-
-    Uses the trapezoidal rule for integration. Updates the edge in-place.
+    """Calculate the interaction attribution (edge) for module_hat, updating edges in-place.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
@@ -380,8 +389,8 @@ def calc_edge_squared(
         in_tuple_dims: The final dimensions of the inputs to the module.
         edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        n_intervals: The number of intervals to use for the integral approximation.
+        integration_rule: Method to choose integration points.
         tqdm_desc: The description to use for the tqdm progress bar.
     """
     has_pos = f_in_hat.ndim == 3
@@ -655,8 +664,8 @@ def calc_edge_stochastic(
         in_tuple_dims: The final dimensions of the inputs to the module.
         edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        n_intervals: The number of intervals to use for the integral approximation.
+        integration_rule: Method to choose integration points.
         n_stochastic_sources: The number of stochastic sources to add to each input.
         tqdm_desc: The description to use for the tqdm progress bar.
     """
@@ -751,8 +760,8 @@ def calc_basis_integrated_gradient(
         module: The module to calculate the integrated gradient of.
         inputs: The inputs to the module. May or may not include a position dimension.
         C_out: The truncated interaction rotation matrix for the module's outputs.
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        n_intervals: The number of intervals to use for the integral approximation.
+        integration_rule: Method to choose integration points.
         basis_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
             latter is a new (November) version that should be used from now on. The latter makes
@@ -809,7 +818,7 @@ def calc_basis_integrated_gradient(
             f_hat_norm = (f_hat_alpha * f_hat_1_0).sum()
         else:
             raise ValueError(
-                f"Unexpected integrated gradient formula {basis_formula} != '(1-alpha)^2' or '(1-0)*alpha'"
+                f"Unexpected basis formula {basis_formula} != '(1-alpha)^2' or '(1-0)*alpha'"
             )
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors

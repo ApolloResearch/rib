@@ -83,6 +83,8 @@ from rib.utils import (
     set_seed,
 )
 
+IntegrationMethod = Literal["trapezoidal", "gauss-legendre", "gradient"]
+
 
 class RibBuildConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -157,9 +159,11 @@ class RibBuildConfig(BaseModel):
         description="The number of intervals to use for the integrated gradient approximation."
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
-    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"] = Field(
+    integration_method: Union[IntegrationMethod, dict[str, IntegrationMethod]] = Field(
         "gauss-legendre",
-        description="The integration method to choose.",
+        description="The integration method to choose. A dictionary can be used to select different"
+        "methods for different node layers. The keys are names of node layers, optionally excluding"
+        "`.[block-num]` suffix. These are checked against the node layers used in the graph.",
     )
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
     calculate_edges: bool = Field(
@@ -232,7 +236,29 @@ class RibBuildConfig(BaseModel):
 
         if self.integration_method == "gradient":
             assert self.n_intervals == 0, "n_intervals must be 0 for gradient integration rule"
+
+        if isinstance(self.integration_method, dict):
+            for node_layer in self.node_layers:
+                prefix = node_layer.split(".")[0]
+                assert (
+                    prefix in self.integration_method or node_layer in self.integration_method
+                ), f"Integration method not specified for node layer {node_layer}"
+            node_layer_prefixes = set(node_layer.split(".")[0] for node_layer in self.node_layers)
+            for key in self.integration_method:
+                assert (
+                    key in self.node_layers or key in node_layer_prefixes
+                ), f"Integration method specified for non-existent node layer {key}"
+
         return self
+
+    def get_integration_method(self, node_layer: str) -> IntegrationMethod:
+        """Get the integration method for a given node layer."""
+        if isinstance(self.integration_method, dict):
+            if node_layer in self.integration_method:
+                return self.integration_method[node_layer]
+            prefix = node_layer.split(".")[0]
+            return self.integration_method[prefix]
+        return self.integration_method
 
 
 class RibBuildResults(BaseModel):

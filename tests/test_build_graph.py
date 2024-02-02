@@ -412,6 +412,28 @@ def test_modular_arithmetic_build_graph_invalid_node_layers():
         graph_build_test(config=config, atol=0)
 
 
+def test_integration_method_specification():
+    # default node layers are ["ln2.1", "unembed"]
+    invalid_methods = [
+        "invalid",
+        {"ln2": "invalid", "unembed": "trapezoidal"},
+        {"ln2": "trapezoidal"},  # missing unembed
+        {"ln2": "trapezoidal", "unembed": "trapezoidal", "output": "trapezoidal"},  # extra output
+    ]
+    for method in invalid_methods:
+        with pytest.raises(ValueError):
+            get_pythia_config({"integration_method": method})
+
+    valid_methods = [
+        "trapezoidal",
+        {"ln2": "trapezoidal", "unembed": "gauss-legendre"},
+        {"ln2": "gauss-legendre", "ln2.1": "trapezoidal", "unembed": "gauss-legendre"},
+    ]
+    for method in valid_methods:
+        config = get_pythia_config({"integration_method": method})
+        assert config.get_integration_method("ln2.1") == "trapezoidal"
+
+
 @pytest.mark.slow
 def test_svd_basis():
     config = get_pythia_config({"basis_formula": "svd"})

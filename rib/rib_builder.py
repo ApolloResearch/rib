@@ -74,7 +74,7 @@ from rib.models import (
     SequentialTransformerConfig,
 )
 from rib.settings import REPO_ROOT
-from rib.types import TORCH_DTYPES, RootPath, StrDtype
+from rib.types import TORCH_DTYPES, IntegrationMethod, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
@@ -82,8 +82,6 @@ from rib.utils import (
     load_config,
     set_seed,
 )
-
-IntegrationMethod = Literal["trapezoidal", "gauss-legendre", "gradient"]
 
 
 class RibBuildConfig(BaseModel):
@@ -453,6 +451,9 @@ def rib_build(
         # MLP "sections" are simply the model layers specified in config.node_layers
         section_names = [layer for layer in config.node_layers if layer != "output"]
 
+    integration_methods = [
+        config.get_integration_method(node_layer) for node_layer in config.node_layers
+    ]
     if config.interaction_matrices_path is None:
         gram_train_loader = DataLoader(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
@@ -507,7 +508,7 @@ def rib_build(
             dtype=dtype,
             device=device,
             n_intervals=config.n_intervals,
-            integration_method=config.integration_method,
+            integration_methods=integration_methods,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
@@ -550,7 +551,7 @@ def rib_build(
             interaction_rotations=edge_interaction_rotations,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
-            integration_method=config.integration_method,
+            integration_methods=integration_methods[:-1],
             section_names=section_names,
             data_loader=edge_train_loader,
             dtype=dtype,

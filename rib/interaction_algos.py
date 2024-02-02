@@ -14,6 +14,7 @@ from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
 from rib.linalg import centering_matrix, eigendecompose, move_const_dir_first, pinv_diag
 from rib.models import MLP, SequentialTransformer
+from rib.types import IntegrationMethod
 from rib.utils import check_device_is_cpu
 
 
@@ -128,7 +129,7 @@ def calculate_interaction_rotations(
     dtype: torch.dtype,
     device: str,
     n_intervals: int,
-    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_methods: list[IntegrationMethod],
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
@@ -212,7 +213,7 @@ def calculate_interaction_rotations(
             dtype=dtype,
             device=device,
             n_intervals=n_intervals,
-            integration_method=integration_method,
+            integration_method=integration_methods[-1],
             M_dtype=M_dtype,
             Lambda_einsum_dtype=Lambda_einsum_dtype,
             truncation_threshold=truncation_threshold,
@@ -255,8 +256,11 @@ def calculate_interaction_rotations(
         len(section_names_to_calculate) == len(node_layers) - 1
     ), "Must be a section name for all but the final node_layer which was already handled above."
 
-    for node_layer, section_name in tqdm(
-        zip(node_layers[-2::-1], section_names_to_calculate[::-1], strict=True),
+    zipped_reversed = list(
+        zip(node_layers[:-1], section_names_to_calculate, integration_methods[:-1], strict=True)
+    )[::-1]
+    for node_layer, section_name, integration_method in tqdm(
+        zipped_reversed,
         total=len(section_names_to_calculate),
         desc="Interaction rotations",
     ):

@@ -1,4 +1,4 @@
-from typing import Callable, Literal, Optional, Union
+from typing import Callable, Literal, NamedTuple, Optional, Union
 
 import numpy as np
 import torch
@@ -208,44 +208,96 @@ def module_hat(
     return f_out_hat
 
 
-def _calc_integration_intervals(
+def _gauss_legendre_weights(
+    n_intervals: int, lower: float = 0, upper: float = 1
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Returns the weights and points for Gauss-Legendre quadrature.
+
+    See https://en.wikipedia.org/wiki/Gauss%E2%80%93Legendre_quadrature.
+    """
+    # Get the roots and weights of the Legendre polynomial of degree n_points
+    x, w = np.polynomial.legendre.leggauss(n_intervals + 1)
+    # Scale the x values from [-1, 1] to [lower_bound, upper_bound]
+    x = (x + 1) * (upper - lower) / 2 + lower
+    # Scale the weights to account for the change in x
+    w = w * (upper - lower) / 2
+    # Make sure weights sum to upper-lower
+    assert np.allclose(w.sum(), upper - lower), f"Weights don't sum to {upper-lower}"
+
+    return w, x
+
+
+def _trapezoidal_weights(
     n_intervals: int,
     integral_boundary_relative_epsilon: float = 1e-3,
-) -> tuple[np.ndarray, float]:
-    """Calculate the integration steps for n_intervals between 0+eps and 1-eps.
+) -> tuple[np.ndarray, np.ndarray]:
+    """Returns n_intervals + 1 evenly spaced integration points, half weigted at the end points.
 
-    Args:
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
-        integral_boundary_relative_epsilon: Rather than integrating from 0 to 1, we integrate from
-            integral_boundary_epsilon to 1 - integral_boundary_epsilon, to avoid issues with
-            ill-defined derivatives at 0 and 1.
-            integral_boundary_epsilon = integral_boundary_relative_epsilon/(n_intervals+1).
-
-    Returns:
-        alphas: The integration steps.
-        interval_size: The size of each integration step, including a correction factor to account
-            for integral_boundary_epsilon.
+    Samples points between [eps, 1-eps], where
+    `eps = integral_boundary_relative_epsilon / (n_intervals + 1)`. This ensures that eps goes to 0
+    as n_intervals goes to infinity.
     """
-    # Scale accuracy of the integral boundaries with the number of intervals
-    integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
-    # Integration samples
     if n_intervals == 0:
         alphas = np.array([0.5])
-        interval_size = 1.0
-        n_alphas = 1
+        weights = np.array([1.0])
     else:
-        # Integration steps for n_intervals intervals
+        # Set the integration boundaries to avoid numerical problems near 0 and 1, but still
+        # scale with n_alphas to keep the desirable (?) property that n_alphas -> infinity
+        # gives the exact integration result.
+        integral_boundary_epsilon = integral_boundary_relative_epsilon / (n_intervals + 1)
         n_alphas = n_intervals + 1
         alphas = np.linspace(integral_boundary_epsilon, 1 - integral_boundary_epsilon, n_alphas)
+        # Set weights to 1/n_intervals. We divide by n_intervals rather than n_alphas to account
+        # for the endpoints being down-weighted by 0.5. Note: We previously set weights to
+        # diff(alphas) and then accounted for the epsilons, but this is equivalent.
+        weights = np.ones_like(alphas) / n_intervals
+        weights[0] /= 2
+        weights[-1] /= 2
+        # Basic checks
         assert np.allclose(np.diff(alphas), alphas[1] - alphas[0]), "alphas must be equally spaced."
-        # Multiply the interval sizes by (1 + 2 eps) to balance out the smaller integration interval
-        interval_size = (alphas[1] - alphas[0]) / (1 - 2 * integral_boundary_epsilon)
-        assert np.allclose(
-            n_intervals * interval_size,
-            1,
-        ), f"n_intervals * interval_size ({n_intervals * interval_size}) != 1"
-    return alphas, interval_size
+        assert np.allclose(weights.sum(), 1), f"Weights don't sum to 1"
+    return weights, alphas
+
+
+class IntegrationPoint(NamedTuple):
+    alpha: float
+    weight: float
+
+
+def _calc_integration_points(
+    n_intervals: int,
+    rule: Literal["gauss-legendre", "trapezoidal", "gradient"] = "gauss-legendre",
+    **kwargs,
+) -> list[IntegrationPoint]:
+    """Calculate the integration steps and weights for n_intervals.
+
+    Args:
+        n_intervals: The number of intervals to use for the integral approximation.
+        rule: The integration method to use. One of:
+            - gauss-legendre: choose some generically good points to evaluate the integrand at
+                https://en.wikipedia.org/wiki/Gauss%E2%80%93Legendre_quadrature
+            - trapezoidal: choose equally spaced points in [ε, 1-ε], with endpoints half-weighted.
+            - gradient: use only one point at α=1. This replaces Integrated Gradients with
+                normal gradients.
+
+    Returns:
+        A list of IntegrationPoint objects, each defining an alpha and weight.
+    """
+    if rule == "gradient":
+        assert n_intervals == 0
+        assert kwargs == {}, f"Got unexpected arguments {kwargs}"
+        weights = np.array([1.0])
+        alphas = np.array([1.0])
+    elif rule == "gauss-legendre":
+        weights, alphas = _gauss_legendre_weights(n_intervals, **kwargs)
+    elif rule == "trapezoidal":
+        weights, alphas = _trapezoidal_weights(n_intervals, **kwargs)
+    else:
+        raise ValueError(f"Unknown rule {rule}")
+
+    pts = [IntegrationPoint(alpha=alpha, weight=weight) for alpha, weight in zip(alphas, weights)]
+    return pts
 
 
 def calc_edge_functional(
@@ -255,11 +307,10 @@ def calc_edge_functional(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
-    """Calculate the interaction attribution (edge) for module_hat using the functional method.
-
-    Uses the trapezoidal rule for integration. Updates the edge in-place.
+    """Calculate the interaction attribution (edge) for module_hat. Updates the edge in-place.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
@@ -281,25 +332,16 @@ def calc_edge_functional(
     else:
         einsum_pattern = "batch in_dim, batch in_dim -> in_dim"
 
-    alphas, interval_size = _calc_integration_intervals(n_intervals)
-
     # Compute f^{l+1}(x) to which the derivative is not applied.
     with torch.inference_mode():
         f_out_hat_const = module_hat(f_in_hat, in_tuple_dims)
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
-    # Integration with the trapzoidal rule
-    for alpha_idx, alpha in tqdm(enumerate(alphas), total=len(alphas), desc=tqdm_desc, leave=False):
-        # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
-        # alpha=0.5) and multiply by the interval size.
-        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
-            trapezoidal_scaler = 0.5 * interval_size
-        else:
-            trapezoidal_scaler = interval_size
-
+    int_points = _calc_integration_points(n_intervals, integration_method)
+    for point in tqdm(int_points, desc=tqdm_desc, leave=False):
         # Need to define alpha_f_in_hat for autograd
-        alpha_f_in_hat = alpha * f_in_hat
+        alpha_f_in_hat = point.alpha * f_in_hat
         f_out_hat_alpha = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         f_out_hat_norm: Float[Tensor, "... rib_out"] = (f_out_hat_const - f_out_hat_alpha) ** 2
@@ -318,11 +360,8 @@ def calc_edge_functional(
             leave=False,
         ):
             # Get the derivative of the ith output element w.r.t alpha_f_in_hat
-            i_grad = (
-                torch.autograd.grad(f_out_hat_norm[i], alpha_f_in_hat, retain_graph=True)[0]
-                / normalization_factor
-                * trapezoidal_scaler
-            )
+            i_grad = torch.autograd.grad(f_out_hat_norm[i], alpha_f_in_hat, retain_graph=True)[0]
+            i_grad *= point.weight / normalization_factor
             with torch.inference_mode():
                 E = einsum(einsum_pattern, i_grad, f_in_hat)
                 # Note that edge is initialised to zeros in
@@ -337,11 +376,10 @@ def calc_edge_squared(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
-    """Calculate the interaction attribution (edge) for module_hat using the squared method.
-
-    Uses the trapezoidal rule for integration. Updates the edge in-place.
+    """Calculate the interaction attribution (edge) for module_hat, updating edges in-place.
 
     Args:
         module_hat: Partial function of rib.linalg.module_hat. Takes in f_in_hat and
@@ -350,15 +388,13 @@ def calc_edge_squared(
         in_tuple_dims: The final dimensions of the inputs to the module.
         edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        n_intervals: The number of intervals to use for the integral approximation.
+        integration_method: Method to choose integration points.
         tqdm_desc: The description to use for the tqdm progress bar.
     """
     has_pos = f_in_hat.ndim == 3
 
     f_in_hat.requires_grad_(True)
-
-    alphas, interval_size = _calc_integration_intervals(n_intervals)
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
@@ -378,17 +414,10 @@ def calc_edge_squared(
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
 
-    # Integration with the trapzoidal rule
-    for alpha_idx, alpha in tqdm(enumerate(alphas), total=len(alphas), desc=tqdm_desc, leave=False):
-        # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
-        # alpha=0.5) and multiply by the interval size.
-        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
-            trapezoidal_scaler = 0.5 * interval_size
-        else:
-            trapezoidal_scaler = interval_size
-
+    int_points = _calc_integration_points(n_intervals, integration_method)
+    for point in tqdm(int_points, desc=tqdm_desc, leave=False):
         # We have to compute inputs from f_hat to make autograd work
-        alpha_f_in_hat = alpha * f_in_hat
+        alpha_f_in_hat = point.alpha * f_in_hat
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output.
@@ -404,14 +433,12 @@ def calc_edge_squared(
                     # j (input dim).
                     # The sum over the batch dimension before passing to autograd is just a trick
                     # to get the grad for every batch index vectorized.
-                    i_grad = (
-                        torch.autograd.grad(
-                            f_out_alpha_hat[:, output_pos_idx, out_dim].sum(dim=0),
-                            alpha_f_in_hat,
-                            retain_graph=True,
-                        )[0]
-                        * trapezoidal_scaler
-                    )
+                    i_grad = torch.autograd.grad(
+                        f_out_alpha_hat[:, output_pos_idx, out_dim].sum(dim=0),
+                        alpha_f_in_hat,
+                        retain_graph=True,
+                    )[0]
+                    i_grad *= point.weight
 
                     with torch.inference_mode():
                         # Element-wise multiply with f_in_hat and sum over the input pos
@@ -421,12 +448,11 @@ def calc_edge_squared(
                             f_in_hat,
                         )
             else:
-                i_grad = (
-                    torch.autograd.grad(
-                        f_out_alpha_hat[:, out_dim].sum(dim=0), alpha_f_in_hat, retain_graph=True
-                    )[0]
-                    * trapezoidal_scaler
-                )
+                i_grad = torch.autograd.grad(
+                    f_out_alpha_hat[:, out_dim].sum(dim=0), alpha_f_in_hat, retain_graph=True
+                )[0]
+                i_grad *= point.weight
+
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat
                     J_hat[:, out_dim, :] -= einsum(
@@ -458,6 +484,7 @@ def calc_basis_jacobian(
     ],
     C_out: Optional[Float[Tensor, "out_hidden out_hidden_trunc"]],
     n_intervals: int,
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
 ) -> Float[Tensor, "batch out_hidden_trunc out_pos in_pos in_hidden"]:
@@ -465,7 +492,7 @@ def calc_basis_jacobian(
     for x in inputs:
         x.requires_grad_(True)
 
-    alphas, interval_size = _calc_integration_intervals(n_intervals)
+    int_points = _calc_integration_points(n_intervals, integration_method)
 
     has_pos = inputs[0].ndim == 3
     batch_size = inputs[0].shape[0]
@@ -535,17 +562,10 @@ def calc_basis_jacobian(
                 )
         else:
             raise AssertionError("This else branch cannot be reached.")
-        for alpha_index, alpha in tqdm(
-            enumerate(alphas), total=len(alphas), desc="Integration steps (alphas)", leave=False
-        ):
-            # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
-            # point estimate at alpha=0.5) and multiply by the interval size.
-            if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
-                trapezoidal_scaler = 0.5 * interval_size
-            else:
-                trapezoidal_scaler = interval_size
+
+        for point in tqdm(int_points, desc="Integration steps (alphas)", leave=False):
             # Compute f^{l+1}(f^l(alpha x))
-            f_in_alpha = tuple(alpha * x for x in inputs)
+            f_in_alpha = tuple(point.alpha * x for x in inputs)
             outputs_alpha = module(*f_in_alpha)
             f_out_alpha = (
                 outputs_alpha
@@ -579,7 +599,7 @@ def calc_basis_jacobian(
                     ),
                     dim=-1,
                 )
-                in_grads[:, r_h, r_p, :, :] += alpha_in_grads * trapezoidal_scaler
+                in_grads[:, r_h, r_p, :, :] += alpha_in_grads * point.weight
                 # Contraction over batch, i, t, s happens after the integral, but we cannot
                 # contract earlier because we have to finish the integral sum (+=) first.
     else:
@@ -592,15 +612,9 @@ def calc_basis_jacobian(
             device=inputs[0].device,
         )
 
-        for alpha_index, alpha in enumerate(alphas):
-            # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a
-            # point estimate at alpha=0.5) and multiply by the interval size.
-            if n_intervals > 0 and (alpha_index == 0 or alpha_index == n_intervals):
-                trapezoidal_scaler = 0.5 * interval_size
-            else:
-                trapezoidal_scaler = interval_size
+        for point in tqdm(int_points, desc="Integration steps (alphas)", leave=False):
             # Compute f^{l+1}(f^l(alpha x))
-            f_in_alpha = tuple(alpha * x for x in inputs)
+            f_in_alpha = tuple(point.alpha * x for x in inputs)
             outputs_alpha = module(*f_in_alpha)
             f_out_alpha = (
                 outputs_alpha
@@ -620,7 +634,7 @@ def calc_basis_jacobian(
                     ),
                     dim=-1,
                 )
-                in_grads[:, i] += alpha_in_grads * trapezoidal_scaler
+                in_grads[:, i] += alpha_in_grads * point.weight
 
     return in_grads
 
@@ -632,6 +646,7 @@ def calc_edge_stochastic(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     n_stochastic_sources: int,
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
@@ -648,15 +663,13 @@ def calc_edge_stochastic(
         in_tuple_dims: The final dimensions of the inputs to the module.
         edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        n_intervals: The number of intervals to use for the integral approximation.
+        integration_method: Method to choose integration points.
         n_stochastic_sources: The number of stochastic sources to add to each input.
         tqdm_desc: The description to use for the tqdm progress bar.
     """
 
     f_in_hat.requires_grad_(True)
-
-    alphas, interval_size = _calc_integration_intervals(n_intervals)
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
@@ -680,17 +693,10 @@ def calc_edge_stochastic(
 
     normalization_factor = f_in_hat.shape[1] * dataset_size * n_stochastic_sources
 
-    # Integration with the trapzoidal rule
-    for alpha_idx, alpha in tqdm(enumerate(alphas), total=len(alphas), desc=tqdm_desc, leave=False):
-        # As per the trapezoidal rule, multiply endpoints by 1/2 (unless taking a point estimate at
-        # alpha=0.5) and multiply by the interval size.
-        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
-            trapezoidal_scaler = 0.5 * interval_size
-        else:
-            trapezoidal_scaler = interval_size
-
+    int_points = _calc_integration_points(n_intervals, integration_method)
+    for point in tqdm(int_points, desc=tqdm_desc, leave=False):
         # We have to compute inputs from f_hat to make autograd work
-        alpha_f_in_hat = alpha * f_in_hat
+        alpha_f_in_hat = point.alpha * f_in_hat
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
@@ -709,10 +715,10 @@ def calc_edge_stochastic(
                     phi[:, r, :],
                     f_out_alpha_hat[:, :, out_dim],
                 )
-                i_grad = (
-                    torch.autograd.grad(phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True)[0]
-                    * trapezoidal_scaler
-                )
+                i_grad = torch.autograd.grad(
+                    phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True
+                )[0]
+                i_grad *= point.weight
 
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat and sum over the input pos
@@ -727,7 +733,7 @@ def calc_edge_stochastic(
     edge += J_hat.sum(dim=(0, 1))
 
 
-def integrated_gradient_trapezoidal_norm(
+def calc_basis_integrated_gradient(
     module: torch.nn.Module,
     inputs: Union[
         tuple[Float[Tensor, "batch emb_in"]],
@@ -736,6 +742,7 @@ def integrated_gradient_trapezoidal_norm(
     ],
     C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     n_intervals: int,
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     basis_formula: Literal["(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
 ) -> Float[Tensor, "... orig_in"]:
     """Calculate the integrated gradient of the norm of the output of a module w.r.t its inputs,
@@ -752,8 +759,8 @@ def integrated_gradient_trapezoidal_norm(
         module: The module to calculate the integrated gradient of.
         inputs: The inputs to the module. May or may not include a position dimension.
         C_out: The truncated interaction rotation matrix for the module's outputs.
-        n_intervals: The number of intervals to use for the integral approximation. If 0, take a
-            point estimate at alpha=0.5 instead of using the trapezoidal rule.
+        n_intervals: The number of intervals to use for the integral approximation.
+        integration_method: Method to choose integration points.
         basis_formula: The formula to use for the integrated gradient. Must be one of
             "(1-alpha)^2" or "(1-0)*alpha". The former is the old (October) version while the
             latter is a new (November) version that should be used from now on. The latter makes
@@ -779,11 +786,9 @@ def integrated_gradient_trapezoidal_norm(
 
     in_grads = torch.zeros_like(torch.cat(inputs, dim=-1))
 
-    alphas, interval_size = _calc_integration_intervals(n_intervals)
-
-    for alpha_idx, alpha in enumerate(alphas):
+    for point in _calc_integration_points(n_intervals, integration_method):
         # Compute f^{l+1}(f^l(alpha x))
-        alpha_inputs = tuple(alpha * x for x in inputs)
+        alpha_inputs = tuple(point.alpha * x for x in inputs)
         output_alpha = module(*alpha_inputs)
         # Concatenate the outputs over the final dimension
         out_acts_alpha = (
@@ -812,19 +817,14 @@ def integrated_gradient_trapezoidal_norm(
             f_hat_norm = (f_hat_alpha * f_hat_1_0).sum()
         else:
             raise ValueError(
-                f"Unexpected integrated gradient formula {basis_formula} != '(1-alpha)^2' or '(1-0)*alpha'"
+                f"Unexpected basis formula {basis_formula} != '(1-alpha)^2' or '(1-0)*alpha'"
             )
 
         # Accumulate the grad of f_hat_norm w.r.t the input tensors
         f_hat_norm.backward(inputs=alpha_inputs, retain_graph=True)
 
-        alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)
-        # As per the trapezoidal rule, multiply the endpoints by 1/2 (unless we're taking a point
-        # estimate at alpha=0.5)
-        if n_intervals > 0 and (alpha_idx == 0 or alpha_idx == n_intervals):
-            alpha_in_grads = 0.5 * alpha_in_grads
-
-        in_grads += alpha_in_grads * interval_size
+        alpha_in_grads = torch.cat([x.grad for x in alpha_inputs], dim=-1)  # type: ignore
+        in_grads += alpha_in_grads * point.weight
 
         for x in alpha_inputs:
             assert x.grad is not None, "Input grad should not be None."

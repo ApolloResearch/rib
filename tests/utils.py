@@ -181,7 +181,8 @@ def assert_is_close(a, b, atol, rtol, **kwargs):
     """Customized version of torch.testing.assert_close(). **kwargs added in msg output"""
     kwargs_str = "\n".join([f"{k}={v}" for k, v in kwargs.items()])
     msg_modifier = lambda m: m + "\n" + kwargs_str
-    b = torch.as_tensor(b)
+    a = torch.as_tensor(a, dtype=torch.float64)
+    b = torch.as_tensor(b, dtype=torch.float64)
     b = torch.broadcast_to(b, a.shape)
     assert_close(
         a, b, atol=atol, rtol=rtol, msg=msg_modifier, check_device=False, check_dtype=False

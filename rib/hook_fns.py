@@ -47,8 +47,10 @@ def _add_to_hooked_matrix(
 
     """
     # If no data exists, initialize with zeros
-    hooked_data.setdefault(hook_name, {}).setdefault(data_key, torch.zeros_like(hooked_matrix))
-    hooked_data[hook_name][data_key] += hooked_matrix
+    hooked_data.setdefault(hook_name, {}).setdefault(
+        data_key, torch.zeros_like(hooked_matrix, device="cpu")
+    )
+    hooked_data[hook_name][data_key] += hooked_matrix.cpu()
 
 
 def _append_to_hooked_list(

@@ -133,7 +133,7 @@ def collect_dataset_means(
     )
 
     dataset_mean: dict[str, Float[Tensor, "orig"]] = {
-        hook_name: hooked_model.hooked_data[hook_name]["dataset_mean"]
+        hook_name: hooked_model.hooked_data[hook_name]["dataset_mean"].to(device=device)
         for hook_name in hooked_model.hooked_data
     }
     hooked_model.clear_hooked_data()
@@ -229,7 +229,7 @@ def collect_gram_matrices(
     )
 
     gram_matrices: dict[str, Float[Tensor, "orig orig"]] = {
-        hook_name: hooked_model.hooked_data[hook_name]["gram"]
+        hook_name: hooked_model.hooked_data[hook_name]["gram"].to(device=device)
         for hook_name in hooked_model.hooked_data
     }
     hooked_model.clear_hooked_data()
@@ -322,6 +322,9 @@ def collect_M_dash_and_Lambda_dash(
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
     Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
     hooked_model.clear_hooked_data()
+
+    M_dash = M_dash.to(device=device)
+    Lambda_dash = Lambda_dash.to(device=device)
 
     return M_dash, Lambda_dash
 

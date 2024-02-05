@@ -14,4 +14,3 @@ pyarrow~=14.0.2
 # If you have trouble installing from pip, try `rm` on `compiler_compat/ld` from your conda python
 # installation (`rm /home/user/.conda/envs/py3.12.1/compiler_compat/ld` for me).
 mpi4py~=3.1.5
-einops~=0.7.0

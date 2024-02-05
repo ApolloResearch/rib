@@ -31,18 +31,27 @@ jobs:
       with:
         python-version: "3.10"
 
-    - name: Determine VENV_PATH and Runner Type
+    - name: Determine VENV_PATH and whether runner is self-hosted
       id: setup-env
       run: |
         if [ -d "/home/user/actions-runner" ]; then
           echo "VENV_PATH=/home/user/actions-runner/rib-env" >> $GITHUB_ENV
-          echo "::set-output name=is_self_hosted::true"
+          echo "is_self_hosted=true" >> $GITHUB_OUTPUT
         else
           echo "VENV_PATH=${{ github.workspace }}/rib-env" >> $GITHUB_ENV
-          echo "::set-output name=is_self_hosted::false"
+          echo "is_self_hosted=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Install mpi
+    - name: Cache virtual environment if not self-hosted
+      if: steps.setup-env.outputs.is_self_hosted == 'false'
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.VENV_PATH }}
+        key: ${{ runner.os }}-venv-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-venv-
+
+    - name: Install mpi if not self-hosted
       if: steps.setup-env.outputs.is_self_hosted == 'false'
       run: |
         sudo apt-get update

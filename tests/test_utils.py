@@ -17,7 +17,12 @@ from rib.ablations import (
 )
 from rib.models import MLP, MLPConfig, MLPLayer
 from rib.models.utils import gelu_new, get_model_attr
-from rib.utils import eval_model_accuracy, find_root, replace_pydantic_model
+from rib.utils import (
+    eval_model_accuracy,
+    find_root,
+    get_chunk_indices,
+    replace_pydantic_model,
+)
 
 
 def test_get_model_attr() -> None:
@@ -271,3 +276,29 @@ class TestReplacePydanticModel:
         replaced_model = replace_pydantic_model(model, {"x": 2, "y": "world"}, {"x": 3})
         assert replaced_model.x == 3
         assert replaced_model.y == "world"
+
+
+@pytest.mark.parametrize("num_chunks", [1, 3, 5, 7, 10])
+def test_get_chunk_indices(num_chunks):
+    data_size = 21  # Total size of the data
+    indices = [get_chunk_indices(data_size, i, num_chunks) for i in range(num_chunks)]
+
+    # Check that all chunks cover the entire data size without overlap
+    all_indices = []
+    for start, end in indices:
+        # Check for overlap
+        for idx in range(start, end):
+            assert idx not in all_indices
+            all_indices.append(idx)
+
+    # Check that there are no gaps and the entire range is covered
+    assert sorted(all_indices) == list(range(data_size))
+
+    # Check that each chunk is within the expected range
+    for start, end in indices:
+        assert 0 <= start < data_size
+        assert 0 < end <= data_size
+        assert start < end
+
+    # Special check for the last chunk to ensure it ends at data_size
+    assert indices[-1][1] == data_size

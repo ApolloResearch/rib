@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable
 
 import numpy as np
@@ -371,7 +372,7 @@ def test_calc_edge_n_intervals(integration_method, edge_formula="squared"):
     if edge_formula == "functional":
         calc_edge = calc_edge_functional
     elif edge_formula == "squared":
-        calc_edge = calc_edge_squared
+        calc_edge = partial(calc_edge_squared, out_dim_start_idx=0, out_dim_end_idx=4)
     else:
         raise ValueError(f"edge_formula {edge_formula} not recognized")
 

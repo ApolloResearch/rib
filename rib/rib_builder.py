@@ -43,7 +43,7 @@ import torch
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from rib.data import (
     BlockVectorDatasetConfig,
@@ -65,7 +65,7 @@ from rib.distributed_utils import (
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
-from rib.loader import get_dataset_chunk, load_model_and_dataset_from_rib_config
+from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
     MLPConfig,
@@ -79,6 +79,7 @@ from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
+    get_chunk_indices,
     load_config,
     set_seed,
 )
@@ -200,6 +201,10 @@ class RibBuildConfig(BaseModel):
         False,
         description="Whether to center the activations before performing rib.",
     )
+    dist_split_over: Literal["out_dim", "dataset"] = Field(
+        "dataset",
+        description="For distributed edge runs, whether to split over out_dim or dataset.",
+    )
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "RibBuildConfig":
@@ -229,6 +234,14 @@ class RibBuildConfig(BaseModel):
             assert (
                 self.n_stochastic_sources_edges is None
             ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
+
+        if self.n_stochastic_sources_edges is not None:
+            assert (
+                self.edge_formula == "squared"
+            ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
+
+        if self.edge_formula == "functional" and self.dist_split_over == "out_dim":
+            raise ValueError("Cannot use functional edge formula with out_dim split")
 
         if self.integration_method == "gradient":
             assert self.n_intervals == 0, "n_intervals must be 0 for gradient integration rule"
@@ -390,13 +403,17 @@ def rib_build(
 
     out_file: Optional[Path] = None
     if config.out_dir is not None:
-        config.out_dir.mkdir(parents=True, exist_ok=True)
         obj_name = "graph" if config.calculate_edges else "Cs"
-        global_rank_suffix = (
-            f"_global_rank{dist_info.global_rank}" if dist_info.global_size > 1 else ""
-        )
-        f_name = f"{config.exp_name}_rib_{obj_name}{global_rank_suffix}.pt"
-        out_file = config.out_dir / f_name
+        if dist_info.global_size > 1:
+            # Save distributed run results in a dedicated directory for the experiment
+            out_dir = config.out_dir / f"distributed_{config.exp_name}"
+            f_name = f"rib_{obj_name}_global_rank{dist_info.global_rank}.pt"
+        else:
+            # Save non-distributed run files in `out`
+            out_dir = config.out_dir
+            f_name = f"{config.exp_name}_rib_{obj_name}.pt"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / f_name
         if not check_outfile_overwrite(out_file, force):
             dist_info.local_comm.Abort()  # stop this and other processes
 
@@ -507,13 +524,17 @@ def rib_build(
     else:
         logger.info("Calculating edges.")
         full_dataset_len = len(dataset)  # type: ignore
-        # no-op if only 1 process
-        data_subset = get_dataset_chunk(
-            dataset, chunk_idx=dist_info.global_rank, total_chunks=dist_info.global_size
-        )
+        if config.dist_split_over == "dataset":
+            # no-op if only 1 process
+            start_idx, end_idx = get_chunk_indices(
+                data_size=full_dataset_len,
+                chunk_idx=dist_info.global_rank,
+                n_chunks=dist_info.global_size,
+            )
+            dataset = Subset(dataset, range(start_idx, end_idx))
 
         edge_train_loader = DataLoader(
-            data_subset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
+            dataset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
         )
 
         logger.info(
@@ -532,6 +553,8 @@ def rib_build(
             data_set_size=full_dataset_len,  # includes data for other processes
             edge_formula=config.edge_formula,
             n_stochastic_sources=config.n_stochastic_sources_edges,
+            out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
+            out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
         )
 
         calc_edges_time = (time.time() - edges_start_time) / 60

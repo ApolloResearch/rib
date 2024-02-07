@@ -233,23 +233,25 @@ def _assignment_permutations(
 
 def assert_basis_similarity(
     ir_A: InteractionRotation, ir_B: InteractionRotation, error: Optional[float] = 0.02
-):
+) -> tuple[float, float, float]:
     """
     Compare two InteractionRotations and assert similarity, allowing for permutations.
 
-    Returns:
-        dir_sims: cosine similarities of the permuted basis vectors
-        dir_norm_ratios: the ratio of basis vector norms
-        lambda_ratios: the ratio of lambda values for the basis directions
+    Pairs up the basis vectors for the two bases and then checks three things:
+        - cosine similarity (absolute valued)
+        - ratio of L2-vector norms
+        - ratio of lambdas
+
+    If the bases are identical, these would be three vectors of all 1s. For each metric we check:
+        - the mean is 1 ± error
+        - the standard deviation is smaller than error
     """
     assert ir_A.node_layer == ir_B.node_layer
     if ir_A.C is None:
         assert ir_B.C is None
-        return None, None, None
 
     a_order, b_order = _assignment_permutations(ir_A, ir_B)
     dir_sims = cosine_similarity(ir_A.C[:, a_order], ir_B.C[:, b_order], dim=0).abs()
-    print(dir_sims.mean())
     dir_norm_ratios = torch.norm(ir_A.C, dim=0)[a_order] / torch.norm(ir_B.C, dim=0)[b_order]
     lambda_ratios = ir_A.Lambda[a_order] / ir_B.Lambda[b_order]
     if error is not None:
@@ -259,4 +261,3 @@ def assert_basis_similarity(
         assert_is_zeros(dir_norm_ratios.std(), atol=error, node_layer=ir_A.node_layer)
         assert_is_ones(lambda_ratios.mean(), atol=error, node_layer=ir_A.node_layer)
         assert_is_zeros(lambda_ratios.std(), atol=error, node_layer=ir_A.node_layer)
-    return dir_sims, dir_norm_ratios, lambda_ratios

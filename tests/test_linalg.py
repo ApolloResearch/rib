@@ -590,10 +590,8 @@ def test_generate_sources():
     n_stochastic_sources = 10
     dim_actual = 100
 
-    tensor_to_use_for_dtype_and_device = torch.empty(1, 1)
-
-    shape = (batch_size, n_stochastic_sources, dim_actual)
-    phi = _generate_sources(shape, like_tensor=tensor_to_use_for_dtype_and_device)
+    phi = torch.empty(batch_size, n_stochastic_sources, dim_actual)
+    phi = _generate_sources(phi)
 
     out = einsum("batch source dim1, batch source dim2 -> batch dim1 dim2", phi, phi)
     out /= n_stochastic_sources

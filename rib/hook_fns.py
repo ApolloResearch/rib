@@ -434,7 +434,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         )
         has_pos = inputs[0].dim() == 3
         if has_pos:
-            einsum_pattern = "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"
+            einsum_pattern = "r batch s j, r batch s jprime -> j jprime"
             in_pos_size = in_grads.shape[3]
             normalization_factor = in_pos_size * dataset_size
             # It is intentional that normalization_factor is multiplied by both,
@@ -454,8 +454,9 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
         with torch.inference_mode():
             # M_dash.shape: j jprime
-            M_dash = einops.einsum(
-                in_grads.to(M_dtype) / normalization_factor, in_grads.to(M_dtype), einsum_pattern
+            M_dash = (
+                einops.einsum(in_grads.to(M_dtype), in_grads.to(M_dtype), einsum_pattern)
+                / normalization_factor
             )
             # In the jacobian basis, Lambda is not computed here but from the M eigenvalues later.
             # Set a placeholder to maintain the same function signature.

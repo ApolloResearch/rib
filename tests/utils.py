@@ -153,7 +153,7 @@ def get_modular_mlp_config(*updates: dict) -> RibBuildConfig:
     modular_mlp_config:
         n_hidden_layers: 2
         width: 10
-        weight_variances: [1,1]
+        weight_variances: [1,1,1,1]
         weight_equal_columns: false
         bias: 0
         activation_fn: relu
@@ -169,8 +169,9 @@ def get_modular_mlp_config(*updates: dict) -> RibBuildConfig:
     truncation_threshold: 1e-15
     dtype: float64
     rotate_final_node_layer: false
-    basis_formula: (1-0)*alpha
+    basis_formula: jacobian
     edge_formula: squared
+    center: false
     """
     config_dict = deep_update(yaml.safe_load(config_str), *updates)
     config = RibBuildConfig(**config_dict)

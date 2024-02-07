@@ -9,20 +9,24 @@ node_layers:
 dataset:
   dataset_type: block_vector
   size: 10000
-  length: 4
-  data_variances: [1, 1]
+  length: 8
+  first_block_length: 4
+  data_variances: [1.0, 1.0]
   data_perfect_correlation: false
   seed: 0
 modular_mlp_config:
   n_hidden_layers: 4
-  width: 4
-  weight_variances: [2, 2]
+  width: 8
+  mixing_layers: [2,3]
+  weight_variances: [2.0, 2.0, 2.0, 2.0]
   weight_equal_columns: false
-  bias: 0
+  bias: 2.0
 seed: 0
 dtype: float64
 batch_size: 256
 n_intervals: 0
 truncation_threshold: 1e-15
 rotate_final_node_layer: false
-basis_formula: (1-0)*alpha
+basis_formula: neuron
+edge_formula: squared
+center: false

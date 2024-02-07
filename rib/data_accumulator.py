@@ -22,6 +22,7 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import module_hat
 from rib.log import logger
 from rib.models.utils import get_model_attr
+from rib.types import IntegrationMethod
 from rib.utils import check_device_is_cpu, get_chunk_indices
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
@@ -330,7 +331,7 @@ def collect_interaction_edges(
     interaction_rotations: list["InteractionRotation"],
     hooked_model: HookedModel,
     n_intervals: int,
-    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_methods: list[IntegrationMethod],
     section_names: list[str],
     data_loader: DataLoader,
     dtype: torch.dtype,
@@ -380,8 +381,8 @@ def collect_interaction_edges(
     ), "Number of edge modules not the same as interaction_rotations - 1."
 
     edge_hooks: list[Hook] = []
-    for idx, (interaction_rotation, module_name) in enumerate(
-        zip(interaction_rotations[:-1], edge_modules)
+    for idx, (interaction_rotation, module_name, integration_method) in enumerate(
+        zip(interaction_rotations[:-1], edge_modules, integration_methods, strict=True)
     ):
         # C from the next node layer
         assert interaction_rotation.C is not None, "C matrix is None."

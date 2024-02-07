@@ -678,41 +678,27 @@ def test_stochastic_source_modadd_convergence():
 
 
 @pytest.fixture(scope="module")
-def no_stoc_result():
-    return rib_build(
-        get_tinystories_config(
-            {
-                "calculate_edges": False,
-                "dataset": {"seed": 4},
-            }
-        )
-    )
+def no_stoc_result() -> RibBuildResults:
+    return rib_build(get_tinystories_config({"calculate_edges": False}))
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
     ["pos_sources", "hidden_sources", "error"],
     [
-        [None, 10, 0.2],  # ~0.15
-        [None, 40, 0.1],  #
-        [3, None, 0.07],  # ~0.05
-        [3, 40, 0.1],  #
+        [None, 10, 0.2],
+        [None, 40, 0.1],
+        [3, None, 0.07],
+        [3, 40, 0.1],
     ],
 )
 def test_stochastic_basis_tinystories(no_stoc_result, pos_sources, hidden_sources, error):
-    """Test stochastic basis in the hidden + position dimension on TinyStories.
-
-    More basis sources allowed because they span 64*10 dims rather than 10 dims.
-
-    We find that with 640 stochastic sources (n_ctx==10, d_hidden=64) the edges differ by up to
-    26.9% of the largest edge.
-    """
+    """Test stochastic basis in the hidden + position dimension on TinyStories."""
     config_stochastic = get_tinystories_config(
         {
             "n_stochastic_sources_basis_pos": pos_sources,
             "n_stochastic_sources_basis_hidden": hidden_sources,
             "calculate_edges": False,
-            "dataset": {"seed": 4},
         }
     )
     stoc_result = rib_build(config_stochastic)

@@ -19,7 +19,7 @@ from mpi4py import MPI
 from rib.edge_combiner import combine_edges
 from rib.rib_builder import RibBuildResults, rib_build
 from rib.settings import REPO_ROOT
-from tests.utils import get_modular_arithmetic_config
+from tests.utils import assert_is_close, get_modular_arithmetic_config
 
 
 def get_single_edges(tmpdir: Path, dist_split_over: str, n_stochastic_sources_edges: Optional[int]):
@@ -97,12 +97,7 @@ def compare_edges(dist_split_over: str, tmpdir: Path, n_stochastic_sources_edges
     )
 
     for s_edges, d_edges in zip(all_single_edges, all_double_edges):
-        assert (
-            s_edges.E_hat.shape == d_edges.E_hat.shape
-        ), f"mismatching shape for {s_edges.in_node_layer}, {s_edges.shape}!={d_edges.shape}"
-        assert torch.allclose(
-            s_edges.E_hat, d_edges.E_hat, atol=1e-9
-        ), f"on {s_edges.in_node_layer} mean error {(s_edges.E_hat-d_edges.E_hat).abs().mean().item()}"
+        assert_is_close(s_edges.E_hat, d_edges.E_hat, atol=1e-9, rtol=1e-0)
 
 
 @pytest.mark.mpi

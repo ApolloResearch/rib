@@ -213,15 +213,16 @@ def _assignment_permutations(
 
     If we add `scipy` dependancy, we should use `scipy.optimize.linear_sum_assignment`."""
     cos_sim = cosine_similarity(ir_A.C.unsqueeze(1), ir_B.C.unsqueeze(2), dim=0).abs()
-    lambda_ratios = ir_A.Lambda.unsqueeze(1) / ir_B.Lambda.unsqueeze(0)
+    lambda_ratios = ir_A.Lambda.unsqueeze(0) / ir_B.Lambda.unsqueeze(1)
     lambda_sim = torch.min(lambda_ratios, 1 / lambda_ratios)
     assert (lambda_sim <= 1).all() and (lambda_sim > 0).all() and not torch.isnan(lambda_sim).any()
-    sim = cos_sim * lambda_sim
 
-    rows_selected = torch.zeros(sim.shape[0], dtype=torch.bool)
+    n = min(ir_A.C.shape[1], ir_B.C.shape[1])
+    sim = cos_sim[:n, :n] * lambda_sim[:n, :n]
+    rows_selected = torch.zeros(n, dtype=torch.bool)
     row_idxs = []
     col_idxs = []
-    for col_idx in range(min(sim.shape)):
+    for col_idx in range(n):
         masked_col = torch.where(rows_selected, -torch.inf, sim[:, col_idx])
         row_idx = masked_col.argmax().item()
         row_idxs.append(row_idx)

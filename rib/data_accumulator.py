@@ -247,6 +247,7 @@ def collect_M_dash_and_Lambda_dash(
     C_out: Optional[Float[Tensor, "orig_out rib_out"]],
     hooked_model: HookedModel,
     n_intervals: int,
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     data_loader: DataLoader,
     module_name: str,
     dtype: torch.dtype,
@@ -298,6 +299,7 @@ def collect_M_dash_and_Lambda_dash(
         fn_kwargs={
             "C_out": C_out,
             "n_intervals": n_intervals,
+            "integration_method": integration_method,
             "dataset_size": len(data_loader.dataset),  # type: ignore
             "M_dtype": M_dtype,
             "Lambda_einsum_dtype": Lambda_einsum_dtype,
@@ -328,6 +330,7 @@ def collect_interaction_edges(
     interaction_rotations: list["InteractionRotation"],
     hooked_model: HookedModel,
     n_intervals: int,
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     section_names: list[str],
     data_loader: DataLoader,
     dtype: torch.dtype,
@@ -433,6 +436,7 @@ def collect_interaction_edges(
                     ),  # C from the current node layer
                     "module_hat": module_hat_partial,
                     "n_intervals": n_intervals,
+                    "integration_method": integration_method,
                     "dataset_size": data_set_size or len(data_loader.dataset),  # type: ignore
                     "out_dim_start_idx": out_dim_start_idx,
                     "out_dim_end_idx": out_dim_end_idx,

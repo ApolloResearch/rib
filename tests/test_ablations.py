@@ -112,7 +112,7 @@ def test_run_mnist_ablations(ablation_type, tmp_path):
             "node_layers": ["layers.1", "layers.2", "output"],
             "batch_size": 100,
             "dtype": "float32",
-            "dataset": {"return_set_n_samples": 100, "return_set_frac": None},
+            "dataset": {"n_samples": 100, "return_set_frac": None},
         }
     )
     results = rib_build(build_config)
@@ -135,7 +135,7 @@ def test_run_mnist_ablations(ablation_type, tmp_path):
     dataset:
         dataset_type: torchvision
         name: MNIST
-        return_set_n_samples: 100
+        n_samples: 100
     batch_size: 64  # 2 batches
     seed: 0
     out_dir: null
@@ -154,7 +154,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, tmp_path):
         {
             "node_layers": ["ln1.0", "ln2.0", "mlp_out.0", "unembed", "output"],
             "batch_size": 100,
-            "dataset": {"return_set_n_samples": 100},
+            "dataset": {"n_samples": 100},
         }
     )
     results = rib_build(build_config)
@@ -174,7 +174,7 @@ def test_run_modular_arithmetic_rib_ablations(ablation_type, tmp_path):
     dataset:
         dataset_type: modular_arithmetic
         return_set: train
-        return_set_n_samples: 100
+        n_samples: 100
     ablation_node_layers:
         - ln1.0
         - ln2.0
@@ -199,7 +199,7 @@ def test_run_mnist_ablations_bisect(ablation_type, tmp_path):
             "node_layers": ["layers.1", "layers.2", "output"],
             "batch_size": 100,
             "dtype": "float32",
-            "dataset": {"return_set_n_samples": 100, "return_set_frac": None},
+            "dataset": {"n_samples": 100, "return_set_frac": None},
         }
     )
     results = rib_build(build_config)
@@ -220,7 +220,7 @@ def test_run_mnist_ablations_bisect(ablation_type, tmp_path):
     dataset:
         dataset_type: torchvision
         name: MNIST
-        return_set_n_samples: 100
+        n_samples: 100
     batch_size: 64  # two batches
     seed: 0
     out_dir: null
@@ -239,7 +239,7 @@ def test_run_modular_arithmetic_rib_ablations_bisect(ablation_type, tmp_path):
         {
             "node_layers": ["ln1.0", "ln2.0", "mlp_out.0", "unembed", "output"],
             "batch_size": 100,
-            "dataset": {"return_set_n_samples": 100},
+            "dataset": {"n_samples": 100},
         }
     )
     results = rib_build(build_config)
@@ -256,7 +256,7 @@ def test_run_modular_arithmetic_rib_ablations_bisect(ablation_type, tmp_path):
     dataset:
         dataset_type: modular_arithmetic
         return_set: train
-        return_set_n_samples: 100
+        n_samples: 100
     ablation_node_layers:
         - ln1.0
         - ln2.0

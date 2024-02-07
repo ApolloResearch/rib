@@ -1,4 +1,4 @@
-"""Define custom datasets."""
+"""Defines the dataset configs and datasets used in RIB."""
 
 from typing import Literal, Optional
 
@@ -22,39 +22,33 @@ class DatasetConfig(BaseModel):
     """Base class for dataset configs."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    return_set: Literal["train", "test", "all"] = Field(
+    return_set: Literal["train", "test", "validation", "all"] = Field(
         "train",
         description="The dataset split to return. If 'all', returns the combined train and test "
         "datasets.",
     )
     return_set_frac: Optional[float] = Field(
         None,
-        description="The fraction of the returned dataset (train/test/all) to use. Cannot be"
-        "used with return_set_n_samples.",
+        description="The fraction of the returned dataset (train/test/validation/all) to load. "
+        "This will be sampled from using n_samples if n_samples is not None.",
     )
-    return_set_n_samples: Optional[int] = Field(
+    n_samples: Optional[int] = Field(
         None,
-        description="The number of raw samples to return from the dataset (train/test/all). "
-        "Cannot be used with return_set_frac.",
+        description="The number of n_ctx length tokenized samples to load from the dataset. This "
+        "will be sampled from either return_set_frac or n_documents if they are not None, or the "
+        "entire dataset if they are None. If n_samples is None, will load all samples in "
+        "return_set_frac (or n_documents if provided in a child class).",
     )
 
     @model_validator(mode="after")
-    def verify_return_set_frac_and_n_samples(self) -> "DatasetConfig":
-        """Verify not both return_set_frac and return_set_n_samples are set and check values."""
+    def verify_return_set_options(self) -> "DatasetConfig":
+        """Can't have both return_set_frac and n_samples be non-None for dataset with n_documents."""
         frac = self.return_set_frac
+        if not hasattr(self, "n_documents") and (frac is not None and self.n_samples is not None):
+            raise ValueError(
+                "Cannot have both return_set_frac and n_samples be non-None for this dataset."
+            )
 
-        if frac is not None:
-            if self.return_set_n_samples is not None:
-                raise ValueError(
-                    "Cannot have both return_set_frac and return_set_n_samples be non-None."
-                )
-            if isinstance(self, HFDatasetConfig) and (frac < 0.01 or frac > 1):
-                raise ValueError(
-                    f"return_set_frac must be > 0.01 and < 1 since huggingface dataset `split` "
-                    f"method does not correctly convert other values to perecentages."
-                )
-            if frac <= 0 or frac > 1:
-                raise ValueError(f"return_set_frac must be > 0 and <= 1.")
         return self
 
 
@@ -70,17 +64,39 @@ class HFDatasetConfig(DatasetConfig):
         description="The HuggingFace name for the tokenizer. Please check whether the tokenizer is "
         "compatible with the model you are using.",
     )
-    return_set: Literal["train", "test"] = Field(
+    return_set: Literal["train", "test", "validation"] = Field(
         ..., description="The dataset split to return from HuggingFace."
     )
     return_set_portion: Literal["first", "last"] = Field(
         "first", description="Whether to load the first or last portion of the return_set."
+    )
+    n_documents: Optional[int] = Field(
+        None,
+        description="The number of documents to load from the dataset before (optional) sampling "
+        "with n_samples. If None, will load all documents in return_set_frac (or all documents if "
+        "return_set_frac is None).",
     )
     n_ctx: Optional[int] = Field(
         None,
         description="Dataset will be packed to sequences of this length. Should be <1024 for gpt2."
         "<2048 for most other models.",
     )
+    seed: Optional[int] = Field(0, description="The random seed value for reproducibility.")
+
+    @model_validator(mode="after")
+    def verify_return_set_options(self) -> "HFDatasetConfig":
+        frac = self.return_set_frac
+        # Can't have both return_set_frac and n_documents be non-None
+        if frac is not None and self.n_documents is not None:
+            raise ValueError(
+                "Cannot have both return_set_frac and n_documents be non-None for HF datasets."
+            )
+        if frac is not None and (frac < 0.01 or frac > 1):
+            raise ValueError(
+                f"return_set_frac must be > 0.01 and < 1 since huggingface dataset `split` "
+                f"method does not correctly convert other values to perecentages."
+            )
+        return self
 
 
 class ModularArithmeticDatasetConfig(DatasetConfig):
@@ -136,7 +152,7 @@ class VisionDatasetConfig(DatasetConfig):
     seed: Optional[int] = 0
     return_set: Literal["train", "test"] = "train"
     return_set_frac: Optional[float] = None  # Needed for some reason to avoid mypy errors
-    return_set_n_samples: Optional[int] = None  # Needed for some reason to avoid mypy errors
+    n_samples: Optional[int] = None  # Needed for some reason to avoid mypy errors
 
 
 class BlockVectorDatasetConfig(DatasetConfig):

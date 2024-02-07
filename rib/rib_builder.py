@@ -158,6 +158,10 @@ class RibBuildConfig(BaseModel):
         description="The number of intervals to use for the integrated gradient approximation."
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
+    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"] = Field(
+        "gauss-legendre",
+        description="The integration method to choose.",
+    )
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
     calculate_edges: bool = Field(
         True,
@@ -204,13 +208,13 @@ class RibBuildConfig(BaseModel):
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "RibBuildConfig":
-        """Exactly one of tlens_pretrained, tlens_model_path, mlp_path, modular_mlp_config must be
-        set.
-
-        In addition, we don't support loading interaction matrices for mlp models (they're so small
-        we shouldn't need to).
-
-        Checks that `n_stochastic_sources_edges` is None for non-squared edge_formula.
+        """Checks:
+        - Exactly one of tlens_pretrained, tlens_model_path, mlp_path, modular_mlp_config must
+            be set.
+        - We don't try to load interaction matrices for mlp models (they're so small we
+            shouldn't need to).
+        - `n_stochastic_sources_edges` is None for non-squared edge_formula.
+        - `n_intervals` must be 0 for gradient integration rule.
         """
         model_options = [
             self.tlens_pretrained,
@@ -238,6 +242,9 @@ class RibBuildConfig(BaseModel):
 
         if self.edge_formula == "functional" and self.dist_split_over == "out_dim":
             raise ValueError("Cannot use functional edge formula with out_dim split")
+
+        if self.integration_method == "gradient":
+            assert self.n_intervals == 0, "n_intervals must be 0 for gradient integration rule"
         return self
 
 
@@ -312,11 +319,11 @@ def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildCo
             assert (
                 config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
             ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
-        elif config.dataset.return_set_n_samples is not None:
-            assert loaded_config.dataset.return_set_n_samples is not None
+        elif config.dataset.n_samples is not None:
+            assert loaded_config.dataset.n_samples is not None
             assert (
-                config.dataset.return_set_n_samples <= loaded_config.dataset.return_set_n_samples
-            ), "Cannot use a larger return_set_n_samples for edges than to calculate the Cs"
+                config.dataset.n_samples <= loaded_config.dataset.n_samples
+            ), "Cannot use a larger n_samples for edges than to calculate the Cs"
 
 
 def load_interaction_rotations(
@@ -491,6 +498,7 @@ def rib_build(
             dtype=dtype,
             device=device,
             n_intervals=config.n_intervals,
+            integration_method=config.integration_method,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
@@ -537,6 +545,7 @@ def rib_build(
             interaction_rotations=edge_interaction_rotations,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
+            integration_method=config.integration_method,
             section_names=section_names,
             data_loader=edge_train_loader,
             dtype=dtype,

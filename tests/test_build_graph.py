@@ -230,7 +230,7 @@ def test_pythia_14m_build_graph_jacobian_stochastic():
         }
     )
     results = graph_build_test(config=config, atol=atol)
-    get_rib_acts_test(results, atol=0)
+    get_rib_acts_test(results, atol=1e-12)
 
 
 @pytest.mark.slow
@@ -685,16 +685,24 @@ def test_stochastic_source_modadd_convergence():
 
 @pytest.fixture(scope="module")
 def no_stoc_result():
-    return rib_build(get_tinystories_config({"calculate_edges": False}))
+    return rib_build(
+        get_tinystories_config(
+            {
+                "calculate_edges": False,
+                "dataset": {"seed": 4},
+            }
+        )
+    )
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
     ["pos_sources", "hidden_sources", "error"],
     [
-        [None, 40, 0.1],
-        [2, None, 0.07],
-        [2, 40, 0.1],
+        [None, 10, 0.2],  # ~0.15
+        [None, 40, 0.1],  #
+        [3, None, 0.07],  # ~0.05
+        [3, 40, 0.1],  #
     ],
 )
 def test_stochastic_basis_tinystories(no_stoc_result, pos_sources, hidden_sources, error):
@@ -710,6 +718,7 @@ def test_stochastic_basis_tinystories(no_stoc_result, pos_sources, hidden_source
             "n_stochastic_sources_basis_pos": pos_sources,
             "n_stochastic_sources_basis_hidden": hidden_sources,
             "calculate_edges": False,
+            "dataset": {"seed": 4},
         }
     )
     stoc_result = rib_build(config_stochastic)

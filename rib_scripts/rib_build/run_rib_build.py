@@ -6,7 +6,6 @@ parallelism is currently only supported for the edge calculation and not the cal
 
 Usage:
     Single GPU:
-        # python run_rib_build.py <path/to/config.yaml> [--force] [--n_pods <int>] [--pod_rank <int>]
         python run_rib_build.py <path/to/config.yaml> [--force]
     Multiple GPUs:
         mpirun -n <n_gpus> python run_rib_build.py <path/to/config.yaml> [--force] [--n_pods <int>]

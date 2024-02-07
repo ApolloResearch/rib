@@ -480,6 +480,8 @@ def interaction_edge_pre_forward_hook_fn(
     n_intervals: int,
     integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     dataset_size: int,
+    out_dim_start_idx: int,
+    out_dim_end_idx: int,
     edge_formula: Literal["functional", "squared"] = "squared",
     n_stochastic_sources: Optional[int] = None,
 ) -> None:
@@ -505,6 +507,8 @@ def interaction_edge_pre_forward_hook_fn(
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
+        out_dim_start_idx: The index of the first output dimension to calculate.
+        out_dim_end_idx: The index of the last output dimension to calculate.
         edge_formula: The formula to use for the attribution.
             - "functional" is the old (October 23) functional version
             - "squared" is the version which iterates over the output dim and output pos dim
@@ -546,6 +550,8 @@ def interaction_edge_pre_forward_hook_fn(
                 edge=edge,
                 dataset_size=dataset_size,
                 n_intervals=n_intervals,
+                out_dim_start_idx=out_dim_start_idx,
+                out_dim_end_idx=out_dim_end_idx,
                 integration_method=integration_method,
                 tqdm_desc=tqdm_desc,
             )
@@ -560,6 +566,8 @@ def interaction_edge_pre_forward_hook_fn(
                 n_intervals=n_intervals,
                 integration_method=integration_method,
                 n_stochastic_sources=n_stochastic_sources,
+                out_dim_start_idx=out_dim_start_idx,
+                out_dim_end_idx=out_dim_end_idx,
                 tqdm_desc=tqdm_desc,
             )
     else:

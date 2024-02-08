@@ -425,25 +425,47 @@ def rib_build(
     config = load_config(config_path_or_obj, config_model=RibBuildConfig)
     set_seed(config.seed)
 
+    dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
+
     if config.naive_gradient_flow:
         if n_pods > 1 or pod_rank > 0:
+            # This is probably easily possible to support
             raise ValueError("Naive gradient flow is not yet supported with distributed computing")
         node_layers = config.node_layers
         final_node_layer = node_layers[-1]
         # Run inidivual rib_builds for each node layer
-        for nl in node_layers:
+        results = []
+        interaction_rotation_paths = []
+        for nl in node_layers[:-1]:
             updates = {
+                # Keep rotate_final_node_layer etc.
                 "node_layers": [nl, final_node_layer],
-                # todo: Think about rotate_final_layer, section names, etc.
                 "exp_name": f"{config.exp_name}_{nl}",
                 "naive_gradient_flow": False,
                 "calculate_edges": False,
+                "interaction_matrices_path": None
             }
             config_i = replace_pydantic_model(config, updates)
-            rib_build(config_i, force=force)
+            result_i = rib_build(config_i, force=force)
+            results.append(result_i)
+            interaction_rotation_paths.append(
+                result_i.config.out_dir / (result_i.config.exp_name + "_rib_Cs.pt")
+            )
         # Collect and merge interacton rotations
-
-    dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
+        # dict_keys(['exp_name', 'gram_matrices', 'interaction_rotations', 'edges', 'dist_info', 'contains_all_edges', 'config', 'ml_model_config', 'calc_C_time', 'calc_edges_time'])
+        interaction_results = {"exp_name": config.exp_name, "gram_matrices": {}, "interaction_rotations": [], "edges": [],
+        "dist_info": {'global_size': 1, 'global_rank': 0, 'n_pods': 1, 'pod_rank': 0, 'local_rank': 0, 'local_size': 1,
+        'is_parallelised': False, 'is_main_process': True}, "contains_all_edges": False, "config": config, "ml_model_config": config.model_config,
+        "calc_C_time": 0, "calc_edges_time": None}
+        for interaction_rotation_path in interaction_rotation_paths:
+            loaded = torch.load(interaction_rotation_path)
+            interaction_results["gram_matrices"].update(loaded["gram_matrices"])
+            interaction_results["interaction_rotations"].extend(loaded["interaction_rotations"])
+            interaction_results["calc_C_time"] += loaded["calc_C_time"]
+        # Save merged interaction rotations
+        interaction_matrices_path = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+        torch.save(interaction_results, interaction_matrices_path)
+        config = replace_pydantic_model(config, {"naive_gradient_flow": False, "interaction_matrices_path": interaction_matrices_path})
 
     adjust_logger_dist(dist_info)
     device = get_device_mpi(dist_info)
@@ -540,7 +562,7 @@ def rib_build(
             config.node_layers,
             len(graph_train_loader),
         )
-        interaction_rotations = calculate_interaction_rotations(
+        interaction_results = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
             section_names=section_names,
             node_layers=config.node_layers,
@@ -559,14 +581,14 @@ def rib_build(
             n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
         )
         # InteractionRotation objects used to calculate edges
-        edge_interaction_rotations = interaction_rotations
+        edge_interaction_rotations = interaction_results
 
         calc_C_time = (time.time() - c_start_time) / 60
         logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
     else:
-        gram_matrices, interaction_rotations = load_interaction_rotations(config=config)
+        gram_matrices, interaction_results = load_interaction_rotations(config=config)
         edge_interaction_rotations = [
-            obj for obj in interaction_rotations if obj.node_layer in config.node_layers
+            obj for obj in interaction_results if obj.node_layer in config.node_layers
         ]
 
     if not config.calculate_edges:
@@ -614,7 +636,7 @@ def rib_build(
     results = RibBuildResults(
         exp_name=config.exp_name,
         gram_matrices={k: v.cpu() for k, v in gram_matrices.items()},
-        interaction_rotations=interaction_rotations,
+        interaction_rotations=interaction_results,
         edges=E_hats,
         dist_info=dist_info,
         contains_all_edges=dist_info.global_size == 1,  # True if no parallelisation

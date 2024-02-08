@@ -17,9 +17,10 @@ import yaml
 from mpi4py import MPI
 
 from rib.edge_combiner import combine_edges
+from rib.utils import replace_pydantic_model
 from rib.rib_builder import RibBuildResults, rib_build
 from rib.settings import REPO_ROOT
-from tests.utils import assert_is_close, get_modular_arithmetic_config
+from tests.utils import assert_basis_similarity, assert_is_close, get_modular_arithmetic_config, get_pythia_config, get_tinystories_config
 
 
 def get_single_edges(tmpdir: Path, dist_split_over: str, n_stochastic_sources_edges: Optional[int]):
@@ -125,3 +126,40 @@ def test_stochastic_edges_are_same_dist_split_over_out_dim(tmpdir):
         tmpdir=tmpdir,
         n_stochastic_sources_edges=3,
     )
+
+
+@pytest.mark.mpi
+def test_distributed_basis(tmp_path):
+    config = get_tinystories_config(
+        {
+            "exp_name": "test_basis",
+            "calculate_edges": False,
+            "dist_split_over": "out_dim",
+            "basis_formula": "jacobian",
+            "dataset": {"n_samples": 1, "return_set": "train", "n_ctx": 10},
+            "node_layers": ["ln1.1", "ln2.1", "ln1.2"]
+        }
+    )
+    single_results = rib_build(config)
+
+    double_config = replace_pydantic_model(config, {"out_dir": tmp_path})
+    double_config_path = tmp_path / "double_config.yaml"
+    with open(double_config_path, "w") as f:
+        yaml.dump(json.loads(double_config.model_dump_json()), f)
+    
+    MPI.Finalize()
+    subprocess.run(
+        f"mpirun -n 2 python {REPO_ROOT}/rib_scripts/rib_build/run_rib_build.py "
+        f"{double_config_path.absolute()} --n_pods=1 --pod_rank=0",
+        shell=True,
+        capture_output=True,
+    )
+
+    double_results = RibBuildResults(
+        **torch.load(tmp_path / "distributed_test_basis/rib_Cs_global_rank0.pt")
+    )
+
+    # we don't expect exact match as we are using stochastic sources and phi-generation seeds
+    # are not reproducible with distributed builds
+    for (ir_single, ir_double) in zip(single_results.interaction_rotations[:-1], double_results.interaction_rotations[:-1]):
+        assert_basis_similarity(ir_single, ir_double, error=0.001)

@@ -573,9 +573,10 @@ def calc_basis_jacobian(
             out_dim_chunk_idx=out_dim_chunk_idx,
             device=inputs[0].device,
         )
-        assert phis.shape[0] == (n_stochastic_sources_pos or out_pos_size) * (
-            n_stochastic_sources_hidden or out_hat_hidden_size
-        )
+        if out_dim_n_chunks == 1:
+            assert phis.shape[0] == (n_stochastic_sources_pos or out_pos_size) * (
+                n_stochastic_sources_hidden or out_hat_hidden_size
+            )
 
         # in_grads.shape: batch, i (out_hidden), t (out_pos), s (in_pos), j (in_hidden)
         assert in_pos_size is not None  # needed for mypy

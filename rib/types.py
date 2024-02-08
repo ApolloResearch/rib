@@ -42,3 +42,5 @@ TorchDtype = Annotated[
 # This is a type for pydantic configs that will convert all relative paths
 # to be relative to the ROOT_DIR of rib.
 RootPath = Annotated[Path, BeforeValidator(to_root_path), PlainSerializer(lambda x: str(x))]
+
+IntegrationMethod = Literal["trapezoidal", "gauss-legendre", "gradient"]

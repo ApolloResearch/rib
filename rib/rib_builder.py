@@ -43,7 +43,7 @@ import torch
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from rib.data import (
     BlockVectorDatasetConfig,
@@ -65,7 +65,7 @@ from rib.distributed_utils import (
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
-from rib.loader import get_dataset_chunk, load_model_and_dataset_from_rib_config
+from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
     MLPConfig,
@@ -74,11 +74,12 @@ from rib.models import (
     SequentialTransformerConfig,
 )
 from rib.settings import REPO_ROOT
-from rib.types import TORCH_DTYPES, RootPath, StrDtype
+from rib.types import TORCH_DTYPES, IntegrationMethod, RootPath, StrDtype
 from rib.utils import (
     check_outfile_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
+    get_chunk_indices,
     load_config,
     set_seed,
 )
@@ -157,9 +158,11 @@ class RibBuildConfig(BaseModel):
         description="The number of intervals to use for the integrated gradient approximation."
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
-    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"] = Field(
+    integration_method: Union[IntegrationMethod, dict[str, IntegrationMethod]] = Field(
         "gauss-legendre",
-        description="The integration method to choose.",
+        description="The integration method to choose. A dictionary can be used to select different"
+        "methods for different node layers. The keys are names of node layers, optionally excluding"
+        "`.[block-num]` suffix. These are checked against the node layers used in the graph.",
     )
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
     calculate_edges: bool = Field(
@@ -200,6 +203,10 @@ class RibBuildConfig(BaseModel):
         False,
         description="Whether to center the activations before performing rib.",
     )
+    dist_split_over: Literal["out_dim", "dataset"] = Field(
+        "dataset",
+        description="For distributed edge runs, whether to split over out_dim or dataset.",
+    )
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "RibBuildConfig":
@@ -230,9 +237,39 @@ class RibBuildConfig(BaseModel):
                 self.n_stochastic_sources_edges is None
             ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
 
+        if self.n_stochastic_sources_edges is not None:
+            assert (
+                self.edge_formula == "squared"
+            ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
+
+        if self.edge_formula == "functional" and self.dist_split_over == "out_dim":
+            raise ValueError("Cannot use functional edge formula with out_dim split")
+
         if self.integration_method == "gradient":
             assert self.n_intervals == 0, "n_intervals must be 0 for gradient integration rule"
+
+        if isinstance(self.integration_method, dict):
+            for node_layer in self.node_layers:
+                prefix = node_layer.split(".")[0]
+                assert (
+                    prefix in self.integration_method or node_layer in self.integration_method
+                ), f"Integration method not specified for node layer {node_layer}"
+            node_layer_prefixes = set(node_layer.split(".")[0] for node_layer in self.node_layers)
+            for key in self.integration_method:
+                assert (
+                    key in self.node_layers or key in node_layer_prefixes
+                ), f"Integration method specified for non-existent node layer {key}"
+
         return self
+
+    def get_integration_method(self, node_layer: str) -> IntegrationMethod:
+        """Get the integration method for a given node layer."""
+        if isinstance(self.integration_method, dict):
+            if node_layer in self.integration_method:
+                return self.integration_method[node_layer]
+            prefix = node_layer.split(".")[0]
+            return self.integration_method[prefix]
+        return self.integration_method
 
 
 class RibBuildResults(BaseModel):
@@ -390,13 +427,17 @@ def rib_build(
 
     out_file: Optional[Path] = None
     if config.out_dir is not None:
-        config.out_dir.mkdir(parents=True, exist_ok=True)
         obj_name = "graph" if config.calculate_edges else "Cs"
-        global_rank_suffix = (
-            f"_global_rank{dist_info.global_rank}" if dist_info.global_size > 1 else ""
-        )
-        f_name = f"{config.exp_name}_rib_{obj_name}{global_rank_suffix}.pt"
-        out_file = config.out_dir / f_name
+        if dist_info.global_size > 1:
+            # Save distributed run results in a dedicated directory for the experiment
+            out_dir = config.out_dir / f"distributed_{config.exp_name}"
+            f_name = f"rib_{obj_name}_global_rank{dist_info.global_rank}.pt"
+        else:
+            # Save non-distributed run files in `out`
+            out_dir = config.out_dir
+            f_name = f"{config.exp_name}_rib_{obj_name}.pt"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_file = out_dir / f_name
         if not check_outfile_overwrite(out_file, force):
             dist_info.local_comm.Abort()  # stop this and other processes
 
@@ -427,6 +468,9 @@ def rib_build(
         # MLP "sections" are simply the model layers specified in config.node_layers
         section_names = [layer for layer in config.node_layers if layer != "output"]
 
+    integration_methods = [
+        config.get_integration_method(node_layer) for node_layer in config.node_layers
+    ]
     if config.interaction_matrices_path is None:
         gram_train_loader = DataLoader(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
@@ -481,7 +525,7 @@ def rib_build(
             dtype=dtype,
             device=device,
             n_intervals=config.n_intervals,
-            integration_method=config.integration_method,
+            integration_methods=integration_methods,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
@@ -507,13 +551,17 @@ def rib_build(
     else:
         logger.info("Calculating edges.")
         full_dataset_len = len(dataset)  # type: ignore
-        # no-op if only 1 process
-        data_subset = get_dataset_chunk(
-            dataset, chunk_idx=dist_info.global_rank, total_chunks=dist_info.global_size
-        )
+        if config.dist_split_over == "dataset":
+            # no-op if only 1 process
+            start_idx, end_idx = get_chunk_indices(
+                data_size=full_dataset_len,
+                chunk_idx=dist_info.global_rank,
+                n_chunks=dist_info.global_size,
+            )
+            dataset = Subset(dataset, range(start_idx, end_idx))
 
         edge_train_loader = DataLoader(
-            data_subset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
+            dataset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
         )
 
         logger.info(
@@ -524,7 +572,7 @@ def rib_build(
             interaction_rotations=edge_interaction_rotations,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
-            integration_method=config.integration_method,
+            integration_methods=integration_methods[:-1],
             section_names=section_names,
             data_loader=edge_train_loader,
             dtype=dtype,
@@ -532,6 +580,8 @@ def rib_build(
             data_set_size=full_dataset_len,  # includes data for other processes
             edge_formula=config.edge_formula,
             n_stochastic_sources=config.n_stochastic_sources_edges,
+            out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
+            out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
         )
 
         calc_edges_time = (time.time() - edges_start_time) / 60

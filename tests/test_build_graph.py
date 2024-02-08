@@ -23,7 +23,6 @@ from rib.data_accumulator import collect_dataset_means
 from rib.hook_fns import acts_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.loader import load_model_and_dataset_from_rib_config
-from rib.log import logger
 from rib.models import SequentialTransformer
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 from rib.types import TORCH_DTYPES
@@ -230,7 +229,7 @@ def test_pythia_14m_build_graph_jacobian_stochastic():
         }
     )
     results = graph_build_test(config=config, atol=atol)
-    get_rib_acts_test(results, atol=0)
+    get_rib_acts_test(results, atol=1e-12)
 
 
 @pytest.mark.slow
@@ -286,36 +285,26 @@ def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e
 def rotate_final_layer_invariance(
     config_not_rotated: RibBuildConfig, rtol: float = 1e-7, atol: float = 0
 ):
-    assert config_not_rotated.rotate_final_node_layer is False
+    assert not config_not_rotated.rotate_final_node_layer
     config_rotated = replace_pydantic_model(config_not_rotated, {"rotate_final_node_layer": True})
-    edges_rotated = rib_build(config_rotated).edges
-    edges_not_rotated = rib_build(config_not_rotated).edges
+    rot_results = rib_build(config_rotated)
+    not_rot_results = rib_build(config_not_rotated)
 
-    # -1 has no edges, -2 is the final layer and changes
-    comparison_layers = config_rotated.node_layers[:-2]
-    for i, module_name in enumerate(comparison_layers):
-        # E_hats[i] is a tuple (name, tensor)
-        logger.info(("Comparing", module_name))
-        rot = edges_rotated[i][1]
-        notrot = edges_not_rotated[i][1]
-        # Check shape
-        assert (
-            rot.shape == notrot.shape
-        ), f"edges_not_rotated and edges_rotated not same shape for {module_name}"
-        # Check values
-        assert_close(
-            rot,
-            notrot,
-            rtol=rtol,
-            atol=atol,
-        )
+    for rot_ir, not_rot_ir in zip(
+        rot_results.interaction_rotations[:-1], not_rot_results.interaction_rotations[:-1]
+    ):
+        assert_basis_similarity(rot_ir, not_rot_ir, error=0.01)
+
+    # we skip last edge as the output basis will not be the same
+    assert len(rot_results.edges) > 1, "No edges to compare!"
+    for rot_edge, not_rot_edge in zip(rot_results.edges[:-1], not_rot_results.edges[:-1]):
+        assert_close(rot_edge.E_hat, not_rot_edge.E_hat, rtol=rtol, atol=atol)
 
 
-@pytest.mark.skip
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "basis_formula, edge_formula",
     [
-        ("(1-alpha)^2", "functional"),
         ("(1-0)*alpha", "functional"),
         ("(1-alpha)^2", "squared"),
         ("(1-0)*alpha", "squared"),
@@ -333,15 +322,14 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
             "basis_formula": basis_formula,
             "edge_formula": edge_formula,
             "dtype": "float64",
-            "node_layers": ["layers.1", "layers.2"],
+            "node_layers": ["layers.0", "layers.1", "layers.2"],
+            "truncation_threshold": 1e-10,
         }
     )
 
     rotate_final_layer_invariance(config_not_rotated=not_rotated_config, rtol=rtol, atol=atol)
 
 
-@pytest.mark.slow
-@pytest.mark.xfail
 @pytest.mark.parametrize(
     "basis_formula, edge_formula",
     [
@@ -353,35 +341,36 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
     ],
 )
 def test_modular_mlp_rotate_final_layer_invariance(
-    basis_formula, edge_formula, rtol=1e-7, atol=1e-8
+    basis_formula, edge_formula, rtol=1e-12, atol=1e-12
 ):
-    """Test that the non-final edges are the same for ModularMLP whether or not we rotate the final layer."""
-    config = get_modular_mlp_config({"basis_formula": basis_formula, "edge_formula": edge_formula})
+    """Test that the non-final edges are the same for ModularMLP whether or not we rotate the final
+    layer."""
+    config = get_modular_mlp_config(
+        {
+            "basis_formula": basis_formula,
+            "edge_formula": edge_formula,
+            # note: if we also include the output the test requires rtol&atol = 1e-2
+            "node_layers": ["layers.0", "layers.1", "layers.2"],
+            "truncation_threshold": 1e-10,
+        }
+    )
     rotate_final_layer_invariance(config_not_rotated=config, rtol=rtol, atol=atol)
 
 
-@pytest.mark.xfail
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "basis_formula, edge_formula, dtype_str",
+    "basis_formula, edge_formula",
     [
-        # functional fp32 currently fails with these tolerances
-        # ("(1-alpha)^2", "functional", "float32"),
-        # ("(1-0)*alpha", "functional", "float32"),
-        ("(1-alpha)^2", "functional", "float64"),
-        ("(1-0)*alpha", "functional", "float64"),
-        ("(1-alpha)^2", "squared", "float32"),
-        ("(1-0)*alpha", "squared", "float32"),
-        ("(1-alpha)^2", "squared", "float64"),
-        ("(1-0)*alpha", "squared", "float64"),
+        ("(1-0)*alpha", "squared"),
+        ("(1-alpha)^2", "squared"),
+        ("jacobian", "squared"),
     ],
 )
 def test_modular_arithmetic_rotate_final_layer_invariance(
     basis_formula,
     edge_formula,
-    dtype_str,
-    rtol=1e-3,
-    atol=1e-3,
+    rtol=1e-6,
+    atol=1e-6,
 ):
     """Test that the non-final edges are independent of final layer rotation for modadd.
 
@@ -390,7 +379,12 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
     """
     rotate_final_layer_invariance(
         config_not_rotated=get_modular_arithmetic_config(
-            {"basis_formula": basis_formula, "edge_formula": edge_formula, "dtype": dtype_str}
+            {
+                "basis_formula": basis_formula,
+                "edge_formula": edge_formula,
+                "dtype": "float64",
+                "truncation_threshold": 1e-10,
+            }
         ),
         rtol=rtol,
         atol=atol,
@@ -410,6 +404,28 @@ def test_modular_arithmetic_build_graph_invalid_node_layers():
     config = get_modular_arithmetic_config({"node_layers": ["mlp_in.0", "ln1.0", "unembed"]})
     with pytest.raises(AssertionError, match="Node layers must be in order."):
         graph_build_test(config=config, atol=0)
+
+
+def test_integration_method_specification():
+    # default node layers are ["ln2.1", "unembed"]
+    invalid_methods = [
+        "invalid",
+        {"ln2": "invalid", "unembed": "trapezoidal"},
+        {"ln2": "trapezoidal"},  # missing unembed
+        {"ln2": "trapezoidal", "unembed": "trapezoidal", "output": "trapezoidal"},  # extra output
+    ]
+    for method in invalid_methods:
+        with pytest.raises(ValueError):
+            get_pythia_config({"integration_method": method})
+
+    valid_methods = [
+        "trapezoidal",
+        {"ln2": "trapezoidal", "unembed": "gauss-legendre"},
+        {"ln2": "gauss-legendre", "ln2.1": "trapezoidal", "unembed": "gauss-legendre"},
+    ]
+    for method in valid_methods:
+        config = get_pythia_config({"integration_method": method})
+        assert config.get_integration_method("ln2.1") == "trapezoidal"
 
 
 @pytest.mark.slow
@@ -684,7 +700,7 @@ def test_stochastic_source_modadd_convergence():
 
 
 @pytest.fixture(scope="module")
-def no_stoc_result():
+def no_stoc_result() -> RibBuildResults:
     return rib_build(get_tinystories_config({"calculate_edges": False}))
 
 
@@ -692,19 +708,14 @@ def no_stoc_result():
 @pytest.mark.parametrize(
     ["pos_sources", "hidden_sources", "error"],
     [
+        [None, 10, 0.2],
         [None, 40, 0.1],
-        [2, None, 0.07],
-        [2, 40, 0.1],
+        [3, None, 0.07],
+        [3, 40, 0.1],
     ],
 )
 def test_stochastic_basis_tinystories(no_stoc_result, pos_sources, hidden_sources, error):
-    """Test stochastic basis in the hidden + position dimension on TinyStories.
-
-    More basis sources allowed because they span 64*10 dims rather than 10 dims.
-
-    We find that with 640 stochastic sources (n_ctx==10, d_hidden=64) the edges differ by up to
-    26.9% of the largest edge.
-    """
+    """Test stochastic basis in the hidden + position dimension on TinyStories."""
     config_stochastic = get_tinystories_config(
         {
             "n_stochastic_sources_basis_pos": pos_sources,

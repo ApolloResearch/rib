@@ -255,9 +255,6 @@ def assert_basis_similarity(
     dir_norm_ratios = torch.norm(ir_A.C, dim=0)[a_order] / torch.norm(ir_B.C, dim=0)[b_order]
     lambda_ratios = ir_A.Lambda[a_order] / ir_B.Lambda[b_order]
     if error is not None:
-        print(f"dir_sims: {dir_sims}")
-        print(f"dir_norm_ratios: {dir_norm_ratios}")
-        print(f"lambda_ratios: {lambda_ratios}")
         assert_is_ones(dir_sims.mean(), atol=error, node_layer=ir_A.node_layer)
         assert_is_zeros(dir_sims.std(), atol=error, node_layer=ir_A.node_layer)
         assert_is_ones(dir_norm_ratios.mean(), atol=error, node_layer=ir_A.node_layer)

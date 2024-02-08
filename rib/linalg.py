@@ -490,13 +490,26 @@ def _generate_phis_array(
 ) -> Int8[Tensor, "n_phis batch out_pos out_hidden"]:
     """Makes array representing the output pos and emb compoents to weight in the jacobian.
 
-    Each phi represents one "vector" to take a jacobian-vector product with.
-    If no stochasticity is used, this will iterate through all (pos, hidden idx) pairs and put a
-    one at that position in the tensor. If stoch sources are used in both dimensions then each phi
-    will be a random vector of ±1s. If stoch sources are used in only one dimension, then the
-    offdiagonal of the non-stocastic dimension will be zero and the diagonal will be ±1s.
+    The output tesors can be thought of as a collection of phi arrays, where each phi is a single
+    vector to take a jacobian-vector product with. Each phi is shape (batch out_pos out_hidden)
+    to match the output activations.
+    - If no stochasticity is used, we iterate over (pos, hidden) pairs (t, i), making phi with
+        - phi[:, t, i] = 1
+        - phi zero everywhere else
+    - If stocasticity is over position only, we iterate over (pos_sources, hidden) pairs (r_p, i):
+        - phi[:, :, i] = ±1
+        - phi zero everywhere else
+    - If stocasticity is over hidden only, we iterate over (pos, hidden_sources) pairs (t, r_h):
+        - phi[:, t, :] = ±1
+        - phi zero everywhere else
+    - If stocasticity is over both, we iterate over (pos_sources, hidden_sources) pairs (r_p, r_h):
+        - phi = ±1 everywhere
 
-    We use int8 to save memory. All values will be in {-1, 0, 1}.
+    All values will be in {-1, 0, 1}. We use int8 to save memory.
+
+    When running our basis calculation distributed over multiple processes, we only return one
+    chunk of the phis per process. The outputs are combined by summing the resulting M_dash
+    tensors in `rib.data_accumulator.collect_M_dash_and_Lambda_dash`.
     """
     phis = []
     all_pos_hid_idxs = list(

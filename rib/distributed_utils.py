@@ -95,7 +95,7 @@ def check_sizes_mpi(dist_info: DistributedInfo, tensor: torch.Tensor):
 
 def sum_across_processes(tensor: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
     if tensor is None:
-        return
+        return None
     cpu_tensor = tensor.cpu()
     MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, cpu_tensor, op=MPI.SUM)
     return cpu_tensor.to(tensor.device)

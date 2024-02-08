@@ -461,9 +461,9 @@ def rib_build(
                 "exp_name": f"{config.exp_name}_{current_node_layer}",
                 "naive_gradient_flow": False,
                 "calculate_edges": False,
-                "interaction_matrices_path": None
-                # These could be run with out_dir = None. Maybe leave it with saving in case
-                # a run crashes at some time? Not sure.
+                "interaction_matrices_path": None,
+                "out_dir": None,
+                # These could be run with out_dir = out_dir ton save the run in case it crashes
             }
             config_i = replace_pydantic_model(config, updates)
             result_i = rib_build(config_i, force=force)
@@ -480,7 +480,7 @@ def rib_build(
                 results.interaction_rotations.insert(0, result_i.interaction_rotations[0])
         # Save merged interaction matrices results file
         results.exp_name = config.exp_name
-        results.config = replace_pydantic_model(config, {"node_layers": node_layers})
+        results.config = replace_pydantic_model(config, {"node_layers": node_layers, "out_dir": config.out_dir})
         config.out_dir.mkdir(parents=True, exist_ok=True)
         interaction_matrices_path = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
         torch.save(results.model_dump(), interaction_matrices_path)

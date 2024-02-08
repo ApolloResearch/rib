@@ -1,4 +1,4 @@
-exp_name: modular_arithmetic
+exp_name: modular_arithmetic_naive_gradient_flow
 seed: 0
 tlens_pretrained: null
 tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
@@ -22,6 +22,6 @@ n_intervals: 0
 dtype: float64
 calculate_edges: true
 eval_type: accuracy
-naive_gradient_flow: false
+naive_gradient_flow: true
 edge_formula: squared
 basis_formula: jacobian

@@ -506,6 +506,8 @@ def rib_build(
             means=means,
             n_stochastic_sources_pos=config.n_stochastic_sources_basis_pos,
             n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
+            out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
+            out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
         )
         # InteractionRotation objects used to calculate edges
         edge_interaction_rotations = interaction_rotations

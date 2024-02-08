@@ -350,6 +350,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
+    out_dim_n_chunks: int = 1,
+    out_dim_chunk_idx: int = 0,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -384,6 +386,9 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
     if basis_formula == "(1-alpha)^2" or basis_formula == "(1-0)*alpha":
+        if not (out_dim_n_chunks == 1 and out_dim_chunk_idx == 0):
+            raise NotImplementedError
+
         in_grads = calc_basis_integrated_gradient(
             module=module,
             inputs=inputs,
@@ -431,6 +436,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             integration_method=integration_method,
             n_stochastic_sources_pos=n_stochastic_sources_pos,
             n_stochastic_sources_hidden=n_stochastic_sources_hidden,
+            out_dim_n_chunks=out_dim_n_chunks,
+            out_dim_chunk_idx=out_dim_chunk_idx,
         )
         has_pos = inputs[0].dim() == 3
         if has_pos:

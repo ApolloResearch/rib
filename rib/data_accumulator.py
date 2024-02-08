@@ -10,6 +10,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from rib.distributed_utils import sum_across_processes
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
     dataset_mean_forward_hook_fn,
@@ -258,6 +259,8 @@ def collect_M_dash_and_Lambda_dash(
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
+    out_dim_n_chunks: int = 1,
+    out_dim_chunk_idx: int = 0,
 ) -> tuple[Float[Tensor, "orig_in orig_in"], Float[Tensor, "orig_in orig_in"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -306,6 +309,8 @@ def collect_M_dash_and_Lambda_dash(
             "basis_formula": basis_formula,
             "n_stochastic_sources_pos": n_stochastic_sources_pos,
             "n_stochastic_sources_hidden": n_stochastic_sources_hidden,
+            "out_dim_n_chunks": out_dim_n_chunks,
+            "out_dim_chunk_idx": out_dim_chunk_idx,
         },
     )
 
@@ -322,6 +327,10 @@ def collect_M_dash_and_Lambda_dash(
     M_dash = hooked_model.hooked_data[hook_name]["M_dash"]
     Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
     hooked_model.clear_hooked_data()
+
+    if out_dim_n_chunks > 1:
+        M_dash = sum_across_processes(M_dash)
+        Lambda_dash = sum_across_processes(Lambda_dash)
 
     return M_dash, Lambda_dash
 

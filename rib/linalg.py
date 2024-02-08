@@ -1,3 +1,4 @@
+from itertools import product
 from typing import Callable, Literal, NamedTuple, Optional, Union
 
 import numpy as np
@@ -9,6 +10,7 @@ from torch import Tensor
 from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES, StrDtype
+from rib.utils import get_chunk_indices
 
 
 def eigendecompose(
@@ -482,6 +484,8 @@ def _generate_phis_array(
     out_hat_hidden_size: int,
     n_stochastic_sources_pos: Optional[int],
     n_stochastic_sources_hidden: Optional[int],
+    out_dim_n_chunks: int,
+    out_dim_chunk_idx: int,
     device: torch.device,
 ) -> Int8[Tensor, "n_phis batch out_pos out_hidden"]:
     """Makes array representing the output pos and emb compoents to weight in the jacobian.
@@ -495,18 +499,30 @@ def _generate_phis_array(
     We use int8 to save memory. All values will be in {-1, 0, 1}.
     """
     phis = []
-    for t in range(n_stochastic_sources_pos or out_pos_size):
-        for i in range(n_stochastic_sources_hidden or out_hat_hidden_size):
-            phi = torch.zeros(
-                (batch_size, out_pos_size, out_hat_hidden_size), dtype=torch.int8, device=device
+    all_pos_hid_idxs = list(
+        product(
+            range(n_stochastic_sources_pos or out_pos_size),
+            range(n_stochastic_sources_hidden or out_hat_hidden_size),
+        )
+    )
+    subset_pod_hid_idxs = all_pos_hid_idxs[
+        slice(
+            *get_chunk_indices(
+                len(all_pos_hid_idxs), n_chunks=out_dim_n_chunks, chunk_idx=out_dim_chunk_idx
             )
-            if n_stochastic_sources_pos is None and n_stochastic_sources_hidden is None:
-                phi[:, t, i] = 1
-            else:
-                p_slice = t if n_stochastic_sources_pos is None else slice(None)
-                h_slice = i if n_stochastic_sources_hidden is None else slice(None)
-                phi[:, p_slice, h_slice] = _generate_sources(phi[:, p_slice, h_slice])  # type: ignore[index]
-            phis.append(phi)
+        )
+    ]
+    for t, i in subset_pod_hid_idxs:
+        phi = torch.zeros(
+            (batch_size, out_pos_size, out_hat_hidden_size), dtype=torch.int8, device=device
+        )
+        if n_stochastic_sources_pos is None and n_stochastic_sources_hidden is None:
+            phi[:, t, i] = 1
+        else:
+            p_slice = t if n_stochastic_sources_pos is None else slice(None)
+            h_slice = i if n_stochastic_sources_hidden is None else slice(None)
+            phi[:, p_slice, h_slice] = _generate_sources(phi[:, p_slice, h_slice])  # type: ignore[index]
+        phis.append(phi)
     return torch.stack(phis, dim=0)
 
 
@@ -521,6 +537,8 @@ def calc_basis_jacobian(
     integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
+    out_dim_n_chunks: int = 1,
+    out_dim_chunk_idx: int = 0,
 ) -> Float[Tensor, "out_hidden_or_sources batch in_pos in_hidden"]:
     # Ensure that the inputs have requires_grad=True
     for x in inputs:
@@ -546,11 +564,13 @@ def calc_basis_jacobian(
 
     if has_pos:
         phis: Int8[Tensor, "n_phis batch out_pos out_hidden"] = _generate_phis_array(
-            batch_size,
-            out_pos_size,
-            out_hat_hidden_size,
-            n_stochastic_sources_pos,
-            n_stochastic_sources_hidden,
+            batch_size=batch_size,
+            out_pos_size=out_pos_size,
+            out_hat_hidden_size=out_hat_hidden_size,
+            n_stochastic_sources_pos=n_stochastic_sources_pos,
+            n_stochastic_sources_hidden=n_stochastic_sources_hidden,
+            out_dim_n_chunks=out_dim_n_chunks,
+            out_dim_chunk_idx=out_dim_chunk_idx,
             device=inputs[0].device,
         )
         assert phis.shape[0] == (n_stochastic_sources_pos or out_pos_size) * (
@@ -592,6 +612,9 @@ def calc_basis_jacobian(
                 )
                 in_grads[r] += torch.cat(phi_in_grads, dim=-1) * point.weight
     else:
+        if not (out_dim_n_chunks == 1 and out_dim_chunk_idx == 0):
+            raise NotImplementedError
+
         # in_grads.shape: batch, i (out_hidden), j (in_hidden)
         in_grads = torch.zeros(
             batch_size,

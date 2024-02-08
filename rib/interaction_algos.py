@@ -140,6 +140,8 @@ def calculate_interaction_rotations(
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
+    out_dim_n_chunks: int = 1,
+    out_dim_chunk_idx: int = 0,
 ) -> list[InteractionRotation]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -223,6 +225,8 @@ def calculate_interaction_rotations(
             means=means[node_layers[-1]] if means is not None else None,
             section_name="",
             C_next_layer=None,
+            out_dim_n_chunks=1,  # we don't parallelize the output layer, it's fast anyways
+            out_dim_chunk_idx=0,  # we don't parallelize the output layer, it's fast anyways
         )
     else:
         if node_layers[-1] == "output":
@@ -282,6 +286,8 @@ def calculate_interaction_rotations(
                 means=means[node_layer] if means is not None else None,
                 section_name=section_name,
                 C_next_layer=C_next_layer,
+                out_dim_n_chunks=out_dim_n_chunks,
+                out_dim_chunk_idx=out_dim_chunk_idx,
             )
         )
 
@@ -307,6 +313,8 @@ def _calculate_one_interaction_rotation(
     means: Optional[Float[Tensor, "d_hidden"]],
     section_name: str,
     C_next_layer: Optional[Float[Tensor, "orig rib"]],
+    out_dim_n_chunks: int,
+    out_dim_chunk_idx: int,
 ) -> InteractionRotation:
     """Calculate a single interaction rotation matrix (C) and it's psuedo-inverse (C_pinv)
 
@@ -392,6 +400,8 @@ def _calculate_one_interaction_rotation(
         basis_formula=basis_formula,
         n_stochastic_sources_pos=n_stochastic_sources_pos,
         n_stochastic_sources_hidden=n_stochastic_sources_hidden,
+        out_dim_n_chunks=out_dim_n_chunks,
+        out_dim_chunk_idx=out_dim_chunk_idx,
     )
     # Then convert it into the pca basis
     M: Float[Tensor, "orig_trunc orig_trunc"] = (

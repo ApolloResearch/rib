@@ -143,6 +143,7 @@ def test_distributed_basis(tmp_path):
             "basis_formula": "jacobian",
             "dataset": {"n_samples": 1, "return_set": "train", "n_ctx": 10},
             "node_layers": ["ln1.1", "ln2.1", "ln1.2"],
+            "out_dir": None,
         }
     )
     single_results = rib_build(config)
@@ -159,12 +160,8 @@ def test_distributed_basis(tmp_path):
         capture_output=True,
     )
 
-    double_results = RibBuildResults(
-        **torch.load(tmp_path / "distributed_test_basis/rib_Cs_global_rank0.pt")
-    )
+    double_results = RibBuildResults(**torch.load(tmp_path / "test_basis_rib_Cs.pt"))
 
-    # we don't expect exact match as we are using stochastic sources and phi-generation seeds
-    # are not reproducible with distributed builds
     for ir_single, ir_double in zip(
         single_results.interaction_rotations[:-1], double_results.interaction_rotations[:-1]
     ):

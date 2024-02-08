@@ -81,6 +81,7 @@ from rib.utils import (
     eval_model_accuracy,
     get_chunk_indices,
     load_config,
+    replace_pydantic_model,
     set_seed,
 )
 
@@ -206,6 +207,11 @@ class RibBuildConfig(BaseModel):
     dist_split_over: Literal["out_dim", "dataset"] = Field(
         "dataset",
         description="For distributed edge runs, whether to split over out_dim or dataset.",
+    )
+    naive_gradient_flow: bool = Field(
+        False,
+        description="Use gradient flow (naive version), running repeated RIB builds with pairs of"
+        "node layers.",
     )
 
     @model_validator(mode="after")
@@ -418,6 +424,24 @@ def rib_build(
     """
     config = load_config(config_path_or_obj, config_model=RibBuildConfig)
     set_seed(config.seed)
+
+    if config.naive_gradient_flow:
+        if n_pods > 1 or pod_rank > 0:
+            raise ValueError("Naive gradient flow is not yet supported with distributed computing")
+        node_layers = config.node_layers
+        final_node_layer = node_layers[-1]
+        # Run inidivual rib_builds for each node layer
+        for nl in node_layers:
+            updates = {
+                "node_layers": [nl, final_node_layer],
+                # todo: Think about rotate_final_layer, section names, etc.
+                "exp_name": f"{config.exp_name}_{nl}",
+                "naive_gradient_flow": False,
+                "calculate_edges": False,
+            }
+            config_i = replace_pydantic_model(config, updates)
+            rib_build(config_i, force=force)
+        # Collect and merge interacton rotations
 
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
 

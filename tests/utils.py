@@ -199,17 +199,30 @@ def assert_is_zeros(tensor, atol, **kwargs):
     assert_is_close(tensor, 0.0, atol=atol, rtol=0, **kwargs)
 
 
-def _assignment_permutations(sim: torch.Tensor) -> tuple[list[int], list[int]]:
+def _assignment_permutations(
+    ir_A: InteractionRotation,
+    ir_B: InteractionRotation,
+) -> tuple[list[int], list[int]]:
     """Return the indices of an assignment between rows and cols using a greedy algorithm.
+
+    Computes a similarity matrix between ribdirs of A and ribdirs of B which combines cos-sim of
+    direction and ratio between lambdas
 
     For each column in order chooses the maximal row that hasn't been chosen yet.
     Will return lists of even length, equal to the minimium of the number of rows and columns.
 
-    A replacement for `scipy.optimize.linear_sum_assignment` without a scipy dependancy."""
-    rows_selected = torch.zeros(sim.shape[0], dtype=torch.bool)
+    If we add `scipy` dependancy, we should use `scipy.optimize.linear_sum_assignment`."""
+    cos_sim = cosine_similarity(ir_A.C.unsqueeze(1), ir_B.C.unsqueeze(2), dim=0).abs()
+    lambda_ratios = ir_A.Lambda.unsqueeze(0) / ir_B.Lambda.unsqueeze(1)
+    lambda_sim = torch.min(lambda_ratios, 1 / lambda_ratios)
+    assert (lambda_sim <= 1).all() and (lambda_sim > 0).all() and not torch.isnan(lambda_sim).any()
+
+    n = min(ir_A.C.shape[1], ir_B.C.shape[1])
+    sim = cos_sim[:n, :n] * lambda_sim[:n, :n]
+    rows_selected = torch.zeros(n, dtype=torch.bool)
     row_idxs = []
     col_idxs = []
-    for col_idx in range(min(sim.shape)):
+    for col_idx in range(n):
         masked_col = torch.where(rows_selected, -torch.inf, sim[:, col_idx])
         row_idx = masked_col.argmax().item()
         row_idxs.append(row_idx)
@@ -220,22 +233,25 @@ def _assignment_permutations(sim: torch.Tensor) -> tuple[list[int], list[int]]:
 
 def assert_basis_similarity(
     ir_A: InteractionRotation, ir_B: InteractionRotation, error: Optional[float] = 0.02
-):
+) -> tuple[float, float, float]:
     """
     Compare two InteractionRotations and assert similarity, allowing for permutations.
 
-    Returns:
-        dir_sims: cosine similarities of the permuted basis vectors
-        dir_norm_ratios: the ratio of basis vector norms
-        lambda_ratios: the ratio of lambda values for the basis directions
+    Pairs up the basis vectors for the two bases and then checks three things:
+        - cosine similarity (absolute valued)
+        - ratio of L2-vector norms
+        - ratio of lambdas
+
+    If the bases are identical, these would be three vectors of all 1s. For each metric we check:
+        - the mean is 1 ± error
+        - the standard deviation is smaller than error
     """
     assert ir_A.node_layer == ir_B.node_layer
     if ir_A.C is None:
         assert ir_B.C is None
-        return None, None, None
-    sim = cosine_similarity(ir_A.C.unsqueeze(1), ir_B.C.unsqueeze(2), dim=0).abs()
-    a_order, b_order = _assignment_permutations(sim)
-    dir_sims = sim[a_order, b_order]
+
+    a_order, b_order = _assignment_permutations(ir_A, ir_B)
+    dir_sims = cosine_similarity(ir_A.C[:, a_order], ir_B.C[:, b_order], dim=0).abs()
     dir_norm_ratios = torch.norm(ir_A.C, dim=0)[a_order] / torch.norm(ir_B.C, dim=0)[b_order]
     lambda_ratios = ir_A.Lambda[a_order] / ir_B.Lambda[b_order]
     if error is not None:
@@ -245,4 +261,3 @@ def assert_basis_similarity(
         assert_is_zeros(dir_norm_ratios.std(), atol=error, node_layer=ir_A.node_layer)
         assert_is_ones(lambda_ratios.mean(), atol=error, node_layer=ir_A.node_layer)
         assert_is_zeros(lambda_ratios.std(), atol=error, node_layer=ir_A.node_layer)
-    return dir_sims, dir_norm_ratios, lambda_ratios

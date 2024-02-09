@@ -15,16 +15,6 @@ import einops
 import pytest
 import torch
 from fancy_einsum import einsum
-from tests.utils import (
-    assert_basis_similarity,
-    assert_is_close,
-    assert_is_zeros,
-    get_mnist_config,
-    get_modular_arithmetic_config,
-    get_modular_mlp_config,
-    get_pythia_config,
-    get_tinystories_config,
-)
 from torch.testing import assert_close
 from torch.utils.data import DataLoader
 
@@ -37,6 +27,16 @@ from rib.models import SequentialTransformer
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 from rib.types import TORCH_DTYPES
 from rib.utils import replace_pydantic_model
+from tests.utils import (
+    assert_basis_similarity,
+    assert_is_close,
+    assert_is_zeros,
+    get_mnist_config,
+    get_modular_arithmetic_config,
+    get_modular_mlp_config,
+    get_pythia_config,
+    get_tinystories_config,
+)
 
 
 def graph_build_test(config: RibBuildConfig, atol: float):

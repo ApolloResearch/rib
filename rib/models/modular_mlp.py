@@ -180,7 +180,10 @@ def generate_block_weights(
 
     # Vertically concatenate the top and bottom rows to form the final matrix
     final_matrix = torch.cat([top_row, bottom_row], dim=0)
-    final_matrix.shape = (total_width, total_width)
+    assert final_matrix.shape == (
+        total_width,
+        total_width,
+    ), "final_matrix shape must be (total_width, total_width)"
     return final_matrix
 
 
@@ -209,7 +212,9 @@ def create_modular_mlp(modular_mlp_config: ModularMLPConfig, seed: Optional[int]
         torch.manual_seed(seed)
 
     # Hardcode weights and biases
-    assert len(mlp.layers) == modular_mlp_config.n_hidden_layers + 1
+    assert (
+        len(mlp.layers) == modular_mlp_config.n_hidden_layers + 1
+    ), "Total number of network layers must match n_hidden_layers + 1"
     for l in range(len(mlp.layers)):
         layer = mlp.layers[l]
         if l in modular_mlp_config.mixing_layers:

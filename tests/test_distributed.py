@@ -141,9 +141,10 @@ def test_distributed_basis(tmp_path):
             "calculate_edges": False,
             "dist_split_over": "out_dim",
             "basis_formula": "jacobian",
-            "dataset": {"n_samples": 1, "return_set": "train", "n_ctx": 10},
+            "dataset": {"n_samples": 4, "return_set": "train", "n_ctx": 10},
             "node_layers": ["ln1.1", "ln2.1", "ln1.2"],
             "out_dir": None,
+            "batch_size": 3,
         }
     )
     single_results = rib_build(config)

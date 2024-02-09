@@ -552,6 +552,7 @@ def calc_basis_jacobian(
     n_stochastic_sources_hidden: Optional[int] = None,
     out_dim_n_chunks: int = 1,
     out_dim_chunk_idx: int = 0,
+    ignore_0th_pos: bool = False,
 ) -> Float[Tensor, "out_hidden_or_sources batch in_pos in_hidden"]:
     # Ensure that the inputs have requires_grad=True
     for x in inputs:
@@ -590,6 +591,8 @@ def calc_basis_jacobian(
             assert phis.shape[0] == (n_stochastic_sources_pos or out_pos_size) * (
                 n_stochastic_sources_hidden or out_hat_hidden_size
             )
+        # if ignore_0th_pos:
+        #     phis[:, :]
 
         # in_grads.shape: batch, i (out_hidden), t (out_pos), s (in_pos), j (in_hidden)
         assert in_pos_size is not None  # needed for mypy
@@ -872,6 +875,7 @@ def calc_gram_matrix(
         Float[Tensor, "batch orig"],
     ],
     dataset_size: int,
+    ignore_0th_pos: bool = False,
 ) -> Float[Tensor, "orig orig"]:
     """Calculate the gram matrix for a given tensor.
 
@@ -889,6 +893,8 @@ def calc_gram_matrix(
     """
     if acts.dim() == 3:  # tensor with pos dimension
         einsum_pattern = "bpi, bpj -> ij"
+        if ignore_0th_pos:
+            acts = acts[:, 1:]
         normalization_factor = acts.shape[1] * dataset_size
     elif acts.dim() == 2:  # tensor without pos dimension
         einsum_pattern = "bi, bj -> ij"

@@ -682,6 +682,7 @@ def calc_edge_stochastic(
     out_dim_start_idx: int,
     out_dim_end_idx: int,
     tqdm_desc: str = "Integration steps (alphas)",
+    ignore_0th_pos: bool = False,
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the stochastic method.
 
@@ -756,6 +757,8 @@ def calc_edge_stochastic(
                     phi_f_out_alpha_hat, alpha_f_in_hat, retain_graph=True
                 )[0]
                 i_grad *= point.weight
+                if ignore_0th_pos:
+                    i_grad[:, 0] = 0
 
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat and sum over the input pos

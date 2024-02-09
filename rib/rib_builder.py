@@ -440,13 +440,12 @@ def rib_build(
             config = replace_pydantic_model(config, {"naive_gradient_flow": False})
             return rib_build(config, force=force, n_pods=n_pods, pod_rank=pod_rank)
 
-        assert config.out_dir is not None, (
-            "naive gradient flow requires out_dir to save"
-            "interaction matrices. Technically we can choose to"
-            "save or not save the intermediate interaction matrices"
-            "but we always need to save the final merged"
-            "interaction matrices to pass it on to the edges run."
-        )
+        if config.out_dir is None:
+            raise NotImplementedError(
+                "Naive gradient flow requires out_dir to save intermediate"
+                "Cs files. We could use a temp dir if out_dir is None, but"
+                "this is not yet supported."
+            )
         # There is possibly a way to avoid this with some refactoring (allowing rib_build() to take
         # in an interaction_matrices object but this seems not worth it.)
 
@@ -457,7 +456,9 @@ def rib_build(
 
         if n_pods > 1 or pod_rank > 0:
             # This is probably possible to support
-            raise ValueError("Naive gradient flow is not yet supported with distributed computing")
+            raise NotImplementedError(
+                "Naive gradient flow is not yet supported with distributed computing"
+            )
         node_layers = config.node_layers
         final_node_layer = node_layers[-1]
         # Run inidivual rib_builds for each node layer. Iterate through node_layers backwards (from
@@ -471,8 +472,7 @@ def rib_build(
                 "naive_gradient_flow": False,
                 "calculate_edges": False,
                 "interaction_matrices_path": None,
-                "out_dir": None,
-                # These could be run with out_dir = out_dir ton save the run in case it crashes
+                "out_dir": None,  # alternatively use temp files that are preserved in case of crash
             }
             config_i = replace_pydantic_model(config, updates)
             result_i = rib_build(config_i, force=force)
@@ -594,7 +594,7 @@ def rib_build(
             config.node_layers,
             len(graph_train_loader),
         )
-        interaction_results = calculate_interaction_rotations(
+        interaction_rotations = calculate_interaction_rotations(
             gram_matrices=gram_matrices,
             section_names=section_names,
             node_layers=config.node_layers,
@@ -613,14 +613,14 @@ def rib_build(
             n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
         )
         # InteractionRotation objects used to calculate edges
-        edge_interaction_rotations = interaction_results
+        edge_interaction_rotations = interaction_rotations
 
         calc_C_time = (time.time() - c_start_time) / 60
         logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
     else:
-        gram_matrices, interaction_results = load_interaction_rotations(config=config)
+        gram_matrices, interaction_rotations = load_interaction_rotations(config=config)
         edge_interaction_rotations = [
-            obj for obj in interaction_results if obj.node_layer in config.node_layers
+            obj for obj in interaction_rotations if obj.node_layer in config.node_layers
         ]
 
     if not config.calculate_edges:
@@ -668,7 +668,7 @@ def rib_build(
     results = RibBuildResults(
         exp_name=config.exp_name,
         gram_matrices={k: v.cpu() for k, v in gram_matrices.items()},
-        interaction_rotations=interaction_results,
+        interaction_rotations=interaction_rotations,
         edges=E_hats,
         dist_info=dist_info,
         contains_all_edges=dist_info.global_size == 1,  # True if no parallelisation

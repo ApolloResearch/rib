@@ -35,6 +35,7 @@ distribute as evenly as possible across all availible GPUs. The rank-0 process w
 and output it as a single file.
 """
 
+import tempfile
 import time
 from pathlib import Path
 from typing import Literal, Optional, Union
@@ -280,10 +281,6 @@ class RibBuildConfig(BaseModel):
             assert (
                 self.mlp_path is None and self.modular_mlp_config is None
             ), "Naive gradient flow not compatible with MLP"
-            assert (
-                self.out_dir is not None
-            ), "Naive gradient flow requires out_dir to save intermediate Cs files"
-
         return self
 
     def get_integration_method(self, node_layer: str) -> IntegrationMethod:
@@ -415,6 +412,31 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], interaction_rotations
 
 
+def _get_out_file_path(
+    config: RibBuildConfig, dist_info: Optional[DistributedInfo] = None, force: bool = False
+) -> Optional[Path]:
+    if config.out_dir is None:
+        return None
+    if config.calculate_edges:
+        if dist_info is not None and dist_info.global_size > 1:
+            # Multiple output files so we store in a dedicated directory for the experiment
+            out_dir = config.out_dir / f"distributed_{config.exp_name}"
+            return out_dir / f"rib_graph_global_rank{dist_info.global_rank}.pt"
+        out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
+    else:
+        # all processes will compute the same Cs so we only have rank 0 write output
+        if dist_info is not None and dist_info.global_size > 1 and dist_info.global_rank != 0:
+            return None
+        out_file = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+    # out_file decided, now check if it exists and if we're allowed to overwrite
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    if not check_outfile_overwrite(out_file, force):
+        if dist_info is not None and dist_info.global_size > 1:
+            dist_info.local_comm.Abort()  # stop this and other processes
+        raise FileExistsError(f"Output file {out_file} already exists")
+    return out_file
+
+
 def gradient_flow_loop(
     config: RibBuildConfig,
     force: bool = False,
@@ -422,20 +444,17 @@ def gradient_flow_loop(
     """Call rib_build() repeatedly to implement a naive version of the gradient flow basis"""
     # Skip directly to rib_build for edge calculation if interaction_matrices_path is provided
     if config.interaction_matrices_path is not None:
-        logger.info("Skipping naive gradient flow because basis given in interaction_matrices_path")
-        config = replace_pydantic_model(config, {"naive_gradient_flow": False})
-        return rib_build(config, force=force)
-
-    # Make sure out_dir is not None and check if we're overwriting
-    if config.out_dir is None:
-        raise NotImplementedError(
-            "Naive gradient flow requires out_dir to save intermediate Cs files. We could use a"
-            "temp dir if out_dir is None, but this is not yet supported."
+        out_file = _get_out_file_path(config, dist_info=None, force=force)
+        logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
+        edges_config = replace_pydantic_model(
+            config, {"naive_gradient_flow": False, "out_dir": None}
         )
-    out_file = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
-    if not check_outfile_overwrite(out_file, force):
-        # Note: This does not use MPI Abort because distributed run is not supported
-        raise FileExistsError(f"Output file {out_file} already exists")
+        edges_results = rib_build(edges_config, force=force)
+        edges_results.config = config
+        if out_file is not None:
+            torch.save(edges_results.model_dump(), out_file)
+            logger.info("Saved gradient flow results (pre-saved Cs, and edges) to %s", out_file)
+        return edges_results
 
     # Run inidivual rib_builds for each node layer. Iterate through node_layers backwards (from
     # output to input). In the first step save rotations for last and second to last layer, in
@@ -450,7 +469,7 @@ def gradient_flow_loop(
             "naive_gradient_flow": False,
             "calculate_edges": False,
             "interaction_matrices_path": None,
-            "out_dir": None,  # alternatively use temp files that are preserved in case of crash
+            "out_dir": None,
         }
         config_i = replace_pydantic_model(config, updates)
         result_i = rib_build(config_i, force=force)
@@ -464,47 +483,45 @@ def gradient_flow_loop(
             assert len(result_i.interaction_rotations) == 2
             assert result_i.interaction_rotations[-1].node_layer == final_node_layer
             results.interaction_rotations.insert(0, result_i.interaction_rotations[0])
-
     # Merge results into a single result and save to file
     assert isinstance(results, RibBuildResults)
-    # Update name and config to the one of the full run (rather than the last individual run)
+    # Update exp_name and config to the one of the full run (rather than the last individual run)
     results.exp_name = config.exp_name
+    # Save the interaction rotations, into out_dir or a temporary directory
+    Cs_out_dir = config.out_dir or Path(tempfile.TemporaryDirectory().name)
     results.config = replace_pydantic_model(
-        results.config,
-        {"naive_gradient_flow": True, "node_layers": node_layers, "out_dir": config.out_dir},
+        config, {"calculate_edges": False, "out_dir": Cs_out_dir}
     )
-    config.out_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(results.model_dump(), out_file)
-    logger.info("Saved gradient flow results to %s", out_file)
+    Cs_out_file = _get_out_file_path(results.config, dist_info=None, force=force)
+    assert Cs_out_file is not None, "Cannot be none since it's either out_dir or a temporary dir"
+    torch.save(results.model_dump(), Cs_out_file)
+    logger.info("Saved gradient flow results (Cs) to %s", Cs_out_file)
 
-    # If the config requests calculation of edges we call rib_build() and pass the gradient-flow
-    # basis via interaction_matrices_path. This will then just calculate the edges.
+    # If the config requests calculation of edges we call rib_build() to compute the edges, passing
+    # the gradient-flow basis via interaction_matrices_path.
     # If the config does not request calculation of edges then we exit. The merged Cs file
     # constitutes a complete (non-calculate-edges) RIB result. We could call rib_build() but all
     # it would do is load the interaction_matrices_path file and save it again.
     if not config.calculate_edges:
         return results
     else:
-        config = replace_pydantic_model(
-            config, {"naive_gradient_flow": False, "interaction_matrices_path": out_file}
+        edges_config = replace_pydantic_model(
+            config,
+            {
+                "naive_gradient_flow": False,
+                "interaction_matrices_path": Cs_out_file,
+                "out_dir": None,
+            },
         )
-        return rib_build(config, force=force)
-
-
-def _get_out_file_path(config: RibBuildConfig, dist_info: DistributedInfo) -> Optional[Path]:
-    if config.out_dir is None:
-        return None
-    if config.calculate_edges:
-        if dist_info.global_size > 1:
-            # Multiple output files so we store in a dedicated directory for the experiment
-            out_dir = config.out_dir / f"distributed_{config.exp_name}"
-            return out_dir / f"rib_graph_global_rank{dist_info.global_rank}.pt"
-        return config.out_dir / f"{config.exp_name}_rib_graph.pt"
-    else:
-        # all processes will compute the same Cs so we only have rank 0 write output
-        if dist_info.global_size > 1 and dist_info.global_rank != 0:
-            return None
-        return config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+        edges_results = rib_build(edges_config, force=force)
+        results.edges = edges_results.edges
+        results.calc_edges_time = edges_results.calc_edges_time
+        # Save the results to file
+        out_file = _get_out_file_path(config, dist_info=None, force=force)
+        if out_file is not None:
+            torch.save(results.model_dump(), out_file)
+            logger.info("Saved gradient flow results (Cs + edges) to %s", out_file)
+        return results
 
 
 def rib_build(
@@ -546,13 +563,7 @@ def rib_build(
             raise NotImplementedError("Distributed naive gradient flow not implemented yet")
         return gradient_flow_loop(config, force)
 
-    out_file = _get_out_file_path(config, dist_info)
-    if out_file is not None:
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        if not check_outfile_overwrite(out_file, force):
-            if dist_info.global_size > 1:
-                dist_info.local_comm.Abort()  # stop this and other processes
-            raise FileExistsError(f"Output file {out_file} already exists")
+    out_file = _get_out_file_path(config, dist_info, force)
 
     calc_C_time = None
     calc_edges_time = None

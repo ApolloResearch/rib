@@ -11,6 +11,8 @@ various scales. This is because combining atol and rtol does not work particular
 that have a small set of large numbers and a large set of small numbers.
 """
 
+# TODO Test all combinations
+
 import einops
 import pytest
 import torch
@@ -184,6 +186,89 @@ def get_means(results: RibBuildResults, atol: float, batch_size=16):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
+    "run_type, use_out_dir",
+    [
+        ("full", 0),
+        ("full", 1),
+        ("partial", 0),
+        ("partial", 1),
+        ("partial", 2),
+    ],
+)
+def test_naive_gradient_flow_interface(run_type, use_out_dir, tmpdir):
+    """Test the Naive Gradient Flow (NGF) interface, making sure that files
+    are written if and only if they should.
+
+    We test
+        1. Full run with / without out_dir
+        2. Edge build with saved Cs, with / without out_dir
+        3. Just run Cs, with / without out_dir
+    """
+    atol = 1e-12
+    defaults = {
+        "exp_name": "modadd_NGF",
+        "basis_formula": "jacobian",
+        "edge_formula": "squared",
+        "integration_method": "gradient",
+        "n_intervals": 0,
+        "naive_gradient_flow": True,
+    }
+    Cs_path = tmpdir / (defaults["exp_name"] + "_rib_Cs.pt")
+    graph_path = tmpdir / (defaults["exp_name"] + "_rib_graph.pt")
+    if run_type == "full":
+        config = get_modular_arithmetic_config(
+            {
+                **defaults,
+                "out_dir": tmpdir if use_out_dir else None,
+            }
+        )
+        results = graph_build_test(config=config, atol=atol)
+        get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
+        if use_out_dir:
+            # Full run saves both Cs and graph (this is only true for NGF)
+            assert Cs_path.exists()
+            assert graph_path.exists()
+        else:
+            assert not Cs_path.exists()
+            assert not graph_path.exists()
+
+    elif run_type == "partial":
+        config_Cs = get_modular_arithmetic_config(
+            {
+                **defaults,
+                "out_dir": tmpdir if use_out_dir else None,
+                "interaction_matrices_path": None,
+                "calculate_edges": False,
+            }
+        )
+        results = rib_build(config_Cs)
+        if use_out_dir:
+            assert Cs_path.exists()
+            assert not graph_path.exists()
+        else:
+            assert not Cs_path.exists()
+            assert not graph_path.exists()
+
+        if use_out_dir:
+            config_edges = get_modular_arithmetic_config(
+                {
+                    **defaults,
+                    "out_dir": tmpdir if use_out_dir == 2 else None,
+                    "interaction_matrices_path": str(Cs_path),
+                    "calculate_edges": True,
+                }
+            )
+            results = rib_build(config_edges)
+            if use_out_dir == 2:
+                assert Cs_path.exists()
+                assert graph_path.exists()
+            elif use_out_dir == 1:
+                assert Cs_path.exists()
+                assert not graph_path.exists()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
     "basis_formula, edge_formula, integration_method, naive_gradient_flow",
     [
         ("(1-alpha)^2", "functional", "trapezoidal", False),
@@ -269,14 +354,14 @@ def test_pythia_14m_build_graph_jacobian_stochastic_and_gradient_flow(tmpdir):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "basis_formula, edge_formula, naive_gradient_flow",
+    "basis_formula, edge_formula",
     [
-        ("(1-alpha)^2", "functional", False),
-        ("(1-0)*alpha", "functional", False),
-        ("(1-alpha)^2", "squared", False),
-        ("(1-0)*alpha", "squared", False),
-        ("jacobian", "squared", False),
-        ("jacobian", "squared", True),
+        ("(1-alpha)^2", "functional"),
+        ("(1-0)*alpha", "functional"),
+        ("(1-alpha)^2", "squared"),
+        ("(1-0)*alpha", "squared"),
+        ("jacobian", "squared"),
+        ("jacobian", "squared"),
     ],
 )
 def test_mnist_build_graph(basis_formula, edge_formula, naive_gradient_flow, tmpdir):

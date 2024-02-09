@@ -1,6 +1,6 @@
-exp_name: rib_modular_arithmetic
+exp_name: rib_modular_arithmetic #_naive_gradient_flow
 ablation_type: rib
-rib_results_path: rib_scripts/rib_build/sample_graphs/modular_arithmetic_rib_graph_sample.pt
+rib_results_path: /home/user/rib/rib_scripts/rib_build/out/modular_arithmetic_rib_graph.pt #_naive_gradient_flow
 schedule:
   schedule_type: exponential
   early_stopping_threshold: null

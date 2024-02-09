@@ -1,4 +1,4 @@
-exp_name: pythia-14m-old
+exp_name: pythia-14m-old-NGF
 seed: 0
 tlens_pretrained: pythia-14m
 tlens_model_path: null
@@ -32,4 +32,7 @@ basis_formula: (1-0)*alpha
 edge_formula: squared
 n_stochastic_sources_basis_hidden: 50
 n_stochastic_sources_basis_pos: 10
+naive_gradient_flow: true
 # using approx 8GB VRAM
+#/home/user/rib/rib_scripts/rib_build/out/pythia-14m-NGF_rib_Cs.pt
+#/home/user/rib/rib_scripts/rib_build/out/pythia-14m_rib_Cs.pt

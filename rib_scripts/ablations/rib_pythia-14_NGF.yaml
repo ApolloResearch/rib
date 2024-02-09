@@ -1,6 +1,6 @@
-exp_name: rib_pythia-14m
+exp_name: rib_pythia-14m-NGF
 ablation_type: rib
-rib_results_path: rib_scripts/rib_build/out/pythia-14m_rib_Cs.pt
+rib_results_path: rib_scripts/rib_build/out/pythia-14m-NGF_rib_Cs.pt
 schedule:
   schedule_type: linear
   early_stopping_threshold: 1.5
@@ -15,8 +15,6 @@ dataset:
   # n_documents: 10
   return_set_portion: first
 ablation_node_layers:
-#todo: Try closer neighbors
-#todo: Try test dataset
   - ln1.0
   - mlp_out.0
   - ln2.3

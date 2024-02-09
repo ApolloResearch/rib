@@ -438,6 +438,11 @@ def rib_build(
             config = replace_pydantic_model(config, {"naive_gradient_flow": False})
             return rib_build(config, force=force, n_pods=n_pods, pod_rank=pod_rank)
 
+        # Cs will always be saved as an intermediate file, so we need to check if we're overwriting
+        interaction_matrices_path = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+        if not check_outfile_overwrite(interaction_matrices_path, force):
+            dist_info.local_comm.Abort()  # stop this and other processes
+
         assert config.out_dir is not None, ("naive gradient flow requires out_dir to save"
                                             "interaction matrices. Technically we can choose to"
                                             "save or not save the intermediate interaction matrices"
@@ -482,9 +487,8 @@ def rib_build(
         results.exp_name = config.exp_name
         results.config = replace_pydantic_model(config, {"node_layers": node_layers, "out_dir": config.out_dir})
         config.out_dir.mkdir(parents=True, exist_ok=True)
-        interaction_matrices_path = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
         torch.save(results.model_dump(), interaction_matrices_path)
-        logger.info("Saved results to %s", interaction_matrices_path)
+        logger.info("Saved gradient flow results to %s", interaction_matrices_path)
         # Now run code again to (potentially) calculate edges
         config = replace_pydantic_model(config, {"naive_gradient_flow": False, "interaction_matrices_path": interaction_matrices_path})
         return rib_build(config, force=force)

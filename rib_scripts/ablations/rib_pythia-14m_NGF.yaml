@@ -1,6 +1,6 @@
-exp_name: rib_pythia-14m-NGF
+exp_name: rib_pythia-14m-old-NGF
 ablation_type: rib
-rib_results_path: rib_scripts/rib_build/out/pythia-14m-NGF_rib_Cs.pt
+rib_results_path: rib_scripts/rib_build/out/pythia-14m-old-NGF_rib_Cs.pt
 schedule:
   schedule_type: linear
   early_stopping_threshold: 1.5
@@ -12,7 +12,7 @@ dataset:
   tokenizer_name: EleutherAI/pythia-14m
   return_set: train  # pile-10k only has train, so we take the first 90% for building and last 10% for ablations
   n_samples: 10
-  # n_documents: 10
+  n_documents: 100
   return_set_portion: first
 ablation_node_layers:
   - ln1.0

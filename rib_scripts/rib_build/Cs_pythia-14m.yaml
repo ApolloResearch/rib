@@ -22,13 +22,12 @@ node_layers:
   - mlp_out.5
 batch_size: 25  #  A100 can handle 24
 gram_batch_size: 40  #  A100 can handle 80
-truncation_threshold: 1e-6
+truncation_threshold: 1e-10
 rotate_final_node_layer: false
 n_intervals: 0
-integration_method: gradient
 dtype: float64
 calculate_edges: false
-basis_formula: (1-0)*alpha
+basis_formula: (1-alpha)^2
 edge_formula: squared
 n_stochastic_sources_basis_hidden: 50
 n_stochastic_sources_basis_pos: 10

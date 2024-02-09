@@ -512,6 +512,7 @@ def interaction_edge_pre_forward_hook_fn(
     out_dim_end_idx: int,
     edge_formula: Literal["functional", "squared"] = "squared",
     n_stochastic_sources: Optional[int] = None,
+    ignore_0th_pos: bool = False,
 ) -> None:
     """Hook function for accumulating the edges (denoted E_hat) of the RIB graph.
 
@@ -597,6 +598,7 @@ def interaction_edge_pre_forward_hook_fn(
                 out_dim_start_idx=out_dim_start_idx,
                 out_dim_end_idx=out_dim_end_idx,
                 tqdm_desc=tqdm_desc,
+                ignore_0th_pos=ignore_0th_pos,
             )
     else:
         raise ValueError(

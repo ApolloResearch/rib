@@ -609,6 +609,7 @@ def rib_build(
             n_stochastic_sources=config.n_stochastic_sources_edges,
             out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
             out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
+            ignore_0th_pos=config.ignore_0th_pos,
         )
 
         calc_edges_time = (time.time() - edges_start_time) / 60

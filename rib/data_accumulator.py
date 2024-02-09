@@ -359,6 +359,7 @@ def collect_interaction_edges(
     n_stochastic_sources: Optional[int] = None,
     out_dim_n_chunks: int = 1,
     out_dim_chunk_idx: int = 0,
+    ignore_0th_pos: bool = False,
 ) -> list[Edges]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -461,6 +462,7 @@ def collect_interaction_edges(
                     "out_dim_end_idx": out_dim_end_idx,
                     "edge_formula": edge_formula,
                     "n_stochastic_sources": n_stochastic_sources,
+                    "ignore_0th_pos": ignore_0th_pos,
                 },
             )
         )

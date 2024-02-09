@@ -233,6 +233,23 @@ def test_pythia_14m_build_graph_jacobian_stochastic():
 
 
 @pytest.mark.slow
+def test_pythia_14m_build_graph_jacobian_stochastic_ignore0():
+    config = get_pythia_config(
+        {
+            "basis_formula": "jacobian",
+            "dataset": {"n_documents": 10, "n_samples": 1, "n_ctx": 2},
+            "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
+            "calculate_edges": True,
+            "edge_formula": "squared",
+            "n_stochastic_sources_edges": 1,
+            "ignore_0th_pos": True,
+        }
+    )
+    results = graph_build_test(config=config, atol=0)
+    get_rib_acts_test(results, atol=1e-12)
+
+
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "basis_formula, edge_formula",
     [

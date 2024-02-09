@@ -418,7 +418,7 @@ def load_interaction_rotations(
 def gradient_flow_loop(
     config: RibBuildConfig,
     force: bool = False,
-):
+) -> RibBuildResults:
     """Call rib_build() repeatedly to implement a naive version of the gradient flow basis"""
     # Skip directly to rib_build for edge calculation if interaction_matrices_path is provided
     if config.interaction_matrices_path is not None:
@@ -434,7 +434,8 @@ def gradient_flow_loop(
         )
     out_file = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
     if not check_outfile_overwrite(out_file, force):
-        return  # Note: This does not use MPI Abort because distributed run is not supported
+        # Note: This does not use MPI Abort because distributed run is not supported
+        raise FileExistsError(f"Output file {out_file} already exists")
 
     # Run inidivual rib_builds for each node layer. Iterate through node_layers backwards (from
     # output to input). In the first step save rotations for last and second to last layer, in
@@ -469,14 +470,18 @@ def gradient_flow_loop(
     # Update name and config to the one of the full run (rather than the last individual run)
     results.exp_name = config.exp_name
     results.config = replace_pydantic_model(
-        config, {"node_layers": node_layers, "out_dir": config.out_dir}
+        results.config,
+        {"naive_gradient_flow": True, "node_layers": node_layers, "out_dir": config.out_dir},
     )
     config.out_dir.mkdir(parents=True, exist_ok=True)
     torch.save(results.model_dump(), out_file)
     logger.info("Saved gradient flow results to %s", out_file)
 
-    # If we don't need edges then we're done, the above save logic is the only thing than rib_build
-    # does for us if not calculating edges. Otherwise run rib_build again to calculate edges.
+    # If the config requests calculation of edges we call rib_build() and pass the gradient-flow
+    # basis via interaction_matrices_path. This will then just calculate the edges.
+    # If the config does not request calculation of edges then we exit. The merged Cs file
+    # constitutes a complete (non-calculate-edges) RIB result. We could call rib_build() but all
+    # it would do is load the interaction_matrices_path file and save it again.
     if not config.calculate_edges:
         return results
     else:

@@ -433,23 +433,27 @@ def rib_build(
 
     if config.naive_gradient_flow:
         if config.interaction_matrices_path is not None:
-            logger.warning("Skipping naive gradient flow calculation as bases are already given via"
-                            "interaction_matrices_path")
+            logger.warning(
+                "Skipping naive gradient flow calculation as bases are already given via"
+                "interaction_matrices_path"
+            )
             config = replace_pydantic_model(config, {"naive_gradient_flow": False})
             return rib_build(config, force=force, n_pods=n_pods, pod_rank=pod_rank)
+
+        assert config.out_dir is not None, (
+            "naive gradient flow requires out_dir to save"
+            "interaction matrices. Technically we can choose to"
+            "save or not save the intermediate interaction matrices"
+            "but we always need to save the final merged"
+            "interaction matrices to pass it on to the edges run."
+        )
+        # There is possibly a way to avoid this with some refactoring (allowing rib_build() to take
+        # in an interaction_matrices object but this seems not worth it.)
 
         # Cs will always be saved as an intermediate file, so we need to check if we're overwriting
         interaction_matrices_path = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
         if not check_outfile_overwrite(interaction_matrices_path, force):
             dist_info.local_comm.Abort()  # stop this and other processes
-
-        assert config.out_dir is not None, ("naive gradient flow requires out_dir to save"
-                                            "interaction matrices. Technically we can choose to"
-                                            "save or not save the intermediate interaction matrices"
-                                            "but we always need to save the final merged"
-                                            "interaction matrices to pass it on to the edges run.")
-        # There is possibly a way to avoid this with some refactoring (allowing rib_build() to take
-        # in an interaction_matrices object but this seems not worth it.)
 
         if n_pods > 1 or pod_rank > 0:
             # This is probably possible to support
@@ -484,13 +488,19 @@ def rib_build(
                 assert result_i.interaction_rotations[-1].node_layer == final_node_layer
                 results.interaction_rotations.insert(0, result_i.interaction_rotations[0])
         # Save merged interaction matrices results file
+        assert isinstance(results, RibBuildResults)
         results.exp_name = config.exp_name
-        results.config = replace_pydantic_model(config, {"node_layers": node_layers, "out_dir": config.out_dir})
+        results.config = replace_pydantic_model(
+            config, {"node_layers": node_layers, "out_dir": config.out_dir}
+        )
         config.out_dir.mkdir(parents=True, exist_ok=True)
         torch.save(results.model_dump(), interaction_matrices_path)
         logger.info("Saved gradient flow results to %s", interaction_matrices_path)
         # Now run code again to (potentially) calculate edges
-        config = replace_pydantic_model(config, {"naive_gradient_flow": False, "interaction_matrices_path": interaction_matrices_path})
+        config = replace_pydantic_model(
+            config,
+            {"naive_gradient_flow": False, "interaction_matrices_path": interaction_matrices_path},
+        )
         return rib_build(config, force=force)
 
     out_file: Optional[Path] = None

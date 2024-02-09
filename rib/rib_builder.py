@@ -94,9 +94,17 @@ class RibBuildConfig(BaseModel):
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     seed: Optional[int] = Field(0, description="The random seed value for reproducibility")
-    tlens_pretrained: Optional[Literal["gpt2", "pythia-14m", "tiny-stories-1M"]] = Field(
-        None, description="Pretrained transformer lens model."
-    )
+    tlens_pretrained: Optional[
+        Literal[
+            "gpt2",
+            "tiny-stories-1M",
+            "pythia-14m",
+            "pythia-31m",
+            "pythia-70m",
+            "pythia-160m",
+            "pythia-410m",
+        ]
+    ] = Field(None, description="Pretrained transformer lens model.")
     tlens_model_path: Optional[RootPath] = Field(
         None, description="Path to saved transformer lens model."
     )
@@ -391,6 +399,22 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], interaction_rotations
 
 
+def _get_out_file_path(config: RibBuildConfig, dist_info: DistributedInfo) -> Optional[Path]:
+    if config.out_dir is None:
+        return None
+    if config.calculate_edges:
+        if dist_info.global_size > 1:
+            # Multiple output files so we store in a dedicated directory for the experiment
+            out_dir = config.out_dir / f"distributed_{config.exp_name}"
+            return out_dir / f"rib_graph_global_rank{dist_info.global_rank}.pt"
+        return config.out_dir / f"{config.exp_name}_rib_graph.pt"
+    else:
+        # all processes will compute the same Cs so we only have rank 0 write output
+        if dist_info.global_size > 1 and dist_info.global_rank != 0:
+            return None
+        return config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+
+
 def rib_build(
     config_path_or_obj: Union[str, RibBuildConfig],
     force: bool = False,
@@ -425,21 +449,13 @@ def rib_build(
     device = get_device_mpi(dist_info)
     dtype = TORCH_DTYPES[config.dtype]
 
-    out_file: Optional[Path] = None
-    if config.out_dir is not None:
-        obj_name = "graph" if config.calculate_edges else "Cs"
-        if dist_info.global_size > 1:
-            # Save distributed run results in a dedicated directory for the experiment
-            out_dir = config.out_dir / f"distributed_{config.exp_name}"
-            f_name = f"rib_{obj_name}_global_rank{dist_info.global_rank}.pt"
-        else:
-            # Save non-distributed run files in `out`
-            out_dir = config.out_dir
-            f_name = f"{config.exp_name}_rib_{obj_name}.pt"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_file = out_dir / f_name
+    out_file = _get_out_file_path(config, dist_info)
+    if out_file is not None:
+        out_file.parent.mkdir(parents=True, exist_ok=True)
         if not check_outfile_overwrite(out_file, force):
-            dist_info.local_comm.Abort()  # stop this and other processes
+            if dist_info.global_size > 1:
+                dist_info.local_comm.Abort()  # stop this and other processes
+            raise FileExistsError(f"Output file {out_file} already exists")
 
     calc_C_time = None
     calc_edges_time = None
@@ -472,6 +488,10 @@ def rib_build(
         config.get_integration_method(node_layer) for node_layer in config.node_layers
     ]
     if config.interaction_matrices_path is None:
+        assert n_pods == 1, "Cannot parallelize Cs calculation between pods"
+        if dist_info.global_size > 1 and config.dist_split_over == "dataset":
+            raise NotImplementedError("Cannot parallelize Cs calculation over dataset")
+
         gram_train_loader = DataLoader(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
@@ -533,6 +553,8 @@ def rib_build(
             means=means,
             n_stochastic_sources_pos=config.n_stochastic_sources_basis_pos,
             n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
+            out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
+            out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
         )
         # InteractionRotation objects used to calculate edges
         edge_interaction_rotations = interaction_rotations

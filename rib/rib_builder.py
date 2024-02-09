@@ -223,6 +223,8 @@ class RibBuildConfig(BaseModel):
             shouldn't need to).
         - `n_stochastic_sources_edges` is None for non-squared edge_formula.
         - `n_intervals` must be 0 for gradient integration rule.
+        - `naive_gradient_flow` is not compatible with MLP
+        - `naive_gradient_flow` is not compatible out_dir is None
         """
         model_options = [
             self.tlens_pretrained,
@@ -265,6 +267,14 @@ class RibBuildConfig(BaseModel):
                 assert (
                     key in self.node_layers or key in node_layer_prefixes
                 ), f"Integration method specified for non-existent node layer {key}"
+
+        if self.naive_gradient_flow:
+            assert (
+                self.mlp_path is None and self.modular_mlp_config is None
+            ), "Naive gradient flow not compatible with MLP"
+            assert (
+                self.out_dir is not None
+            ), "Naive gradient flow requires out_dir to save intermediate Cs files"
 
         return self
 

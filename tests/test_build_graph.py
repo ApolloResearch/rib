@@ -15,6 +15,16 @@ import einops
 import pytest
 import torch
 from fancy_einsum import einsum
+from tests.utils import (
+    assert_basis_similarity,
+    assert_is_close,
+    assert_is_zeros,
+    get_mnist_config,
+    get_modular_arithmetic_config,
+    get_modular_mlp_config,
+    get_pythia_config,
+    get_tinystories_config,
+)
 from torch.testing import assert_close
 from torch.utils.data import DataLoader
 
@@ -27,16 +37,6 @@ from rib.models import SequentialTransformer
 from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
 from rib.types import TORCH_DTYPES
 from rib.utils import replace_pydantic_model
-from tests.utils import (
-    assert_basis_similarity,
-    assert_is_close,
-    assert_is_zeros,
-    get_mnist_config,
-    get_modular_arithmetic_config,
-    get_modular_mlp_config,
-    get_pythia_config,
-    get_tinystories_config,
-)
 
 
 def graph_build_test(config: RibBuildConfig, atol: float):
@@ -184,23 +184,29 @@ def get_means(results: RibBuildResults, atol: float, batch_size=16):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "basis_formula, edge_formula, integration_method",
+    "basis_formula, edge_formula, integration_method, naive_gradient_flow",
     [
-        ("(1-alpha)^2", "functional", "trapezoidal"),
-        ("(1-0)*alpha", "functional", "trapezoidal"),
-        ("(1-alpha)^2", "squared", "trapezoidal"),
-        ("(1-0)*alpha", "squared", "trapezoidal"),
-        ("jacobian", "squared", "trapezoidal"),
-        ("jacobian", "squared", "gauss-legendre"),
+        ("(1-alpha)^2", "functional", "trapezoidal", False),
+        ("(1-0)*alpha", "functional", "trapezoidal", False),
+        ("(1-alpha)^2", "squared", "trapezoidal", False),
+        ("(1-0)*alpha", "squared", "trapezoidal", False),
+        ("jacobian", "squared", "trapezoidal", False),
+        ("jacobian", "squared", "gauss-legendre", False),
+        ("jacobian", "squared", "gradient", False),
+        ("jacobian", "squared", "gradient", True),
     ],
 )
-def test_modular_arithmetic_build_graph(basis_formula, edge_formula, integration_method):
+def test_modular_arithmetic_build_graph(
+    basis_formula, edge_formula, integration_method, naive_gradient_flow, tmpdir
+):
     atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
     config = get_modular_arithmetic_config(
         {
             "basis_formula": basis_formula,
             "edge_formula": edge_formula,
             "integration_method": integration_method,
+            "naive_gradient_flow": naive_gradient_flow,
+            "out_dir": tmpdir if naive_gradient_flow else None,
         }
     )
     results = graph_build_test(config=config, atol=atol)
@@ -216,39 +222,74 @@ def test_pythia_14m_build_graph():
 
 
 @pytest.mark.slow
-def test_pythia_14m_build_graph_jacobian_stochastic():
+def test_pythia_14m_build_graph_jacobian_stochastic_and_gradient_flow(tmpdir):
     atol = 0  # Works with 0 for batch_size 900 but not 1800
-    config = get_pythia_config(
-        {
-            "basis_formula": "jacobian",
-            "dataset": {"n_documents": 10, "n_samples": 1, "n_ctx": 2},
-            "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
-            "calculate_edges": True,
-            "edge_formula": "squared",
-            "n_stochastic_sources_edges": 1,
-        }
+    results = []
+    for naive_gradient_flow in [True, False]:
+        config = get_pythia_config(
+            {
+                "exp_name": "14m_NGF=" + str(naive_gradient_flow),
+                "basis_formula": "jacobian",
+                "dataset": {"n_documents": 10, "n_samples": 1, "n_ctx": 2},
+                "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
+                "calculate_edges": True,
+                "edge_formula": "squared",
+                "n_stochastic_sources_edges": 1,
+                "naive_gradient_flow": naive_gradient_flow,
+                "rotate_final_node_layer": True,
+                "out_dir": tmpdir,
+            }
+        )
+        result = graph_build_test(config=config, atol=atol)
+        get_rib_acts_test(result, atol=1e-12)
+        results.append(result)
+    # The last layer (just SVD) and penultimate layer (always computed w.r.t. last layer) should be
+    # the same; the rest should be different (in practice the difference seems to be small, see
+    # https://github.com/ApolloResearch/rib/pull/333).
+    torch.testing.assert_close(
+        results[0].interaction_rotations[-1].C,
+        results[1].interaction_rotations[-1].C,
+        atol=0,
+        rtol=0,
     )
-    results = graph_build_test(config=config, atol=atol)
-    get_rib_acts_test(results, atol=1e-12)
+    torch.testing.assert_close(
+        results[0].interaction_rotations[-2].C,
+        results[1].interaction_rotations[-2].C,
+        atol=0,
+        rtol=0,
+    )
+    with pytest.raises(AssertionError):
+        torch.testing.assert_close(
+            results[0].interaction_rotations[-3].C,
+            results[1].interaction_rotations[-3].C,
+            atol=0,
+            rtol=0,
+        )
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "basis_formula, edge_formula",
+    "basis_formula, edge_formula, naive_gradient_flow",
     [
-        ("(1-alpha)^2", "functional"),
-        ("(1-0)*alpha", "functional"),
-        ("(1-alpha)^2", "squared"),
-        ("(1-0)*alpha", "squared"),
-        ("jacobian", "squared"),
+        ("(1-alpha)^2", "functional", False),
+        ("(1-0)*alpha", "functional", False),
+        ("(1-alpha)^2", "squared", False),
+        ("(1-0)*alpha", "squared", False),
+        ("jacobian", "squared", False),
+        ("jacobian", "squared", True),
     ],
 )
-def test_mnist_build_graph(basis_formula, edge_formula):
+def test_mnist_build_graph(basis_formula, edge_formula, naive_gradient_flow, tmpdir):
     dtype_str = "float32"
     # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64.
     atol = 1e-5
     config = get_mnist_config(
-        {"basis_formula": basis_formula, "edge_formula": edge_formula, "dtype": dtype_str}
+        {
+            "basis_formula": basis_formula,
+            "edge_formula": edge_formula,
+            "dtype": dtype_str,
+            "out_dir": tmpdir if naive_gradient_flow else None,
+        }
     )
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=atol)
@@ -273,11 +314,16 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         ("svd", "functional", "float64"),
         ("neuron", "functional", "float32"),
         ("neuron", "functional", "float64"),
+        ("jacobian", "squared", "float64"),
     ],
 )
 def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
     config = get_modular_mlp_config(
-        {"basis_formula": basis_formula, "edge_formula": edge_formula, "dtype": dtype_str}
+        {
+            "basis_formula": basis_formula,
+            "edge_formula": edge_formula,
+            "dtype": dtype_str,
+        }
     )
     graph_build_test(config=config, atol=atol)
 

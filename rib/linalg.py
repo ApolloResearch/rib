@@ -1,5 +1,5 @@
 from itertools import product
-from typing import Callable, Literal, NamedTuple, Optional, Union
+from typing import Callable, Literal, NamedTuple, Optional, TypeVar, Union, cast
 
 import numpy as np
 import torch
@@ -472,10 +472,13 @@ def calc_edge_squared(
     edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1) if has_pos else 0)
 
 
-def _generate_sources(like_tensor: Tensor):
+T = TypeVar("T", bound=Tensor)
+
+
+def _generate_sources(like_tensor: T) -> T:
     """Generate a tensor of ±1s, with shape and dtype given by `like_tensor`."""
     bools = torch.rand(size=like_tensor.size(), device=like_tensor.device) > 0.5
-    return torch.where(bools, 1, -1).to(like_tensor)
+    return cast(T, torch.where(bools, 1, -1).to(like_tensor))
 
 
 def _generate_phis_array(
@@ -518,13 +521,10 @@ def _generate_phis_array(
             range(n_stochastic_sources_hidden or out_hat_hidden_size),
         )
     )
-    subset_pod_hid_idxs = all_pos_hid_idxs[
-        slice(
-            *get_chunk_indices(
-                len(all_pos_hid_idxs), n_chunks=out_dim_n_chunks, chunk_idx=out_dim_chunk_idx
-            )
-        )
-    ]
+    chunk_start, chunk_end = get_chunk_indices(
+        len(all_pos_hid_idxs), n_chunks=out_dim_n_chunks, chunk_idx=out_dim_chunk_idx
+    )
+    subset_pod_hid_idxs = all_pos_hid_idxs[chunk_start:chunk_end]
     for t, i in subset_pod_hid_idxs:
         phi = torch.zeros(
             (batch_size, out_pos_size, out_hat_hidden_size), dtype=torch.int8, device=device
@@ -615,7 +615,9 @@ def calc_basis_jacobian(
             )
             f_out_hat_alpha = f_out_alpha @ C_out if C_out is not None else f_out_alpha
 
-            for r, phi in tqdm(enumerate(phis), desc="Iteration over sources", leave=False):
+            for r, phi in tqdm(
+                enumerate(phis), total=phis.shape[0], desc="Iteration over sources", leave=False
+            ):
                 # Torch supports taking jacobian-vector products (where our vector is given by phi)
                 # It's possible to pass in all of phis at once with `is_grads_batched=True` and it
                 # will be a bit faster due to vmap but the memory usage is much higher.

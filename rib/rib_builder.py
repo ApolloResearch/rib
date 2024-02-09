@@ -94,9 +94,17 @@ class RibBuildConfig(BaseModel):
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     seed: Optional[int] = Field(0, description="The random seed value for reproducibility")
-    tlens_pretrained: Optional[Literal["gpt2", "pythia-14m", "tiny-stories-1M"]] = Field(
-        None, description="Pretrained transformer lens model."
-    )
+    tlens_pretrained: Optional[
+        Literal[
+            "gpt2",
+            "tiny-stories-1M",
+            "pythia-14m",
+            "pythia-31m",
+            "pythia-70m",
+            "pythia-160m",
+            "pythia-410m",
+        ]
+    ] = Field(None, description="Pretrained transformer lens model.")
     tlens_model_path: Optional[RootPath] = Field(
         None, description="Path to saved transformer lens model."
     )
@@ -391,7 +399,7 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], interaction_rotations
 
 
-def _get_out_file_path(config, dist_info) -> Optional[Path]:
+def _get_out_file_path(config: RibBuildConfig, dist_info: DistributedInfo) -> Optional[Path]:
     if config.out_dir is None:
         return None
     if config.calculate_edges:

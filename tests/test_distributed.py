@@ -151,7 +151,7 @@ def test_distributed_basis(tmp_path):
     double_config = replace_pydantic_model(config, {"out_dir": tmp_path})
     double_config_path = tmp_path / "double_config.yaml"
     with open(double_config_path, "w") as f:
-        yaml.dump(json.loads(double_config.model_dump_json()), f)
+        yaml.dump(double_config.model_dump(), f)
     MPI.Finalize()
     subprocess.run(
         f"mpirun -n 2 python {REPO_ROOT}/rib_scripts/rib_build/run_rib_build.py "

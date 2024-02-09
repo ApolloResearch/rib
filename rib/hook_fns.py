@@ -461,9 +461,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
         with torch.inference_mode():
             # M_dash.shape: j jprime
-            M_dash = (
-                einops.einsum(in_grads.to(M_dtype), in_grads.to(M_dtype), einsum_pattern)
-                / normalization_factor
+            M_dash = einops.einsum(
+                in_grads.to(M_dtype) / normalization_factor, in_grads.to(M_dtype), einsum_pattern
             )
             # In the jacobian basis, Lambda is not computed here but from the M eigenvalues later.
             # Set a placeholder to maintain the same function signature.

@@ -32,7 +32,7 @@ class ModularMLPConfig(BaseModel):
     )
     weight_variances: List[float] = Field(
         [1.0, 1.0, 1.0, 1.0],
-        description="Variance of the two blocks of the block diagonal matrix.",
+        description="Variances of the two on-diagonal blocks and two off diagonal the block diagonal matrix. Ordered [first_diagonal, second_diagonal, first_off_diagonal, second_off_diagonal]",
     )
     weight_equal_columns: bool = Field(
         False,
@@ -73,7 +73,9 @@ def generate_block_diagonal_weights(
         first_block_width = total_width // 2
 
     assert total_width > first_block_width, "First block width must be smaller than total width"
-    assert len(block_variances) == 4, "Only four blocks supported"
+    assert (
+        len(block_variances) == 4
+    ), "Only matrices with two on-diagonal and two off-diagonal blocks supported"
 
     second_block_width = total_width - first_block_width
 
@@ -106,7 +108,8 @@ def generate_block_weights(
     block_variances: List[float],
     equal_columns: bool,
 ) -> Float[Tensor, "width width"]:
-    """Generate a random block matrix.
+    """Generate a random matrix consisting of two diagonal and two off-diagonal blocks with
+    specified variances for each block.
 
     Args:
         dtype: The dtype of the weights
@@ -124,7 +127,7 @@ def generate_block_weights(
     assert (
         total_width > first_diagonal_block_width
     ), "First block width must be smaller than total width"
-    assert len(block_variances) == 4, "Only four blocks supported"
+    assert len(block_variances) == 4, "Only two diagonal and two off-diagonal blocks supported"
 
     second_diagonal_block_width = total_width - first_diagonal_block_width
 
@@ -142,13 +145,13 @@ def generate_block_weights(
             .repeat(second_diagonal_block_width, 1)
             .T
         )
-        first_non_diagonal_block = (
+        first_off_diagonal_block = (
             block_variances[2]
             * torch.randn(1, first_diagonal_block_width, dtype=dtype)
             .repeat(second_diagonal_block_width, 1)
             .T
         )
-        second_non_diagonal_block = (
+        second_off_diagonal_block = (
             block_variances[3]
             * torch.randn(1, second_diagonal_block_width, dtype=dtype)
             .repeat(first_diagonal_block_width, 1)
@@ -162,34 +165,31 @@ def generate_block_weights(
         second_diagonal_block = block_variances[1] * torch.randn(
             second_diagonal_block_width, second_diagonal_block_width, dtype=dtype
         )
-        first_non_diagonal_block = block_variances[2] * torch.randn(
+        first_off_diagonal_block = block_variances[2] * torch.randn(
             first_diagonal_block_width, second_diagonal_block_width, dtype=dtype
         )
-        second_non_diagonal_block = block_variances[3] * torch.randn(
+        second_off_diagonal_block = block_variances[3] * torch.randn(
             second_diagonal_block_width, first_diagonal_block_width, dtype=dtype
         )
 
     # Horizontally concatenate the first row of blocks
-    top_row = torch.cat([first_diagonal_block, first_non_diagonal_block], dim=1)
+    top_row = torch.cat([first_diagonal_block, first_off_diagonal_block], dim=1)
 
     # Horizontally concatenate the second row of blocks
-    bottom_row = torch.cat([second_non_diagonal_block, second_diagonal_block], dim=1)
+    bottom_row = torch.cat([second_off_diagonal_block, second_diagonal_block], dim=1)
 
     # Vertically concatenate the top and bottom rows to form the final matrix
     final_matrix = torch.cat([top_row, bottom_row], dim=0)
+    final_matrix.shape = (total_width, total_width)
     return final_matrix
 
 
-def create_modular_mlp(
-    modular_mlp_config: ModularMLPConfig,
-    seed: Optional[int] = None,
-) -> MLP:
+def create_modular_mlp(modular_mlp_config: ModularMLPConfig, seed: Optional[int] = None) -> MLP:
     """Generate a block diagonal MLP.
 
     Args:
         modular_mlp_config: Config class for the block diagonal MLP
-        seed: Seed
-        for generating the weights
+        seed: Seed for generating the weights
 
     Returns:
         A block diagonal MLP

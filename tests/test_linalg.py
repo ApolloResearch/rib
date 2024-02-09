@@ -4,6 +4,7 @@ from typing import Callable
 import numpy as np
 import pytest
 import torch
+from einops import rearrange
 from fancy_einsum import einsum
 from jaxtyping import Float
 from torch import Tensor
@@ -12,6 +13,7 @@ from torch.func import jacrev
 from rib.linalg import (
     IntegrationPoint,
     _calc_integration_points,
+    _generate_phis_array,
     _generate_sources,
     calc_basis_integrated_gradient,
     calc_edge_functional,
@@ -590,10 +592,8 @@ def test_generate_sources():
     n_stochastic_sources = 10
     dim_actual = 100
 
-    tensor_to_use_for_dtype_and_device = torch.empty(1, 1)
-
-    shape = (batch_size, n_stochastic_sources, dim_actual)
-    phi = _generate_sources(shape, like_tensor=tensor_to_use_for_dtype_and_device)
+    phi = torch.empty(batch_size, n_stochastic_sources, dim_actual)
+    phi = _generate_sources(phi)
 
     out = einsum("batch source dim1, batch source dim2 -> batch dim1 dim2", phi, phi)
     out /= n_stochastic_sources
@@ -604,3 +604,47 @@ def test_generate_sources():
     assert torch.allclose(diagonal_of_out, torch.ones_like(diagonal_of_out))
     assert deviation_from_identity.mean() < 0.001
     assert deviation_from_identity.std() < 0.4  # Empirically around 0.3147 for these dims
+
+
+def test_generate_phis_array():
+    n_batch, n_pos, n_hid = 2, 3, 4
+    r_pos, r_hid = 5, 6
+
+    get_phis = partial(
+        _generate_phis_array,
+        batch_size=n_batch,
+        out_pos_size=n_pos,
+        out_hat_hidden_size=n_hid,
+        out_dim_n_chunks=1,
+        out_dim_chunk_idx=0,
+        device=torch.device("cpu"),
+    )
+
+    # No stochastic sources
+    phis = get_phis(n_stochastic_sources_pos=None, n_stochastic_sources_hidden=None)
+    assert ((phis == 0) | (phis == 1)).all()
+    assert phis.shape == (n_pos * n_hid, n_batch, n_pos, n_hid)
+    assert phis.sum() == n_pos * n_hid * n_batch
+    phis_5d = rearrange(phis, "(npos nhid) batch pos hid -> npos nhid batch pos hid", npos=n_pos)
+    assert (phis_5d.diagonal(dim1=0, dim2=3).diagonal(dim1=0, dim2=2) == 1).all()
+
+    # Stochastic sources over position
+    phis = get_phis(n_stochastic_sources_pos=r_pos, n_stochastic_sources_hidden=None)
+    assert ((phis == 0) | (phis == 1) | (phis == -1)).all()
+    assert phis.shape == (r_pos * n_hid, n_batch, n_pos, n_hid)
+    assert (phis**2).sum() == r_pos * n_hid * n_batch * n_pos
+    phis_5d = rearrange(phis, "(rpos nhid) batch pos hid -> rpos nhid batch pos hid", rpos=r_pos)
+    assert (phis_5d.diagonal(dim1=1, dim2=4) != 0).all()
+
+    # Stochastic sources over hidden
+    phis = get_phis(n_stochastic_sources_pos=None, n_stochastic_sources_hidden=r_hid)
+    assert ((phis == 0) | (phis == 1) | (phis == -1)).all()
+    assert phis.shape == (n_pos * r_hid, n_batch, n_pos, n_hid)
+    assert (phis**2).sum() == n_pos * r_hid * n_batch * n_hid
+    phis_5d = rearrange(phis, "(npos rhid) batch pos hid -> npos rhid batch pos hid", npos=n_pos)
+    assert (phis_5d.diagonal(dim1=0, dim2=3) != 0).all()
+
+    # Stochastic sources over both
+    phis = get_phis(n_stochastic_sources_pos=r_pos, n_stochastic_sources_hidden=r_hid)
+    assert ((phis == 1) | (phis == -1)).all()
+    assert phis.shape == (r_pos * r_hid, n_batch, n_pos, n_hid)

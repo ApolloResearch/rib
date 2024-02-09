@@ -364,7 +364,10 @@ def test_pythia_14m_build_graph_jacobian_stochastic_and_gradient_flow(tmpdir):
         ("jacobian", "squared"),
     ],
 )
-def test_mnist_build_graph(basis_formula, edge_formula, naive_gradient_flow, tmpdir):
+def test_mnist_build_graph(
+    basis_formula,
+    edge_formula,
+):
     dtype_str = "float32"
     # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64.
     atol = 1e-5
@@ -373,7 +376,7 @@ def test_mnist_build_graph(basis_formula, edge_formula, naive_gradient_flow, tmp
             "basis_formula": basis_formula,
             "edge_formula": edge_formula,
             "dtype": dtype_str,
-            "out_dir": tmpdir if naive_gradient_flow else None,
+            "out_dir": None,
         }
     )
     results = graph_build_test(config=config, atol=atol)

@@ -215,6 +215,9 @@ class RibBuildConfig(BaseModel):
         "dataset",
         description="For distributed edge runs, whether to split over out_dim or dataset.",
     )
+    ignore_0th_pos: bool = Field(
+        False, description="Whether to ignore the 0th sequence position in all activations"
+    )
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "RibBuildConfig":
@@ -509,6 +512,7 @@ def rib_build(
                 device=device,
                 collect_output_dataset_means=collect_output_gram,
                 hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
+                ignore_0th_pos=config.ignore_0th_pos,
             )
 
         collect_gram_start_time = time.time()
@@ -523,6 +527,7 @@ def rib_build(
             collect_output_gram=collect_output_gram,
             hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             means=means,
+            ignore_0th_pos=config.ignore_0th_pos,
         )
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 

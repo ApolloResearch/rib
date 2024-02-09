@@ -76,6 +76,7 @@ def collect_dataset_means(
     dtype: torch.dtype,
     collect_output_dataset_means: bool = True,
     hook_names: Optional[list[str]] = None,
+    ignore_0th_pos: bool = False,
 ) -> dict[str, Float[Tensor, "orig"]]:
     """Collect the mean input activation for each module on the dataset.
 
@@ -115,7 +116,7 @@ def collect_dataset_means(
                 data_key="dataset_mean",
                 fn=dataset_mean_pre_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"dataset_size": dataset_size},
+                fn_kwargs={"dataset_size": dataset_size, "ignore_0th_pos": ignore_0th_pos},
             )
         )
     if collect_output_dataset_means:
@@ -126,7 +127,7 @@ def collect_dataset_means(
                 data_key="dataset_mean",
                 fn=dataset_mean_forward_hook_fn,
                 module_name=module_names[-1],
-                fn_kwargs={"dataset_size": dataset_size},
+                fn_kwargs={"dataset_size": dataset_size, "ignore_0th_pos": ignore_0th_pos},
             )
         )
 
@@ -160,6 +161,7 @@ def collect_gram_matrices(
     collect_output_gram: bool = True,
     hook_names: Optional[list[str]] = None,
     means: Optional[dict[str, Float[Tensor, "orig"]]] = None,
+    ignore_0th_pos: bool = False,
 ) -> dict[str, Float[Tensor, "orig orig"]]:
     """Collect gram matrices for the module inputs and optionally the output of the final module.
 
@@ -207,7 +209,11 @@ def collect_gram_matrices(
                 data_key="gram",
                 fn=gram_pre_forward_hook_fn,
                 module_name=module_name,
-                fn_kwargs={"dataset_size": dataset_size, "shift": shift},
+                fn_kwargs={
+                    "dataset_size": dataset_size,
+                    "shift": shift,
+                    "ignore_0th_pos": ignore_0th_pos,
+                },
             )
         )
     if collect_output_gram:
@@ -222,6 +228,7 @@ def collect_gram_matrices(
                     "dataset_size": dataset_size,
                     # we don't need to care about bias positions in the output
                     "shift": -means["output"] if means is not None else None,
+                    "ignore_0th_pos": ignore_0th_pos,
                 },
             )
         )
@@ -262,6 +269,7 @@ def collect_M_dash_and_Lambda_dash(
     n_stochastic_sources_hidden: Optional[int] = None,
     out_dim_n_chunks: int = 1,
     out_dim_chunk_idx: int = 0,
+    ignore_0th_pos: bool = False,
 ) -> tuple[Float[Tensor, "orig_in orig_in"], Float[Tensor, "orig_in orig_in"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -312,6 +320,7 @@ def collect_M_dash_and_Lambda_dash(
             "n_stochastic_sources_hidden": n_stochastic_sources_hidden,
             "out_dim_n_chunks": out_dim_n_chunks,
             "out_dim_chunk_idx": out_dim_chunk_idx,
+            "ignore_0th_pos": ignore_0th_pos,
         },
     )
 

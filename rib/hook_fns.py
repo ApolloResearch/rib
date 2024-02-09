@@ -94,6 +94,7 @@ def dataset_mean_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
+    ignore_0th_pos: bool = False,
 ) -> None:
     """Calculates the mean of the output activations and adds it to hooked_data.
 
@@ -112,6 +113,8 @@ def dataset_mean_forward_hook_fn(
     out_acts = torch.cat([x.detach().clone() for x in _to_tuple(output)], dim=-1)
     out_acts_mean_contrib = out_acts.sum(dim=0) / dataset_size  # sum over batch
     if out_acts_mean_contrib.ndim == 2:
+        if ignore_0th_pos:
+            out_acts_mean_contrib = out_acts_mean_contrib[1:]
         out_acts_mean_contrib = out_acts_mean_contrib.mean(dim=0)  # mean over seqpos
     assert out_acts_mean_contrib.ndim == 1, f"mean must be 1D, shape={out_acts_mean_contrib.shape}"
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, out_acts_mean_contrib)
@@ -124,6 +127,7 @@ def dataset_mean_pre_forward_hook_fn(
     hook_name: str,
     data_key: Union[str, list[str]],
     dataset_size: int,
+    ignore_0th_pos: bool = False,
 ) -> None:
     """Hook function for calculating the mean of the input activations.
 
@@ -141,6 +145,8 @@ def dataset_mean_pre_forward_hook_fn(
     in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
     in_acts_mean_contrib = in_acts.sum(dim=0) / dataset_size  # sum over batch
     if in_acts_mean_contrib.ndim == 2:
+        if ignore_0th_pos:
+            in_acts_mean_contrib = in_acts_mean_contrib[1:]
         in_acts_mean_contrib = in_acts_mean_contrib.mean(dim=0)  # mean over seqpos
     assert in_acts_mean_contrib.ndim == 1, f"mean must be 1D, shape={in_acts_mean_contrib.shape}"
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts_mean_contrib)
@@ -155,6 +161,7 @@ def gram_forward_hook_fn(
     data_key: Union[str, list[str]],
     dataset_size: int,
     shift: Optional[Float[Tensor, "orig"]] = None,
+    ignore_0th_pos: bool = False,
 ) -> None:
     """Hook function for calculating and updating the gram matrix.
 
@@ -177,7 +184,9 @@ def gram_forward_hook_fn(
     if shift is not None:
         out_acts += shift
 
-    gram_matrix = calc_gram_matrix(out_acts, dataset_size=dataset_size)
+    gram_matrix = calc_gram_matrix(
+        out_acts, dataset_size=dataset_size, ignore_0th_pos=ignore_0th_pos
+    )
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
@@ -189,6 +198,7 @@ def gram_pre_forward_hook_fn(
     data_key: Union[str, list[str]],
     dataset_size: int,
     shift: Optional[Float[Tensor, "orig"]] = None,
+    ignore_0th_pos: bool = False,
 ) -> None:
     """Calculate the gram matrix for inputs with positional indices and add it to the global.
 
@@ -210,7 +220,9 @@ def gram_pre_forward_hook_fn(
     if shift is not None:
         in_acts += shift
 
-    gram_matrix = calc_gram_matrix(in_acts, dataset_size=dataset_size)
+    gram_matrix = calc_gram_matrix(
+        in_acts, dataset_size=dataset_size, ignore_0th_pos=ignore_0th_pos
+    )
     _add_to_hooked_matrix(hooked_data, hook_name, data_key, gram_matrix)
 
 
@@ -352,6 +364,7 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     n_stochastic_sources_hidden: Optional[int] = None,
     out_dim_n_chunks: int = 1,
     out_dim_chunk_idx: int = 0,
+    ignore_0th_pos: bool = False,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -451,6 +464,14 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
                 normalization_factor *= n_stochastic_sources_pos
             if n_stochastic_sources_hidden is not None:
                 normalization_factor *= n_stochastic_sources_hidden
+
+            if ignore_0th_pos:
+                # we remove all gradients from the 0th seqpos in the input to any output positions
+                # note there are no gradient from non-0ths seqpos to the 0th seqpos in the output
+                # because of causal masking
+                assert in_grads.shape[2] == in_pos_size, "seqpos not found where we expect it!"
+                in_grads[:, :, 0, :] = 0.0
+
         else:
             assert (
                 n_stochastic_sources_pos is None and n_stochastic_sources_hidden is None

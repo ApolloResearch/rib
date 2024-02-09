@@ -397,6 +397,77 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], interaction_rotations
 
 
+def gradient_flow_loop(
+    config: RibBuildConfig,
+    force: bool = False,
+):
+    """Call rib_build() repeatedly to implement a naive version of the gradient flow basis"""
+    # Skip directly to rib_build for edge calculation if interaction_matrices_path is provided
+    if config.interaction_matrices_path is not None:
+        logger.info("Skipping naive gradient flow because basis given in interaction_matrices_path")
+        config = replace_pydantic_model(config, {"naive_gradient_flow": False})
+        return rib_build(config, force=force)
+
+    # Make sure out_dir is not None and check if we're overwriting
+    if config.out_dir is None:
+        raise NotImplementedError(
+            "Naive gradient flow requires out_dir to save intermediate Cs files. We could use a"
+            "temp dir if out_dir is None, but this is not yet supported."
+        )
+    out_file = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+    if not check_outfile_overwrite(out_file, force):
+        return  # Note: This does not use MPI Abort because distributed run is not supported
+
+    # Run inidivual rib_builds for each node layer. Iterate through node_layers backwards (from
+    # output to input). In the first step save rotations for last and second to last layer, in
+    # the other steps save rotations for the current layer only (append at beginning of list).
+    node_layers = config.node_layers
+    final_node_layer = node_layers[-1]
+    results = None
+    for current_node_layer in node_layers[:-1][::-1]:
+        updates = {
+            "node_layers": [current_node_layer, final_node_layer],
+            "exp_name": f"{config.exp_name}_{current_node_layer}",
+            "naive_gradient_flow": False,
+            "calculate_edges": False,
+            "interaction_matrices_path": None,
+            "out_dir": None,  # alternatively use temp files that are preserved in case of crash
+        }
+        config_i = replace_pydantic_model(config, updates)
+        result_i = rib_build(config_i, force=force)
+        if results is None:
+            results = result_i
+        else:
+            results.gram_matrices.update(result_i.gram_matrices)
+            results.calc_C_time += result_i.calc_C_time
+            # result_i.interaction_rotations contains both the current and the final layer. In all
+            # but the first iteration (above) we only want the rotations for the current layer.
+            assert len(result_i.interaction_rotations) == 2
+            assert result_i.interaction_rotations[-1].node_layer == final_node_layer
+            results.interaction_rotations.insert(0, result_i.interaction_rotations[0])
+
+    # Merge results into a single result and save to file
+    assert isinstance(results, RibBuildResults)
+    # Update name and config to the one of the full run (rather than the last individual run)
+    results.exp_name = config.exp_name
+    results.config = replace_pydantic_model(
+        config, {"node_layers": node_layers, "out_dir": config.out_dir}
+    )
+    config.out_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(results.model_dump(), out_file)
+    logger.info("Saved gradient flow results to %s", out_file)
+
+    # If we don't need edges then we're done, the above save logic is the only thing than rib_build
+    # does for us if not calculating edges. Otherwise run rib_build again to calculate edges.
+    if not config.calculate_edges:
+        return results
+    else:
+        config = replace_pydantic_model(
+            config, {"naive_gradient_flow": False, "interaction_matrices_path": out_file}
+        )
+        return rib_build(config, force=force)
+
+
 def rib_build(
     config_path_or_obj: Union[str, RibBuildConfig],
     force: bool = False,
@@ -432,76 +503,9 @@ def rib_build(
     dtype = TORCH_DTYPES[config.dtype]
 
     if config.naive_gradient_flow:
-        if config.interaction_matrices_path is not None:
-            logger.warning(
-                "Skipping naive gradient flow calculation as bases are already given via"
-                "interaction_matrices_path"
-            )
-            config = replace_pydantic_model(config, {"naive_gradient_flow": False})
-            return rib_build(config, force=force, n_pods=n_pods, pod_rank=pod_rank)
-
-        if config.out_dir is None:
-            raise NotImplementedError(
-                "Naive gradient flow requires out_dir to save intermediate"
-                "Cs files. We could use a temp dir if out_dir is None, but"
-                "this is not yet supported."
-            )
-        # There is possibly a way to avoid this with some refactoring (allowing rib_build() to take
-        # in an interaction_matrices object but this seems not worth it.)
-
-        # Cs will always be saved as an intermediate file, so we need to check if we're overwriting
-        interaction_matrices_path = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
-        if not check_outfile_overwrite(interaction_matrices_path, force):
-            dist_info.local_comm.Abort()  # stop this and other processes
-
         if n_pods > 1 or pod_rank > 0:
-            # This is probably possible to support
-            raise NotImplementedError(
-                "Naive gradient flow is not yet supported with distributed computing"
-            )
-        node_layers = config.node_layers
-        final_node_layer = node_layers[-1]
-        # Run inidivual rib_builds for each node layer. Iterate through node_layers backwards (from
-        # output to input). In the first step save rotations for last and second to last layer, in
-        # the other steps save rotations for the current layer only (append at beginning of list).
-        results = None
-        for current_node_layer in node_layers[:-1][::-1]:
-            updates = {
-                "node_layers": [current_node_layer, final_node_layer],
-                "exp_name": f"{config.exp_name}_{current_node_layer}",
-                "naive_gradient_flow": False,
-                "calculate_edges": False,
-                "interaction_matrices_path": None,
-                "out_dir": None,  # alternatively use temp files that are preserved in case of crash
-            }
-            config_i = replace_pydantic_model(config, updates)
-            result_i = rib_build(config_i, force=force)
-            if results is None:
-                results = result_i
-            else:
-                results.gram_matrices.update(result_i.gram_matrices)
-                results.calc_C_time += result_i.calc_C_time
-                # result_i.interaction_rotations contains both the current and the final layer. In
-                # all but the first iteration (above) we only want the rotations for the current
-                # layer.
-                assert len(result_i.interaction_rotations) == 2
-                assert result_i.interaction_rotations[-1].node_layer == final_node_layer
-                results.interaction_rotations.insert(0, result_i.interaction_rotations[0])
-        # Save merged interaction matrices results file
-        assert isinstance(results, RibBuildResults)
-        results.exp_name = config.exp_name
-        results.config = replace_pydantic_model(
-            config, {"node_layers": node_layers, "out_dir": config.out_dir}
-        )
-        config.out_dir.mkdir(parents=True, exist_ok=True)
-        torch.save(results.model_dump(), interaction_matrices_path)
-        logger.info("Saved gradient flow results to %s", interaction_matrices_path)
-        # Now run code again to (potentially) calculate edges
-        config = replace_pydantic_model(
-            config,
-            {"naive_gradient_flow": False, "interaction_matrices_path": interaction_matrices_path},
-        )
-        return rib_build(config, force=force)
+            raise NotImplementedError("Distributed naive gradient flow not implemented yet")
+        return gradient_flow_loop(config, force)
 
     out_file: Optional[Path] = None
     if config.out_dir is not None:

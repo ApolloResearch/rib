@@ -4,7 +4,6 @@ Utilities for dealing with parallel processes across pods and also across GPUs w
 
 import warnings
 from logging import WARNING
-from typing import Optional
 
 import torch
 from mpi4py import MPI
@@ -93,9 +92,7 @@ def check_sizes_mpi(dist_info: DistributedInfo, tensor: torch.Tensor):
         ), f"mismatched shape of tensors across processes, shapes = {sizes}"
 
 
-def sum_across_processes(tensor: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
-    if tensor is None:
-        return None
+def sum_across_processes(tensor: torch.Tensor) -> torch.Tensor:
     cpu_tensor = tensor.cpu()
     MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, cpu_tensor, op=MPI.SUM)
     return cpu_tensor.to(tensor.device)

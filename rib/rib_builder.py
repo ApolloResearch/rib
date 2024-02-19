@@ -249,6 +249,16 @@ class RibBuildConfig(BaseModel):
                 self.mlp_path is None and self.modular_mlp_config is None
             ), "We don't support loading interaction matrices for mlp models"
 
+        if self.n_stochastic_sources_basis_pos is not None:
+            assert (
+                self.basis_formula == "jacobian"
+            ), "n_stochastic_sources_basis_pos only implemented for jacobian basis_formula"
+
+        if self.n_stochastic_sources_basis_hidden is not None:
+            assert (
+                self.basis_formula == "jacobian"
+            ), "n_stochastic_sources_basis_hidden only implemented for jacobian basis_formula"
+
         if self.edge_formula != "squared":
             assert (
                 self.n_stochastic_sources_edges is None

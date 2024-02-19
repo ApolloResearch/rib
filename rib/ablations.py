@@ -26,7 +26,7 @@ from rib.rib_builder import RibBuildResults
 from rib.settings import REPO_ROOT
 from rib.types import TORCH_DTYPES, RootPath, StrDtype
 from rib.utils import (
-    check_outfile_overwrite,
+    check_out_file_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
     load_config,
@@ -728,7 +728,7 @@ def load_bases_and_ablate(
         out_file = (
             config.out_dir / f"{config.exp_name}_{config.ablation_type}_ablation_results.json"
         )
-        if not check_outfile_overwrite(out_file, force):
+        if not check_out_file_overwrite(out_file, force):
             raise FileExistsError("Not overwriting output file")
 
     set_seed(config.seed)

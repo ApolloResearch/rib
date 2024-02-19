@@ -18,7 +18,7 @@ import torch
 from rib.log import logger
 from rib.plotting import plot_rib_graph
 from rib.rib_builder import RibBuildResults
-from rib.utils import check_out_file_overwrite
+from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
 
 def main(
@@ -38,7 +38,7 @@ def main(
         out_file = Path(out_file)
 
     if not check_out_file_overwrite(out_file, force):
-        return
+        handle_overwrite_fail()
 
     assert results.edges, "The results file does not contain any edges."
     # Add labels if provided

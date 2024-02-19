@@ -29,6 +29,7 @@ from rib.utils import (
     check_out_file_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
+    handle_overwrite_fail,
     load_config,
     set_seed,
 )
@@ -729,7 +730,7 @@ def load_bases_and_ablate(
             config.out_dir / f"{config.exp_name}_{config.ablation_type}_ablation_results.json"
         )
         if not check_out_file_overwrite(out_file, force):
-            raise FileExistsError("Not overwriting output file")
+            handle_overwrite_fail()
 
     set_seed(config.seed)
     rib_results = RibBuildResults(**torch.load(config.rib_results_path))

@@ -20,7 +20,7 @@ import fire
 from rib.log import logger
 from rib.plotting import plot_ablation_results
 from rib.types import RootPath
-from rib.utils import check_out_file_overwrite
+from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
 
 def main(*results_files: Union[str, Path], force: bool = False) -> Optional[RootPath]:
@@ -55,7 +55,7 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
     out_file = Path(__file__).parent / "out" / f"{out_filename}_{eval_type}_vs_ablated_vecs.png"
 
     if not check_out_file_overwrite(out_file, force):
-        return None
+        handle_overwrite_fail()
 
     plot_ablation_results(
         results=results_list,

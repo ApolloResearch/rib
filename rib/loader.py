@@ -145,10 +145,6 @@ def load_mlp(
         mlp.fold_bias()
 
     all_node_layers = [f"layers.{i}" for i in range(len(mlp.layers))] + ["output"]
-    assert len(node_layers) > 0 and "-".join(node_layers) in "-".join(all_node_layers), (
-        f"Provided node_layers: {node_layers} is not a subsequence of all_node_layers: "
-        f"{all_node_layers}. This must be the case to build a valid RIB graph."
-    )
     return mlp
 
 

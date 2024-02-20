@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Literal, Optional, Union
 
 import torch
+import torch.nn as nn
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
@@ -69,6 +70,7 @@ from rib.interaction_algos import InteractionRotation, calculate_interaction_rot
 from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
+    MLP,
     MLPConfig,
     ModularMLPConfig,
     SequentialTransformer,
@@ -245,11 +247,6 @@ class RibBuildConfig(BaseModel):
         if sum(1 for val in model_options if val is not None) != 1:
             raise ValueError(f"Exactly one of {model_options} must be set")
 
-        if self.interaction_matrices_path is not None:
-            assert (
-                self.mlp_path is None and self.modular_mlp_config is None
-            ), "We don't support loading interaction matrices for mlp models"
-
         if self.n_stochastic_sources_basis_pos is not None:
             assert (
                 self.basis_formula == "jacobian"
@@ -287,11 +284,6 @@ class RibBuildConfig(BaseModel):
                 assert (
                     key in self.node_layers or key in node_layer_prefixes
                 ), f"Integration method specified for non-existent node layer {key}"
-
-        if self.naive_gradient_flow:
-            assert (
-                self.mlp_path is None and self.modular_mlp_config is None
-            ), "Naive gradient flow not compatible with MLP"
 
         if self.naive_gradient_flow:
             assert (
@@ -515,7 +507,7 @@ def gradient_flow_loop(
             "out_dir": None,
         }
         config_i = replace_pydantic_model(config, updates)
-        result_i = rib_build(config_i, force=force)
+        result_i = rib_build(config_i, force=force, hacky_gradient_flow=True)
         if results is None:
             results = result_i
         else:
@@ -559,11 +551,22 @@ def gradient_flow_loop(
         return results
 
 
+class CustomModuleList(nn.ModuleList):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, x):
+        for module in self:
+            x = module(x)
+        return x
+
+
 def rib_build(
     config_path_or_obj: Union[str, RibBuildConfig],
     force: bool = False,
     n_pods: int = 1,
     pod_rank: int = 0,
+    hacky_gradient_flow: bool = False,
 ) -> RibBuildResults:
     """Build the RIB graph and store it on disk.
 
@@ -606,6 +609,26 @@ def rib_build(
 
     model, dataset = load_model_and_dataset_from_rib_config(config, device=device, dtype=dtype)
     model.eval()
+
+    # Run RIB
+    if isinstance(model, SequentialTransformer):
+        # Don't build the graph for the section of the model before the first node layer
+        section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
+    else:
+        # MLP "sections" are simply the model layers specified in config.node_layers
+        section_names = [layer for layer in config.node_layers if layer != "output"]
+
+    if hacky_gradient_flow and isinstance(model, MLP):
+        assert not config.calculate_edges
+        assert config.node_layers[-1] == "output", "The final node layer must be the output layer"
+        assert len(config.node_layers) == 2, "Node layers should be exactly 2 items"
+        main_layer_index = int(config.node_layers[0].split(".")[-1])
+        pre_section = nn.Sequential(*model.layers[:main_layer_index])
+        main_section = nn.Sequential(*model.layers[main_layer_index:])
+        model.layers = nn.ModuleList([pre_section, main_section])
+        # Overwrite section_names
+        section_names = ["layers.1"]
+
     hooked_model = HookedModel(model)
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
 
@@ -619,14 +642,6 @@ def rib_build(
         elif config.eval_type == "ce_loss":
             loss = eval_cross_entropy_loss(hooked_model, eval_loader, dtype=dtype, device=device)
             logger.info("Model per-token loss on dataset: %.2f", loss)
-
-    # Run RIB
-    if isinstance(model, SequentialTransformer):
-        # Don't build the graph for the section of the model before the first node layer
-        section_names = [f"sections.{sec}" for sec in model.sections if sec != "pre"]
-    else:
-        # MLP "sections" are simply the model layers specified in config.node_layers
-        section_names = [layer for layer in config.node_layers if layer != "output"]
 
     integration_methods = [
         config.get_integration_method(node_layer) for node_layer in config.node_layers

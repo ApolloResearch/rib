@@ -1,4 +1,4 @@
-exp_name: block_diagonal
+exp_name: block_diagonal_nnib_10k
 node_layers:
   - layers.0
   - layers.1
@@ -10,7 +10,7 @@ node_layers:
   - output
 dataset:
   dataset_type: block_vector
-  size: 100000
+  size: 10000
   length: 10
   data_variances: [1, 1]
   data_perfect_correlation: false
@@ -32,4 +32,4 @@ rotate_final_node_layer: false
 basis_formula: jacobian
 edge_formula: squared
 center: true
-naive_gradient_flow: true
+naive_gradient_flow: false

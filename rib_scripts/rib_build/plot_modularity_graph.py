@@ -93,8 +93,8 @@ def multipartite_layout_by_partition(G: nx.Graph) -> dict[str, np.ndarray]:
     return layout
 
 
-def plot_modular_graph(G: nx.Graph, weighted=True, weight_scale=10, ax=None):
-    partition = nx.community.louvain_communities(G, weight="weight")
+def plot_modular_graph(G: nx.Graph, weighted=True, weight_scale=10, ax=None, seed=1):
+    partition = nx.community.louvain_communities(G, weight="weight", resolution=1, seed=seed)
 
     for i, part in enumerate(partition):
         for n in part:
@@ -118,15 +118,16 @@ def plot_modular_graph(G: nx.Graph, weighted=True, weight_scale=10, ax=None):
     )
 
 
-def main(results_file: str) -> None:
-    rib_results = RibBuildResults(**torch.load(results_file))
-    out_dir = Path(__file__).parent / "out"
-    out_file_path = out_dir / f"{rib_results.exp_name}_modularity_graph.png"
-
-    G = get_nx_graph(rib_results, edge_masks=None)
-    plot_modular_graph(G)
-    plt.savefig(out_file_path)
-    logger.info(f"Saved graph to {out_file_path}")
+def main(*results_files: str, num_seeds=1) -> None:
+    for results_file in results_files:
+        rib_results = RibBuildResults(**torch.load(results_file))
+        G = get_nx_graph(rib_results, edge_masks=None)
+        for seed in range(num_seeds):
+            plot_modular_graph(G, seed=seed)
+            out_dir = Path(__file__).parent / "out"
+            out_file_path = out_dir / f"{rib_results.exp_name}_modularity_graph_{seed=}.png"
+            plt.savefig(out_file_path)
+            logger.info(f"Saved graph to {out_file_path}")
 
 
 if __name__ == "__main__":

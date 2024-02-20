@@ -5,24 +5,31 @@ node_layers:
   - layers.2
   - layers.3
   - layers.4
+  - layers.5
+  - layers.6
   - output
 dataset:
   dataset_type: block_vector
-  size: 10000
-  length: 4
+  size: 100000
+  length: 10
   data_variances: [1, 1]
   data_perfect_correlation: false
   seed: 0
 modular_mlp_config:
-  n_hidden_layers: 4
-  width: 4
-  weight_variances: [2, 2]
+  n_hidden_layers: 6
+  width: 10
+  weight_variances: [1., 1.]
   weight_equal_columns: false
   bias: 0
 seed: 0
 dtype: float64
-batch_size: 256
+batch_size: 100000
+gram_batch_size: 100000
+edge_batch_size: 100000
 n_intervals: 0
 truncation_threshold: 1e-15
 rotate_final_node_layer: false
-basis_formula: (1-0)*alpha
+basis_formula: jacobian
+edge_formula: squared
+center: true
+naive_gradient_flow: true

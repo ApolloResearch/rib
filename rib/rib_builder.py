@@ -447,11 +447,14 @@ def rib_build(
 
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
 
-    # we increment the seed between processes so we generate different phis
+    # we increment the seed between processes so we generate different phis. This is because
+    # each process will calculate a fraction of the total sources, and we need these sources
+    # (phis) to be different.
     if config.dist_split_over == "out_dim" and config.seed is not None:
-        # chosen by fair dice roll, guaranteed to be random
-        # (https://xkcd.com/221/)
         random_increment = 9594
+        # chosen by fair dice roll, guaranteed to be random (https://xkcd.com/221/)
+        # for real, the reason we add an increment is to avoid correlation between
+        # different global seeds, i.e. seed=0 pod=1 and seed=1 pod=0
         set_seed(config.seed + random_increment * dist_info.global_rank)
     else:
         set_seed(config.seed)

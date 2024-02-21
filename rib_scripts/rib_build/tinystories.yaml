@@ -9,11 +9,11 @@ dataset:
   return_set: train
   return_set_frac: null
   n_documents: 5000  # avg ~235 toks / document
-  n_samples: 15
+  n_samples: 5000
   # 2k: 97.1% during mlp_in.7 after >1 batch
   # 20: 95.1% during mlp_in.7 after >1 batch
   return_set_portion: first
-  n_ctx: 256 # needs to be <= 511 for the model to behave reasonably
+  n_ctx: 100 # needs to be <= 511 for the model to behave reasonably
 node_layers:
   # - ln1.0
   # - ln1_out.0
@@ -66,9 +66,9 @@ node_layers:
   - unembed # resid #this would be ==ln1.8 if there was one
 rotate_final_node_layer: true
 # Good barch sizes for 48GB a6000 with n_ctx=256
-gram_batch_size: 200
-batch_size: 5
-edge_batch_size: 1
+gram_batch_size: 500
+batch_size: 600
+edge_batch_size: 400
 truncation_threshold: 1e-15
 dtype: float64
 calculate_edges: true
@@ -78,9 +78,9 @@ n_intervals: 0
 integration_method: gradient
 basis_formula: jacobian
 edge_formula: squared
-# n_stochastic_sources_basis_pos: 64
-# n_stochastic_sources_basis_hidden: 50
-# n_stochastic_sources_edges: 50 #over pos, up to 511
+n_stochastic_sources_basis_pos: 20
+n_stochastic_sources_basis_hidden: 40
+n_stochastic_sources_edges: 6 #over pos, up to 511
 # d_hidden = 64
 # in_grads: Float[Tensor, "n_phis batch in_pos in_hidden"]
 # n_stochastic_sources_basis_pos * n_stochastic_sources_basis_hidden * batch_size * n_ctx * n_hidden

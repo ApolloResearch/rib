@@ -8,8 +8,8 @@ dataset:
   tokenizer_name: EleutherAI/gpt-neo-125M
   return_set: train
   return_set_frac: null
-  n_documents: 5000  # avg ~235 toks / document
-  n_samples: 5000
+  n_documents: 10000  # avg ~235 toks / document
+  n_samples: 500
   # 2k: 97.1% during mlp_in.7 after >1 batch
   # 20: 95.1% during mlp_in.7 after >1 batch
   return_set_portion: first
@@ -63,6 +63,8 @@ node_layers:
   - ln2.7 # resid, attn_out + resid
   - ln2_out.7 # var, resid, attn_out + resid
   - mlp_in.7 # ln_resid, attn_out + resid
+  - ln_final
+  - ln_final_out
   - unembed # resid #this would be ==ln1.8 if there was one
 rotate_final_node_layer: true
 # Good barch sizes for 48GB a6000 with n_ctx=256
@@ -78,6 +80,7 @@ n_intervals: 0
 integration_method: gradient
 basis_formula: jacobian
 edge_formula: squared
+center: true
 n_stochastic_sources_basis_pos: 20
 n_stochastic_sources_basis_hidden: 40
 n_stochastic_sources_edges: 6 #over pos, up to 511

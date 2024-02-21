@@ -127,6 +127,7 @@ def main(*results_files: str, num_seeds=1) -> None:
             out_dir = Path(__file__).parent / "out"
             out_file_path = out_dir / f"{rib_results.exp_name}_modularity_graph_{seed=}.png"
             plt.savefig(out_file_path)
+            plt.close()
             logger.info(f"Saved graph to {out_file_path}")
 
 

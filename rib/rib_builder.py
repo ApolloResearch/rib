@@ -566,6 +566,8 @@ def rib_build(
 
         calc_C_time = (time.time() - c_start_time) / 60
         logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
+        logger.info("Max memory allocated: %.2f GB", torch.cuda.max_memory_allocated() / 1e9)
+        torch.cuda.reset_peak_memory_stats()
     else:
         gram_matrices, interaction_rotations = load_interaction_rotations(config=config)
         edge_interaction_rotations = [
@@ -613,6 +615,7 @@ def rib_build(
 
         calc_edges_time = (time.time() - edges_start_time) / 60
         logger.info("Time to calculate edges: %.2f minutes", calc_edges_time)
+        logger.info("Max memory allocated: %.2f GB", torch.cuda.max_memory_allocated() / 1e9)
 
     results = RibBuildResults(
         exp_name=config.exp_name,

@@ -447,9 +447,12 @@ def rib_build(
 
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
 
-    # we increment seed so that different phis are created for different processes
+    # we increment the seed between processes so we generate different phis
     if config.dist_split_over == "out_dim" and config.seed is not None:
-        set_seed(config.seed + dist_info.global_rank)
+        # chosen by fair dice roll, guaranteed to be random
+        # (https://xkcd.com/221/)
+        random_increment = 9594
+        set_seed(config.seed + random_increment * dist_info.global_rank)
     else:
         set_seed(config.seed)
 

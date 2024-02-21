@@ -103,6 +103,9 @@ class RibBuildConfig(BaseModel):
             "pythia-70m",
             "pythia-160m",
             "pythia-410m",
+            "pythia-1b",
+            "pythia-1.4b",
+            "pythia-2.8b",
         ]
     ] = Field(None, description="Pretrained transformer lens model.")
     tlens_model_path: Optional[RootPath] = Field(
@@ -445,7 +448,7 @@ def rib_build(
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
 
     # we increment seed so that different phis are created for different processes
-    if config.dist_split_over == "out_dim":
+    if config.dist_split_over == "out_dim" and config.seed is not None:
         set_seed(config.seed + dist_info.global_rank)
     else:
         set_seed(config.seed)

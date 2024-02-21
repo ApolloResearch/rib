@@ -532,7 +532,8 @@ def rib_build(
             hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             means=means,
         )
-        logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
+        time_to_collect_gram = (time.time() - collect_gram_start_time) / 60
+        logger.info("Time to collect gram matrices: %.2f minutes", time_to_collect_gram)
 
         graph_train_loader = DataLoader(
             dataset=dataset, batch_size=config.batch_size, shuffle=False

@@ -1,4 +1,4 @@
-exp_name: tinystories
+exp_name: tinystories_ngf_sammples=1k
 seed: 0
 tlens_pretrained: tiny-stories-1M
 tlens_model_path: null
@@ -9,7 +9,7 @@ dataset:
   return_set: train
   return_set_frac: null
   n_documents: 10000  # avg ~235 toks / document
-  n_samples: 500
+  n_samples: 1000
   # 2k: 97.1% during mlp_in.7 after >1 batch
   # 20: 95.1% during mlp_in.7 after >1 batch
   return_set_portion: first
@@ -88,3 +88,4 @@ n_stochastic_sources_edges: 6 #over pos, up to 511
 # in_grads: Float[Tensor, "n_phis batch in_pos in_hidden"]
 # n_stochastic_sources_basis_pos * n_stochastic_sources_basis_hidden * batch_size * n_ctx * n_hidden
 # = 64 * 256 * 3 * 256 * 64 = 6.7e8 is 90% VRAM usage
+naive_gradient_flow: true

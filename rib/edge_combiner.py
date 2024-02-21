@@ -71,6 +71,7 @@ def combine_edges(*inputs: str) -> None:
         configs.append(results.config)
         global_ranks.append(results.dist_info.global_rank)
         global_sizes.append(results.dist_info.global_size)
+        logger.info(f"Loaded results from {results_file}")
 
     # Check that all results have the same global_size
     assert len(set(global_sizes)) == 1, f"global_sizes are not all the same: {global_sizes}"
@@ -95,6 +96,7 @@ def combine_edges(*inputs: str) -> None:
     # Check that all configs are identical
     assert len(set(map(str, configs))) == 1, f"configs are not all the same: {configs}"
 
+    logger.info("Combining edges...")
     # Concat edges together
     combined_edges = []
     for node_layer_edges in zip(*all_edges):
@@ -128,6 +130,7 @@ def combine_edges(*inputs: str) -> None:
     out_results.edges = combined_edges
     out_results.contains_all_edges = True
 
+    logger.info("Saving combined edges...")
     torch.save(out_results.model_dump(), out_file)
     result_file_strs = "\n".join(map(str, result_file_paths))
     logger.info(f"Combined edges in files\n{result_file_strs}\nand saved to {out_file}")

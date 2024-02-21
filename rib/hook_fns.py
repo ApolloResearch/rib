@@ -407,16 +407,18 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         with torch.inference_mode():
             M_dash = torch.einsum(
                 einsum_pattern,
-                in_grads.to(M_dtype) / normalization_factor,
+                in_grads.to(M_dtype),
                 in_grads.to(M_dtype),
             )
+            M_dash /= normalization_factor
             # Concatenate the inputs over the final dimension
             in_acts = torch.cat(inputs, dim=-1)
             Lambda_dash = torch.einsum(
                 einsum_pattern,
-                in_grads.to(Lambda_einsum_dtype) / normalization_factor,
+                in_grads.to(Lambda_einsum_dtype),
                 in_acts.to(Lambda_einsum_dtype),
             )
+            Lambda_dash /= normalization_factor
             Lambda_dash = Lambda_dash.to(in_dtype)
 
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
@@ -461,9 +463,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
         with torch.inference_mode():
             # M_dash.shape: j jprime
-            M_dash = einops.einsum(
-                in_grads.to(M_dtype) / normalization_factor, in_grads.to(M_dtype), einsum_pattern
-            )
+            M_dash = einops.einsum(in_grads.to(M_dtype), in_grads.to(M_dtype), einsum_pattern)
+            M_dash /= normalization_factor
             # In the jacobian basis, Lambda is not computed here but from the M eigenvalues later.
             # Set a placeholder to maintain the same function signature.
             Lambda_dash = torch.tensor(torch.nan)

@@ -441,9 +441,14 @@ def rib_build(
         Results of the graph build
     """
     config = load_config(config_path_or_obj, config_model=RibBuildConfig)
-    set_seed(config.seed)
 
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
+
+    # we increment seed so that different phis are created for different processes
+    if config.dist_split_over == "out_dim":
+        set_seed(config.seed + dist_info.global_rank)
+    else:
+        set_seed(config.seed)
 
     adjust_logger_dist(dist_info)
     device = get_device_mpi(dist_info)

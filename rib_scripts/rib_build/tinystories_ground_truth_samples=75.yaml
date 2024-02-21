@@ -69,7 +69,7 @@ node_layers:
 rotate_final_node_layer: true
 # Hardware
 gram_batch_size: 100 # negligible time
-batch_size: 12 # batch_size=15 works _sometimes_ on single A100 @ n_ctx=200 & no stochastic sources
+batch_size: 25 # batch_size=15 works _sometimes_ on single A100 @ n_ctx=200 & no stochastic sources
 edge_batch_size: 100 # not focusing on edges
 dist_split_over: out_dim
 # Common

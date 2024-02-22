@@ -899,6 +899,51 @@ def calc_gram_matrix(
     return torch.einsum(einsum_pattern, acts / normalization_factor, acts)
 
 
+def calc_weighted_gram_matrix(
+    acts: Union[
+        Float[Tensor, "batch pos orig"],
+        Float[Tensor, "batch orig"],
+    ],
+    grads: Union[
+        Float[Tensor, "batch pos orig"],
+        Float[Tensor, "batch orig"],
+    ],
+    dataset_size: int,
+) -> Float[Tensor, "orig orig"]:
+    """Calculate the weighted gram matrix. The weighting is given by the sum over orig dimension of
+    the elementwise square of the grads tensor.
+
+    The gram is normalized by the number of positions if the tensor has a position dimension.
+
+    Note that the inputs must contain a batch dimension, otherwise the normalization will not be
+    correct.
+
+    Args:
+        acts: The tensor to calculate the gram matrix for. May or may not have a position dimension.
+        grads: The tensor to use for weighting the gram matrix. Must have the same shape as acts.
+        dataset_size: The size of the dataset. Used for scaling the gram matrix.
+
+    Returns:
+        The weighted gram matrix.
+    """
+    assert acts.shape == grads.shape, "acts and grads must have the same shape"
+
+    if grads.dim() == 3:  # tensor with pos dimension
+        metric_einsum_pattern = "bsi, bti -> bst"
+        gram_einsum_pattern = "bsi, bst, btj -> ij"
+        normalisation_factor = acts.shape[1] * dataset_size
+    elif grads.dim() == 2:  # tensor without pos dimension
+        metric_einsum_pattern = "bi, bi -> b"
+        gram_einsum_pattern = "bi, b, bj -> ij"
+        normalisation_factor = dataset_size
+    else:
+        raise ValueError("Unexpected tensor rank")
+    metric_tensor: Float[Tensor, "orig orig"] = (
+        torch.einsum(metric_einsum_pattern, grads, grads) / grads.shape[-1]
+    )
+    return torch.einsum(gram_einsum_pattern, acts, metric_tensor, acts / normalisation_factor)
+
+
 def centering_matrix(
     mean: Float[torch.Tensor, "emb"],
     inverse: bool = False,

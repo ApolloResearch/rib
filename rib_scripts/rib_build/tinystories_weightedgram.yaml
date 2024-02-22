@@ -1,0 +1,32 @@
+exp_name: tinystories_unweighted_gram
+seed: 0
+tlens_pretrained: tiny-stories-1M
+tlens_model_path: null
+dataset:
+  dataset_type: huggingface
+  name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if part of training
+  tokenizer_name: EleutherAI/gpt-neo-125M
+  return_set: train
+  return_set_frac: null
+  n_documents: 5000  # avg ~235 toks / story
+  n_samples: 3000
+  return_set_portion: first
+  n_ctx: 256 # needs to be <= 511 for the model to behave reasonably
+node_layers:
+  - ln1.4
+  - mlp_out.4
+  - ln1.7
+  - mlp_out.7
+batch_size: 10
+gram_batch_size: 10
+weighted_gram: false
+edge_batch_size: 10
+truncation_threshold: 1e-15
+rotate_final_node_layer: true
+n_intervals: 0
+integration_method: gradient
+dtype: float64
+calculate_edges: false
+eval_type: null
+basis_formula: svd
+center: false

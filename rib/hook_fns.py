@@ -24,6 +24,7 @@ from rib.linalg import (
     calc_edge_squared,
     calc_edge_stochastic,
     calc_gram_matrix,
+    calc_weighted_gram_matrix,
 )
 
 
@@ -601,9 +602,116 @@ def acts_forward_hook_fn(
         hooked_data: Dictionary of hook data.
         hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
         data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
+        shift: added to the activations before gram matrix calculation. Used to center the data.
     """
     assert isinstance(data_key, str), "data_key must be a string."
-    outputs = output if isinstance(output, tuple) else (output,)
-    detached_outputs = [x.detach().cpu() for x in outputs]
-    # Store the output activations
-    hooked_data[hook_name] = {data_key: detached_outputs}
+    # Concat over the final dimension
+    out_acts = torch.cat([x.detach().clone() for x in _to_tuple(output)], dim=-1)
+    hooked_data.setdefault(hook_name, {}).setdefault(data_key, torch.zeros_like(out_acts))
+    hooked_data[hook_name][data_key] = out_acts
+    # _add_to_hooked_matrix(hooked_data, hook_name, data_key, out_acts)
+
+
+def acts_pre_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: InputActType,
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+) -> None:
+    """Hook function for storing the input activations.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module. Handles modules with one or two inputs of varying sizes
+            and with or without positional indices. If no positional indices, assumes one input.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
+        shift: added to the activations before gram matrix calculation. Used to center the data.
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+    # Concat over the final dimension
+    in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+    hooked_data.setdefault(hook_name, {}).setdefault(data_key, torch.zeros_like(in_acts))
+    hooked_data[hook_name][data_key] = in_acts
+
+
+def weighted_gram_backward_hook_fn(
+    module: torch.nn.Module,
+    grad_input: InputActType,
+    grad_output: OutputActType,
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    dataset_size: int,
+    shift: Optional[Float[Tensor, "orig"]] = None,
+) -> None:
+    """
+    Hook function for calculating and updating the weighted gram matrix.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        grad_input: Gradient of the input. Handles modules with one or two inputs of varying sizes
+        and with or without positional indices. If no positional indices, assumes one input.
+        grad_output: Gradient of the output (not used).
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
+        shift: added to the activations before gram matrix calculation. Used to center the data.
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+    # Concat over the final dimension
+    in_grads = torch.cat([x.detach().clone() for x in grad_input], dim=-1)
+    if shift is not None:
+        in_grads += shift
+
+    # assert that the key 'activations' is in hooked_data[hook_name]
+    assert (
+        "activations" in hooked_data[hook_name]
+    ), "Activations must be stored before running the backward hook"
+    weighted_gram_matrix = calc_weighted_gram_matrix(
+        hooked_data[hook_name]["activations"], in_grads, dataset_size=dataset_size
+    )
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, weighted_gram_matrix)
+
+
+def weighted_gram_pre_backward_hook_fn(
+    module: torch.nn.Module,
+    grad_output: OutputActType,
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+    dataset_size: int,
+    shift: Optional[Float[Tensor, "orig"]] = None,
+) -> None:
+    """
+    Hook function for calculating and updatingt the weighted gram matrix in the outputs.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        grad_output: Gradient of the output. Handles modules with one or two outputs of varying sizes
+            and with or without positional indices. If no positional indices, assumes one output.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the gram matrix.
+        shift: added to the activations before gram matrix calculation. Used to center the data.
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+    # Concat over the final dimension
+    out_grads = torch.cat([x.detach().clone() for x in _to_tuple(grad_output)], dim=-1)
+    if shift is not None:
+        out_grads += shift
+
+    # assert that the key 'activations' is in hooked_data[hook_name]
+    assert (
+        "activations" in hooked_data[hook_name]
+    ), "Activations must be stored before running the backward hook"
+    weighted_gram_matrix = calc_weighted_gram_matrix(
+        hooked_data[hook_name]["activations"], out_grads, dataset_size=dataset_size
+    )
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, weighted_gram_matrix)

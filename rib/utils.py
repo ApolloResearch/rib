@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Callable, Optional, Type, TypeVar, Union
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 import yaml
 from jaxtyping import Float, Int
 from pydantic import BaseModel
@@ -339,3 +340,29 @@ def get_chunk_indices(data_size: int, chunk_idx: int, n_chunks: int) -> tuple[in
     chunk_end = data_size * (chunk_idx + 1) // n_chunks
 
     return chunk_start, chunk_end
+
+
+def lm_cross_entropy_loss(
+    logits: Float[torch.Tensor, "batch pos d_vocab"],
+    tokens: Int[torch.Tensor, "batch pos"],
+    per_token: bool = False,
+) -> Union[Float[torch.Tensor, ""], Float[torch.Tensor, "batch pos"]]:
+    """Cross entropy loss for the language model, gives the loss for predicting the NEXT token.
+
+    Args:
+        logits (torch.Tensor): Logits. Shape [batch, pos, d_vocab]
+        tokens (torch.Tensor[int64]): Input tokens. Shape [batch, pos]
+        per_token (bool, optional): Whether to return the log probs predicted for the correct token,
+        or the loss (ie mean of the predicted log probs). Note that the returned array has shape
+        [batch, seq-1] as we cannot predict the first token (alternately, we ignore the final
+        logit). Defaults to False.
+    """
+    log_probs = F.log_softmax(logits, dim=-1)
+    # Use torch.gather to find the log probs of the correct tokens
+    # Offsets needed because we're predicting the NEXT token (this means the final logit is meaningless)
+    # None and [..., 0] needed because the tensor used in gather must have the same rank.
+    predicted_log_probs = log_probs.gather(dim=-1, index=tokens[..., None])[..., 0]
+    if per_token:
+        return -predicted_log_probs
+    else:
+        return -predicted_log_probs.mean()

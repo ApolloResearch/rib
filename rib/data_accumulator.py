@@ -13,18 +13,22 @@ from tqdm import tqdm
 from rib.distributed_utils import sum_across_processes
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
+    acts_forward_hook_fn,
+    acts_pre_forward_hook_fn,
     dataset_mean_forward_hook_fn,
     dataset_mean_pre_forward_hook_fn,
     gram_forward_hook_fn,
     gram_pre_forward_hook_fn,
     interaction_edge_pre_forward_hook_fn,
+    weighted_gram_backward_hook_fn,
+    weighted_gram_pre_backward_hook_fn,
 )
 from rib.hook_manager import Hook, HookedModel
 from rib.linalg import module_hat
 from rib.log import logger
 from rib.models.utils import get_model_attr
 from rib.types import IntegrationMethod
-from rib.utils import check_device_is_cpu, get_chunk_indices
+from rib.utils import check_device_is_cpu, get_chunk_indices, lm_cross_entropy_loss
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -229,6 +233,130 @@ def collect_gram_matrices(
     run_dataset_through_model(
         hooked_model, data_loader, gram_hooks, dtype=dtype, device=device, use_tqdm=True
     )
+
+    gram_matrices: dict[str, Float[Tensor, "orig orig"]] = {
+        hook_name: hooked_model.hooked_data[hook_name]["gram"]
+        for hook_name in hooked_model.hooked_data
+    }
+    hooked_model.clear_hooked_data()
+
+    expected_gram_keys = set(hook_names + ["output"]) if collect_output_gram else set(hook_names)
+    assert set(gram_matrices.keys()) == expected_gram_keys, (
+        f"Gram matrix keys not the same as the module names that were hooked. "
+        f"Expected: {expected_gram_keys}, got: {set(gram_matrices.keys())}"
+    )
+
+    return gram_matrices
+
+
+def collect_weighted_gram_matrices(
+    hooked_model: HookedModel,
+    module_names: list[str],
+    data_loader: DataLoader,
+    device: str,
+    dtype: torch.dtype,
+    collect_output_gram: bool = True,
+    hook_names: Optional[list[str]] = None,
+    means: Optional[dict[str, Float[Tensor, "orig"]]] = None,
+) -> dict[str, Float[Tensor, "orig orig"]]:
+    """Collect gram matrices for the module inputs and optionally the output of the final module.
+
+    We use pre_forward hooks for the input to each module. If `collect_output_gram` is True, we
+    also collect the gram matrix for the output of the final module using a forward hook.
+
+    Will collect correlation matrices (that is, gram matrices of centered activations) if `means` is
+    provided. In this case, `bias_positions` must also be provided. The bias positions will not be
+    centered.
+
+    Args:
+        hooked_model: The hooked model.
+        module_names: The names of the modules to collect gram matrices for. Can be any valid
+            pytorch module in hooked_model.model. These typically correspond to section_names (e.g.
+            "sections.section_0") when the model is a SequentialTransformer or raw layers (e.g.
+            "layers.2") when the model is an MLP.
+        data_loader: The pytorch data loader.
+        device: The device to run the model on.
+        dtype: The data type to use for model computations.
+        collect_output_gram: Whether to collect the gram matrix for the output of the final module.
+        hook_names: Used to store the gram matrices in the hooked model.
+        means: A dictionary of mean activations for each module. The keys are the hook names. If
+            not none, will be used to center the activations when computing the gram matrices.
+
+    Returns:
+        A dictionary of gram matrices, where the keys are the hook names (a.k.a. node layer names)
+    """
+    assert len(module_names) > 0, "No modules specified."
+    if hook_names is not None:
+        assert len(hook_names) == len(module_names), "Must specify a hook name for each module."
+    else:
+        hook_names = module_names
+
+    dataset_size = len(data_loader.dataset)  # type: ignore
+    activation_hooks: list[Hook] = []
+    gram_hooks: list[Hook] = []
+    # Add input hooks
+    for module_name, hook_name in zip(module_names, hook_names):
+        shift: Optional[Float[Tensor, "orig"]] = None
+        if means is not None and hook_name in means:
+            shift = -means[hook_name]
+            shift[-1] = 0.0  # don't shift the final bias pos
+        activation_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="activations",
+                fn=acts_pre_forward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={},
+            )
+        )
+        gram_hooks.append(
+            Hook(
+                name=hook_name,
+                data_key="gram",
+                fn=weighted_gram_backward_hook_fn,
+                module_name=module_name,
+                fn_kwargs={"dataset_size": dataset_size, "shift": shift},
+            )
+        )
+    if collect_output_gram:
+        # Add hook to collect model output
+        activation_hooks.append(
+            Hook(
+                name="output",
+                data_key="activations",
+                fn=acts_forward_hook_fn,
+                module_name=module_names[-1],
+                fn_kwargs={},
+            )
+        )
+        gram_hooks.append(
+            Hook(
+                name="output",
+                data_key="gram",
+                fn=weighted_gram_pre_backward_hook_fn,
+                module_name=module_names[-1],
+                fn_kwargs={
+                    # we don't need to care about bias positions in the output
+                    "shift": -means["output"] if means is not None else None
+                },
+            )
+        )
+
+    hooked_model.add_hooks(gram_hooks)
+
+    desc = "Batches through entire model"
+    loader = tqdm(data_loader, total=len(data_loader), desc=desc)
+    for batch in loader:
+        data, labels = batch
+        data = data.to(device=device)
+        labels = labels.to(device=device)
+        # Change the dtype unless the inputs are integers (e.g. like they are for LMs)
+        if data.dtype not in [torch.int64, torch.int32]:
+            data = data.to(dtype=dtype)
+        output = hooked_model(data, hooks=activation_hooks)[0]
+        loss = lm_cross_entropy_loss(output, labels)
+        loss.backward()
+    hooked_model.remove_backward_hooks()
 
     gram_matrices: dict[str, Float[Tensor, "orig orig"]] = {
         hook_name: hooked_model.hooked_data[hook_name]["gram"]

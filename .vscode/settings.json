@@ -1,5 +1,5 @@
 {
-    "editor.minimap.enabled": false,
+    "editor.minimap.enabled": true,
     "editor.inlineSuggest.enabled": true,
     "editor.wordWrap": "on",
     "diffEditor.ignoreTrimWhitespace": false,
@@ -34,7 +34,6 @@
     "jupyter.interactiveWindow.creationMode": "perFile",
     "notebook.formatOnSave.enabled": true,
     "rewrap.autoWrap.enabled": true,
-    "rewrap.wrappingColumn": 100,
     "python.testing.pytestArgs": [
         "tests"
     ],

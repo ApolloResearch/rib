@@ -39,29 +39,79 @@ class Hook:
     fn: Callable
     module_name: str
     fn_kwargs: dict[str, Any] = field(default_factory=dict)
+    hook_type: str = "forward"
 
     def __post_init__(self) -> None:
         """Set the hook_type attribute based on whether fn contains an output argument.
 
-        Also verify that the name of the function contains 'forward' or 'pre_forward', depending
-        on which type is inferred.
+        Also verify that the name of the function contains one of
+        'forward','pre_forward','backward','pre_backward' depending on which type is inferred.
         """
         fn_args = list(inspect.signature(self.fn).parameters.keys())
-        assert fn_args[:2] == [
-            "module",
-            "inputs",
-        ], f"Hook function must have signature (module, inputs, ...), got {fn_args}"
-        if len(fn_args) > 2 and fn_args[2] == "output":
+        forward_args = ["module", "inputs", "output"]
+        pre_forward_args = ["module", "inputs"]
+        backward_args = ["module", "grad_input", "grad_output"]
+        pre_backward_args = ["module", "grad_output"]
+        if len(fn_args) > 2 and fn_args[:3] == forward_args:
             self.hook_type = "forward"
             assert (
                 "forward" in self.fn.__name__ and "pre_forward" not in self.fn.__name__
             ), f"Hook name must contain 'forward' for forward hooks, got {self.fn.__name__}"
-        else:
+        elif len(fn_args) > 1 and fn_args[:2] == pre_forward_args:
             self.hook_type = "pre_forward"
-            assert "pre_forward" in self.fn.__name__, (
-                f"Hook name must contain 'pre_forward' for pre_forward hooks, got "
-                f"{self.fn.__name__}"
+            assert (
+                "pre_forward" in self.fn.__name__
+            ), f"Hook name must contain 'pre_forward' for pre_forward hooks, got {self.fn.__name__}"
+        elif len(fn_args) > 2 and fn_args[:3] == backward_args:
+            self.hook_type = "backward"
+            assert (
+                "backward" in self.fn.__name__ and "pre_backward" not in self.fn.__name__
+            ), f"Hook name must contain 'backward' for backward hooks, got {self.fn.__name__}"
+        elif len(fn_args) > 1 and fn_args[:2] == pre_backward_args:
+            self.hook_type = "pre_backward"
+            assert (
+                "pre_backward" in self.fn.__name__
+            ), f"Hook name must contain 'pre_backward' for pre_backward hooks, got {self.fn.__name__}"
+        else:
+            raise ValueError(
+                f"Hook function must have signature (module, inputs, [output]) or "
+                f"(module, grad_input, grad_output) or (module, grad_output), got {fn_args}"
             )
+
+        # if self.hook_type == "forward":
+        #     assert fn_args[:2] == [
+        #         "module",
+        #         "inputs",
+        #     ], f"Hook function must have signature (module, inputs, ...), got {fn_args}"
+        #     if len(fn_args) > 2 and fn_args[2] == "output":
+        #         self.hook_type = "forward"
+        #         assert (
+        #             "forward" in self.fn.__name__ and "pre_forward" not in self.fn.__name__
+        #         ), f"Hook name must contain 'forward' for forward hooks, got {self.fn.__name__}"
+        #     else:
+        #         self.hook_type = "pre_forward"
+        #         assert "pre_forward" in self.fn.__name__, (
+        #             f"Hook name must contain 'pre_forward' for pre_forward hooks, got "
+        #             f"{self.fn.__name__}"
+        #         )
+        # elif self.hook_type == "backward":
+        #     assert fn_args[:2] == [
+        #         "module",
+        #         "inputs",
+        #     ], f"Hook function must have signature (module, inputs, ...), got {fn_args}"
+        #     if len(fn_args) > 2 and fn_args[1] == "grad_input":
+        #         self.hook_type = "backward"
+        #         assert "backward" in self.fn.__name__, (
+        #             f"Hook name must contain 'backward' for pre_backward hooks, got "
+        #             f"{self.fn.__name__}"
+        #         )
+        #     else:
+        #         self.hook_type = "pre_backward"
+        #         assert (
+        #             "pre_backward" in self.fn.__name__
+        #         ), f"Hook name must contain 'pre_backward' for backward hooks, got {self.fn.__name__}"
+        # else:
+        #     raise ValueError(f"hook_type must be 'forward' or 'backward', got {self.hook_type}")
 
 
 class HookedModel(torch.nn.Module):
@@ -82,20 +132,21 @@ class HookedModel(torch.nn.Module):
     def __init__(self, model: torch.nn.Module) -> None:
         super().__init__()
         self.model = model
-        self.hook_handles: list[torch.utils.hooks.RemovableHandle] = []
+        self.forward_hook_handles: list[torch.utils.hooks.RemovableHandle] = []
+        self.backward_hook_handles: list[torch.utils.hooks.RemovableHandle] = []
         self.hooked_data: dict[str, Any] = {}
 
     def __call__(self, *args, hooks: Optional[list[Hook]] = None, **kwargs) -> Any:
-        return self.forward(*args, hooks=hooks, **kwargs)
+        return self.forward(*args, forward_hooks=hooks, **kwargs)
 
-    def forward(self, *args, hooks: Optional[list[Hook]] = None, **kwargs) -> Any:
+    def forward(self, *args, forward_hooks: Optional[list[Hook]] = None, **kwargs) -> Any:
         """Run the forward pass of the model and remove all hooks."""
-        if hooks is not None:
-            self.add_hooks(hooks)
+        if forward_hooks is not None:
+            self.add_hooks(forward_hooks)
         try:
             output = self.model(*args, **kwargs)
         finally:
-            self.remove_hooks()
+            self.remove_forward_hooks()
         return output
 
     def add_hooks(self, hooks: list[Hook]) -> None:
@@ -111,15 +162,30 @@ class HookedModel(torch.nn.Module):
             )
             if hook.hook_type == "forward":
                 handle = hook_module.register_forward_hook(hook_fn_partial)
+                self.forward_hook_handles.append(handle)
             elif hook.hook_type == "pre_forward":
                 handle = hook_module.register_forward_pre_hook(hook_fn_partial)
-            self.hook_handles.append(handle)
+                self.forward_hook_handles.append(handle)
+            elif hook.hook_type == "backward":
+                handle = hook_module.register_full_backward_hook(hook_fn_partial)
+                self.backward_hook_handles.append(handle)
+            elif hook.hook_type == "pre_backward":
+                handle = hook_module.register_full_backward_pre_hook(hook_fn_partial)
+                self.backward_hook_handles.append(handle)
+            else:
+                raise ValueError(f"Invalid hook_type, got {hook.hook_type}")
 
-    def remove_hooks(self) -> None:
-        """Remove all hooks from the model."""
-        for handle in self.hook_handles:
+    def remove_forward_hooks(self) -> None:
+        """Remove all forward hooks from the model."""
+        for handle in self.forward_hook_handles:
             handle.remove()
-        self.hook_handles = []
+        self.forward_hook_handles = []
+
+    def remove_backward_hooks(self) -> None:
+        """Remove all backward hooks from the model."""
+        for handle in self.backward_hook_handles:
+            handle.remove()
+        self.backward_hook_handles = []
 
     def clear_hooked_data(self) -> None:
         """Clear all data stored in the hooked_data attribute."""
@@ -151,7 +217,7 @@ class HookedModel(torch.nn.Module):
                     module_name=module_name,
                 )
             )
-        output = self.forward(*args, hooks=act_hooks, **kwargs)
+        output = self.forward(*args, forward_hooks=act_hooks, **kwargs)
         hooked_data = self.hooked_data
         self.clear_hooked_data()
         return output, hooked_data

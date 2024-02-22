@@ -87,7 +87,7 @@ def test_hooked_model_add_and_remove_hooks(model):
     mock_fn.assert_called_once()
 
     # Ensure all hooks are removed after forward pass
-    assert not hooked_model.hook_handles
+    assert not hooked_model.forward_hook_handles
 
     # Ensure output matches expected output from base model (gram hook does not modify output)
     assert torch.allclose(result, model(data))

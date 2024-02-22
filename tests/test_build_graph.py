@@ -144,7 +144,7 @@ def get_rib_acts_test(results: RibBuildResults, atol: float, batch_size=16):
         for input, _ in data_loader:
             if input.dtype not in [torch.int32, torch.int64]:
                 input = input.to(dtype=dtype)
-            hooked_model.forward(input.to(device=device), hooks=[hook])
+            hooked_model.forward(input.to(device=device), forward_hooks=[hook])
             cache_out = hooked_model.hooked_data[prev_module_id]["acts"]
             hooked_model.clear_hooked_data()
             prev_module_outputs.append(torch.concatenate(cache_out, dim=-1).cpu())

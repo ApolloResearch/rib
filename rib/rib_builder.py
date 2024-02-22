@@ -56,6 +56,7 @@ from rib.data_accumulator import (
     collect_dataset_means,
     collect_gram_matrices,
     collect_interaction_edges,
+    collect_weighted_gram_matrices,
 )
 from rib.distributed_utils import (
     DistributedInfo,
@@ -146,6 +147,11 @@ class RibBuildConfig(BaseModel):
         None,
         description="The batch size to use when calculating the gram matrices. If None, use the same"
         "batch size as the one used to build the graph.",
+    )
+    weighted_gram: bool = Field(
+        False,
+        description="Whether to weight the calculation of the gram matrices by the size of gradients"
+        "on each datapoint.",
     )
     edge_batch_size: Optional[int] = Field(
         None,
@@ -513,17 +519,28 @@ def rib_build(
 
         collect_gram_start_time = time.time()
         logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
-
-        gram_matrices = collect_gram_matrices(
-            hooked_model=hooked_model,
-            module_names=section_names,
-            data_loader=gram_train_loader,
-            dtype=dtype,
-            device=device,
-            collect_output_gram=collect_output_gram,
-            hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
-            means=means,
-        )
+        if config.weighted_gram:
+            gram_matrices = collect_weighted_gram_matrices(
+                hooked_model=hooked_model,
+                module_names=section_names,
+                data_loader=gram_train_loader,
+                device=device,
+                dtype=dtype,
+                collect_output_gram=collect_output_gram,
+                hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
+                means=means,
+            )
+        else:
+            gram_matrices = collect_gram_matrices(
+                hooked_model=hooked_model,
+                module_names=section_names,
+                data_loader=gram_train_loader,
+                dtype=dtype,
+                device=device,
+                collect_output_gram=collect_output_gram,
+                hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
+                means=means,
+            )
         logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
 
         graph_train_loader = DataLoader(

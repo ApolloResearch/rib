@@ -65,7 +65,7 @@ from rib.distributed_utils import (
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
-from rib.loader import load_model_and_dataset_from_rib_config
+from rib.loader import load_dataset, load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
     MLPConfig,
@@ -143,6 +143,19 @@ class RibBuildConfig(BaseModel):
         ...,
         discriminator="dataset_type",
         description="The dataset to use to build the graph.",
+    )
+    gram_dataset: Optional[
+        Union[
+            ModularArithmeticDatasetConfig,
+            HFDatasetConfig,
+            VisionDatasetConfig,
+            BlockVectorDatasetConfig,
+        ]
+    ] = Field(
+        None,
+        discriminator="dataset_type",
+        description="The dataset to use for the gram matrix. Defaults to the same dataset as the"
+        "one used to build the graph.",
     )
     batch_size: int = Field(..., description="The batch size to use when building the graph.")
     gram_batch_size: Optional[int] = Field(
@@ -475,6 +488,14 @@ def rib_build(
     calc_edges_time = None
 
     model, dataset = load_model_and_dataset_from_rib_config(config, device=device, dtype=dtype)
+    if config.gram_dataset is None:
+        gram_dataset = dataset
+    else:
+        gram_dataset = load_dataset(
+            dataset_config=config.gram_dataset,
+            model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
+            tlens_model_path=config.tlens_model_path,
+        )
     model.eval()
     hooked_model = HookedModel(model)
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
@@ -506,8 +527,11 @@ def rib_build(
         if dist_info.global_size > 1 and config.dist_split_over == "dataset":
             raise NotImplementedError("Cannot parallelize Cs calculation over dataset")
 
+        # Note that we use shuffle=False because we already shuffled the dataset when we loaded it
         gram_train_loader = DataLoader(
-            dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
+            dataset=gram_dataset,
+            batch_size=config.gram_batch_size or config.batch_size,
+            shuffle=False,
         )
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer

@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch.utils.data import Subset, TensorDataset
 
-from rib.loader import load_sequential_transformer, tokenize_dataset
+from rib.loader import load_sequential_transformer, prepare_dataset
 from rib.utils import get_data_subset, set_seed
 
 
@@ -83,7 +83,7 @@ class TestTokenizeDataset:
 
     def test_outputs_are_all_n_ctx_length(self):
         n_ctx = 5
-        tokenized_dataset = tokenize_dataset(self.sample_dataset, self.tokenizer, n_ctx)
+        tokenized_dataset = prepare_dataset(self.sample_dataset, self.tokenizer, n_ctx)
         for input_ids, labels in tokenized_dataset:
             assert len(input_ids) == n_ctx
             assert len(labels) == n_ctx
@@ -91,18 +91,16 @@ class TestTokenizeDataset:
     def test_dataset_has_expected_size(self):
         n_ctx = 5
         n_samples = 3
-        tokenized_dataset = tokenize_dataset(self.sample_dataset, self.tokenizer, n_ctx, n_samples)
+        tokenized_dataset = prepare_dataset(self.sample_dataset, self.tokenizer, n_ctx, n_samples)
         assert len(tokenized_dataset) == n_samples
 
     def test_seed_reproducibility(self):
         n_ctx = 5
         n_samples = 2
         seed = 0
-        dataset1 = tokenize_dataset(self.sample_dataset, self.tokenizer, n_ctx, n_samples, seed)
+        dataset1 = prepare_dataset(self.sample_dataset, self.tokenizer, n_ctx, n_samples, seed)
         duplicate_tokenizer = MockTokenizer()
-        dataset2 = tokenize_dataset(
-            self.sample_dataset, duplicate_tokenizer, n_ctx, n_samples, seed
-        )
+        dataset2 = prepare_dataset(self.sample_dataset, duplicate_tokenizer, n_ctx, n_samples, seed)
         assert torch.equal(dataset1.tensors[0], dataset2.tensors[0]) and torch.equal(
             dataset1.tensors[1], dataset2.tensors[1]
         )
@@ -110,9 +108,9 @@ class TestTokenizeDataset:
     def test_different_seeds(self):
         n_ctx = 5
         n_samples = 2
-        dataset1 = tokenize_dataset(self.sample_dataset, self.tokenizer, n_ctx, n_samples, 42)
+        dataset1 = prepare_dataset(self.sample_dataset, self.tokenizer, n_ctx, n_samples, 42)
         duplicate_tokenizer = MockTokenizer()
-        dataset2 = tokenize_dataset(self.sample_dataset, duplicate_tokenizer, n_ctx, n_samples, 43)
+        dataset2 = prepare_dataset(self.sample_dataset, duplicate_tokenizer, n_ctx, n_samples, 43)
         assert not torch.equal(dataset1.tensors[0], dataset2.tensors[0]) or not torch.equal(
             dataset1.tensors[1], dataset2.tensors[1]
         )
@@ -124,7 +122,7 @@ class TestTokenizeDataset:
         So we can flatten the input_ids and labels and check that they are equal (offset by one).
         """
         n_ctx = 5
-        tokenized_dataset = tokenize_dataset(self.sample_dataset, self.tokenizer, n_ctx)
+        tokenized_dataset = prepare_dataset(self.sample_dataset, self.tokenizer, n_ctx)
         flattened_input_ids = [
             token_id for input_ids, _ in tokenized_dataset for token_id in input_ids
         ]
@@ -140,7 +138,7 @@ class TestTokenizeDataset:
         """
         n_ctx = 5
         n_samples = 3
-        tokenized_dataset = tokenize_dataset(self.sample_dataset, self.tokenizer, n_ctx, n_samples)
+        tokenized_dataset = prepare_dataset(self.sample_dataset, self.tokenizer, n_ctx, n_samples)
         for input_ids, labels in tokenized_dataset:
             assert len(input_ids) == len(labels)
             assert torch.equal(input_ids[1:], labels[:-1])

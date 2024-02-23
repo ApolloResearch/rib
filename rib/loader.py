@@ -8,8 +8,11 @@ import torchvision
 import yaml
 from datasets import load_dataset as hf_load_dataset
 from torch.utils.data import Dataset, TensorDataset
+from tqdm import tqdm
 from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
+
+from rib.log import logger
 
 if TYPE_CHECKING:
     from rib.rib_builder import RibBuildConfig
@@ -214,7 +217,7 @@ def create_modular_arithmetic_dataset(
     return dataset_subset
 
 
-def tokenize_dataset(
+def prepare_dataset(
     dataset: Dataset,
     tokenizer: AutoTokenizer,
     n_ctx: int,
@@ -241,20 +244,29 @@ def tokenize_dataset(
         TensorDataset: The tokenized dataset.
     """
     assert tokenizer.eos_token_id is not None, "Tokenizer must have an eos token id"
+    # May already be tokenized
+    try:
+        tokenized = not "text" in dataset.features.keys()  # type: ignore
+    except AttributeError:
+        tokenized = False
     # Tokenize all samples and merge them into one long list of tokens
-    all_tokens = []
-    for example in dataset:  # type: ignore
-        tokens = tokenizer(example["text"])["input_ids"]
-        # Add the eos token to the end of each sample as was done in the original training
-        # https://github.com/EleutherAI/pythia/issues/123#issuecomment-1791136253
-        all_tokens.extend(tokens + [tokenizer.eos_token_id])
-
+    all_tokens: list[int] = []
+    for example in tqdm(dataset, desc="Tokenizing dataset", total=len(dataset)):  # type: ignore
+        if not tokenized:
+            tokens = tokenizer(example["text"])["input_ids"]
+            # Add the eos token to the end of each sample as was done in the original training
+            # https://github.com/EleutherAI/pythia/issues/123#issuecomment-1791136253
+            all_tokens.extend(tokens + [tokenizer.eos_token_id])
+        else:
+            tokens = example["input_ids"]
+            all_tokens.extend(tokens)
     # There shouldn't be any padding tokens, so ensure that there are len(dataset) eos tokens
-    len_dataset = len(dataset)  # type: ignore
-    assert all_tokens.count(tokenizer.eos_token_id) == len_dataset, (
-        f"Number of eos tokens ({all_tokens.count(tokenizer.eos_token_id)}) does not match "
-        f"number of samples ({len_dataset})."
-    )
+    if not tokenized:
+        len_dataset = len(dataset)  # type: ignore
+        assert all_tokens.count(tokenizer.eos_token_id) == len_dataset, (
+            f"Number of eos tokens ({all_tokens.count(tokenizer.eos_token_id)}) does not match "
+            f"number of samples ({len_dataset})."
+        )
     # Split the merged tokens into chunks that fit the context length
     raw_chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
 
@@ -347,17 +359,21 @@ def create_hf_dataset(
         # Sample n_samples from all documents in return_set
         data_split = dataset_config.return_set
 
+    logger.info(f"Loading HuggingFace dataset {dataset_config.name} split {data_split}")
     raw_dataset = hf_load_dataset(dataset_config.name, split=data_split)
+    logger.info(f"Loaded {len(raw_dataset)} samples from HuggingFace dataset")
 
     tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
     tokenizer.pad_token = tokenizer.eos_token
-    tokenized_dataset = tokenize_dataset(
+    logger.info(f"Tokenizing HuggingFace dataset with tokenizer {dataset_config.tokenizer_name}")
+    tokenized_dataset = prepare_dataset(
         dataset=raw_dataset,
         tokenizer=tokenizer,
         n_ctx=n_ctx,
         n_samples=dataset_config.n_samples,
         seed=dataset_config.seed,
     )
+    logger.info(f"Tokenized {len(tokenized_dataset)} samples from HuggingFace dataset")
     return tokenized_dataset
 
 

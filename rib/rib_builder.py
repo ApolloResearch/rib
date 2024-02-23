@@ -642,6 +642,7 @@ def rib_build(
         )
     model.eval()
     hooked_model = HookedModel(model)
+    logger.info(f"Gram dataset length: {len(gram_dataset)}")  # type: ignore
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
 
     # Evaluate model on dataset for sanity check

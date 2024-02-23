@@ -1,0 +1,99 @@
+exp_name: tinystories_ground_truth_dist_sammples=2500_10%gram
+seed: 0
+tlens_pretrained: tiny-stories-1M
+tlens_model_path: null
+dataset:
+  dataset_type: huggingface
+  name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if part of training
+  tokenizer_name: EleutherAI/gpt-neo-125M
+  return_set: train
+  return_set_frac: null
+  n_documents: 10000  # avg ~235 toks / document
+  n_samples: 2500
+  return_set_portion: first
+  n_ctx: 200 # needs to be <= 511 for the model to behave reasonably
+gram_dataset:
+  # Tokenizing 200k documents takes about 1.3 minutes, so expect 13 min for whole dataset
+  # use tokenized version instead
+  dataset_type: huggingface
+  name: apollo-research/sae-roneneldan-TinyStories-tokenizer-gpt2
+  tokenizer_name: EleutherAI/gpt-neo-125M
+  return_set: train
+  return_set_frac: 0.1
+  return_set_portion: first
+  n_ctx: 200
+eval_type: null
+# RIB layers
+node_layers:
+  - ln1.0
+  - ln1_out.0
+  - attn_in.0
+  - ln2.0
+  - ln2_out.0
+  - mlp_in.0
+  - ln1.1
+  - ln1_out.1
+  - attn_in.1
+  - ln2.1
+  - ln2_out.1
+  - mlp_in.1
+  - ln1.2
+  - ln1_out.2
+  - attn_in.2
+  - ln2.2
+  - ln2_out.2
+  - mlp_in.2
+  - ln1.3
+  - ln1_out.3
+  - attn_in.3
+  - ln2.3
+  - ln2_out.3
+  - mlp_in.3
+  - ln1.4
+  - ln1_out.4
+  - attn_in.4
+  - ln2.4
+  - ln2_out.4
+  - mlp_in.4
+  - ln1.5
+  - ln1_out.5
+  - attn_in.5
+  - ln2.5
+  - ln2_out.5
+  - mlp_in.5
+  - ln1.6
+  - ln1_out.6
+  - attn_in.6
+  - ln2.6
+  - ln2_out.6
+  - mlp_in.6
+  - ln1.7 # resid
+  - ln1_out.7 # var, resid
+  - attn_in.7 # ln_resid, resid
+  - ln2.7 # resid, attn_out + resid
+  - ln2_out.7 # var, resid, attn_out + resid
+  - mlp_in.7 # ln_resid, attn_out + resid
+  - ln_final
+  - ln_final_out
+  - unembed # resid #this would be ==ln1.8 if there was one
+rotate_final_node_layer: true
+# Hardware
+gram_batch_size: 100 # negligible time
+batch_size: 27 # batch_size=15 works _sometimes_ on single A100 @ n_ctx=200 & no stochastic sources
+edge_batch_size: 100 # not focusing on edges
+dist_split_over: out_dim
+# Common
+dtype: float64
+truncation_threshold: 1e-15
+n_intervals: 0
+integration_method: gradient
+# Basis
+basis_formula: jacobian
+center: true
+naive_gradient_flow: false
+# n_stochastic_sources_basis_pos: 20
+# n_stochastic_sources_basis_hidden: 40
+# Edges
+calculate_edges: false
+edge_formula: squared
+n_stochastic_sources_edges: 6

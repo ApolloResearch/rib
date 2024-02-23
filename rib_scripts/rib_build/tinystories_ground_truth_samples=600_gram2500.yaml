@@ -1,4 +1,4 @@
-exp_name: tinystories_ground_truth_dist_sammples=5000
+exp_name: tinystories_ground_truth_dist_sammples=600_gram2500
 seed: 0
 tlens_pretrained: tiny-stories-1M
 tlens_model_path: null
@@ -9,7 +9,17 @@ dataset:
   return_set: train
   return_set_frac: null
   n_documents: 10000  # avg ~235 toks / document
-  n_samples: 5000
+  n_samples: 600
+  return_set_portion: first
+  n_ctx: 200 # needs to be <= 511 for the model to behave reasonably
+gram_dataset:
+  dataset_type: huggingface
+  name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if part of training
+  tokenizer_name: EleutherAI/gpt-neo-125M
+  return_set: train
+  return_set_frac: null
+  n_documents: 10000  # avg ~235 toks / document
+  n_samples: 2500
   return_set_portion: first
   n_ctx: 200 # needs to be <= 511 for the model to behave reasonably
 eval_type: null
@@ -68,8 +78,8 @@ node_layers:
   - unembed # resid #this would be ==ln1.8 if there was one
 rotate_final_node_layer: true
 # Hardware
-gram_batch_size: 100 # negligible time
-batch_size: 75 # batch_size=15 works _sometimes_ on single A100 @ n_ctx=200 & no stochastic sources
+gram_batch_size: 50 # negligible time
+batch_size: 25 # batch_size=15 works _sometimes_ on single A100 @ n_ctx=200 & no stochastic sources
 edge_batch_size: 100 # not focusing on edges
 dist_split_over: out_dim
 # Common

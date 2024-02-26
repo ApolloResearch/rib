@@ -212,7 +212,7 @@ def test_run_mnist_ablations_bisect(ablation_type, tmp_path):
     rib_results_path: {tempfile}
     schedule:
         schedule_type: bisect
-        score_target: 0.9
+        score_target_difference: 0.1
     dtype: float32
     ablation_node_layers:
         - layers.1

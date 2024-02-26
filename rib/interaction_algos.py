@@ -1,6 +1,6 @@
 """This module contains algorithms related to interaction rotations."""
 
-from typing import Callable, Literal, Optional, Union
+from typing import Callable, Literal, Optional
 
 import torch
 from jaxtyping import Float, Int
@@ -151,6 +151,7 @@ def calculate_interaction_rotations(
     n_stochastic_sources_hidden: Optional[int] = None,
     out_dim_n_chunks: int = 1,
     out_dim_chunk_idx: int = 0,
+    isolate_ln_var: bool = True,
 ) -> list[InteractionRotation]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -236,6 +237,7 @@ def calculate_interaction_rotations(
             C_next_layer=None,
             out_dim_n_chunks=1,  # we don't parallelize the output layer, it's fast anyways
             out_dim_chunk_idx=0,  # we don't parallelize the output layer, it's fast anyways
+            isolate_ln_var=isolate_ln_var,
         )
     else:
         if node_layers[-1] == "output":
@@ -300,6 +302,7 @@ def calculate_interaction_rotations(
                 C_next_layer=C_next_layer,
                 out_dim_n_chunks=out_dim_n_chunks,
                 out_dim_chunk_idx=out_dim_chunk_idx,
+                isolate_ln_var=isolate_ln_var,
             )
         )
 
@@ -327,6 +330,7 @@ def _calculate_one_interaction_rotation(
     C_next_layer: Optional[Float[Tensor, "orig rib"]],
     out_dim_n_chunks: int,
     out_dim_chunk_idx: int,
+    isolate_ln_var: bool,
 ) -> InteractionRotation:
     """Calculate a single interaction rotation matrix (C) and it's psuedo-inverse (C_pinv)
 
@@ -354,9 +358,9 @@ def _calculate_one_interaction_rotation(
 
     ### SVD ROTATION (U)
     layer_is_ln_out = isinstance(
-        get_model_attr(hooked_model.model, section_name), Union[LayerNormOut, DualLayerNormOut]
+        get_model_attr(hooked_model.model, node_layer), (LayerNormOut, DualLayerNormOut)
     )
-    if layer_is_ln_out:
+    if isolate_ln_var and layer_is_ln_out:
         # if we are immediately before a ln-out layer (i.e. between ln-in and ln-out), we want to
         # isolate the variance direction
         # into a single RIB direction. This leads to a much neater graph. The ln-variance is always
@@ -435,7 +439,7 @@ def _calculate_one_interaction_rotation(
     # we want to preserve 0-2 directions from the eigendecomposition. These will be the constant
     # direction (if centering) and/or the variance direction (if we are immediately before a ln-out
     # layer). These are both sorted first in U, so we just mask the first 0-2 dirs.
-    n_masked = (1 if center else 0) + (1 if layer_is_ln_out else 0)
+    n_masked = (1 if center else 0) + (1 if isolate_ln_var and layer_is_ln_out else 0)
     eigenvalues, V = masked_eigendecompose(M, n_masked)
 
     V = V.to(dtype)

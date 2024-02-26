@@ -218,6 +218,11 @@ class RibBuildConfig(BaseModel):
         "dataset",
         description="For distributed edge runs, whether to split over out_dim or dataset.",
     )
+    isolate_ln_var: bool = Field(
+        True,
+        description="Whether to special case the LN-variance function as a separate node. Otherwise"
+        "the LN variance will be potentially mixed with other RIB functions.",
+    )
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "RibBuildConfig":
@@ -570,6 +575,7 @@ def rib_build(
             n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
             out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
             out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
+            isolate_ln_var=config.isolate_ln_var,
         )
         # InteractionRotation objects used to calculate edges
         edge_interaction_rotations = interaction_rotations

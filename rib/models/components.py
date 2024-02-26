@@ -670,7 +670,7 @@ class LayerNormOut(torch.nn.Module):
         # produce a bad loss if and only if the layer norm scale was important.
         if torch.any(var <= 0):
             logger.warning(
-                "Negative variance found. This should only occur in edge ablations."
+                "Negative variance found. This should only occur in edge ablations. "
                 "Setting var to ReLU(var)."
             )
             var = torch.relu(var)
@@ -774,7 +774,7 @@ class DualLayerNormOut(torch.nn.Module):
         # produce a bad loss if and only if the layer norm scale was important.
         if torch.any(var <= 0):
             logger.warning(
-                "Negative variance found. This should only occur in edge ablations."
+                "Negative variance found. This should only occur in edge ablations. "
                 "Setting var to ReLU(var)."
             )
             var = torch.relu(var)

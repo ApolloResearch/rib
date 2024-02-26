@@ -20,8 +20,6 @@ from rib.linalg import (
     pinv_diag,
 )
 from rib.models import MLP, SequentialTransformer
-from rib.models.components import DualLayerNormOut, LayerNormOut
-from rib.models.utils import get_model_attr
 from rib.types import IntegrationMethod
 from rib.utils import check_device_is_cpu
 
@@ -358,12 +356,7 @@ def _calculate_one_interaction_rotation(
         )
 
     ### SVD ROTATION (U)
-    try:
-        layer_is_ln_out = isinstance(
-            get_model_attr(hooked_model.model, node_layer), (LayerNormOut, DualLayerNormOut)
-        )
-    except AttributeError:
-        layer_is_ln_out = False
+    layer_is_ln_out = node_layer.split(".")[0] in ("ln1_out", "ln2_out")
     if isolate_ln_var and layer_is_ln_out:
         # if we are immediately before a ln-out layer (i.e. between ln-in and ln-out), we want to
         # isolate the variance direction

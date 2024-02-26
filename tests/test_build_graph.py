@@ -199,7 +199,7 @@ def test_naive_gradient_flow_interface(run_type, use_out_dir, tmpdir):
     """Test the Naive Gradient Flow (NGF) interface, making sure that files
     are written if and only if they should.
 
-    We test
+    We test one of three cases, selected by "use_out_dir"
         1. Full run with / without out_dir
         2. Edge build with saved Cs, with / without out_dir
         3. Just run Cs, with / without out_dir

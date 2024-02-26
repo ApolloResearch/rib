@@ -25,6 +25,7 @@ from rib.utils import check_outfile_overwrite
 
 def main(*results_files: Union[str, Path], force: bool = False) -> Optional[RootPath]:
     results_list = []
+    no_ablation_results_list = []
     exp_names = []
     ablation_types = []
     eval_type = None
@@ -39,6 +40,7 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
             results = json.load(f)
 
         results_list.append(results["results"])
+        no_ablation_results_list.append(results["no_ablation_results"])
         exp_names.append(results["config"]["exp_name"])
         ablation_types.append(results["config"]["ablation_type"])
         if eval_type is None:
@@ -59,13 +61,14 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
 
     plot_ablation_results(
         results=results_list,
+        no_ablation_results_list=no_ablation_results_list,
         out_file=out_file,
         exp_names=[f"{exp_name} LM" for exp_name in exp_names],
         eval_type=eval_type,
         ablation_types=ablation_types,
         log_scale=False,
         xlim=(0.0, 20.0) if eval_type == "accuracy" else None,
-        ylim=(0.0, 1.0) if eval_type == "accuracy" else (3.2, 5),
+        ylim_relative=(-0.05, 0.1) if eval_type == "accuracy" else (-0.1, 0.2),
     )
 
     logger.info(f"Saved plot to {out_file}")

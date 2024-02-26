@@ -11,6 +11,8 @@ various scales. This is because combining atol and rtol does not work particular
 that have a small set of large numbers and a large set of small numbers.
 """
 
+# TODO Test all combinations
+
 import einops
 import pytest
 import torch
@@ -184,23 +186,112 @@ def get_means(results: RibBuildResults, atol: float, batch_size=16):
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    "basis_formula, edge_formula, integration_method",
+    "run_type, use_out_dir",
     [
-        ("(1-alpha)^2", "functional", "trapezoidal"),
-        ("(1-0)*alpha", "functional", "trapezoidal"),
-        ("(1-alpha)^2", "squared", "trapezoidal"),
-        ("(1-0)*alpha", "squared", "trapezoidal"),
-        ("jacobian", "squared", "trapezoidal"),
-        ("jacobian", "squared", "gauss-legendre"),
+        ("full", 0),
+        ("full", 1),
+        ("partial", 0),
+        ("partial", 1),
+        ("partial", 2),
     ],
 )
-def test_modular_arithmetic_build_graph(basis_formula, edge_formula, integration_method):
+def test_naive_gradient_flow_interface(run_type, use_out_dir, tmpdir):
+    """Test the Naive Gradient Flow (NGF) interface, making sure that files
+    are written if and only if they should.
+
+    We test one of three cases, selected by "use_out_dir"
+        1. Full run with / without out_dir
+        2. Edge build with saved Cs, with / without out_dir
+        3. Just run Cs, with / without out_dir
+    """
+    atol = 1e-12
+    defaults = {
+        "exp_name": "modadd_NGF",
+        "basis_formula": "jacobian",
+        "edge_formula": "squared",
+        "integration_method": "gradient",
+        "n_intervals": 0,
+        "naive_gradient_flow": True,
+    }
+    Cs_path = tmpdir / (defaults["exp_name"] + "_rib_Cs.pt")
+    graph_path = tmpdir / (defaults["exp_name"] + "_rib_graph.pt")
+    if run_type == "full":
+        config = get_modular_arithmetic_config(
+            {
+                **defaults,
+                "out_dir": tmpdir if use_out_dir else None,
+            }
+        )
+        results = graph_build_test(config=config, atol=atol)
+        get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
+        if use_out_dir:
+            # Full run saves both Cs and graph (this is only true for NGF)
+            assert Cs_path.exists()
+            assert graph_path.exists()
+        else:
+            assert not Cs_path.exists()
+            assert not graph_path.exists()
+
+    elif run_type == "partial":
+        config_Cs = get_modular_arithmetic_config(
+            {
+                **defaults,
+                "out_dir": tmpdir if use_out_dir else None,
+                "interaction_matrices_path": None,
+                "calculate_edges": False,
+            }
+        )
+        results = rib_build(config_Cs)
+        if use_out_dir:
+            assert Cs_path.exists()
+            assert not graph_path.exists()
+        else:
+            assert not Cs_path.exists()
+            assert not graph_path.exists()
+
+        if use_out_dir:
+            config_edges = get_modular_arithmetic_config(
+                {
+                    **defaults,
+                    "out_dir": tmpdir if use_out_dir == 2 else None,
+                    "interaction_matrices_path": str(Cs_path),
+                    "calculate_edges": True,
+                }
+            )
+            results = rib_build(config_edges)
+            if use_out_dir == 2:
+                assert Cs_path.exists()
+                assert graph_path.exists()
+            elif use_out_dir == 1:
+                assert Cs_path.exists()
+                assert not graph_path.exists()
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "basis_formula, edge_formula, integration_method, naive_gradient_flow",
+    [
+        ("(1-alpha)^2", "functional", "trapezoidal", False),
+        ("(1-0)*alpha", "functional", "trapezoidal", False),
+        ("(1-alpha)^2", "squared", "trapezoidal", False),
+        ("(1-0)*alpha", "squared", "trapezoidal", False),
+        ("jacobian", "squared", "trapezoidal", False),
+        ("jacobian", "squared", "gauss-legendre", False),
+        ("jacobian", "squared", "gradient", False),
+        ("jacobian", "squared", "gradient", True),
+    ],
+)
+def test_modular_arithmetic_build_graph(
+    basis_formula, edge_formula, integration_method, naive_gradient_flow, tmpdir
+):
     atol = 1e-12  # Works with 1e-7 for float32 and 1e-12 for float64. NEED 1e-5 for CPU
     config = get_modular_arithmetic_config(
         {
             "basis_formula": basis_formula,
             "edge_formula": edge_formula,
             "integration_method": integration_method,
+            "naive_gradient_flow": naive_gradient_flow,
+            "out_dir": tmpdir if naive_gradient_flow else None,
         }
     )
     results = graph_build_test(config=config, atol=atol)
@@ -216,20 +307,49 @@ def test_pythia_14m_build_graph():
 
 
 @pytest.mark.slow
-def test_pythia_14m_build_graph_jacobian_stochastic():
+def test_pythia_14m_build_graph_jacobian_stochastic_and_gradient_flow(tmpdir):
     atol = 0  # Works with 0 for batch_size 900 but not 1800
-    config = get_pythia_config(
-        {
-            "basis_formula": "jacobian",
-            "dataset": {"n_documents": 10, "n_samples": 1, "n_ctx": 2},
-            "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
-            "calculate_edges": True,
-            "edge_formula": "squared",
-            "n_stochastic_sources_edges": 1,
-        }
+    results = []
+    for naive_gradient_flow in [True, False]:
+        config = get_pythia_config(
+            {
+                "exp_name": "14m_NGF=" + str(naive_gradient_flow),
+                "basis_formula": "jacobian",
+                "dataset": {"n_documents": 10, "n_samples": 1, "n_ctx": 2},
+                "node_layers": ["ln2.1", "mlp_out.5", "unembed"],
+                "calculate_edges": True,
+                "edge_formula": "squared",
+                "n_stochastic_sources_edges": 1,
+                "naive_gradient_flow": naive_gradient_flow,
+                "rotate_final_node_layer": True,
+                "out_dir": tmpdir,
+            }
+        )
+        result = graph_build_test(config=config, atol=atol)
+        get_rib_acts_test(result, atol=1e-12)
+        results.append(result)
+    # The last layer (just SVD) and penultimate layer (always computed w.r.t. last layer) should be
+    # the same; the rest should be different (in practice the difference seems to be small, see
+    # https://github.com/ApolloResearch/rib/pull/333).
+    torch.testing.assert_close(
+        results[0].interaction_rotations[-1].C,
+        results[1].interaction_rotations[-1].C,
+        atol=0,
+        rtol=0,
     )
-    results = graph_build_test(config=config, atol=atol)
-    get_rib_acts_test(results, atol=1e-12)
+    torch.testing.assert_close(
+        results[0].interaction_rotations[-2].C,
+        results[1].interaction_rotations[-2].C,
+        atol=0,
+        rtol=0,
+    )
+    with pytest.raises(AssertionError):
+        torch.testing.assert_close(
+            results[0].interaction_rotations[-3].C,
+            results[1].interaction_rotations[-3].C,
+            atol=0,
+            rtol=0,
+        )
 
 
 @pytest.mark.slow
@@ -241,14 +361,23 @@ def test_pythia_14m_build_graph_jacobian_stochastic():
         ("(1-alpha)^2", "squared"),
         ("(1-0)*alpha", "squared"),
         ("jacobian", "squared"),
+        ("jacobian", "squared"),
     ],
 )
-def test_mnist_build_graph(basis_formula, edge_formula):
+def test_mnist_build_graph(
+    basis_formula,
+    edge_formula,
+):
     dtype_str = "float32"
     # Works with 1e-5 for float32 and 1e-15 (and maybe smaller) for float64.
     atol = 1e-5
     config = get_mnist_config(
-        {"basis_formula": basis_formula, "edge_formula": edge_formula, "dtype": dtype_str}
+        {
+            "basis_formula": basis_formula,
+            "edge_formula": edge_formula,
+            "dtype": dtype_str,
+            "out_dir": None,
+        }
     )
     results = graph_build_test(config=config, atol=atol)
     get_rib_acts_test(results, atol=atol)
@@ -273,11 +402,16 @@ def test_mnist_build_graph(basis_formula, edge_formula):
         ("svd", "functional", "float64"),
         ("neuron", "functional", "float32"),
         ("neuron", "functional", "float64"),
+        ("jacobian", "squared", "float64"),
     ],
 )
 def test_modular_mlp_build_graph(basis_formula, edge_formula, dtype_str, atol=1e-6):
     config = get_modular_mlp_config(
-        {"basis_formula": basis_formula, "edge_formula": edge_formula, "dtype": dtype_str}
+        {
+            "basis_formula": basis_formula,
+            "edge_formula": edge_formula,
+            "dtype": dtype_str,
+        }
     )
     graph_build_test(config=config, atol=atol)
 

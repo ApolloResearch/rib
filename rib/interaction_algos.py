@@ -1,6 +1,6 @@
 """This module contains algorithms related to interaction rotations."""
 
-from typing import Callable, Literal, Optional
+from typing import Callable, Literal, Optional, Union
 
 import torch
 from jaxtyping import Float, Int
@@ -20,6 +20,8 @@ from rib.linalg import (
     pinv_diag,
 )
 from rib.models import MLP, SequentialTransformer
+from rib.models.components import DualLayerNormOut, LayerNormOut
+from rib.models.utils import get_model_attr
 from rib.types import IntegrationMethod
 from rib.utils import check_device_is_cpu
 
@@ -351,10 +353,12 @@ def _calculate_one_interaction_rotation(
         )
 
     ### SVD ROTATION (U)
-
-    layer_is_ln_out = node_layer.split(".")[0] in ["ln1_out", "ln2_out"]
+    layer_is_ln_out = isinstance(
+        get_model_attr(hooked_model.model, section_name), Union[LayerNormOut, DualLayerNormOut]
+    )
     if layer_is_ln_out:
-        # if we are immediately before a ln-out layer, we want to isolate the variance direction
+        # if we are immediately before a ln-out layer (i.e. between ln-in and ln-out), we want to
+        # isolate the variance direction
         # into a single RIB direction. This leads to a much neater graph. The ln-variance is always
         # the 0th component of the residual stream so we just mask it in the eigensolve
         D_dash, U_dash = masked_eigendecompose(gram_matrix, 1)

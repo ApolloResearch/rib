@@ -37,7 +37,9 @@ class Embed(nn.Module):
         )
         self.return_tokens = return_tokens
 
-    def forward(self, tokens: Int[Tensor, "..."]) -> Union[
+    def forward(
+        self, tokens: Int[Tensor, "..."]
+    ) -> Union[
         tuple[Float[Tensor, "d_vocab d_model"], Int[Tensor, "... d_model"]],
         Float[Tensor, "... d_model"],
     ]:
@@ -653,14 +655,26 @@ class LayerNormOut(torch.nn.Module):
         self.return_residual = return_residual
         self._exclude_final_dim = False
 
-    def forward(self, var: Float[Tensor, "... 1"], residual: Float[Tensor, "... d_model"]) -> Union[
+    def forward(
+        self, var: Float[Tensor, "... 1"], residual: Float[Tensor, "... d_model"]
+    ) -> Union[
         Float[Tensor, "... d_model"],
         tuple[Float[Tensor, "... d_model"], Float[Tensor, "... d_model"]],
     ]:
         residual_for_norm = residual[..., :-1] if self._exclude_final_dim else residual
+
+        # If we perform edge-ablations we can produce a negative value in the variance node. We
+        # expect that such strong ablations destroy performance. While we could implement a special
+        # case to return bad loss if we find a negative variance, we think it's easier to just set
+        # negative variances to zero -- this should suitably blow up the layer norm scale, and thus
+        # produce a bad loss if and only if the layer norm scale was important.
         if torch.any(var <= 0):
-            logger.warning(f"Negative variance found. Setting var to ReLU(var).")
+            logger.warning(
+                "Negative variance found. This should only occur in edge ablations."
+                "Setting var to ReLU(var)."
+            )
             var = torch.relu(var)
+
         out = layer_norm(residual_for_norm, var=var + self.cfg.eps)
 
         if self._exclude_final_dim:
@@ -752,9 +766,19 @@ class DualLayerNormOut(torch.nn.Module):
                 "new" residual stream in the subsequent (MLP) layers.
         """
         residual_for_norm = residual[..., :-1] if self._exclude_final_dim else residual
+
+        # If we perform edge-ablations we can produce a negative value in the variance node. We
+        # expect that such strong ablations destroy performance. While we could implement a special
+        # case to return bad loss if we find a negative variance, we think it's easier to just set
+        # negative variances to zero -- this should suitably blow up the layer norm scale, and thus
+        # produce a bad loss if and only if the layer norm scale was important.
         if torch.any(var <= 0):
-            logger.warning(f"Negative variance found. Setting var to ReLU(var).")
+            logger.warning(
+                "Negative variance found. This should only occur in edge ablations."
+                "Setting var to ReLU(var)."
+            )
             var = torch.relu(var)
+
         out = layer_norm(residual_for_norm, var=var + self.cfg.eps)
         if self._exclude_final_dim:
             # Add the final dimension back in

@@ -12,7 +12,13 @@ from typing_extensions import Annotated
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import centering_matrix, eigendecompose, move_const_dir_first, pinv_diag
+from rib.linalg import (
+    centering_matrix,
+    eigendecompose,
+    masked_eigendecompose,
+    move_const_dir_first,
+    pinv_diag,
+)
 from rib.models import MLP, SequentialTransformer
 from rib.types import IntegrationMethod
 from rib.utils import check_device_is_cpu
@@ -345,7 +351,16 @@ def _calculate_one_interaction_rotation(
         )
 
     ### SVD ROTATION (U)
-    D_dash, U_dash = eigendecompose(gram_matrix)
+
+    layer_is_ln_out = node_layer.split(".")[0] in ["ln1_out", "ln2_out"]
+    if layer_is_ln_out:
+        # if we are immediately before a ln-out layer, we want to isolate the variance direction
+        # into a single RIB direction. This leads to a much neater graph. The ln-variance is always
+        # the 0th component of the residual stream so we just mask it in the eigensolve
+        D_dash, U_dash = masked_eigendecompose(gram_matrix, 1)
+    else:
+        D_dash, U_dash = eigendecompose(gram_matrix)
+
     if center:
         D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
 
@@ -413,19 +428,11 @@ def _calculate_one_interaction_rotation(
     )
     # and take it's eigenvector basis as V
     V: Float[Tensor, "orig_trunc orig_trunc"]
-    if center:
-        # We don't want to rotate the constant direction (in the 0th position).
-        # We thus eigendecompose a submatrix ignoring the first row and col
-        sub_eigenvalues, sub_V = eigendecompose(M[1:, 1:])
-        V = torch.zeros_like(M)
-        V[0, 0] = 1
-        V[1:, 1:] = sub_V
-        # The eigenvalues are used in the jacobian basis to set the correct Lambdas.
-        # For the constant direction set Lambda to M[0,0], though it should not affect
-        # the result for all edges except those connecting to the const direction.
-        eigenvalues = torch.cat([M[0, 0].unsqueeze(0), sub_eigenvalues])
-    else:
-        eigenvalues, V = eigendecompose(M)
+    # we want to preserve 0-2 directions from the eigendecomposition. These will be the constant
+    # direction (if centering) and/or the variance direction (if we are immediately before a ln-out
+    # layer). These are both sorted first in U, so we just mask the first 0-2 dirs.
+    n_masked = (1 if center else 0) + (1 if layer_is_ln_out else 0)
+    eigenvalues, V = masked_eigendecompose(M, n_masked)
 
     V = V.to(dtype)
 

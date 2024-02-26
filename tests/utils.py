@@ -85,7 +85,7 @@ def get_tinystories_config(*updates: dict) -> RibBuildConfig:
     tlens_model_path: null
     dataset:
         dataset_type: huggingface
-        name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if part of training
+        name: skeskinen/TinyStories-hf # or skeskinen/TinyStories-GPT4, but not clear if part of training
         tokenizer_name: EleutherAI/gpt-neo-125M
         return_set: train
         return_set_frac: null

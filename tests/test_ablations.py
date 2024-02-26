@@ -252,7 +252,7 @@ def test_run_modular_arithmetic_rib_ablations_bisect(ablation_type, tmp_path):
     rib_results_path: {tempfile}
     schedule:
         schedule_type: bisect
-        score_target: 0.9
+        score_target_difference: 0.1
     dataset:
         dataset_type: modular_arithmetic
         return_set: train

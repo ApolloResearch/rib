@@ -359,15 +359,17 @@ def _calculate_one_interaction_rotation(
     layer_is_ln_out = node_layer.split(".")[0] in ("ln1_out", "ln2_out")
     if isolate_ln_var and layer_is_ln_out:
         # if we are immediately before a ln-out layer (i.e. between ln-in and ln-out), we want to
-        # isolate the variance direction
-        # into a single RIB direction. This leads to a much neater graph. The ln-variance is always
-        # the 0th component of the residual stream so we just mask it in the eigensolve
+        # isolate the variance direction into a single RIB direction for a neater graph.
+        # The ln-variance is always the 0th component of the original residual stream
         D_dash, U_dash = masked_eigendecompose(gram_matrix, 1)
     else:
         D_dash, U_dash = eigendecompose(gram_matrix)
 
     if center:
         D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
+
+    # now the first PCA direction is the constant direction (if centering) and next is ln variance
+    # (if this is just before ln_out and we are isolating ln variance)
 
     # Trucate all directions with eigenvalues smaller than some threshold
     mask = D_dash > truncation_threshold  # true if we keep the direction

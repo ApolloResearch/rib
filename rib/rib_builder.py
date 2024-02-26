@@ -125,6 +125,15 @@ class RibBuildConfig(BaseModel):
         description="Path to pre-saved interaction matrices. If provided, we don't recompute."
         "Only supported for transformer models.",
     )
+    load_means_and_grams_path: Optional[RootPath] = Field(
+        None,
+        description="Path to pre-saved mean and gram matrices. If provided, we don't recompute."
+        "Only supported for transformer models.",
+    )
+    save_means_and_grams: Optional[bool] = Field(
+        False,
+        description="Whether to save the mean and gram matrices to file.",
+    )
     node_layers: list[str] = Field(
         ...,
         description="Module ids whose inputs correspond to node layers in the graph."
@@ -255,6 +264,8 @@ class RibBuildConfig(BaseModel):
             assert (
                 self.mlp_path is None and self.modular_mlp_config is None
             ), "We don't support loading interaction matrices for mlp models"
+        if self.save_means_and_grams:
+            assert self.out_dir is not None, "out_dir must be set to save mean and gram matrices"
 
         if self.edge_formula != "squared":
             assert (
@@ -412,7 +423,47 @@ def load_interaction_rotations(
     interaction_rotations = [
         InteractionRotation(**data) for data in matrices_info["interaction_rotations"]
     ]
-    return matrices_info["gram_matrices"], interaction_rotations
+    return matrices_info["grams"], interaction_rotations
+
+
+def load_means_and_grams(
+    config: RibBuildConfig,
+) -> tuple[dict[str, Float[Tensor, "orig orig"]], list[InteractionRotation]]:
+    """Load pre-saved mean and gram matrices from file.
+
+    Args:
+        config: The config used to calculate the matrices.
+
+    Returns:
+        The mean and gram matrices
+    """
+    logger.info(
+        "Loading pre-saved mean and gram matrices from %s", config.load_means_and_grams_path
+    )
+    assert config.load_means_and_grams_path is not None
+    matrices_info = torch.load(config.load_means_and_grams_path)
+
+    config_dict = config.model_dump()
+    # The loaded config might have a different schema. Only pass fields that are still valid.
+    valid_fields = list(config_dict.keys())
+
+    # If not all fields are valid, log a warning
+    loaded_config_dict: dict = {}
+    for loaded_key in matrices_info["config"]:
+        if loaded_key in valid_fields:
+            loaded_config_dict[loaded_key] = matrices_info["config"][loaded_key]
+        else:
+            logger.warning(
+                "The following field in the loaded config is no longer supported and will be ignored:"
+                f" {loaded_key}"
+            )
+
+    loaded_config = RibBuildConfig(**loaded_config_dict)
+    _verify_compatible_configs(config, loaded_config)
+
+    means = matrices_info["means"]
+    grams = matrices_info["grams"]
+    return means, grams
 
 
 def _get_out_file_path(config: RibBuildConfig, dist_info: DistributedInfo) -> Optional[Path]:
@@ -484,6 +535,15 @@ def rib_build(
                 dist_info.local_comm.Abort()  # stop this and other processes
             raise FileExistsError(f"Output file {out_file} already exists")
 
+    if config.save_means_and_grams:
+        assert config.out_dir is not None
+        means_and_grams_outfile = config.out_dir / f"{config.exp_name}_rib_means_and_grams.pt"
+        if not check_outfile_overwrite(means_and_grams_outfile, force):
+            # TODO Use the new function from naivegradient flow here
+            if dist_info.global_size > 1:
+                dist_info.local_comm.Abort()  # stop this and other processes
+            raise FileExistsError(f"Output file {out_file} already exists")
+
     calc_C_time = None
     calc_edges_time = None
 
@@ -528,43 +588,59 @@ def rib_build(
         if dist_info.global_size > 1 and config.dist_split_over == "dataset":
             raise NotImplementedError("Cannot parallelize Cs calculation over dataset")
 
-        # Note that we use shuffle=False because we already shuffled the dataset when we loaded it
-        gram_train_loader = DataLoader(
-            dataset=gram_dataset,
-            batch_size=config.gram_batch_size or config.batch_size,
-            shuffle=False,
-        )
-        # Only need gram matrix for output if we're rotating the final node layer
-        collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
+        if config.load_means_and_grams_path is None:
+            # Note that we use shuffle=False because we already shuffled the dataset when we loaded it
+            gram_train_loader = DataLoader(
+                dataset=gram_dataset,
+                batch_size=config.gram_batch_size or config.batch_size,
+                shuffle=False,
+            )
+            # Only need gram matrix for output if we're rotating the final node layer
+            collect_output_gram = (
+                config.node_layers[-1] == "output" and config.rotate_final_node_layer
+            )
 
-        means: Optional[dict[str, Float[Tensor, "orig"]]] = None
-        if config.center:
-            logger.info("Collecting dataset means")
-            means = collect_dataset_means(
+            means: Optional[dict[str, Float[Tensor, "orig"]]] = None
+            if config.center:
+                logger.info("Collecting dataset means")
+                means = collect_dataset_means(
+                    hooked_model=hooked_model,
+                    module_names=section_names,
+                    data_loader=gram_train_loader,
+                    dtype=dtype,
+                    device=device,
+                    collect_output_dataset_means=collect_output_gram,
+                    hook_names=[
+                        module_id for module_id in config.node_layers if module_id != "output"
+                    ],
+                )
+
+            collect_gram_start_time = time.time()
+            logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
+
+            gram_matrices = collect_gram_matrices(
                 hooked_model=hooked_model,
                 module_names=section_names,
                 data_loader=gram_train_loader,
                 dtype=dtype,
                 device=device,
-                collect_output_dataset_means=collect_output_gram,
+                collect_output_gram=collect_output_gram,
                 hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
+                means=means,
             )
-
-        collect_gram_start_time = time.time()
-        logger.info("Collecting gram matrices for %d batches.", len(gram_train_loader))
-
-        gram_matrices = collect_gram_matrices(
-            hooked_model=hooked_model,
-            module_names=section_names,
-            data_loader=gram_train_loader,
-            dtype=dtype,
-            device=device,
-            collect_output_gram=collect_output_gram,
-            hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
-            means=means,
-        )
-        time_to_collect_gram = (time.time() - collect_gram_start_time) / 60
-        logger.info("Time to collect gram matrices: %.2f minutes", time_to_collect_gram)
+            time_to_collect_gram = (time.time() - collect_gram_start_time) / 60
+            logger.info("Time to collect gram matrices: %.2f minutes", time_to_collect_gram)
+            # Save the mean and gram matrices to file
+            if config.save_means_and_grams:
+                matrices_info = {
+                    "means": means,
+                    "grams": gram_matrices,
+                    "config": config.model_dump(),
+                }
+                logger.info("Saving mean and gram matrices to %s", means_and_grams_outfile)
+                torch.save(matrices_info, means_and_grams_outfile)
+        else:
+            means, gram_matrices = load_means_and_grams(config)
 
         graph_train_loader = DataLoader(
             dataset=dataset, batch_size=config.batch_size, shuffle=False

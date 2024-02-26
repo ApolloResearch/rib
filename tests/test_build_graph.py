@@ -558,8 +558,10 @@ def test_isolated_ln_var():
     for ir in results.interaction_rotations:
         if ir.C_pinv is not None:
             # var is in the 0th position in the original acts
+            amount_in_var_dir = ir.C_pinv[:, 0].abs()
+            # There should be a unique non-const rib dir that has a non-zero component here
             assert (
-                ir.C_pinv[:, 0].abs() > 1e-12
+                amount_in_var_dir[1:] > 1e-12
             ).sum() == 1, f"Var not isolated on {ir.node_layer}, {ir.C_pinv[:, 0]}"
 
 

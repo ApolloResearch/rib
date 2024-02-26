@@ -561,10 +561,14 @@ def test_isolated_ln_var(center):
         if ir.C_pinv is not None:
             # var is in the 0th position in the original acts
             amount_in_var_dir = ir.C_pinv[:, 0].abs()
-            # There should be a unique non-const rib dir that has a non-zero component here
-            assert (
-                amount_in_var_dir[1:] > 1e-12
-            ).sum() == 1, f"Var not isolated on {ir.node_layer}, {ir.C_pinv[:, 0]}"
+            # assert the var direction exists, and no other non-const dir read from var
+            exp_var_idx = 1 if center else 0
+            assert amount_in_var_dir[exp_var_idx] > 1e-6
+            assert_is_zeros(
+                amount_in_var_dir[exp_var_idx + 1 :], atol=1e-12, node_layer=ir.node_layer
+            )
+            # assert var dir is otherwise all 0
+            assert_is_zeros(ir.C_pinv[exp_var_idx, 1:], atol=1e-12, node_layer=ir.node_layer)
 
 
 @pytest.mark.slow

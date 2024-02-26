@@ -82,7 +82,7 @@ class InteractionRotation(BaseModel):
 def build_sorted_lambda_matrices(
     Lambda_abs: Float[Tensor, "orig_trunc"],
     truncation_threshold: float,
-    ignore_first_index: bool = False,
+    ignore_first_n: int = 0,
 ) -> tuple[Float[Tensor, "orig_trunc rib"], Float[Tensor, "rib orig_trunc"]]:
     """Build the sqrt sorted Lambda matrix and its pseudoinverse.
 
@@ -90,19 +90,20 @@ def build_sorted_lambda_matrices(
 
     Args:
         Lambda_abs: Vector of the absolute values of the lambdas.
+        truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
+        ignore_first_n: We do not sort or truncate the first `ignore_first_n` lambdas.
 
     Returns:
         - The sqrt of the sorted Lambda matrix
         - The pseudoinverse of the sqrt sorted Lambda matrix
 
     """
-    # Get the sort indices in descending order
-    if not ignore_first_index:
-        idxs: Int[Tensor, "orig_trunc"] = torch.argsort(Lambda_abs, descending=True)
-    else:
-        idxs_excl_first = torch.argsort(Lambda_abs[1:], descending=True) + 1
-        zero = torch.tensor([0], device=idxs_excl_first.device)
-        idxs = torch.cat([zero, idxs_excl_first])
+    # Get the sorted indices in descending order, ignoring the first n.
+    sorted_idxs_excl_first_n = (
+        torch.argsort(Lambda_abs[ignore_first_n:], descending=True) + ignore_first_n
+    )
+    same_order_first_n = torch.arange(ignore_first_n, device=sorted_idxs_excl_first_n.device)
+    idxs = torch.cat([same_order_first_n, sorted_idxs_excl_first_n])
 
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
@@ -453,7 +454,7 @@ def _calculate_one_interaction_rotation(
         Lambda = (V.T @ R_pinv @ Lambda_dash @ R @ V).diag().abs()
     # Build a matrix for scaling by sqrt(Lambda).
     # This function prunes directions with small Lambdas. This is our second trunctaion.
-    L, L_inv = build_sorted_lambda_matrices(Lambda, truncation_threshold, ignore_first_index=center)
+    L, L_inv = build_sorted_lambda_matrices(Lambda, truncation_threshold, ignore_first_n=n_masked)
 
     ### FINAL ROTATION MATRIX (C)
     C: Float[Tensor, "orig rib"] = (R @ V @ L).detach().cpu()

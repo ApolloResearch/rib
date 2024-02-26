@@ -308,11 +308,11 @@ class BisectSchedule:
         while self._upper_bound - self._lower_bound > 1:
             yield self._get_proposal()
 
-    def update_bounds(self, score: float):
+    def update_bounds(self, score: float, base_score: float):
         """Bisect logic: update either the upper or lower bound based on the current score."""
         # Loss: Lower is better. Check if the current loss is good, i.e. <= the target loss.
         if self._eval_type == "ce_loss":
-            if score <= self.config.score_target:
+            if score - base_score <= self.config.score_target:
                 # Good loss --> ablate more vectors. Set lower bound to current n_vecs_ablated.
                 self._lower_bound = self._most_recent_proposal
             else:
@@ -320,7 +320,7 @@ class BisectSchedule:
                 self._upper_bound = self._most_recent_proposal
         # The same as above but opposite if statements because higher accuracy is better.
         elif self._eval_type == "accuracy":
-            if score >= self.config.score_target:
+            if score - base_score >= self.config.score_target:
                 self._lower_bound = self._most_recent_proposal
             else:
                 self._upper_bound = self._most_recent_proposal
@@ -468,7 +468,7 @@ def ablate_node_layers_and_eval(
             results[ablation_node_layer][n_vecs_remaining] = score
 
             if isinstance(ablation_schedule, BisectSchedule):
-                ablation_schedule.update_bounds(score)
+                ablation_schedule.update_bounds(score, base_score)
             else:
                 ablation_schedule.update_early_stopping_flag(score)
 
@@ -615,7 +615,7 @@ def ablate_edges_and_eval(
             results[ablation_node_layer][num_edges_kept] = score
 
             if isinstance(ablation_schedule, BisectSchedule):
-                ablation_schedule.update_bounds(score)
+                ablation_schedule.update_bounds(score, base_score)
             else:
                 ablation_schedule.update_early_stopping_flag(score)
 
@@ -714,7 +714,8 @@ def load_bases_and_ablate(
         A dictionary containing the results of the ablation experiments. The dictionary contains
         "config" (json dump of the config), "results" (a dictionary mapping node layers to
         accuracies/losses), "time_taken" (the time taken to run the ablations), and
-        "no_ablation_result" (numbering). If "edge" ablations were performed, the dictionary also
+        "no_ablation_result" (performance with no ablations). If "edge" ablations were performed,
+        the dictionary also
         contains "n_edges_required" (the number of edges required to achieve the target accuracy/
         loss, non-empty only if BisectSchedule was used) and "edge_masks" (a dictionary mapping
         node layers to edge masks).

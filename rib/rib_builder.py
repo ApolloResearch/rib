@@ -426,9 +426,9 @@ def load_interaction_rotations(
     return matrices_info["grams"], interaction_rotations
 
 
-def load_means_and_grams(
+def load_means_and_grams_from_file(
     config: RibBuildConfig,
-) -> tuple[dict[str, Float[Tensor, "orig orig"]], list[InteractionRotation]]:
+) -> tuple[dict[str, Float[Tensor, "orig"]], dict[str, Float[Tensor, "orig orig"]]]:
     """Load pre-saved mean and gram matrices from file.
 
     Args:
@@ -640,7 +640,7 @@ def rib_build(
                 logger.info("Saving mean and gram matrices to %s", means_and_grams_outfile)
                 torch.save(matrices_info, means_and_grams_outfile)
         else:
-            means, gram_matrices = load_means_and_grams(config)
+            means, gram_matrices = load_means_and_grams_from_file(config)
 
         graph_train_loader = DataLoader(
             dataset=dataset, batch_size=config.batch_size, shuffle=False

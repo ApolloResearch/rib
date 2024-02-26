@@ -681,6 +681,31 @@ def test_centered_rib_modadd(basis_formula):
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize("center", [True, False])
+def test_isolated_ln_var(center):
+    """Test that there is a single direction in the basis pre-LN out representing the variance."""
+    config = get_tinystories_config(
+        {
+            "node_layers": ["ln1_out.1", "ln2_out.1", "ln2_out.2"],
+            "center": center,
+        }
+    )
+    results = rib_build(config)
+    for ir in results.interaction_rotations:
+        if ir.C_pinv is not None:
+            # var is in the 0th position in the original acts
+            amount_in_var_dir = ir.C_pinv[:, 0].abs()
+            # assert the var direction exists, and no other non-const dir read from var
+            exp_var_idx = 1 if center else 0
+            assert amount_in_var_dir[exp_var_idx] > 1e-6
+            assert_is_zeros(
+                amount_in_var_dir[exp_var_idx + 1 :], atol=1e-12, node_layer=ir.node_layer
+            )
+            # assert var dir is otherwise all 0
+            assert_is_zeros(ir.C_pinv[exp_var_idx, 1:], atol=1e-12, node_layer=ir.node_layer)
+
+
+@pytest.mark.slow
 @pytest.mark.parametrize("basis_formula", ["(1-alpha)^2", "(1-0)*alpha"])
 @pytest.mark.parametrize("edge_formula", ["functional", "squared"])
 @pytest.mark.parametrize("dtype_str", ["float32", "float64"])

@@ -731,6 +731,27 @@ def test_stochastic_basis_tinystories(no_stoc_result, pos_sources, hidden_source
         assert_basis_similarity(stoc_ir, no_stoc_ir, error=error)
 
 
+@pytest.mark.slow
+def test_separate_gram_loader():
+    """Test stochastic basis in the hidden + position dimension on TinyStories."""
+    config = get_tinystories_config(
+        {
+            "gram_dataset": {
+                "dataset_type": "huggingface",
+                "name": "apollo-research/sae-roneneldan-TinyStories-tokenizer-gpt2",
+                "tokenizer_name": "EleutherAI/gpt-neo-125M",
+                "return_set": "train",
+                "return_set_frac": None,
+                "n_documents": 5,
+                "n_samples": 15,
+                "return_set_portion": "first",
+                "n_ctx": 10,
+            }
+        }
+    )
+    graph_build_test(config=config, atol=1e-8)
+
+
 @pytest.mark.slow()
 @pytest.mark.parametrize(
     ["pos_sources", "hidden_sources"],

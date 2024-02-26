@@ -358,9 +358,12 @@ def _calculate_one_interaction_rotation(
         )
 
     ### SVD ROTATION (U)
-    layer_is_ln_out = isinstance(
-        get_model_attr(hooked_model.model, node_layer), (LayerNormOut, DualLayerNormOut)
-    )
+    try:
+        layer_is_ln_out = isinstance(
+            get_model_attr(hooked_model.model, node_layer), (LayerNormOut, DualLayerNormOut)
+        )
+    except AttributeError:
+        layer_is_ln_out = False
     if isolate_ln_var and layer_is_ln_out:
         # if we are immediately before a ln-out layer (i.e. between ln-in and ln-out), we want to
         # isolate the variance direction

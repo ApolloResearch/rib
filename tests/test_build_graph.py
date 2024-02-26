@@ -547,11 +547,13 @@ def test_centered_rib_modadd(basis_formula):
 
 
 @pytest.mark.slow
-def test_isolated_ln_var():
+@pytest.mark.parametrize("center", [True, False])
+def test_isolated_ln_var(center):
     """Test that there is a single direction in the basis pre-LN out representing the variance."""
     config = get_tinystories_config(
         {
             "node_layers": ["ln1_out.1", "ln2_out.1", "ln2_out.2"],
+            "center": center,
         }
     )
     results = rib_build(config)

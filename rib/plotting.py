@@ -100,13 +100,14 @@ def _prepare_edges_for_plotting(
 
 def plot_ablation_results(
     results: list[dict[str, dict[str, float]]],
-    no_ablation_results_list: float,
+    no_ablation_results_list: list[float],
     out_file: Optional[Path],
     exp_names: list[str],
     eval_type: Literal["accuracy", "ce_loss"],
     ablation_types: list[Literal["orthogonal", "rib"]],
     log_scale: bool = False,
     xlim: Optional[tuple[float, float]] = None,
+    ylim: Optional[tuple[float, float]] = None,
     ylim_relative: Optional[tuple[float, float]] = None,
 ) -> None:
     """Plot accuracy/loss vs number of remaining basis vectors.
@@ -119,7 +120,9 @@ def plot_ablation_results(
         ablation_types: The type of ablation performed for each experiment ("orthogonal" or "rib").
         log_scale: Whether to use a log scale for the x-axis. Defaults to False.
         xlim: The limits for the x-axis. Defaults to None.
-        ylim: The limits for the y-axis, relative to no_ablation_result. Defaults to None.
+        ylim: The limits for the y-axis. Defaults to None.
+        ylim_relative: The limits for the y-axis, relative to no_ablation_result. Is overwritten by
+            ylim if both are provided. Defaults to None.
     """
     # Verify that all results have the same node layers
     node_layers_per_exp = [set(result.keys()) for result in results]
@@ -135,26 +138,27 @@ def plot_ablation_results(
         axs = [axs]
 
     for i, node_layer in enumerate(node_layers):
-        for exp_name, ablation_type, exp_results, no_ablation_result in zip(
-            exp_names, ablation_types, results, no_ablation_results_list
+        for j, [exp_name, ablation_type, exp_results, no_ablation_result] in enumerate(
+            zip(exp_names, ablation_types, results, no_ablation_results_list)
         ):
             n_vecs_remaining = sorted(list(int(k) for k in exp_results[node_layer]))
             y_values = [exp_results[node_layer][str(i)] for i in n_vecs_remaining]
-            axs[i].plot(n_vecs_remaining, y_values, "-o", label=exp_name)
-            axs[i].axhline(no_ablation_result, color="gray", linestyle="--")
+            color = plt.cm.get_cmap("tab10")(j)
+            axs[i].plot(n_vecs_remaining, y_values, "-o", color=color, label=exp_name)
+            axs[i].axhline(no_ablation_result, color="grey", linestyle="--")
 
             axs[i].set_title(f"{eval_type} vs n_remaining_basis_vecs for input to {node_layer}")
             axs[i].set_xlabel("Number of remaining basis vecs")
             axs[i].set_ylabel(eval_type)
             if xlim is not None:
                 axs[i].set_xlim(*xlim)
-            if ylim_relative is not None:
-                ylim_actual = (
+            if ylim is not None:
+                axs[i].set_ylim(*ylim)
+            elif ylim_relative is not None:
+                axs[i].set_ylim(
                     no_ablation_result + ylim_relative[0],
                     no_ablation_result + ylim_relative[1],
                 )
-                axs[i].set_ylim(*ylim_actual)
-
             if log_scale:
                 axs[i].set_xscale("log")
 

@@ -40,7 +40,7 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
             results = json.load(f)
 
         results_list.append(results["results"])
-        no_ablation_results_list.append(results["no_ablation_results"])
+        no_ablation_results_list.append(results["no_ablation_result"])
         exp_names.append(results["config"]["exp_name"])
         ablation_types.append(results["config"]["ablation_type"])
         if eval_type is None:
@@ -68,7 +68,8 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
         ablation_types=ablation_types,
         log_scale=False,
         xlim=(0.0, 20.0) if eval_type == "accuracy" else None,
-        ylim_relative=(-0.05, 0.1) if eval_type == "accuracy" else (-0.1, 0.2),
+        ylim=(0.0, 1.0) if eval_type == "accuracy" else None,
+        ylim_relative=(-0.1, 0.2) if eval_type == "ce_loss" else None,
     )
 
     logger.info(f"Saved plot to {out_file}")

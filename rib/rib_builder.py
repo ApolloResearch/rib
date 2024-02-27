@@ -458,10 +458,10 @@ def load_interaction_rotations(
     interaction_rotations = [
         InteractionRotation(**data) for data in matrices_info["interaction_rotations"]
     ]
-    return matrices_info["grams"], interaction_rotations
+    return matrices_info["gram_matrices"], interaction_rotations
 
 
-def load_means_and_grams_from_file(
+def load_mean_vectors_and_gram_matrices(
     config: RibBuildConfig,
 ) -> tuple[dict[str, Float[Tensor, "orig"]], dict[str, Float[Tensor, "orig orig"]]]:
     """Load pre-saved mean and gram matrices from file.
@@ -496,9 +496,7 @@ def load_means_and_grams_from_file(
     loaded_config = RibBuildConfig(**loaded_config_dict)
     _verify_compatible_configs(config, loaded_config)
 
-    means = matrices_info["means"]
-    grams = matrices_info["grams"]
-    return means, grams
+    return matrices_info["mean_vectors"], matrices_info["gram_matrices"]
 
 
 def _get_out_file_path(
@@ -681,17 +679,17 @@ def rib_build(
             raise NotImplementedError("Distributed naive gradient flow not implemented yet")
         return gradient_flow_loop(config, force)
 
+    if config.save_means_and_grams:
+        if n_pods > 1 or pod_rank > 0:
+            raise NotImplementedError("Saving means and grams does not handle MPI yet")
+
     out_file = _get_out_file_path(config, dist_info)
     _check_out_file_path(out_file, force, dist_info)
 
     if config.save_means_and_grams:
         assert config.out_dir is not None
         means_and_grams_outfile = config.out_dir / f"{config.exp_name}_rib_means_and_grams.pt"
-        if not check_outfile_overwrite(means_and_grams_outfile, force):
-            # TODO Use the new function from naivegradient flow here
-            if dist_info.global_size > 1:
-                dist_info.local_comm.Abort()  # stop this and other processes
-            raise FileExistsError(f"Output file {out_file} already exists")
+        _check_out_file_path(means_and_grams_outfile, force, dist_info)
 
     calc_C_time = None
     calc_edges_time = None
@@ -749,10 +747,10 @@ def rib_build(
                 config.node_layers[-1] == "output" and config.rotate_final_node_layer
             )
 
-            means: Optional[dict[str, Float[Tensor, "orig"]]] = None
+            mean_vectors: Optional[dict[str, Float[Tensor, "orig"]]] = None
             if config.center:
                 logger.info("Collecting dataset means")
-                means = collect_dataset_means(
+                mean_vectors = collect_dataset_means(
                     hooked_model=hooked_model,
                     module_names=section_names,
                     data_loader=gram_train_loader,
@@ -775,21 +773,21 @@ def rib_build(
                 device=device,
                 collect_output_gram=collect_output_gram,
                 hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
-                means=means,
+                means=mean_vectors,
             )
             time_to_collect_gram = (time.time() - collect_gram_start_time) / 60
             logger.info("Time to collect gram matrices: %.2f minutes", time_to_collect_gram)
             # Save the mean and gram matrices to file
             if config.save_means_and_grams:
                 matrices_info = {
-                    "means": means,
-                    "grams": gram_matrices,
+                    "mean_vectors": mean_vectors,
+                    "gram_matrices": gram_matrices,
                     "config": config.model_dump(),
                 }
                 logger.info("Saving mean and gram matrices to %s", means_and_grams_outfile)
                 torch.save(matrices_info, means_and_grams_outfile)
         else:
-            means, gram_matrices = load_means_and_grams_from_file(config)
+            mean_vectors, gram_matrices = load_mean_vectors_and_gram_matrices(config)
 
         graph_train_loader = DataLoader(
             dataset=dataset, batch_size=config.batch_size, shuffle=False
@@ -815,7 +813,7 @@ def rib_build(
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
             center=config.center,
-            means=means,
+            means=mean_vectors,
             n_stochastic_sources_pos=config.n_stochastic_sources_basis_pos,
             n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
             out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,

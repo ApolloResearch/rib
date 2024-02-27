@@ -43,6 +43,7 @@ from tests.utils import (
 
 def graph_build_test(config: RibBuildConfig, atol: float):
     results = rib_build(config)
+    grams_normal = results.gram_matrices
 
     grams = results.gram_matrices
     Cs = results.interaction_rotations
@@ -682,6 +683,67 @@ def test_centered_rib_modadd(basis_formula):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("center", [True, False])
+def test_saving_and_loading(tmpdir, center):
+    """Test that we can save and load intermediate results."""
+    # Gram compute
+    config_grams = get_modular_arithmetic_config(
+        {"out_dir": tmpdir, "calculate_Cs": False, "calculate_edges": False, "center": center}
+    )
+    gram_results = rib_build(config_grams)
+    # Cs compute
+    config_Cs = get_modular_arithmetic_config(
+        {
+            "out_dir": tmpdir,
+            "calculate_edges": False,
+            "gram_matrices_path": str(tmpdir / f"{config_grams.exp_name}_rib_grams.pt"),
+            "center": center,
+        }
+    )
+    Cs_results = rib_build(config_Cs)
+    for key in Cs_results.gram_matrices:
+        assert_close(Cs_results.gram_matrices[key], gram_results.gram_matrices[key])
+    if Cs_results.mean_vectors is not None:
+        for key in Cs_results.mean_vectors:
+            assert_close(Cs_results.mean_vectors[key], gram_results.mean_vectors[key])
+    # Edges compute from Cs
+    edges_config = get_modular_arithmetic_config(
+        {
+            "out_dir": tmpdir,
+            "calculate_edges": True,
+            "interaction_matrices_path": str(tmpdir / f"{config_Cs.exp_name}_rib_Cs.pt"),
+            "center": center,
+        }
+    )
+    edges_results = rib_build(edges_config)
+    for key in edges_results.gram_matrices:
+        assert_close(edges_results.gram_matrices[key], gram_results.gram_matrices[key])
+    if edges_results.mean_vectors is not None:
+        for key in edges_results.mean_vectors:
+            assert_close(edges_results.mean_vectors[key], gram_results.mean_vectors[key])
+    for A, B in zip(edges_results.interaction_rotations, Cs_results.interaction_rotations):
+        assert_close(A.C, B.C)
+    # Edges compute from both
+    edges_config = get_modular_arithmetic_config(
+        {
+            "out_dir": tmpdir,
+            "calculate_edges": True,
+            "gram_matrices_path": str(tmpdir / f"{config_Cs.exp_name}_rib_grams.pt"),
+            "interaction_matrices_path": str(tmpdir / f"{config_Cs.exp_name}_rib_Cs.pt"),
+            "center": center,
+        }
+    )
+    edges_results = rib_build(edges_config, force=True)
+    for key in edges_results.gram_matrices:
+        assert_close(edges_results.gram_matrices[key], gram_results.gram_matrices[key])
+    if edges_results.mean_vectors is not None:
+        for key in edges_results.mean_vectors:
+            assert_close(edges_results.mean_vectors[key], gram_results.mean_vectors[key])
+    for A, B in zip(edges_results.interaction_rotations, Cs_results.interaction_rotations):
+        assert_close(A.C, B.C)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("center", [True, False])
 def test_isolated_ln_var(center):
     """Test that there is a single direction in the basis pre-LN out representing the variance."""
     config = get_tinystories_config(
@@ -897,7 +959,7 @@ def test_separate_gram_loader():
         {
             "gram_dataset": {
                 "dataset_type": "huggingface",
-                "name": "apollo-research/sae-roneneldan-TinyStories-tokenizer-gpt2",
+                "name": "apollo-research/sae-skeskinen-TinyStories-hf-tokenizer-gpt2",
                 "tokenizer_name": "EleutherAI/gpt-neo-125M",
                 "return_set": "train",
                 "return_set_frac": None,

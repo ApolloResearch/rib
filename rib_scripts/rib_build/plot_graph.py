@@ -28,9 +28,7 @@ def _to_results(results: ResultsLike) -> RibBuildResults:
     if isinstance(results, RibBuildResults):
         return results
     elif isinstance(results, (str, Path)):
-        rdict = torch.load(results)
-        del rdict["config"]["ignore_0th_pos"]
-        return RibBuildResults(**rdict)
+        return RibBuildResults(**torch.load(results))
     else:
         raise ValueError(f"Invalid results type: {type(results)}")
 

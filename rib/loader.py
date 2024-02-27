@@ -373,7 +373,7 @@ def create_hf_dataset(
         n_samples=dataset_config.n_samples,
         seed=dataset_config.seed,
     )
-    logger.info(f"Tokenized {len(tokenized_dataset)} samples from HuggingFace dataset")
+    logger.info(f"Tokenized {len(tokenized_dataset)} sequences from HuggingFace dataset")
     return tokenized_dataset
 
 

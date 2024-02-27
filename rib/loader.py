@@ -251,7 +251,7 @@ def prepare_dataset(
         tokenized = False
     # Tokenize all samples and merge them into one long list of tokens
     all_tokens: list[int] = []
-    for example in tqdm(dataset, desc="Tokenizing dataset", total=len(dataset)):  # type: ignore
+    for example in tqdm(dataset, desc="Processing dataset", total=len(dataset)):  # type: ignore
         if not tokenized:
             tokens = tokenizer(example["text"])["input_ids"]
             # Add the eos token to the end of each sample as was done in the original training
@@ -259,7 +259,6 @@ def prepare_dataset(
             all_tokens.extend(tokens + [tokenizer.eos_token_id])
         else:
             tokens = example["input_ids"]
-
             all_tokens.extend(tokens)
     # Check number of eos tokens
     len_dataset = len(dataset)  # type: ignore

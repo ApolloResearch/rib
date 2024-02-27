@@ -277,6 +277,9 @@ class RibBuildConfig(BaseModel):
         if self.calculate_edges and not self.calculate_Cs:
             raise ValueError("calculate_edges=True requires calculate_Cs=True")
 
+        if self.gram_matrices_path and not self.calculate_Cs:
+            raise ValueError("gram_matrices_path given but calculate_Cs=False")
+
         if self.interaction_matrices_path and not self.calculate_Cs:
             logger.warning("interaction_matrices_path ignored due to calculate_Cs=False")
 
@@ -424,9 +427,10 @@ def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildCo
             ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
         elif config.dataset.n_samples is not None:
             assert loaded_config.dataset.n_samples is not None
-            assert (
-                config.dataset.n_samples <= loaded_config.dataset.n_samples
-            ), "Cannot use a larger n_samples for edges than to calculate the Cs"
+            if config.dataset.n_samples != loaded_config.dataset.n_samples:
+                logger.warning(
+                    "The loaded config uses a different number of samples than the current config. Is this intended?"
+                )
 
 
 def load_interaction_rotations(

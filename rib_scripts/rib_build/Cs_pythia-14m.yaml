@@ -8,20 +8,28 @@ dataset:
   name: NeelNanda/pile-10k
   tokenizer_name: EleutherAI/pythia-14m
   return_set: train  # pile-10k only has train, so we take the first 90% for building and last 10% for ablations
-  return_set_frac: 0.9
-  n_samples: null
+  return_set_frac: null
+  n_samples: 10
+  n_documents: 100
   return_set_portion: first
+  n_ctx: 100
 node_layers:
   - mlp_out.0
   - ln2.3
   - mlp_out.3
   - ln1.5
   - mlp_out.5
-batch_size: 6  # Based on 24GB a5000 GPU
-gram_batch_size: 10  # Based on 24GB a5000 GPU
-truncation_threshold: 1e-15
-rotate_final_node_layer: false
-n_intervals: 50
+rotate_final_node_layer: true
+batch_size: 25  #  A100 can handle 24
+gram_batch_size: 40  #  A100 can handle 80
+truncation_threshold: 1e-10
+n_intervals: 0
+integration_method: gradient
 dtype: float64
 calculate_edges: false
-eval_type: ce_loss
+basis_formula: jacobian
+edge_formula: squared
+center: true
+n_stochastic_sources_basis_hidden: 50
+n_stochastic_sources_basis_pos: 10
+# using approx 8GB VRAM

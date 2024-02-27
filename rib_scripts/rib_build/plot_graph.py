@@ -19,7 +19,7 @@ import torch
 from rib.log import logger
 from rib.plotting import plot_rib_graph
 from rib.rib_builder import RibBuildResults
-from rib.utils import check_outfile_overwrite
+from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
 ResultsLike = Union[RibBuildResults, Path, str]
 
@@ -133,8 +133,8 @@ def main(
     else:
         out_file = Path(out_file)
 
-    if not check_outfile_overwrite(out_file, force):
-        return
+    if not check_out_file_overwrite(out_file, force):
+        handle_overwrite_fail()
 
     assert results.edges, "The results file does not contain any edges."
     hide_const_edges = hide_const_edges or results.config.center

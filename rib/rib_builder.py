@@ -519,7 +519,7 @@ def load_mean_vectors_and_gram_matrices(
     # Move to device and return
     mean_vectors = (
         {k: v.to(device) for k, v in matrices_info["mean_vectors"].items()}
-        if matrices_info["mean_vectors"] is not None
+        if matrices_info["mean_vectors"]
         else None
     )
     gram_matrices = {k: v.to(device) for k, v in matrices_info["gram_matrices"].items()}

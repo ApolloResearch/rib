@@ -38,7 +38,7 @@ def plot_by_layer(
     nodes_per_layer=100,
     out_file=None,
     edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
-    hide_const_edges: Optional[bool] = None,
+    hide_const_edges: bool = True,
     const_edge_norm: Optional[float] = None,
 ):
     """
@@ -53,6 +53,10 @@ def plot_by_layer(
         nodes_per_layer: The number of nodes per layer to plot.
         out_file: The path to save the plot.
         edge_norm: A function to normalize the edge weights pre-plotting.
+        hide_const_edges: Whether to hide the nodes corresponding to constant RIB dirs. This is
+            ignored if the RIB build is non-centered
+        const_edge_norm: If non-none, will use a fixed normalization value for all layers instead
+            of normalizing edges layer by layer.
     """
     results = _to_results(results)
 
@@ -87,7 +91,7 @@ def plot_by_layer(
             nodes_per_layer=nodes_per_layer,
             out_file=None,
             node_labels=None,
-            hide_const_edges=hide_const_edges or results.config.center,
+            hide_const_edges=results.config.center and hide_const_edges,
             ax=ax,
             const_edge_norm=const_edge_norm,
         )
@@ -104,11 +108,24 @@ def main(
     labels_file: Optional[str] = None,
     out_file: Optional[Union[str, Path]] = None,
     force: bool = False,
-    hide_const_edges: Optional[bool] = None,
+    hide_const_edges: bool = True,
     by_layer: Optional[bool] = False,
     const_edge_norm: Optional[float] = None,
 ) -> None:
-    """Plot an RIB graph given a results file contain the graph edges."""
+    """Plot an RIB graph given a results file contain the graph edges.
+
+    Args:
+        results: The results file containing the graph edges.
+        nodes_per_layer: The number of nodes per layer to plot.
+        labels_file: A csv file containing the labels for the nodes.
+        out_file: The path to save the plot.
+        force: Whether to overwrite the out_file if it already exists.
+        hide_const_edges: Whether to hide the nodes corresponding to constant RIB dirs. This is
+            ignored if the RIB build is non-centered
+        by_layer: Whether to plot the graph by layer.
+        const_edge_norm: If non-none, will use a fixed normalization value for all layers instead
+            of normalizing edges layer by layer.
+    """
     results = _to_results(results)
     if out_file is None:
         out_dir = Path(__file__).parent / "out"
@@ -137,7 +154,7 @@ def main(
             results,
             nodes_per_layer=nodes_per_layer,
             out_file=out_file,
-            hide_const_edges=hide_const_edges,
+            hide_const_edges=results.config.center and hide_const_edges,
             const_edge_norm=const_edge_norm,
         )
         return None
@@ -157,7 +174,7 @@ def main(
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,
         node_labels=node_labels,
-        hide_const_edges=hide_const_edges,
+        hide_const_edges=results.config.center and hide_const_edges,
         const_edge_norm=const_edge_norm,
     )
 

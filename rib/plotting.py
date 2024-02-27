@@ -79,6 +79,8 @@ def _prepare_edges_for_plotting(
         raw_edges (list[torch.Tensor]): List of edges tensors, each with shape
             (n_nodes_in_l+1, n_nodes_in_l).
         nodes_per_layer (list[int]): The number of nodes in each layer.
+        norm (Optional[float]): The value to normalize the edges by. If None, will normalize each
+            layer by the sum of the absolute values of the edges.
 
     Returns:
         list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
@@ -201,12 +203,14 @@ def plot_rib_graph(
         nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
             all layers have the same number of nodes. If list, then the number of nodes in each
             layer is given by the list.
-        out_file (Path): The file to save the plot to.
+        out_file (Path): The file to save the plot to. If None, no plot is saved
         node_labels: The labels for each node in the graph. If None, then no labels are added.
         hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes.
         ax: The axis to plot the graph on. If None, then a new figure is created.
         const_edge_norm (Optional[float]): The value to normalize the edges by. If None, will choose
             a different value for each layer (the sum of the absolute values of the edges).
+        colors (Optional[list[str]]): The colors to use for the nodes in each layer. If None, then
+            the tab10 colormap is used.
     """
     if isinstance(nodes_per_layer, int):
         # Note that there is one more layer than there edge matrices

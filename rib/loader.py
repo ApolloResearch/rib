@@ -246,7 +246,7 @@ def prepare_dataset(
     assert tokenizer.eos_token_id is not None, "Tokenizer must have an eos token id"
     # May already be tokenized
     try:
-        tokenized = not "text" in dataset.features.keys()  # type: ignore
+        tokenized = "input_ids" in dataset.features.keys()  # type: ignore
     except AttributeError:
         tokenized = False
     # Tokenize all samples and merge them into one long list of tokens
@@ -259,17 +259,29 @@ def prepare_dataset(
             all_tokens.extend(tokens + [tokenizer.eos_token_id])
         else:
             tokens = example["input_ids"]
+
             all_tokens.extend(tokens)
-    # There shouldn't be any padding tokens, so ensure that there are len(dataset) eos tokens
+    # Check number of eos tokens
+    len_dataset = len(dataset)  # type: ignore
+    n_eos_tokens = all_tokens.count(tokenizer.eos_token_id)
     if not tokenized:
-        len_dataset = len(dataset)  # type: ignore
-        assert all_tokens.count(tokenizer.eos_token_id) == len_dataset, (
+        # When we tokenize the dataset ourselves then len_dataset is the number of actual stories
+        # and thus the number of eos tokens should match len_dataset.
+        assert n_eos_tokens == len_dataset, (
             f"Number of eos tokens ({all_tokens.count(tokenizer.eos_token_id)}) does not match "
             f"number of samples ({len_dataset})."
         )
+    else:
+        # When we load a tokenized dataset then len_dataset is just the number of rows of lenght
+        # 511, irrespective of the actual number of stories. EOS tokens are already included in
+        # the tokenized dataset. Since stories are typically 235 tokens long, the number of eos
+        # tokens will be around len_dataset*511/235 > len_dataset.
+        assert n_eos_tokens >= len_dataset, (
+            f"Number of eos tokens ({all_tokens.count(tokenizer.eos_token_id)}) is smaller than "
+            f"expected for a dataset of length {len_dataset}."
+        )
     # Split the merged tokens into chunks that fit the context length
     raw_chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
-
     # Note that we ignore the final raw_chunk, as we get the label for the final token in a chunk
     # from the subsequent chunk.
     n_raw_chunks = len(raw_chunks) - 1
@@ -373,7 +385,7 @@ def create_hf_dataset(
         n_samples=dataset_config.n_samples,
         seed=dataset_config.seed,
     )
-    logger.info(f"Tokenized {len(tokenized_dataset)} sequences from HuggingFace dataset")
+    logger.info(f"Tokenized {len(tokenized_dataset)} samples from HuggingFace dataset")
     return tokenized_dataset
 
 

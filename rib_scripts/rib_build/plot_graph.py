@@ -3,16 +3,17 @@
 Usage:
     python plot_graph.py <path/to/results.pt> [--nodes_per_layer <int>]
         [--labels_file <path/to/labels.csv>] [--out_file <path/to/out.png>]
-        [--force]
+        [--force] [--by_layer] [--edge_norm_factor <float>]
 
     The results.pt should be the output of the run_rib_build.py script.
 """
 
 import csv
 from pathlib import Path
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import fire
+import matplotlib.pyplot as plt
 import torch
 
 from rib.log import logger
@@ -20,19 +21,99 @@ from rib.plotting import plot_rib_graph
 from rib.rib_builder import RibBuildResults
 from rib.utils import check_outfile_overwrite
 
+ResultsLike = Union[RibBuildResults, Path, str]
+
+
+def _to_results(results: ResultsLike) -> RibBuildResults:
+    if isinstance(results, RibBuildResults):
+        return results
+    elif isinstance(results, (str, Path)):
+        rdict = torch.load(results)
+        del rdict["config"]["ignore_0th_pos"]
+        return RibBuildResults(**rdict)
+    else:
+        raise ValueError(f"Invalid results type: {type(results)}")
+
+
+def plot_by_layer(
+    results: ResultsLike,
+    nodes_per_layer=100,
+    out_file=None,
+    edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
+    hide_const_edges: Optional[bool] = None,
+    const_edge_norm: Optional[float] = None,
+):
+    """
+    Plots a RIB graph with every transformer block on it's own row.
+
+    Can be called from the command line interface with `--by_layer` flag.
+
+    You'll need to call the function from python if you want to use edge_norm.
+
+    Args:
+        results: The results file containing the graph edges.
+        nodes_per_layer: The number of nodes per layer to plot.
+        out_file: The path to save the plot.
+        edge_norm: A function to normalize the edge weights pre-plotting.
+    """
+    results = _to_results(results)
+
+    def get_block(name: str) -> Optional[int]:
+        split = name.split(".")
+        if len(split) == 2:
+            return int(split[1])
+        else:
+            return None
+
+    blocks_in_results = [
+        get_block(nl) for nl in results.config.node_layers if get_block(nl) is not None
+    ]
+    assert blocks_in_results
+    blocks = range(min(blocks_in_results), max(blocks_in_results) + 1)  # type: ignore
+
+    fig, axs = plt.subplots(len(blocks), 1, figsize=(8, len(blocks) * 6))
+    axs = axs if len(blocks) > 1 else [axs]
+
+    for ax, block in zip(axs, blocks, strict=True):
+        edges = [edge for edge in results.edges if get_block(edge.in_node_layer) == block]
+        layers = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
+        if edge_norm is not None:
+            raw_edges = [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges]
+        else:
+            raw_edges = [edge.E_hat for edge in edges]
+
+        plot_rib_graph(
+            raw_edges=raw_edges,
+            layer_names=layers,
+            exp_name=results.exp_name,
+            nodes_per_layer=nodes_per_layer,
+            out_file=None,
+            node_labels=None,
+            hide_const_edges=hide_const_edges or results.config.center,
+            ax=ax,
+            const_edge_norm=const_edge_norm,
+        )
+
+    if out_file is not None:
+        plt.savefig(out_file, dpi=300)
+
+        logger.info(f"Saved plot to {Path(out_file).absolute()}")
+
 
 def main(
-    results_file: str,
-    nodes_per_layer: Union[int, list[int]] = 40,
+    results: ResultsLike,
+    nodes_per_layer: Union[int, list[int]] = 64,
     labels_file: Optional[str] = None,
     out_file: Optional[Union[str, Path]] = None,
     force: bool = False,
     hide_const_edges: Optional[bool] = None,
+    by_layer: Optional[bool] = False,
+    const_edge_norm: Optional[float] = None,
 ) -> None:
     """Plot an RIB graph given a results file contain the graph edges."""
-    results = RibBuildResults(**torch.load(results_file))
-    out_dir = Path(__file__).parent / "out"
+    results = _to_results(results)
     if out_file is None:
+        out_dir = Path(__file__).parent / "out"
         out_file = out_dir / f"{results.exp_name}_rib_graph.png"
     else:
         out_file = Path(out_file)
@@ -41,6 +122,8 @@ def main(
         return
 
     assert results.edges, "The results file does not contain any edges."
+    hide_const_edges = hide_const_edges or results.config.center
+
     # Add labels if provided
     if labels_file is not None:
         with open(labels_file, "r", newline="") as file:
@@ -48,6 +131,18 @@ def main(
             node_labels = list(reader)
     else:
         node_labels = None
+
+    if by_layer:
+        if node_labels is not None:
+            raise NotImplementedError("Would just need to find the right subset of labels")
+        plot_by_layer(
+            results,
+            nodes_per_layer=nodes_per_layer,
+            out_file=out_file,
+            hide_const_edges=hide_const_edges,
+            const_edge_norm=const_edge_norm,
+        )
+        return None
 
     edge_layers = [edges.in_node_layer for edges in results.edges] + [
         results.edges[-1].out_node_layer
@@ -64,7 +159,8 @@ def main(
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,
         node_labels=node_labels,
-        hide_const_edges=hide_const_edges or results.config.center,
+        hide_const_edges=hide_const_edges,
+        const_edge_norm=const_edge_norm,
     )
 
     logger.info(f"Saved plot to {out_file}")

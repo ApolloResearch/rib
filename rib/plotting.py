@@ -187,8 +187,8 @@ def plot_rib_graph(
     out_file: Optional[Path] = None,
     node_labels: Optional[list[list[str]]] = None,
     hide_const_edges: bool = False,
-    ax=None,
-    norm: Optional[float] = None,
+    ax: Optional[plt.Axes] = None,
+    const_edge_norm: Optional[float] = None,
     colors: Optional[list[str]] = None,
 ) -> None:
     """Plot the RIB graph for the given edges.
@@ -202,6 +202,11 @@ def plot_rib_graph(
             all layers have the same number of nodes. If list, then the number of nodes in each
             layer is given by the list.
         out_file (Path): The file to save the plot to.
+        node_labels: The labels for each node in the graph. If None, then no labels are added.
+        hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes.
+        ax: The axis to plot the graph on. If None, then a new figure is created.
+        const_edge_norm (Optional[float]): The value to normalize the edges by. If None, will choose
+            a different value for each layer (the sum of the absolute values of the edges).
     """
     if isinstance(nodes_per_layer, int):
         # Note that there is one more layer than there edge matrices
@@ -210,7 +215,7 @@ def plot_rib_graph(
     max_layer_height = max(nodes_per_layer)
 
     edges = _prepare_edges_for_plotting(
-        raw_edges, nodes_per_layer, hide_const_edges=hide_const_edges, norm=norm
+        raw_edges, nodes_per_layer, hide_const_edges=hide_const_edges, norm=const_edge_norm
     )
 
     # Create the undirected graph
@@ -236,7 +241,10 @@ def plot_rib_graph(
 
     # Draw nodes
     if colors is None:
-        colors = ["black", "green", "orange", "purple"]  # Add more colors if you have more layers
+        # tab10 colormap
+        # convert from rgb to hex to avoid matplotlib warning
+        to_hex = lambda x: f"{int(x * 255):02x}"
+        colors = [f"#{to_hex(r)}{to_hex(g)}{to_hex(b)}" for r, g, b in plt.get_cmap("tab10").colors]  # type: ignore
     options = {"edgecolors": "tab:gray", "node_size": 100, "alpha": 0.3}
     for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
         nx.draw_networkx_nodes(

@@ -361,7 +361,7 @@ def create_hf_dataset(
 
     logger.info(f"Loading HuggingFace dataset {dataset_config.name} split {data_split}")
     raw_dataset = hf_load_dataset(dataset_config.name, split=data_split)
-    logger.info(f"Loaded {len(raw_dataset)} samples from HuggingFace dataset")
+    logger.info(f"Loaded {len(raw_dataset)} documents from HuggingFace dataset")
 
     tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
     tokenizer.pad_token = tokenizer.eos_token

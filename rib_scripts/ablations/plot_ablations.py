@@ -66,10 +66,9 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
         exp_names=[f"{exp_name} LM" for exp_name in exp_names],
         eval_type=eval_type,
         ablation_types=ablation_types,
-        log_scale=False,
         xlim=(0.0, 20.0) if eval_type == "accuracy" else None,
-        ylim=(0.0, 1.0) if eval_type == "accuracy" else None,
-        ylim_relative=(-0.1, 0.2) if eval_type == "ce_loss" else None,
+        ylim=(0.0, 1.0) if eval_type == "accuracy" else (-0.1, 0.2),
+        baseline_is_zero=False if eval_type == "accuracy" else True,
     )
 
     logger.info(f"Saved plot to {out_file}")

@@ -175,7 +175,7 @@ class RIBGraph:
         """Get k random edges from the graph."""
         return [
             (self.nodes[u], self.nodes[v], self.G.weight(u, v))
-            for u, v in nk.graphtools.randomEdges(graph.G, k)
+            for u, v in nk.graphtools.randomEdges(self.G, k)
         ]
 
     def layer_idx_of(self, node: Node) -> int:
@@ -184,11 +184,12 @@ class RIBGraph:
 
     def run_leiden(self, gamma=1, iterations=10):
         algo = nk.community.ParallelLeiden(self.G, gamma=gamma, iterations=iterations)
-        self._nk_partition = nk.community.detectCommunities(graph.G, algo=algo)
+        self._nk_partition = nk.community.detectCommunities(self.G, algo=algo)
         self._make_clusters()
 
     def _make_clusters(self):
         assert self._nk_partition is not None
+        clusters = []
         for cluster_id in self._nk_partition.subsetSizeMap().keys():
             member_ids = self._nk_partition.getMembers(cluster_id)
             nodes = [self.nodes[i] for i in member_ids]
@@ -251,83 +252,42 @@ class RIBGraph:
 
         return (tot_edges - kept_edges) if absolute else kept_edges / tot_edges
 
+    def paino_plot(
+        self,
+        clusters: Union[NodeCluster, list[NodeCluster], Literal["all"]] = "all",
+        ax=None,
+    ):
+        def _fill_array(arr: np.ndarray, nodes: list[Node], val: float):
+            for n in nodes:
+                arr[self.node_layers.index(n.layer), n.idx] = val
 
-def paino_plot(
-    graph: RIBGraph,
-    clusters: Union[NodeCluster, list[NodeCluster], Literal["all"]] = "all",
-    ax=None,
-):
-    def _fill_array(arr: np.ndarray, nodes: list[Node], val: float):
-        for n in nodes:
-            arr[graph.node_layers.index(n.layer), n.idx] = val
+        # make cluster list
+        assert self.clusters is not None
+        if clusters == "all":  # all non-singletons
+            clusters = [c for c in self.clusters if c.size > 1]
+        elif isinstance(clusters, NodeCluster):
+            clusters = [clusters]
+        clusters = cast(list[NodeCluster], clusters)
 
-    assert graph.clusters is not None
-    if clusters == "all":  # all non-singletons
-        clusters = [c for c in graph.clusters if c.size > 1]
-    elif isinstance(clusters, NodeCluster):
-        clusters = [clusters]
-    clusters = cast(list[NodeCluster], clusters)
+        # make colormap
+        null_color = [0.2, 0.2, 0.2, 1]
+        singleton_color = [1, 1, 1, 1]
+        cluster_colors = [colorcet.glasbey[i % 256] for i in range(len(clusters))]
+        cmap = plt.matplotlib.colors.ListedColormap([null_color, singleton_color, *cluster_colors])
 
-    null_color = [0.2, 0.2, 0.2, 1]
-    singleton_color = [1, 1, 1, 1]
-    cluster_colors = [colorcet.glasbey[i % 256] for i in range(len(clusters))]
-    cmap = plt.matplotlib.colors.ListedColormap([null_color, singleton_color, *cluster_colors])
-    norm = plt.matplotlib.colors.Normalize(-1, len(clusters))
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(6, 6))
+        # make base array
+        max_width = max(self.nodes_per_layer.values())
+        arr = np.full((len(self.node_layers), max_width), fill_value=-1)
+        _fill_array(arr, self.nodes, 0)
+        # fill array with clusters
+        for i, c in enumerate(clusters):
+            _fill_array(arr, c.nodes, i + 1)
 
-    # make base array
-    max_width = max(graph.nodes_per_layer.values())
-    arr = np.full((len(graph.node_layers), max_width), fill_value=-1)
-    _fill_array(arr, graph.nodes, 0)
-    for i, c in enumerate(clusters):
-        _fill_array(arr, c.nodes, i + 1)
+        # plot
+        norm = plt.matplotlib.colors.Normalize(-1, len(clusters))
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(6, 6))
 
-    ax.matshow(arr[:, 1:].T, cmap=cmap, origin="lower", norm=norm, aspect="auto")
-    ax.set_xlabel("Node layer")
-    ax.set_ylabel("RIB index")
-
-
-def edge_distribution(
-    results,
-    layout: tuple[int, int] = (2, 4),
-    xlim=(None, None),
-    ylim=(0, 1),
-    vlines: Optional[dict[str, float]] = None,
-):
-    """Plots culmulative distribution functions of the edge values.
-
-    Helpful for undetstanding the epsilon cutoffs used for edge normalization, especially with
-    `edge_distribution(..., vlines=AdaptiveEdgeNorm.eps_by_layer)`.
-
-    Args:
-        results: The results from a RIB build.
-        layout: The number of rows and columns of the plot.
-        xlim: The x-axis limits.
-        ylim: The y-axis limits.
-        vlines: A dictionary of node_layer -> float, drawn as vertical lines on the subplots.
-    """
-    ps = torch.cat([torch.linspace(0.02, 0.9, 70), torch.linspace(0.9, 1, 150)])
-    figsize = (layout[1] * 3, layout[0] * 3)
-    fig, axs = plt.subplots(*layout, figsize=figsize, sharex=True, sharey=True)
-
-    for edge in results.edges:
-        in_nl = edge.in_node_layer
-        if in_nl in ["ln_final", "ln_final_out"]:
-            continue
-        prefix, layer = in_nl.split(".")
-        E = edge.E_hat.to(torch.float32)
-        xs = torch.quantile(E, ps).cpu().numpy()
-        ax = axs.flat[int(layer)]
-        color = get_prefix_colors()[prefix]
-        ax.plot(xs, ps, label=in_nl, color=color)
-        ax.set_title(f"layer {layer}")
-
-        if vlines is not None:
-            ax.axvline(vlines[in_nl], color=color, linestyle="--")
-
-    plt.xscale("log")
-    plt.ylim(*ylim)
-    plt.xlim(*xlim)
-    axs.flat[-1].legend()
-    plt.tight_layout()
+        ax.matshow(arr[:, 1:].T, cmap=cmap, origin="lower", norm=norm, aspect="auto")
+        ax.set_xlabel("Node layer")
+        ax.set_ylabel("RIB index")

@@ -97,7 +97,7 @@ def plot_by_layer(
         )
 
     if out_file is not None:
-        plt.savefig(out_file, dpi=300)
+        plt.savefig(out_file, dpi=200)
 
         logger.info(f"Saved plot to {Path(out_file).absolute()}")
 

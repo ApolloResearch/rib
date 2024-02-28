@@ -88,7 +88,7 @@ def run_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
         rib_results_path=results_path.absolute(),
         schedule=BisectScheduleConfig(
             schedule_type="bisect",
-            score_target=threshold,
+            score_target_difference=threshold,
             scaling="logarithmic",
         ),
         dataset=dataset,

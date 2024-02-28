@@ -108,6 +108,9 @@ class RibBuildConfig(BaseModel):
             "pythia-70m",
             "pythia-160m",
             "pythia-410m",
+            "pythia-1b",
+            "pythia-1.4b",
+            "pythia-2.8b",
         ]
     ] = Field(None, description="Pretrained transformer lens model.")
     tlens_model_path: Optional[RootPath] = Field(
@@ -220,6 +223,11 @@ class RibBuildConfig(BaseModel):
         "dataset",
         description="For distributed edge runs, whether to split over out_dim or dataset.",
     )
+    isolate_ln_var: bool = Field(
+        True,
+        description="Whether to special case the LN-variance function as a separate node. Otherwise"
+        "the LN variance will be potentially mixed with other RIB functions.",
+    )
     naive_gradient_flow: bool = Field(
         False,
         description="Use gradient flow (naive version), running repeated RIB builds with pairs of"
@@ -246,6 +254,16 @@ class RibBuildConfig(BaseModel):
         ]
         if sum(1 for val in model_options if val is not None) != 1:
             raise ValueError(f"Exactly one of {model_options} must be set")
+
+        if self.n_stochastic_sources_basis_pos is not None:
+            assert (
+                self.basis_formula == "jacobian"
+            ), "n_stochastic_sources_basis_pos only implemented for jacobian basis_formula"
+
+        if self.n_stochastic_sources_basis_hidden is not None:
+            assert (
+                self.basis_formula == "jacobian"
+            ), "n_stochastic_sources_basis_hidden only implemented for jacobian basis_formula"
 
         if self.n_stochastic_sources_basis_pos is not None:
             assert (
@@ -588,9 +606,20 @@ def rib_build(
         Results of the graph build
     """
     config = load_config(config_path_or_obj, config_model=RibBuildConfig)
-    set_seed(config.seed)
 
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
+
+    # we increment the seed between processes so we generate different phis. This is because
+    # each process will calculate a fraction of the total sources, and we need these sources
+    # (phis) to be different.
+    if config.dist_split_over == "out_dim" and config.seed is not None:
+        random_increment = 9594
+        # chosen by fair dice roll, guaranteed to be random (https://xkcd.com/221/)
+        # for real, the reason we add an increment is to avoid correlation between
+        # different global seeds, i.e. seed=0 pod=1 and seed=1 pod=0
+        set_seed(config.seed + random_increment * dist_info.global_rank)
+    else:
+        set_seed(config.seed)
 
     adjust_logger_dist(dist_info)
     device = get_device_mpi(dist_info)
@@ -683,7 +712,8 @@ def rib_build(
             hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             means=means,
         )
-        logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
+        time_to_collect_gram = (time.time() - collect_gram_start_time) / 60
+        logger.info("Time to collect gram matrices: %.2f minutes", time_to_collect_gram)
 
         graph_train_loader = DataLoader(
             dataset=dataset, batch_size=config.batch_size, shuffle=False
@@ -714,12 +744,15 @@ def rib_build(
             n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
             out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
             out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
+            isolate_ln_var=config.isolate_ln_var,
         )
         # InteractionRotation objects used to calculate edges
         edge_interaction_rotations = interaction_rotations
 
         calc_C_time = (time.time() - c_start_time) / 60
         logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
+        logger.info("Max memory allocated for Cs: %.2f GB", torch.cuda.max_memory_allocated() / 1e9)
+        torch.cuda.reset_peak_memory_stats()
     else:
         gram_matrices, interaction_rotations = load_interaction_rotations(config=config)
         edge_interaction_rotations = [
@@ -767,6 +800,9 @@ def rib_build(
 
         calc_edges_time = (time.time() - edges_start_time) / 60
         logger.info("Time to calculate edges: %.2f minutes", calc_edges_time)
+        logger.info(
+            "Max memory allocated for edges: %.2f GB", torch.cuda.max_memory_allocated() / 1e9
+        )
 
     results = RibBuildResults(
         exp_name=config.exp_name,

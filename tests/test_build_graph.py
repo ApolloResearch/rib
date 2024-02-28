@@ -199,7 +199,7 @@ def test_naive_gradient_flow_interface(run_type, use_out_dir, tmpdir):
     """Test the Naive Gradient Flow (NGF) interface, making sure that files
     are written if and only if they should.
 
-    We test
+    We test one of three cases, selected by "use_out_dir"
         1. Full run with / without out_dir
         2. Edge build with saved Cs, with / without out_dir
         3. Just run Cs, with / without out_dir
@@ -525,11 +525,11 @@ def test_modular_arithmetic_rotate_final_layer_invariance(
     )
 
 
-def test_mnist_build_graph_invalid_node_layers():
-    """Test that non-sequential node_layers raises an error."""
-    config = get_mnist_config({"node_layers": ["layers.0", "layers.2"]})
-    with pytest.raises(AssertionError, match="is not a subsequence of all_node_layers:"):
-        graph_build_test(config=config, atol=0)
+# def test_mnist_build_graph_invalid_node_layers():
+#     """Test that non-sequential node_layers raises an error."""
+#     config = get_mnist_config({"node_layers": ["layers.0", "layers.2"]})
+#     with pytest.raises(AssertionError, match="is not a subsequence of all_node_layers:"):
+#         graph_build_test(config=config, atol=0)
 
 
 def test_modular_arithmetic_build_graph_invalid_node_layers():
@@ -678,6 +678,31 @@ def test_centered_rib_modadd(basis_formula):
     )
     results = rib_build(config)
     centered_rib_test(results, atol=1e-10)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("center", [True, False])
+def test_isolated_ln_var(center):
+    """Test that there is a single direction in the basis pre-LN out representing the variance."""
+    config = get_tinystories_config(
+        {
+            "node_layers": ["ln1_out.1", "ln2_out.1", "ln2_out.2"],
+            "center": center,
+        }
+    )
+    results = rib_build(config)
+    for ir in results.interaction_rotations:
+        if ir.C_pinv is not None:
+            # var is in the 0th position in the original acts
+            amount_in_var_dir = ir.C_pinv[:, 0].abs()
+            # assert the var direction exists, and no other non-const dir read from var
+            exp_var_idx = 1 if center else 0
+            assert amount_in_var_dir[exp_var_idx] > 1e-6
+            assert_is_zeros(
+                amount_in_var_dir[exp_var_idx + 1 :], atol=1e-12, node_layer=ir.node_layer
+            )
+            # assert var dir is otherwise all 0
+            assert_is_zeros(ir.C_pinv[exp_var_idx, 1:], atol=1e-12, node_layer=ir.node_layer)
 
 
 @pytest.mark.slow

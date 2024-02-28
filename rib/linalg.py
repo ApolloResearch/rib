@@ -52,6 +52,32 @@ def eigendecompose(
     return eigenvalues, eigenvectors
 
 
+def masked_eigendecompose(
+    x: Float[Tensor, "orig orig"],
+    n_masked: int,
+    descending: bool = True,
+    dtype: StrDtype = "float64",
+):
+    """Calculate eigenvalues and eigenvectors, keeping the first n_masked rows and columns isolated.
+
+    This is useful for preserve certain directions in the resulting basis. In particular, we
+    preserve the direction representing variance in layer-norms, and preserve the constant direction
+    in all RIB layers.
+
+    Args:
+        x: A real symmetric matrix (e.g. the result of X^T @ X)
+        n_masked: The number of rows and columns to keep isolated.
+        descending: If True, sort eigenvalues and corresponding eigenvectors in descending order
+            of eigenvalues.
+        dtype: The precision in which to perform the eigendecomposition.
+            Values below torch.float64 tend to be very unstable.
+    """
+    sub_vals, sub_vecs = eigendecompose(x[n_masked:, n_masked:], descending=descending, dtype=dtype)
+    vecs = torch.block_diag(torch.eye(n_masked).to(sub_vecs), sub_vecs)
+    vals = torch.cat([x.diag()[:n_masked], sub_vals])
+    return vals, vecs
+
+
 def move_const_dir_first(
     D_dash: Float[Tensor, "d_hidden"],
     U_dash: Float[Tensor, "d_hidden d_hidden"],

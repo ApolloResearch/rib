@@ -171,7 +171,8 @@ class RIBGraph:
 
     def run_leiden(self, gamma=1, iterations=10):
         algo = nk.community.ParallelLeiden(self.G, gamma=gamma, iterations=iterations)
-        self._nk_partition = nk.community.detectCommunities(self.G, algo=algo)
+        algo.run()
+        self._nk_partition = algo.getPartition()
         self._make_clusters()
 
     def _make_clusters(self):

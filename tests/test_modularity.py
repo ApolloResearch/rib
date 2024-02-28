@@ -12,6 +12,7 @@ def results() -> RibBuildResults:
     return rib_build(get_tinystories_config())
 
 
+@pytest.mark.slow
 def test_clustering(results: RibBuildResults):
     graph = RIBGraph(results)
     graph.run_leiden()
@@ -47,6 +48,7 @@ def test_clustering(results: RibBuildResults):
     graph.paino_plot()
 
 
+@pytest.mark.slow
 def test_edge_norm(results: RibBuildResults):
     eps = results.edges[0].E_hat.flatten().quantile(0.5)  # use median, will keep half of edges
     edge_norm = LogEdgeNorm(eps)
@@ -63,6 +65,7 @@ def test_edge_norm(results: RibBuildResults):
             assert_is_close(w, log10(orig_weight / eps), atol=1e-5, rtol=0)
 
 
+@pytest.mark.slow
 def test_gamma(results: RibBuildResults):
     graph_small_gamma = RIBGraph(results)
     graph_small_gamma.run_leiden(gamma=1e-3)

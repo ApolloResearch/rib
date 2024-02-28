@@ -129,6 +129,7 @@ def run_modularity(
         plt.savefig(edge_dist_path)
         logger.info(f"Saved edge distribution plot to {edge_dist_path.absolute()}")
 
+        # erronius warning, see https://github.com/matplotlib/matplotlib/issues/9970
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message="Attempt to set non-positive")
             plt.clf()

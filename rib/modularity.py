@@ -155,8 +155,8 @@ class RIBGraph:
         self._make_graph()
 
     def _add_layer_edges(self, edge, start_idx: int):
-        E = self.edge_norm(edge.E_hat, edge.in_node_layer)
-        out_idxs, in_idxs = torch.nonzero(E[start_idx:, start_idx:], as_tuple=True)
+        E = self.edge_norm(edge.E_hat, edge.in_node_layer)[start_idx:, start_idx:]
+        out_idxs, in_idxs = torch.nonzero(E, as_tuple=True)
         in_ids = in_idxs + self.node_to_idx[Node(edge.in_node_layer, start_idx)]
         out_ids = out_idxs + self.node_to_idx[Node(edge.out_node_layer, start_idx)]
         weights = E[out_idxs, in_idxs].flatten().cpu()
@@ -171,7 +171,7 @@ class RIBGraph:
 
         self.G.checkConsistency()
 
-    def random_edges(self, k=10):
+    def random_edges(self, k=10) -> list[tuple[Node, Node, float]]:
         """Get k random edges from the graph."""
         return [
             (self.nodes[u], self.nodes[v], self.G.weight(u, v))

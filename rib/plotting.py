@@ -73,7 +73,7 @@ def _prepare_edges_for_plotting(
     raw_edges: list[torch.Tensor],
     nodes_per_layer: list[int],
     hide_const_edges: bool = False,
-    norm: Optional[float] = None,
+    const_edge_norm: Optional[float] = None,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
@@ -97,7 +97,7 @@ def _prepare_edges_for_plotting(
             # should be zero except for a non-rotated last layer where they are important.
             weight_matrix[:, const_node_index] = 0
         # Normalize the edge weights by the sum of the absolute values of the weights
-        norm = torch.sum(torch.abs(weight_matrix)).item() if norm is None else norm
+        norm = const_edge_norm or torch.sum(torch.abs(weight_matrix)).item()
         weight_matrix /= norm
         # Only keep the desired number of nodes in each layer
         in_nodes = nodes_per_layer[i]
@@ -248,7 +248,10 @@ def plot_rib_graph(
     max_layer_height = max(nodes_per_layer)
 
     edges = _prepare_edges_for_plotting(
-        raw_edges, nodes_per_layer, hide_const_edges=hide_const_edges, norm=const_edge_norm
+        raw_edges,
+        nodes_per_layer,
+        hide_const_edges=hide_const_edges,
+        const_edge_norm=const_edge_norm,
     )
 
     # Create the undirected graph

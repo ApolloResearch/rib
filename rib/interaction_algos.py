@@ -12,8 +12,15 @@ from typing_extensions import Annotated
 
 from rib.data_accumulator import collect_M_dash_and_Lambda_dash
 from rib.hook_manager import HookedModel
-from rib.linalg import centering_matrix, eigendecompose, move_const_dir_first, pinv_diag
+from rib.linalg import (
+    centering_matrix,
+    eigendecompose,
+    masked_eigendecompose,
+    move_const_dir_first,
+    pinv_diag,
+)
 from rib.models import MLP, SequentialTransformer
+from rib.types import IntegrationMethod
 from rib.utils import check_device_is_cpu
 
 
@@ -73,7 +80,7 @@ class InteractionRotation(BaseModel):
 def build_sorted_lambda_matrices(
     Lambda_abs: Float[Tensor, "orig_trunc"],
     truncation_threshold: float,
-    ignore_first_index: bool = False,
+    ignore_first_n: int = 0,
 ) -> tuple[Float[Tensor, "orig_trunc rib"], Float[Tensor, "rib orig_trunc"]]:
     """Build the sqrt sorted Lambda matrix and its pseudoinverse.
 
@@ -81,19 +88,20 @@ def build_sorted_lambda_matrices(
 
     Args:
         Lambda_abs: Vector of the absolute values of the lambdas.
+        truncation_threshold: Remove eigenvectors with eigenvalues below this threshold.
+        ignore_first_n: We do not sort or truncate the first `ignore_first_n` lambdas.
 
     Returns:
         - The sqrt of the sorted Lambda matrix
         - The pseudoinverse of the sqrt sorted Lambda matrix
 
     """
-    # Get the sort indices in descending order
-    if not ignore_first_index:
-        idxs: Int[Tensor, "orig_trunc"] = torch.argsort(Lambda_abs, descending=True)
-    else:
-        idxs_excl_first = torch.argsort(Lambda_abs[1:], descending=True) + 1
-        zero = torch.tensor([0], device=idxs_excl_first.device)
-        idxs = torch.cat([zero, idxs_excl_first])
+    # Get the sorted indices in descending order, ignoring the first n.
+    sorted_idxs_excl_first_n = (
+        torch.argsort(Lambda_abs[ignore_first_n:], descending=True) + ignore_first_n
+    )
+    same_order_first_n = torch.arange(ignore_first_n, device=sorted_idxs_excl_first_n.device)
+    idxs = torch.cat([same_order_first_n, sorted_idxs_excl_first_n])
 
     # Get the number of values we will truncate
     n_small_lambdas: int = int(torch.sum(Lambda_abs < truncation_threshold).item())
@@ -128,7 +136,7 @@ def calculate_interaction_rotations(
     dtype: torch.dtype,
     device: str,
     n_intervals: int,
-    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_methods: list[IntegrationMethod],
     M_dtype: torch.dtype = torch.float64,
     Lambda_einsum_dtype: torch.dtype = torch.float64,
     truncation_threshold: float = 1e-5,
@@ -140,6 +148,9 @@ def calculate_interaction_rotations(
     means: Optional[dict[str, Float[Tensor, "d_hidden"]]] = None,
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
+    out_dim_n_chunks: int = 1,
+    out_dim_chunk_idx: int = 0,
+    isolate_ln_var: bool = True,
 ) -> list[InteractionRotation]:
     """Calculate the interaction rotation matrices (denoted C) and their psuedo-inverses.
 
@@ -212,7 +223,7 @@ def calculate_interaction_rotations(
             dtype=dtype,
             device=device,
             n_intervals=n_intervals,
-            integration_method=integration_method,
+            integration_method=integration_methods[-1],
             M_dtype=M_dtype,
             Lambda_einsum_dtype=Lambda_einsum_dtype,
             truncation_threshold=truncation_threshold,
@@ -223,6 +234,9 @@ def calculate_interaction_rotations(
             means=means[node_layers[-1]] if means is not None else None,
             section_name="",
             C_next_layer=None,
+            out_dim_n_chunks=1,  # we don't parallelize the output layer, it's fast anyways
+            out_dim_chunk_idx=0,  # we don't parallelize the output layer, it's fast anyways
+            isolate_ln_var=isolate_ln_var,
         )
     else:
         if node_layers[-1] == "output":
@@ -255,8 +269,11 @@ def calculate_interaction_rotations(
         len(section_names_to_calculate) == len(node_layers) - 1
     ), "Must be a section name for all but the final node_layer which was already handled above."
 
-    for node_layer, section_name in tqdm(
-        zip(node_layers[-2::-1], section_names_to_calculate[::-1], strict=True),
+    zipped_reversed = list(
+        zip(node_layers[:-1], section_names_to_calculate, integration_methods[:-1], strict=True)
+    )[::-1]
+    for node_layer, section_name, integration_method in tqdm(
+        zipped_reversed,
         total=len(section_names_to_calculate),
         desc="Interaction rotations",
     ):
@@ -282,6 +299,9 @@ def calculate_interaction_rotations(
                 means=means[node_layer] if means is not None else None,
                 section_name=section_name,
                 C_next_layer=C_next_layer,
+                out_dim_n_chunks=out_dim_n_chunks,
+                out_dim_chunk_idx=out_dim_chunk_idx,
+                isolate_ln_var=isolate_ln_var,
             )
         )
 
@@ -307,6 +327,9 @@ def _calculate_one_interaction_rotation(
     means: Optional[Float[Tensor, "d_hidden"]],
     section_name: str,
     C_next_layer: Optional[Float[Tensor, "orig rib"]],
+    out_dim_n_chunks: int,
+    out_dim_chunk_idx: int,
+    isolate_ln_var: bool,
 ) -> InteractionRotation:
     """Calculate a single interaction rotation matrix (C) and it's psuedo-inverse (C_pinv)
 
@@ -333,9 +356,20 @@ def _calculate_one_interaction_rotation(
         )
 
     ### SVD ROTATION (U)
-    D_dash, U_dash = eigendecompose(gram_matrix)
+    layer_is_ln_out = node_layer.split(".")[0] in ("ln1_out", "ln2_out")
+    if isolate_ln_var and layer_is_ln_out:
+        # if we are immediately before a ln-out layer (i.e. between ln-in and ln-out), we want to
+        # isolate the variance direction into a single RIB direction for a neater graph.
+        # The ln-variance is always the 0th component of the original residual stream
+        D_dash, U_dash = masked_eigendecompose(gram_matrix, 1)
+    else:
+        D_dash, U_dash = eigendecompose(gram_matrix)
+
     if center:
         D_dash, U_dash = move_const_dir_first(D_dash, U_dash)
+
+    # now the first PCA direction is the constant direction (if centering) and next is ln variance
+    # (if this is just before ln_out and we are isolating ln variance)
 
     # Trucate all directions with eigenvalues smaller than some threshold
     mask = D_dash > truncation_threshold  # true if we keep the direction
@@ -392,6 +426,8 @@ def _calculate_one_interaction_rotation(
         basis_formula=basis_formula,
         n_stochastic_sources_pos=n_stochastic_sources_pos,
         n_stochastic_sources_hidden=n_stochastic_sources_hidden,
+        out_dim_n_chunks=out_dim_n_chunks,
+        out_dim_chunk_idx=out_dim_chunk_idx,
     )
     # Then convert it into the pca basis
     M: Float[Tensor, "orig_trunc orig_trunc"] = (
@@ -399,19 +435,11 @@ def _calculate_one_interaction_rotation(
     )
     # and take it's eigenvector basis as V
     V: Float[Tensor, "orig_trunc orig_trunc"]
-    if center:
-        # We don't want to rotate the constant direction (in the 0th position).
-        # We thus eigendecompose a submatrix ignoring the first row and col
-        sub_eigenvalues, sub_V = eigendecompose(M[1:, 1:])
-        V = torch.zeros_like(M)
-        V[0, 0] = 1
-        V[1:, 1:] = sub_V
-        # The eigenvalues are used in the jacobian basis to set the correct Lambdas.
-        # For the constant direction set Lambda to M[0,0], though it should not affect
-        # the result for all edges except those connecting to the const direction.
-        eigenvalues = torch.cat([M[0, 0].unsqueeze(0), sub_eigenvalues])
-    else:
-        eigenvalues, V = eigendecompose(M)
+    # we want to preserve 0-2 directions from the eigendecomposition. These will be the constant
+    # direction (if centering) and/or the variance direction (if we are immediately before a ln-out
+    # layer). These are both sorted first in U, so we just mask the first 0-2 dirs.
+    n_masked = (1 if center else 0) + (1 if isolate_ln_var and layer_is_ln_out else 0)
+    eigenvalues, V = masked_eigendecompose(M, n_masked)
 
     V = V.to(dtype)
 
@@ -424,7 +452,7 @@ def _calculate_one_interaction_rotation(
         Lambda = (V.T @ R_pinv @ Lambda_dash @ R @ V).diag().abs()
     # Build a matrix for scaling by sqrt(Lambda).
     # This function prunes directions with small Lambdas. This is our second trunctaion.
-    L, L_inv = build_sorted_lambda_matrices(Lambda, truncation_threshold, ignore_first_index=center)
+    L, L_inv = build_sorted_lambda_matrices(Lambda, truncation_threshold, ignore_first_n=n_masked)
 
     ### FINAL ROTATION MATRIX (C)
     C: Float[Tensor, "orig rib"] = (R @ V @ L).detach().cpu()

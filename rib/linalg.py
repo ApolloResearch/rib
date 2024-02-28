@@ -1,14 +1,16 @@
-from typing import Callable, Literal, NamedTuple, Optional, Union
+from itertools import product
+from typing import Callable, Literal, NamedTuple, Optional, TypeVar, Union, cast
 
 import numpy as np
 import torch
 from einops import rearrange
 from fancy_einsum import einsum
-from jaxtyping import Float
+from jaxtyping import Float, Int8
 from torch import Tensor
 from tqdm import tqdm
 
 from rib.types import TORCH_DTYPES, StrDtype
+from rib.utils import get_chunk_indices
 
 
 def eigendecompose(
@@ -48,6 +50,32 @@ def eigendecompose(
         eigenvalues = eigenvalues[idx]
         eigenvectors = eigenvectors[:, idx]
     return eigenvalues, eigenvectors
+
+
+def masked_eigendecompose(
+    x: Float[Tensor, "orig orig"],
+    n_masked: int,
+    descending: bool = True,
+    dtype: StrDtype = "float64",
+):
+    """Calculate eigenvalues and eigenvectors, keeping the first n_masked rows and columns isolated.
+
+    This is useful for preserve certain directions in the resulting basis. In particular, we
+    preserve the direction representing variance in layer-norms, and preserve the constant direction
+    in all RIB layers.
+
+    Args:
+        x: A real symmetric matrix (e.g. the result of X^T @ X)
+        n_masked: The number of rows and columns to keep isolated.
+        descending: If True, sort eigenvalues and corresponding eigenvectors in descending order
+            of eigenvalues.
+        dtype: The precision in which to perform the eigendecomposition.
+            Values below torch.float64 tend to be very unstable.
+    """
+    sub_vals, sub_vecs = eigendecompose(x[n_masked:, n_masked:], descending=descending, dtype=dtype)
+    vecs = torch.block_diag(torch.eye(n_masked).to(sub_vecs), sub_vecs)
+    vals = torch.cat([x.diag()[:n_masked], sub_vals])
+    return vals, vecs
 
 
 def move_const_dir_first(
@@ -376,6 +404,8 @@ def calc_edge_squared(
     edge: Float[Tensor, "rib_out rib_in"],
     dataset_size: int,
     n_intervals: int,
+    out_dim_start_idx: int,
+    out_dim_end_idx: int,
     integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
@@ -388,6 +418,8 @@ def calc_edge_squared(
         in_tuple_dims: The final dimensions of the inputs to the module.
         edge: The edge between f_in_hat and f_out_hat. This is modified in-place for each batch.
         dataset_size: The size of the dataset. Used for normalizing the gradients.
+        out_dim_start_idx: The index of the first output dimension to calculate.
+        out_dim_end_idx: The index of the last output dimension to calculate.
         n_intervals: The number of intervals to use for the integral approximation.
         integration_method: Method to choose integration points.
         tqdm_desc: The description to use for the tqdm progress bar.
@@ -398,7 +430,10 @@ def calc_edge_squared(
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
-    rib_out_size, rib_in_size = edge.shape
+    rib_in_size = edge.shape[1]
+
+    chunk_size = out_dim_end_idx - out_dim_start_idx
+
     if has_pos:
         # Just run the model to see what the output pos size is
         with torch.inference_mode():
@@ -407,9 +442,9 @@ def calc_edge_squared(
     # Accumulate integral results for all x (batch) and t (out position) values.
     # We store values because we need to square the integral result before summing.
     J_hat = (
-        torch.zeros(batch_size, out_pos_size, rib_out_size, rib_in_size, device=f_in_hat.device)
+        torch.zeros(batch_size, out_pos_size, chunk_size, rib_in_size, device=f_in_hat.device)
         if has_pos
-        else torch.zeros(batch_size, rib_out_size, rib_in_size, device=f_in_hat.device)
+        else torch.zeros(batch_size, chunk_size, rib_in_size, device=f_in_hat.device)
     )
 
     normalization_factor = f_in_hat.shape[1] * dataset_size if has_pos else dataset_size
@@ -421,10 +456,10 @@ def calc_edge_squared(
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
         # Take the derivative of the (i, t) element (output dim and output pos) of the output.
-        for out_dim in tqdm(
-            range(rib_out_size),
-            total=rib_out_size,
-            desc="Iteration over output dims (+token dims if has_pos)",
+        for idx_in_chunk, out_dim in tqdm(
+            enumerate(range(out_dim_start_idx, out_dim_end_idx)),
+            total=chunk_size,
+            desc=f"Iteration over output dims (+token dims if has_pos). Chunk_idxs: {out_dim_start_idx}-{out_dim_end_idx}",
             leave=False,
         ):
             if has_pos:
@@ -442,7 +477,7 @@ def calc_edge_squared(
 
                     with torch.inference_mode():
                         # Element-wise multiply with f_in_hat and sum over the input pos
-                        J_hat[:, output_pos_idx, out_dim, :] -= einsum(
+                        J_hat[:, output_pos_idx, idx_in_chunk, :] -= einsum(
                             "batch in_pos in_dim, batch in_pos in_dim -> batch in_dim",
                             i_grad,
                             f_in_hat,
@@ -455,7 +490,7 @@ def calc_edge_squared(
 
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat
-                    J_hat[:, out_dim, :] -= einsum(
+                    J_hat[:, idx_in_chunk, :] -= einsum(
                         "batch in_dim, batch in_dim -> batch in_dim", i_grad, f_in_hat
                     )
 
@@ -463,17 +498,71 @@ def calc_edge_squared(
     edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1) if has_pos else 0)
 
 
-def _generate_sources(shape, like_tensor):
-    """Generate a tensor of -1 or 1 with equal probability.
+T = TypeVar("T", bound=Tensor)
 
-    Args:
-        shape: The shape of the output tensor.
-        like_tensor: A tensor with the desired dtype and device (not modified).
 
-    Returns:
-        A tensor of shape `shape` with values -1 or 1 with equal probability.
+def _generate_sources(like_tensor: T) -> T:
+    """Generate a tensor of ±1s, with shape and dtype given by `like_tensor`."""
+    bools = torch.rand(size=like_tensor.size(), device=like_tensor.device) > 0.5
+    return cast(T, torch.where(bools, 1, -1).to(like_tensor))
+
+
+def _generate_phis_array(
+    batch_size: int,
+    out_pos_size: int,
+    out_hat_hidden_size: int,
+    n_stochastic_sources_pos: Optional[int],
+    n_stochastic_sources_hidden: Optional[int],
+    out_dim_n_chunks: int,
+    out_dim_chunk_idx: int,
+    device: torch.device,
+) -> Int8[Tensor, "n_phis batch out_pos out_hidden"]:
+    """Makes array representing the output pos and emb compoents to weight in the jacobian.
+
+    The output tesors can be thought of as a collection of phi arrays, where each phi is a single
+    vector to take a jacobian-vector product with. Each phi is shape (batch out_pos out_hidden)
+    to match the output activations.
+    - If no stochasticity is used, we iterate over (pos, hidden) pairs (t, i), making phi with
+        - phi[:, t, i] = 1
+        - phi zero everywhere else
+    - If stocasticity is over position only, we iterate over (pos_sources, hidden) pairs (r_p, i):
+        - phi[:, :, i] = ±1
+        - phi zero everywhere else
+    - If stocasticity is over hidden only, we iterate over (pos, hidden_sources) pairs (t, r_h):
+        - phi[:, t, :] = ±1
+        - phi zero everywhere else
+    - If stocasticity is over both, we iterate over (pos_sources, hidden_sources) pairs (r_p, r_h):
+        - phi = ±1 everywhere
+
+    All values will be in {-1, 0, 1}. We use int8 to save memory.
+
+    When running our basis calculation distributed over multiple processes, we only return one
+    chunk of the phis per process. The outputs are combined by summing the resulting M_dash
+    tensors in `rib.data_accumulator.collect_M_dash_and_Lambda_dash`.
     """
-    return torch.where(torch.rand(shape) > 0.5, 1, -1).to(like_tensor)
+    phis = []
+    all_pos_hid_idxs = list(
+        product(
+            range(n_stochastic_sources_pos or out_pos_size),
+            range(n_stochastic_sources_hidden or out_hat_hidden_size),
+        )
+    )
+    chunk_start, chunk_end = get_chunk_indices(
+        len(all_pos_hid_idxs), n_chunks=out_dim_n_chunks, chunk_idx=out_dim_chunk_idx
+    )
+    subset_pod_hid_idxs = all_pos_hid_idxs[chunk_start:chunk_end]
+    for t, i in subset_pod_hid_idxs:
+        phi = torch.zeros(
+            (batch_size, out_pos_size, out_hat_hidden_size), dtype=torch.int8, device=device
+        )
+        if n_stochastic_sources_pos is None and n_stochastic_sources_hidden is None:
+            phi[:, t, i] = 1
+        else:
+            p_slice = t if n_stochastic_sources_pos is None else slice(None)
+            h_slice = i if n_stochastic_sources_hidden is None else slice(None)
+            phi[:, p_slice, h_slice] = _generate_sources(phi[:, p_slice, h_slice])  # type: ignore[index]
+        phis.append(phi)
+    return torch.stack(phis, dim=0)
 
 
 def calc_basis_jacobian(
@@ -487,7 +576,9 @@ def calc_basis_jacobian(
     integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
-) -> Float[Tensor, "batch out_hidden_trunc out_pos in_pos in_hidden"]:
+    out_dim_n_chunks: int = 1,
+    out_dim_chunk_idx: int = 0,
+) -> Float[Tensor, "out_hidden_or_sources batch in_pos in_hidden"]:
     # Ensure that the inputs have requires_grad=True
     for x in inputs:
         x.requires_grad_(True)
@@ -511,59 +602,35 @@ def calc_basis_jacobian(
     assert batch_size == f_out_dummy[0].shape[0], "batch size mismatch"
 
     if has_pos:
-        n_sources_pos = n_stochastic_sources_pos or out_pos_size
-        n_sources_hidden = n_stochastic_sources_hidden or out_hat_hidden_size
+        phis: Int8[Tensor, "n_phis batch out_pos out_hidden"] = _generate_phis_array(
+            batch_size=batch_size,
+            out_pos_size=out_pos_size,
+            out_hat_hidden_size=out_hat_hidden_size,
+            n_stochastic_sources_pos=n_stochastic_sources_pos,
+            n_stochastic_sources_hidden=n_stochastic_sources_hidden,
+            out_dim_n_chunks=out_dim_n_chunks,
+            out_dim_chunk_idx=out_dim_chunk_idx,
+            device=inputs[0].device,
+        )
+        if out_dim_n_chunks == 1:
+            assert phis.shape[0] == (n_stochastic_sources_pos or out_pos_size) * (
+                n_stochastic_sources_hidden or out_hat_hidden_size
+            )
 
         # in_grads.shape: batch, i (out_hidden), t (out_pos), s (in_pos), j (in_hidden)
         assert in_pos_size is not None  # needed for mypy
-        in_grads = torch.zeros(
+        in_grads: Float[Tensor, "n_phis batch in_pos in_hidden"] = torch.zeros(
+            phis.shape[0],
             batch_size,
-            n_sources_hidden,
-            n_sources_pos,
             in_pos_size,
             in_hidden_size,
             dtype=inputs[0].dtype,
             device=inputs[0].device,
         )
 
-        # Introduce stochastic sources: Don't iterate over all i and/or t, but a random
-        # direction in the i and t space. Sources = -1 or 1 with equal probability.
-        # Note on odering: We need the alpha loop to be the outer loop, because each alpha requires
-        # a module() call. We also require the stochstic sources to map to the same i/t directions
-        # for each alpha step so that the integral makes sense. Thus we need to fix phi before the
-        # alpha loop and cannot generate it on the fly (which would have saved memory).
-        phi_shape = (batch_size, n_sources_hidden, n_sources_pos, out_hat_hidden_size, out_pos_size)
-        if n_stochastic_sources_pos is None and n_stochastic_sources_hidden is None:
-            # Full dimensions -- no stochastic sources, phi_{b,i,t,i',t'} = delta_{i,i'} delta_{t,t'}
-            phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
-            for i in range(out_hat_hidden_size):
-                for t in range(out_pos_size):
-                    phi[:, i, t, i, t] = 1.0
-        elif (n_stochastic_sources_pos is not None) and (n_stochastic_sources_hidden is not None):
-            # Fully stochastic over i and t. Note that this is different from having two separate
-            # phi tensors for pos and hidden ("meshgrid like"). For a different r_h the same r_p
-            # can correspond to a different position vector etc.
-            phi = _generate_sources(phi_shape, like_tensor=in_grads)
-        elif n_stochastic_sources_pos is not None and n_stochastic_sources_hidden is None:
-            # Stochastic over t, but not i. Set phi_{b,i,t,i',t'} = delta_{i,i'} random_{b,t,t'}
-            phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
-            for i in range(out_hat_hidden_size):
-                phi[:, i, :, i, :] = _generate_sources(
-                    (batch_size, n_stochastic_sources_pos, out_pos_size),
-                    like_tensor=in_grads,
-                )
-        elif n_stochastic_sources_pos is None and n_stochastic_sources_hidden is not None:
-            # Stochastic over i, but not t. Set phi_{b,i,t,i',t'} = random_{b,i,i'} delta_{t,t'}
-            phi = torch.zeros(phi_shape, dtype=in_grads.dtype, device=in_grads.device)
-            for t in range(out_pos_size):
-                phi[:, :, t, :, t] = _generate_sources(
-                    (batch_size, n_stochastic_sources_hidden, out_hat_hidden_size),
-                    like_tensor=in_grads,
-                )
-        else:
-            raise AssertionError("This else branch cannot be reached.")
-
-        for point in tqdm(int_points, desc="Integration steps (alphas)", leave=False):
+        for point in tqdm(
+            int_points, desc="Integration steps (alphas)", leave=False, disable=len(int_points) == 1
+        ):
             # Compute f^{l+1}(f^l(alpha x))
             f_in_alpha = tuple(point.alpha * x for x in inputs)
             outputs_alpha = module(*f_in_alpha)
@@ -574,35 +641,22 @@ def calc_basis_jacobian(
             )
             f_out_hat_alpha = f_out_alpha @ C_out if C_out is not None else f_out_alpha
 
-            # Shapes of inputs and outputs, that lead to in_grads.shape = batch, i, t, s, j/jprime
-            # f_out_hat_alpha.shape: batch t i
-            # f_in_alpha: batch, s, j
-
-            for r_h, r_p in tqdm(
-                np.ndindex(n_sources_hidden, n_sources_pos),
-                total=n_sources_hidden * n_sources_pos,
-                desc="Iteration over sources",
-                leave=False,
+            for r, phi in tqdm(
+                enumerate(phis), total=phis.shape[0], desc="Iteration over sources", leave=False
             ):
-                # phi_shape = (batch_size, n_sources_A, n_sources_B, out_hat_hidden_size, out_pos_size)
-                phi_f_out_hat_alpha = einsum(
-                    "batch out_hidden out_pos, batch out_pos out_hidden -> batch",
-                    phi[:, r_h, r_p, :, :],
-                    f_out_hat_alpha,
+                # Torch supports taking jacobian-vector products (where our vector is given by phi)
+                # It's possible to pass in all of phis at once with `is_grads_batched=True` and it
+                # will be a bit faster due to vmap but the memory usage is much higher.
+
+                # phi_in_grads is a tuple of the same shape as inputs
+                phi_in_grads = torch.autograd.grad(
+                    outputs=f_out_hat_alpha, inputs=f_in_alpha, grad_outputs=phi, retain_graph=True
                 )
-                # Need to retain_graph because we call autograd on f_out_hat_alpha multiple
-                # times (for each i and t, in a for loop) aka we're doing a jacobian.
-                # Sum over batch is a trick to get the grad for every batch index vectorized.
-                alpha_in_grads = torch.cat(
-                    torch.autograd.grad(
-                        phi_f_out_hat_alpha.sum(dim=0), f_in_alpha, retain_graph=True
-                    ),
-                    dim=-1,
-                )
-                in_grads[:, r_h, r_p, :, :] += alpha_in_grads * point.weight
-                # Contraction over batch, i, t, s happens after the integral, but we cannot
-                # contract earlier because we have to finish the integral sum (+=) first.
+                in_grads[r] += torch.cat(phi_in_grads, dim=-1) * point.weight
     else:
+        if not (out_dim_n_chunks == 1 and out_dim_chunk_idx == 0):
+            raise NotImplementedError
+
         # in_grads.shape: batch, i (out_hidden), j (in_hidden)
         in_grads = torch.zeros(
             batch_size,
@@ -648,6 +702,8 @@ def calc_edge_stochastic(
     n_intervals: int,
     integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     n_stochastic_sources: int,
+    out_dim_start_idx: int,
+    out_dim_end_idx: int,
     tqdm_desc: str = "Integration steps (alphas)",
 ) -> None:
     """Calculate the interaction attribution (edge) for module_hat using the stochastic method.
@@ -666,6 +722,8 @@ def calc_edge_stochastic(
         n_intervals: The number of intervals to use for the integral approximation.
         integration_method: Method to choose integration points.
         n_stochastic_sources: The number of stochastic sources to add to each input.
+        out_dim_start_idx: The index of the first output dimension to calculate.
+        out_dim_end_idx: The index of the last output dimension to calculate.
         tqdm_desc: The description to use for the tqdm progress bar.
     """
 
@@ -673,7 +731,9 @@ def calc_edge_stochastic(
 
     # Get sizes for intermediate result storage
     batch_size = f_in_hat.shape[0]
-    rib_out_size, rib_in_size = edge.shape
+    rib_in_size = edge.shape[1]
+
+    chunk_size = out_dim_end_idx - out_dim_start_idx
 
     # Just run the model to see what the output pos size is
     with torch.inference_mode():
@@ -682,7 +742,7 @@ def calc_edge_stochastic(
     # Accumulate integral results for all x (batch) and r (stochastic dim) values.
     # We store values because we need to square the integral result before summing.
     J_hat = torch.zeros(
-        batch_size, n_stochastic_sources, rib_out_size, rib_in_size, device=f_in_hat.device
+        batch_size, n_stochastic_sources, chunk_size, rib_in_size, device=f_in_hat.device
     )
 
     # Create phis that are -1 or 1 with equal probability
@@ -699,11 +759,11 @@ def calc_edge_stochastic(
         alpha_f_in_hat = point.alpha * f_in_hat
         f_out_alpha_hat = module_hat(alpha_f_in_hat, in_tuple_dims)
 
-        # Take derivative of the (i, r) element (output dim and stochastic noise dim) of the output.
-        for out_dim in tqdm(
-            range(rib_out_size),
-            total=rib_out_size,
-            desc="Iteration over output dims (and stochastic sources)",
+        # Take the derivative of the (i, t) element (output dim and output pos) of the output.
+        for idx_in_chunk, out_dim in tqdm(
+            enumerate(range(out_dim_start_idx, out_dim_end_idx)),
+            total=chunk_size,
+            desc=f"Iteration over output dims and stochastic sources. Chunk_idxs: {out_dim_start_idx}-{out_dim_end_idx}",
             leave=False,
         ):
             for r in range(n_stochastic_sources):
@@ -722,15 +782,14 @@ def calc_edge_stochastic(
 
                 with torch.inference_mode():
                     # Element-wise multiply with f_in_hat and sum over the input pos
-                    J_hat[:, r, out_dim, :] -= einsum(
+                    J_hat[:, r, idx_in_chunk, :] -= einsum(
                         "in_batch in_pos in_dim, in_batch in_pos in_dim -> in_batch in_dim",
                         i_grad,
                         f_in_hat,
                     )
 
     # Square, and sum over batch size and output pos
-    J_hat = J_hat**2 / normalization_factor
-    edge += J_hat.sum(dim=(0, 1))
+    edge += (J_hat**2 / normalization_factor).sum(dim=(0, 1))
 
 
 def calc_basis_integrated_gradient(

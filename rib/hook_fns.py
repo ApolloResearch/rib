@@ -350,6 +350,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
+    out_dim_n_chunks: int = 1,
+    out_dim_chunk_idx: int = 0,
 ) -> None:
     """Hook function for accumulating the M' and Lambda' matrices.
 
@@ -384,6 +386,9 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
     assert not module._forward_hooks, "Module has multiple forward hooks"
 
     if basis_formula == "(1-alpha)^2" or basis_formula == "(1-0)*alpha":
+        if not (out_dim_n_chunks == 1 and out_dim_chunk_idx == 0):
+            raise NotImplementedError
+
         in_grads = calc_basis_integrated_gradient(
             module=module,
             inputs=inputs,
@@ -402,16 +407,18 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
         with torch.inference_mode():
             M_dash = torch.einsum(
                 einsum_pattern,
-                in_grads.to(M_dtype) / normalization_factor,
+                in_grads.to(M_dtype),
                 in_grads.to(M_dtype),
             )
+            M_dash /= normalization_factor
             # Concatenate the inputs over the final dimension
             in_acts = torch.cat(inputs, dim=-1)
             Lambda_dash = torch.einsum(
                 einsum_pattern,
-                in_grads.to(Lambda_einsum_dtype) / normalization_factor,
+                in_grads.to(Lambda_einsum_dtype),
                 in_acts.to(Lambda_einsum_dtype),
             )
+            Lambda_dash /= normalization_factor
             Lambda_dash = Lambda_dash.to(in_dtype)
 
             _add_to_hooked_matrix(hooked_data, hook_name, data_key[0], M_dash)
@@ -431,11 +438,13 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
             integration_method=integration_method,
             n_stochastic_sources_pos=n_stochastic_sources_pos,
             n_stochastic_sources_hidden=n_stochastic_sources_hidden,
+            out_dim_n_chunks=out_dim_n_chunks,
+            out_dim_chunk_idx=out_dim_chunk_idx,
         )
         has_pos = inputs[0].dim() == 3
         if has_pos:
-            einsum_pattern = "batch r_A r_B s j, batch r_A r_B s jprime -> j jprime"
-            in_pos_size = in_grads.shape[3]
+            einsum_pattern = "r batch s j, r batch s jprime -> j jprime"
+            in_pos_size = inputs[0].shape[1]
             normalization_factor = in_pos_size * dataset_size
             # It is intentional that normalization_factor is multiplied by both,
             # n_stochastic_sources_pos and n_stochastic_sources_hidden when both are present. The
@@ -454,9 +463,8 @@ def M_dash_and_Lambda_dash_pre_forward_hook_fn(
 
         with torch.inference_mode():
             # M_dash.shape: j jprime
-            M_dash = einops.einsum(
-                in_grads.to(M_dtype) / normalization_factor, in_grads.to(M_dtype), einsum_pattern
-            )
+            M_dash = einops.einsum(in_grads.to(M_dtype), in_grads.to(M_dtype), einsum_pattern)
+            M_dash /= normalization_factor
             # In the jacobian basis, Lambda is not computed here but from the M eigenvalues later.
             # Set a placeholder to maintain the same function signature.
             Lambda_dash = torch.tensor(torch.nan)
@@ -480,6 +488,8 @@ def interaction_edge_pre_forward_hook_fn(
     n_intervals: int,
     integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
     dataset_size: int,
+    out_dim_start_idx: int,
+    out_dim_end_idx: int,
     edge_formula: Literal["functional", "squared"] = "squared",
     n_stochastic_sources: Optional[int] = None,
 ) -> None:
@@ -505,6 +515,8 @@ def interaction_edge_pre_forward_hook_fn(
         n_intervals: Number of intervals to use for the trapezoidal rule. If 0, this is equivalent
             to taking a point estimate at alpha == 0.5.
         dataset_size: Size of the dataset. Used to normalize the gradients.
+        out_dim_start_idx: The index of the first output dimension to calculate.
+        out_dim_end_idx: The index of the last output dimension to calculate.
         edge_formula: The formula to use for the attribution.
             - "functional" is the old (October 23) functional version
             - "squared" is the version which iterates over the output dim and output pos dim
@@ -546,6 +558,8 @@ def interaction_edge_pre_forward_hook_fn(
                 edge=edge,
                 dataset_size=dataset_size,
                 n_intervals=n_intervals,
+                out_dim_start_idx=out_dim_start_idx,
+                out_dim_end_idx=out_dim_end_idx,
                 integration_method=integration_method,
                 tqdm_desc=tqdm_desc,
             )
@@ -560,6 +574,8 @@ def interaction_edge_pre_forward_hook_fn(
                 n_intervals=n_intervals,
                 integration_method=integration_method,
                 n_stochastic_sources=n_stochastic_sources,
+                out_dim_start_idx=out_dim_start_idx,
+                out_dim_end_idx=out_dim_end_idx,
                 tqdm_desc=tqdm_desc,
             )
     else:

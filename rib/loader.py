@@ -7,7 +7,7 @@ import torch
 import torchvision
 import yaml
 from datasets import load_dataset as hf_load_dataset
-from torch.utils.data import Dataset, Subset, TensorDataset
+from torch.utils.data import Dataset, TensorDataset
 from transformer_lens import HookedTransformer
 from transformers import AutoTokenizer
 
@@ -423,33 +423,6 @@ def load_dataset(
     else:
         assert isinstance(dataset_config, BlockVectorDatasetConfig)
         return create_block_vector_dataset(dataset_config=dataset_config)
-
-
-def get_dataset_chunk(dataset: Dataset, chunk_idx: int, total_chunks: int) -> Dataset:
-    """
-    Returns a subset of the dataset, determined by the `chunk_idx` and `total_chunks`.
-
-    Useful for dataparellism, if we want each process to use a different dataset chunk.
-
-    Args:
-        dataset (Dataset): The dataset to use. Must be a Map-style dataset (implements `__len__`
-            and `__get_item__`).
-        chunk_idx (int): The id
-        total_chunks (int): Total number of chunks. If this is exactly 1, we return all of `dataset`.
-
-    Returns:
-        The DataLoader or a tuple of DataLoaders.
-    """
-    assert chunk_idx < total_chunks, f"chunk_idx {chunk_idx} >= total # of chunks {total_chunks}"
-    if total_chunks == 1:
-        return dataset
-    dataset_len = len(dataset)  # type: ignore
-    assert (
-        total_chunks <= dataset_len
-    ), f"more chunks than elements of the dataset ({total_chunks} > {dataset_len})"
-    dataset_idx_start = dataset_len * chunk_idx // total_chunks
-    dataset_idx_end = dataset_len * (chunk_idx + 1) // total_chunks
-    return Subset(dataset, range(dataset_idx_start, dataset_idx_end))
 
 
 def load_model_and_dataset_from_rib_config(

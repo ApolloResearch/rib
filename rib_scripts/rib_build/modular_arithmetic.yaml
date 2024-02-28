@@ -13,10 +13,15 @@ node_layers:
   - unembed
   - output
 rotate_final_node_layer: false
-batch_size: 256
+batch_size: 99999
+edge_batch_size: 99999
 truncation_threshold: 1e-15
 last_pos_module_type: add_resid1  # module type in which to only output the last position index
-n_intervals: 50
+integration_method: gradient
+n_intervals: 0
 dtype: float64
 calculate_edges: true
 eval_type: accuracy
+naive_gradient_flow: false
+edge_formula: squared
+basis_formula: jacobian

@@ -90,3 +90,9 @@ def check_sizes_mpi(dist_info: DistributedInfo, tensor: torch.Tensor):
         assert (
             len(set(sizes)) == 1
         ), f"mismatched shape of tensors across processes, shapes = {sizes}"
+
+
+def sum_across_processes(tensor: torch.Tensor) -> torch.Tensor:
+    cpu_tensor = tensor.cpu()
+    MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, cpu_tensor, op=MPI.SUM)
+    return cpu_tensor.to(tensor.device)

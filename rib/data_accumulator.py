@@ -10,6 +10,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from rib.distributed_utils import sum_across_processes
 from rib.hook_fns import (
     M_dash_and_Lambda_dash_pre_forward_hook_fn,
     dataset_mean_forward_hook_fn,
@@ -22,7 +23,8 @@ from rib.hook_manager import Hook, HookedModel
 from rib.linalg import module_hat
 from rib.log import logger
 from rib.models.utils import get_model_attr
-from rib.utils import check_device_is_cpu
+from rib.types import IntegrationMethod
+from rib.utils import check_device_is_cpu, get_chunk_indices
 
 if TYPE_CHECKING:  # Prevent circular import to import type annotations
     from rib.interaction_algos import InteractionRotation
@@ -258,6 +260,8 @@ def collect_M_dash_and_Lambda_dash(
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha"] = "(1-0)*alpha",
     n_stochastic_sources_pos: Optional[int] = None,
     n_stochastic_sources_hidden: Optional[int] = None,
+    out_dim_n_chunks: int = 1,
+    out_dim_chunk_idx: int = 0,
 ) -> tuple[Float[Tensor, "orig_in orig_in"], Float[Tensor, "orig_in orig_in"]]:
     """Collect the matrices M' and Lambda' for the input to the module specifed by `module_name`.
 
@@ -306,6 +310,8 @@ def collect_M_dash_and_Lambda_dash(
             "basis_formula": basis_formula,
             "n_stochastic_sources_pos": n_stochastic_sources_pos,
             "n_stochastic_sources_hidden": n_stochastic_sources_hidden,
+            "out_dim_n_chunks": out_dim_n_chunks,
+            "out_dim_chunk_idx": out_dim_chunk_idx,
         },
     )
 
@@ -323,6 +329,10 @@ def collect_M_dash_and_Lambda_dash(
     Lambda_dash = hooked_model.hooked_data[hook_name]["Lambda_dash"]
     hooked_model.clear_hooked_data()
 
+    if out_dim_n_chunks > 1:
+        M_dash = sum_across_processes(M_dash)
+        Lambda_dash = sum_across_processes(Lambda_dash)
+
     return M_dash, Lambda_dash
 
 
@@ -330,7 +340,7 @@ def collect_interaction_edges(
     interaction_rotations: list["InteractionRotation"],
     hooked_model: HookedModel,
     n_intervals: int,
-    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"],
+    integration_methods: list[IntegrationMethod],
     section_names: list[str],
     data_loader: DataLoader,
     dtype: torch.dtype,
@@ -338,6 +348,8 @@ def collect_interaction_edges(
     data_set_size: Optional[int] = None,
     edge_formula: Literal["functional", "squared"] = "squared",
     n_stochastic_sources: Optional[int] = None,
+    out_dim_n_chunks: int = 1,
+    out_dim_chunk_idx: int = 0,
 ) -> list[Edges]:
     """Collect interaction edges between each node layer in Cs.
 
@@ -361,6 +373,10 @@ def collect_interaction_edges(
             - "squared" is the version which iterates over the output dim and output pos dim
         n_stochastic_sources: The number of stochastic sources for positional dimension
             (approximation). Defaults to None.
+        out_dim_n_chunks: The number of chunks to split the out_dim into. 1 unless the script is
+            parallelized over the out_dim.
+        out_dim_chunk_idx: The index of the current chunk. 0 unless the script is parallelized over
+            the out_dim.
     Returns:
         A list of Edges objects, which contain a matrix of edges between two node layers.
     """
@@ -374,8 +390,8 @@ def collect_interaction_edges(
     ), "Number of edge modules not the same as interaction_rotations - 1."
 
     edge_hooks: list[Hook] = []
-    for idx, (interaction_rotation, module_name) in enumerate(
-        zip(interaction_rotations[:-1], edge_modules)
+    for idx, (interaction_rotation, module_name, integration_method) in enumerate(
+        zip(interaction_rotations[:-1], edge_modules, integration_methods, strict=True)
     ):
         # C from the next node layer
         assert interaction_rotation.C is not None, "C matrix is None."
@@ -390,6 +406,34 @@ def collect_interaction_edges(
             C_in_pinv=interaction_rotation.C_pinv.to(device=device),
             C_out=C_out,
         )
+        # Get the output edge dimension from the next node layer
+        C_out = interaction_rotations[idx + 1].C
+        out_rib_dim = (
+            C_out.shape[1] if C_out is not None else interaction_rotations[idx + 1].orig_dim
+        )
+
+        C_in = interaction_rotation.C
+        assert C_in is not None, "C_in is None."
+        # Get chunk indices in case we're parallelizing over the out_dim. Will be (0, out_rib_dim)
+        # if not.
+        out_dim_start_idx, out_dim_end_idx = get_chunk_indices(
+            data_size=out_rib_dim,
+            chunk_idx=out_dim_chunk_idx,
+            n_chunks=out_dim_n_chunks,
+        )
+        chunk_size = out_dim_end_idx - out_dim_start_idx
+
+        # Initialise the edge matrices to zeros(chunk_size, in_rib_dim). These get accumulated in
+        # the forward hook.
+        hooked_model.hooked_data[interaction_rotation.node_layer] = {
+            "edge": torch.zeros(
+                chunk_size,
+                C_in.shape[1],
+                dtype=dtype,
+                device=device,
+            )
+        }
+
         edge_hooks.append(
             Hook(
                 name=interaction_rotation.node_layer,
@@ -404,29 +448,13 @@ def collect_interaction_edges(
                     "n_intervals": n_intervals,
                     "integration_method": integration_method,
                     "dataset_size": data_set_size or len(data_loader.dataset),  # type: ignore
+                    "out_dim_start_idx": out_dim_start_idx,
+                    "out_dim_end_idx": out_dim_end_idx,
                     "edge_formula": edge_formula,
                     "n_stochastic_sources": n_stochastic_sources,
                 },
             )
         )
-        # Get the output edge dimension from the next node layer
-        C_out = interaction_rotations[idx + 1].C
-        out_rib_dim = (
-            C_out.shape[1] if C_out is not None else interaction_rotations[idx + 1].orig_dim
-        )
-
-        C_in = interaction_rotations[idx].C
-        assert C_in is not None, "C_in is None."
-        # Initialise the edge matrices to zeros(out_rib_dim, in_rib_dim). These get accumulated in
-        # the forward hook.
-        hooked_model.hooked_data[interaction_rotation.node_layer] = {
-            "edge": torch.zeros(
-                out_rib_dim,
-                C_in.shape[1],
-                dtype=dtype,
-                device=device,
-            )
-        }
 
     run_dataset_through_model(
         hooked_model, data_loader, edge_hooks, dtype=dtype, device=device, use_tqdm=True

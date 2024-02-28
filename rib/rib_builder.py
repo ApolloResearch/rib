@@ -35,6 +35,7 @@ distribute as evenly as possible across all availible GPUs. The rank-0 process w
 and output it as a single file.
 """
 
+import tempfile
 import time
 from pathlib import Path
 from typing import Literal, Optional, Union
@@ -43,7 +44,7 @@ import torch
 from jaxtyping import Float
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from rib.data import (
     BlockVectorDatasetConfig,
@@ -65,7 +66,7 @@ from rib.distributed_utils import (
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
-from rib.loader import get_dataset_chunk, load_model_and_dataset_from_rib_config
+from rib.loader import load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
     MLPConfig,
@@ -74,12 +75,15 @@ from rib.models import (
     SequentialTransformerConfig,
 )
 from rib.settings import REPO_ROOT
-from rib.types import TORCH_DTYPES, RootPath, StrDtype
+from rib.types import TORCH_DTYPES, IntegrationMethod, RootPath, StrDtype
 from rib.utils import (
-    check_outfile_overwrite,
+    check_out_file_overwrite,
     eval_cross_entropy_loss,
     eval_model_accuracy,
+    get_chunk_indices,
+    handle_overwrite_fail,
     load_config,
+    replace_pydantic_model,
     set_seed,
 )
 
@@ -93,9 +97,20 @@ class RibBuildConfig(BaseModel):
         "is written. If a relative path, it is relative to the root of the rib repo.",
     )
     seed: Optional[int] = Field(0, description="The random seed value for reproducibility")
-    tlens_pretrained: Optional[Literal["gpt2", "pythia-14m", "tiny-stories-1M"]] = Field(
-        None, description="Pretrained transformer lens model."
-    )
+    tlens_pretrained: Optional[
+        Literal[
+            "gpt2",
+            "tiny-stories-1M",
+            "pythia-14m",
+            "pythia-31m",
+            "pythia-70m",
+            "pythia-160m",
+            "pythia-410m",
+            "pythia-1b",
+            "pythia-1.4b",
+            "pythia-2.8b",
+        ]
+    ] = Field(None, description="Pretrained transformer lens model.")
     tlens_model_path: Optional[RootPath] = Field(
         None, description="Path to saved transformer lens model."
     )
@@ -157,9 +172,11 @@ class RibBuildConfig(BaseModel):
         description="The number of intervals to use for the integrated gradient approximation."
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
-    integration_method: Literal["trapezoidal", "gauss-legendre", "gradient"] = Field(
+    integration_method: Union[IntegrationMethod, dict[str, IntegrationMethod]] = Field(
         "gauss-legendre",
-        description="The integration method to choose.",
+        description="The integration method to choose. A dictionary can be used to select different"
+        "methods for different node layers. The keys are names of node layers, optionally excluding"
+        "`.[block-num]` suffix. These are checked against the node layers used in the graph.",
     )
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
     calculate_edges: bool = Field(
@@ -200,6 +217,20 @@ class RibBuildConfig(BaseModel):
         False,
         description="Whether to center the activations before performing rib.",
     )
+    dist_split_over: Literal["out_dim", "dataset"] = Field(
+        "dataset",
+        description="For distributed edge runs, whether to split over out_dim or dataset.",
+    )
+    isolate_ln_var: bool = Field(
+        True,
+        description="Whether to special case the LN-variance function as a separate node. Otherwise"
+        "the LN variance will be potentially mixed with other RIB functions.",
+    )
+    naive_gradient_flow: bool = Field(
+        False,
+        description="Use gradient flow (naive version), running repeated RIB builds with pairs of"
+        "node layers.",
+    )
 
     @model_validator(mode="after")
     def verify_model_info(self) -> "RibBuildConfig":
@@ -210,6 +241,8 @@ class RibBuildConfig(BaseModel):
             shouldn't need to).
         - `n_stochastic_sources_edges` is None for non-squared edge_formula.
         - `n_intervals` must be 0 for gradient integration rule.
+        - `naive_gradient_flow` is not compatible with MLP
+        - `naive_gradient_flow` is not compatible out_dir is None
         """
         model_options = [
             self.tlens_pretrained,
@@ -225,14 +258,64 @@ class RibBuildConfig(BaseModel):
                 self.mlp_path is None and self.modular_mlp_config is None
             ), "We don't support loading interaction matrices for mlp models"
 
+        if self.n_stochastic_sources_basis_pos is not None:
+            assert (
+                self.basis_formula == "jacobian"
+            ), "n_stochastic_sources_basis_pos only implemented for jacobian basis_formula"
+
+        if self.n_stochastic_sources_basis_hidden is not None:
+            assert (
+                self.basis_formula == "jacobian"
+            ), "n_stochastic_sources_basis_hidden only implemented for jacobian basis_formula"
+
         if self.edge_formula != "squared":
             assert (
                 self.n_stochastic_sources_edges is None
             ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
 
+        if self.n_stochastic_sources_edges is not None:
+            assert (
+                self.edge_formula == "squared"
+            ), "n_stochastic_sources_edges must be None for non-squared edge_formula"
+
+        if self.edge_formula == "functional" and self.dist_split_over == "out_dim":
+            raise ValueError("Cannot use functional edge formula with out_dim split")
+
         if self.integration_method == "gradient":
             assert self.n_intervals == 0, "n_intervals must be 0 for gradient integration rule"
+
+        if isinstance(self.integration_method, dict):
+            for node_layer in self.node_layers:
+                prefix = node_layer.split(".")[0]
+                assert (
+                    prefix in self.integration_method or node_layer in self.integration_method
+                ), f"Integration method not specified for node layer {node_layer}"
+            node_layer_prefixes = set(node_layer.split(".")[0] for node_layer in self.node_layers)
+            for key in self.integration_method:
+                assert (
+                    key in self.node_layers or key in node_layer_prefixes
+                ), f"Integration method specified for non-existent node layer {key}"
+
+        if self.naive_gradient_flow:
+            assert (
+                self.mlp_path is None and self.modular_mlp_config is None
+            ), "Naive gradient flow not compatible with MLP"
+
+        if self.naive_gradient_flow:
+            assert (
+                self.interaction_matrices_path is None
+            ) or self.calculate_edges, "You are running with calculate_edges=False but interaction_matrices_path are provided. What do you want me to compute?"
+
         return self
+
+    def get_integration_method(self, node_layer: str) -> IntegrationMethod:
+        """Get the integration method for a given node layer."""
+        if isinstance(self.integration_method, dict):
+            if node_layer in self.integration_method:
+                return self.integration_method[node_layer]
+            prefix = node_layer.split(".")[0]
+            return self.integration_method[prefix]
+        return self.integration_method
 
 
 class RibBuildResults(BaseModel):
@@ -354,6 +437,136 @@ def load_interaction_rotations(
     return matrices_info["gram_matrices"], interaction_rotations
 
 
+def _get_out_file_path(
+    config: RibBuildConfig,
+    dist_info: Optional[DistributedInfo] = None,
+) -> Optional[Path]:
+    if config.out_dir is None:
+        return None
+    if config.calculate_edges:
+        if dist_info is not None and dist_info.global_size > 1:
+            # Multiple output files so we store in a dedicated directory for the experiment
+            out_dir = config.out_dir / f"distributed_{config.exp_name}"
+            out_file = out_dir / f"rib_graph_global_rank{dist_info.global_rank}.pt"
+        else:
+            out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
+    else:
+        # all processes will compute the same Cs so we only have rank 0 write output
+        if dist_info is not None and dist_info.global_size > 1 and dist_info.global_rank != 0:
+            return None
+        out_file = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+    return out_file
+
+
+def _check_out_file_path(
+    out_file: Optional[Path], force: bool, dist_info: Optional[DistributedInfo] = None
+) -> None:
+    if out_file is not None:
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        if not check_out_file_overwrite(out_file, force):
+            handle_overwrite_fail(dist_info)
+
+
+def gradient_flow_loop(
+    config: RibBuildConfig,
+    force: bool = False,
+) -> RibBuildResults:
+    """Call rib_build() repeatedly to implement a naive version of the gradient flow basis
+
+    There is three procedures we handle:
+        1. Calculate edges only. This happens if interaction_matrices_path is provided. we assume
+           these to be the gradient flow basis and just run the normal edges calculation. We still
+           need to wrap this here because we we want to write naive_gradient_flow into the config
+           of the final output.
+        2a. Calculate bases only (interaction_matrices_path is None and calculate_edges is False).
+        2b. Calculate bases and then edges (the full run).
+
+
+    """
+    # Case 1, skip directly to rib_build for (potential) edge calculation
+    if config.interaction_matrices_path is not None:
+        out_file = _get_out_file_path(config)
+        _check_out_file_path(out_file, force)
+
+        edges_config = replace_pydantic_model(
+            config, {"naive_gradient_flow": False, "out_dir": None}
+        )
+        edges_results = rib_build(edges_config, force=force)
+        edges_results.config = config
+        if out_file is not None:
+            torch.save(edges_results.model_dump(), out_file)
+            logger.info("Saved gradient flow results (pre-saved Cs, and edges) to %s", out_file)
+        return edges_results
+
+    # Case 2, we need a directory to store the Cs because gradient flow works with multiple calls.
+    Cs_out_dir = config.out_dir or Path(tempfile.TemporaryDirectory().name)
+    Cs_out_file = Cs_out_dir / f"{config.exp_name}_rib_Cs.pt"
+    _check_out_file_path(Cs_out_file, force)
+    # Case 2b, check the edges output file already before going through the Cs calculation.
+    if config.calculate_edges:
+        Cs_and_edges_out_file = _get_out_file_path(config)
+        _check_out_file_path(Cs_and_edges_out_file, force)
+
+    # Run inidivual rib_builds for each node layer. Iterate through node_layers backwards (from
+    # output to input). In the first step save rotations for last and second to last layer, in
+    # the other steps save rotations for the current layer only (append at beginning of list).
+    node_layers = config.node_layers
+    final_node_layer = node_layers[-1]
+    results = None
+    for current_node_layer in node_layers[:-1][::-1]:
+        updates = {
+            "node_layers": [current_node_layer, final_node_layer],
+            "exp_name": f"{config.exp_name}_{current_node_layer}",
+            "naive_gradient_flow": False,
+            "calculate_edges": False,
+            "interaction_matrices_path": None,
+            "out_dir": None,
+        }
+        config_i = replace_pydantic_model(config, updates)
+        result_i = rib_build(config_i, force=force)
+        if results is None:
+            results = result_i
+        else:
+            results.gram_matrices.update(result_i.gram_matrices)
+            results.calc_C_time += result_i.calc_C_time
+            # result_i.interaction_rotations contains both the current and the final layer. In all
+            # but the first iteration (above) we only want the rotations for the current layer.
+            assert len(result_i.interaction_rotations) == 2
+            assert result_i.interaction_rotations[-1].node_layer == final_node_layer
+            results.interaction_rotations.insert(0, result_i.interaction_rotations[0])
+    # Merge results into a single result and save to file
+    assert isinstance(results, RibBuildResults)
+    # Update exp_name and config to the one of the full run (rather than the last individual run)
+    results.exp_name = config.exp_name
+    results.config = replace_pydantic_model(
+        config, {"calculate_edges": False, "out_dir": Cs_out_dir}
+    )
+    # This save is necessary. In case 2a it constitutes the final results, in case 2b we use this
+    # file to pass the Cs to the edge calculation.
+    torch.save(results.model_dump(), Cs_out_file)
+    logger.info("Saved gradient flow results (Cs) to %s", Cs_out_file)
+
+    if not config.calculate_edges:
+        return results
+    else:
+        edges_config = replace_pydantic_model(
+            config,
+            {
+                "naive_gradient_flow": False,
+                "interaction_matrices_path": Cs_out_file,
+                "out_dir": None,
+            },
+        )
+        edges_results = rib_build(edges_config, force=force)
+        results.edges = edges_results.edges
+        results.calc_edges_time = edges_results.calc_edges_time
+        # Save the edges results to file
+        if Cs_and_edges_out_file is not None:
+            torch.save(results.model_dump(), Cs_and_edges_out_file)
+            logger.info("Saved gradient flow results (Cs + edges) to %s", Cs_and_edges_out_file)
+        return results
+
+
 def rib_build(
     config_path_or_obj: Union[str, RibBuildConfig],
     force: bool = False,
@@ -380,25 +593,32 @@ def rib_build(
         Results of the graph build
     """
     config = load_config(config_path_or_obj, config_model=RibBuildConfig)
-    set_seed(config.seed)
 
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
+
+    # we increment the seed between processes so we generate different phis. This is because
+    # each process will calculate a fraction of the total sources, and we need these sources
+    # (phis) to be different.
+    if config.dist_split_over == "out_dim" and config.seed is not None:
+        random_increment = 9594
+        # chosen by fair dice roll, guaranteed to be random (https://xkcd.com/221/)
+        # for real, the reason we add an increment is to avoid correlation between
+        # different global seeds, i.e. seed=0 pod=1 and seed=1 pod=0
+        set_seed(config.seed + random_increment * dist_info.global_rank)
+    else:
+        set_seed(config.seed)
 
     adjust_logger_dist(dist_info)
     device = get_device_mpi(dist_info)
     dtype = TORCH_DTYPES[config.dtype]
 
-    out_file: Optional[Path] = None
-    if config.out_dir is not None:
-        config.out_dir.mkdir(parents=True, exist_ok=True)
-        obj_name = "graph" if config.calculate_edges else "Cs"
-        global_rank_suffix = (
-            f"_global_rank{dist_info.global_rank}" if dist_info.global_size > 1 else ""
-        )
-        f_name = f"{config.exp_name}_rib_{obj_name}{global_rank_suffix}.pt"
-        out_file = config.out_dir / f_name
-        if not check_outfile_overwrite(out_file, force):
-            dist_info.local_comm.Abort()  # stop this and other processes
+    if config.naive_gradient_flow:
+        if n_pods > 1 or pod_rank > 0:
+            raise NotImplementedError("Distributed naive gradient flow not implemented yet")
+        return gradient_flow_loop(config, force)
+
+    out_file = _get_out_file_path(config, dist_info)
+    _check_out_file_path(out_file, force, dist_info)
 
     calc_C_time = None
     calc_edges_time = None
@@ -427,7 +647,14 @@ def rib_build(
         # MLP "sections" are simply the model layers specified in config.node_layers
         section_names = [layer for layer in config.node_layers if layer != "output"]
 
+    integration_methods = [
+        config.get_integration_method(node_layer) for node_layer in config.node_layers
+    ]
     if config.interaction_matrices_path is None:
+        assert n_pods == 1, "Cannot parallelize Cs calculation between pods"
+        if dist_info.global_size > 1 and config.dist_split_over == "dataset":
+            raise NotImplementedError("Cannot parallelize Cs calculation over dataset")
+
         gram_train_loader = DataLoader(
             dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
         )
@@ -460,7 +687,8 @@ def rib_build(
             hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
             means=means,
         )
-        logger.info("Time to collect gram matrices: %.2f", time.time() - collect_gram_start_time)
+        time_to_collect_gram = (time.time() - collect_gram_start_time) / 60
+        logger.info("Time to collect gram matrices: %.2f minutes", time_to_collect_gram)
 
         graph_train_loader = DataLoader(
             dataset=dataset, batch_size=config.batch_size, shuffle=False
@@ -481,7 +709,7 @@ def rib_build(
             dtype=dtype,
             device=device,
             n_intervals=config.n_intervals,
-            integration_method=config.integration_method,
+            integration_methods=integration_methods,
             truncation_threshold=config.truncation_threshold,
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
@@ -489,12 +717,17 @@ def rib_build(
             means=means,
             n_stochastic_sources_pos=config.n_stochastic_sources_basis_pos,
             n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
+            out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
+            out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
+            isolate_ln_var=config.isolate_ln_var,
         )
         # InteractionRotation objects used to calculate edges
         edge_interaction_rotations = interaction_rotations
 
         calc_C_time = (time.time() - c_start_time) / 60
         logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
+        logger.info("Max memory allocated for Cs: %.2f GB", torch.cuda.max_memory_allocated() / 1e9)
+        torch.cuda.reset_peak_memory_stats()
     else:
         gram_matrices, interaction_rotations = load_interaction_rotations(config=config)
         edge_interaction_rotations = [
@@ -507,13 +740,17 @@ def rib_build(
     else:
         logger.info("Calculating edges.")
         full_dataset_len = len(dataset)  # type: ignore
-        # no-op if only 1 process
-        data_subset = get_dataset_chunk(
-            dataset, chunk_idx=dist_info.global_rank, total_chunks=dist_info.global_size
-        )
+        if config.dist_split_over == "dataset":
+            # no-op if only 1 process
+            start_idx, end_idx = get_chunk_indices(
+                data_size=full_dataset_len,
+                chunk_idx=dist_info.global_rank,
+                n_chunks=dist_info.global_size,
+            )
+            dataset = Subset(dataset, range(start_idx, end_idx))
 
         edge_train_loader = DataLoader(
-            data_subset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
+            dataset, batch_size=config.edge_batch_size or config.batch_size, shuffle=False
         )
 
         logger.info(
@@ -524,7 +761,7 @@ def rib_build(
             interaction_rotations=edge_interaction_rotations,
             hooked_model=hooked_model,
             n_intervals=config.n_intervals,
-            integration_method=config.integration_method,
+            integration_methods=integration_methods[:-1],
             section_names=section_names,
             data_loader=edge_train_loader,
             dtype=dtype,
@@ -532,10 +769,15 @@ def rib_build(
             data_set_size=full_dataset_len,  # includes data for other processes
             edge_formula=config.edge_formula,
             n_stochastic_sources=config.n_stochastic_sources_edges,
+            out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
+            out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
         )
 
         calc_edges_time = (time.time() - edges_start_time) / 60
         logger.info("Time to calculate edges: %.2f minutes", calc_edges_time)
+        logger.info(
+            "Max memory allocated for edges: %.2f GB", torch.cuda.max_memory_allocated() / 1e9
+        )
 
     results = RibBuildResults(
         exp_name=config.exp_name,

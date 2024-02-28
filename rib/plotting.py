@@ -17,6 +17,8 @@ import networkx as nx
 import numpy as np
 import torch
 
+from rib.log import logger
+
 
 def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:
     """Create a list of node layers from the given edges."""
@@ -71,7 +73,7 @@ def _prepare_edges_for_plotting(
     raw_edges: list[torch.Tensor],
     nodes_per_layer: list[int],
     hide_const_edges: bool = False,
-    norm: Optional[float] = None,
+    const_edge_norm: Optional[float] = None,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
@@ -95,7 +97,7 @@ def _prepare_edges_for_plotting(
             # should be zero except for a non-rotated last layer where they are important.
             weight_matrix[:, const_node_index] = 0
         # Normalize the edge weights by the sum of the absolute values of the weights
-        norm = torch.sum(torch.abs(weight_matrix)).item() if norm is None else norm
+        norm = const_edge_norm or torch.sum(torch.abs(weight_matrix)).item()
         weight_matrix /= norm
         # Only keep the desired number of nodes in each layer
         in_nodes = nodes_per_layer[i]
@@ -106,25 +108,32 @@ def _prepare_edges_for_plotting(
 
 def plot_ablation_results(
     results: list[dict[str, dict[str, float]]],
+    no_ablation_results_list: list[float],
     out_file: Optional[Path],
     exp_names: list[str],
     eval_type: Literal["accuracy", "ce_loss"],
     ablation_types: list[Literal["orthogonal", "rib"]],
-    log_scale: bool = False,
+    log_scale_x: bool = False,
+    log_scale_y: bool = False,
     xlim: Optional[tuple[float, float]] = None,
     ylim: Optional[tuple[float, float]] = None,
+    baseline_is_zero: bool = False,
 ) -> None:
     """Plot accuracy/loss vs number of remaining basis vectors.
 
     Args:
         results: A list of dictionares mapping node layers to an inner dictionary that maps the
             number of basis vectors remaining to the accuracy/loss.
+        no_ablation_results_list: A list of the accuracy/loss for the no ablation case for each
+            experiment.
         out_file: The file to save the plot to.
         exp_names: The names of the rib_scripts.
         ablation_types: The type of ablation performed for each experiment ("orthogonal" or "rib").
         log_scale: Whether to use a log scale for the x-axis. Defaults to False.
         xlim: The limits for the x-axis. Defaults to None.
         ylim: The limits for the y-axis. Defaults to None.
+        ylim_relative: The limits for the y-axis, relative to no_ablation_result. Is overwritten by
+            ylim if both are provided. Defaults to None.
     """
     # Verify that all results have the same node layers
     node_layers_per_exp = [set(result.keys()) for result in results]
@@ -139,11 +148,30 @@ def plot_ablation_results(
     if n_plots == 1:
         axs = [axs]
 
+    # Check that all ablation curves use the same baseline. If not that is okay but should be
+    # warned about. Multiple baselines will produce multiple grey baseline lines.
+    if not all(
+        no_ablation_result == no_ablation_results_list[0]
+        for no_ablation_result in no_ablation_results_list[1:]
+    ):
+        logger.warning(
+            "Different baselines detected! Are you sure you want to compare these results?"
+        )
+
     for i, node_layer in enumerate(node_layers):
-        for exp_name, ablation_type, exp_results in zip(exp_names, ablation_types, results):
+        for j, [exp_name, ablation_type, exp_results, no_ablation_result] in enumerate(
+            zip(exp_names, ablation_types, results, no_ablation_results_list)
+        ):
             n_vecs_remaining = sorted(list(int(k) for k in exp_results[node_layer]))
-            y_values = [exp_results[node_layer][str(i)] for i in n_vecs_remaining]
-            axs[i].plot(n_vecs_remaining, y_values, "-o", label=exp_name)
+            y_values = np.array([exp_results[node_layer][str(i)] for i in n_vecs_remaining])
+            color = plt.cm.get_cmap("tab10")(j)
+            if baseline_is_zero:
+                y_values -= no_ablation_result
+                if not log_scale_y:
+                    axs[i].axhline(0, color="grey", linestyle="--")
+            else:
+                axs[i].axhline(no_ablation_result, color="grey", linestyle="--")
+            axs[i].plot(n_vecs_remaining, y_values, "-o", color=color, label=exp_name)
 
             axs[i].set_title(f"{eval_type} vs n_remaining_basis_vecs for input to {node_layer}")
             axs[i].set_xlabel("Number of remaining basis vecs")
@@ -152,9 +180,10 @@ def plot_ablation_results(
                 axs[i].set_xlim(*xlim)
             if ylim is not None:
                 axs[i].set_ylim(*ylim)
-
-            if log_scale:
+            if log_scale_x:
                 axs[i].set_xscale("log")
+            if log_scale_y:
+                axs[i].set_yscale("log")
 
             axs[i].grid(True)
             axs[i].legend()
@@ -219,7 +248,10 @@ def plot_rib_graph(
     max_layer_height = max(nodes_per_layer)
 
     edges = _prepare_edges_for_plotting(
-        raw_edges, nodes_per_layer, hide_const_edges=hide_const_edges, norm=const_edge_norm
+        raw_edges,
+        nodes_per_layer,
+        hide_const_edges=hide_const_edges,
+        const_edge_norm=const_edge_norm,
     )
 
     # Create the undirected graph

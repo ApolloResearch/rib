@@ -1,4 +1,4 @@
-exp_name: block_diagonal_nnib_10k_v2_cross
+exp_name: block_diagonal_ngf_10k_v2_cross
 node_layers:
   - layers.0
   - layers.1
@@ -27,7 +27,7 @@ dataset:
 modular_mlp_config:
   n_hidden_layers: 15
   width: 20
-  mixing_layers: [14] #somehow adding the 5 here also messes up layers >5
+  mixing_layers: [14]
   weight_variances: [1., 1., 0.3, 0.3]
   weight_equal_columns: false
   bias: 0
@@ -42,4 +42,4 @@ rotate_final_node_layer: false
 basis_formula: jacobian
 edge_formula: squared
 center: true
-naive_gradient_flow: false
+naive_gradient_flow: true

@@ -1,4 +1,4 @@
-exp_name: block_diagonal_nnib_10k_v2_cross
+exp_name: block_diagonal_ngf_10k_v2_cross
 node_layers:
   - layers.0
   - layers.1
@@ -20,18 +20,18 @@ node_layers:
 dataset:
   dataset_type: block_vector
   size: 10000
-  length: 20
+  length: 16
   data_variances: [1, 1]
   data_perfect_correlation: false
-  seed: 0
+  seed: 3
 modular_mlp_config:
   n_hidden_layers: 15
-  width: 20
-  mixing_layers: [1] #somehow adding the 5 here also messes up layers >5
+  width: 16
+  mixing_layers: [1]
   weight_variances: [1., 1., 0.3, 0.3]
   weight_equal_columns: false
   bias: 0
-seed: 0
+seed: 3
 dtype: float64
 batch_size: 100000
 gram_batch_size: 100000
@@ -42,4 +42,4 @@ rotate_final_node_layer: false
 basis_formula: jacobian
 edge_formula: squared
 center: true
-naive_gradient_flow: false
+naive_gradient_flow: true

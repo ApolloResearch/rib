@@ -20,18 +20,18 @@ node_layers:
 dataset:
   dataset_type: block_vector
   size: 10000
-  length: 16
+  length: 20
   data_variances: [1, 1]
   data_perfect_correlation: false
-  seed: 3
+  seed: 4
 modular_mlp_config:
   n_hidden_layers: 15
-  width: 16
+  width: 20
   mixing_layers: [1]
   weight_variances: [1., 1., 0.3, 0.3]
   weight_equal_columns: false
   bias: 0
-seed: 3
+seed: 4
 dtype: float64
 batch_size: 100000
 gram_batch_size: 100000

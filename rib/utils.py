@@ -11,6 +11,7 @@ from pydantic.v1.utils import deep_update
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset, Subset, random_split
 
+from rib.distributed_utils import DistributedInfo
 from rib.log import logger
 from rib.settings import REPO_ROOT
 
@@ -154,8 +155,11 @@ def load_config(config_path_or_obj: Union[Path, str, T], config_model: Type[T]) 
     return config_model(**config_dict)
 
 
-def check_outfile_overwrite(out_file: Path, force: bool = False) -> bool:
+def check_out_file_overwrite(out_file: Optional[Path], force: bool = False) -> bool:
     """Check if out_file exists and whether it should be overwritten."""
+
+    if out_file is None:
+        return True
 
     def _response():
         response = input(f"Output file {out_file} already exists. Overwrite? (y/n) ")
@@ -163,16 +167,25 @@ def check_outfile_overwrite(out_file: Path, force: bool = False) -> bool:
 
     if out_file.exists():
         if force:
-            logger.info(f"Overwriting {out_file} (reason: config or cmdline)")
+            logger.info(f"Overwriting {out_file} (reason: cmdline)")
             return True
         elif _response():
-            logger.info(f"Overwriting {out_file} (based on user prompt)")
+            logger.info(f"Overwriting {out_file} (reason: user prompt)")
             return True
         else:
-            logger.info("Exiting.")
+            logger.info(f"Not overwriting {out_file}.")
             return False
     else:
         return True
+
+
+def handle_overwrite_fail(dist_info: Optional[DistributedInfo] = None):
+    """Handle the case where the output file already exists and we cannot overwrite it."""
+    # If we are in a distributed setting, we need to abort all processes.
+    if dist_info is not None and dist_info.global_size > 1:
+        dist_info.local_comm.Abort()
+    # Otherwise, we just raise an error.
+    raise FileExistsError(f"Output file already exists")
 
 
 def set_seed(seed: Optional[int]) -> None:

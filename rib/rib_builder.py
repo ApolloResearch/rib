@@ -352,7 +352,7 @@ class RibBuildResults(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
     exp_name: str = Field(..., description="The name of the experiment")
     mean_vectors: Optional[dict[str, torch.Tensor]] = Field(
-        description="Mean vectors at each node layer.", repr=False
+        default_factory=lambda: {}, description="Mean vectors at each node layer.", repr=False
     )
     gram_matrices: dict[str, torch.Tensor] = Field(
         description="Gram matrices at each node layer.", repr=False

@@ -161,7 +161,8 @@ def plot_ablation_results(
             color = plt.cm.get_cmap("tab10")(j)
             if baseline_is_zero:
                 y_values -= no_ablation_result
-                axs[i].axhline(0, color="grey", linestyle="--")
+                if not log_scale_y:
+                    axs[i].axhline(0, color="grey", linestyle="--")
             else:
                 axs[i].axhline(no_ablation_result, color="grey", linestyle="--")
             axs[i].plot(n_vecs_remaining, y_values, "-o", color=color, label=exp_name)

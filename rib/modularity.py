@@ -10,23 +10,10 @@ import matplotlib.pyplot as plt
 import networkit as nk
 import numpy as np
 import torch
-import tqdm.notebook as tqdm
+import tqdm
 from jaxtyping import Bool, Float
 
 from rib.rib_builder import RibBuildResults
-
-
-def get_prefix_colors():
-    cmap = plt.get_cmap("Paired")
-    return {
-        "ln1": cmap.colors[1],
-        "ln1_out": cmap.colors[0],
-        "attn_in": cmap.colors[3],
-        "ln2": cmap.colors[9],
-        "ln2_out": cmap.colors[8],
-        "mlp_in": cmap.colors[5],
-    }
-
 
 EdgeTensor = Float[torch.Tensor, "rib_out rib_in"]
 

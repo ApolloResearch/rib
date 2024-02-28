@@ -9,7 +9,7 @@ import torch
 from rib.ablations import AblationConfig, BisectScheduleConfig, load_bases_and_ablate
 from rib.data import HFDatasetConfig
 from rib.log import logger
-from rib.modularity import AdaptiveEdgeNorm, RIBGraph, get_prefix_colors
+from rib.modularity import AdaptiveEdgeNorm, RIBGraph
 from rib.rib_builder import RibBuildResults
 from rib.utils import replace_pydantic_model
 from rib_scripts.rib_build.plot_graph import plot_by_layer
@@ -42,6 +42,17 @@ def edge_distribution(
     ps = torch.cat([torch.linspace(0.02, 0.9, 70), torch.linspace(0.9, 1, 150)])
     figsize = (layout[1] * 3, layout[0] * 3)
     fig, axs = plt.subplots(*layout, figsize=figsize, sharex=True, sharey=True)
+
+    def get_prefix_colors():
+        cmap = plt.get_cmap("Paired")
+        return {
+            "ln1": cmap.colors[1],
+            "ln1_out": cmap.colors[0],
+            "attn_in": cmap.colors[3],
+            "ln2": cmap.colors[9],
+            "ln2_out": cmap.colors[8],
+            "mlp_in": cmap.colors[5],
+        }
 
     for edge in results.edges:
         in_nl = edge.in_node_layer

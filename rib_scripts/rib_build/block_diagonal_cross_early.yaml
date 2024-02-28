@@ -23,7 +23,7 @@ dataset:
   length: 20
   data_variances: [1, 1]
   data_perfect_correlation: false
-  seed: 0
+  seed: 4
 modular_mlp_config:
   n_hidden_layers: 15
   width: 20
@@ -31,7 +31,7 @@ modular_mlp_config:
   weight_variances: [1., 1., 0.3, 0.3]
   weight_equal_columns: false
   bias: 0
-seed: 0
+seed: 4
 dtype: float64
 batch_size: 100000
 gram_batch_size: 100000

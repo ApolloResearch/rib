@@ -83,12 +83,14 @@ def run_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
     results_path = Path(results_path)
     results = RibBuildResults(**torch.load(results_path))
     assert isinstance(results.config.dataset, HFDatasetConfig)  # for mypy
+    dataset_return_sets = {
+        "roneneldan/TinyStories": "validation",
+        "NeelNanda/pile-10k": "train",  # no test
+    }
     dataset = replace_pydantic_model(
         results.config.dataset,
         {
-            "return_set": "validation"
-            if results.config.dataset.name == "roneneldan/TinyStories"
-            else "test",
+            "return_set": dataset_return_sets[results.config.dataset.name],
             "n_samples": 10,
         },
     )

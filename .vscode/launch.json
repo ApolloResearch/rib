@@ -143,5 +143,8 @@
                 "port": 5678
             }
         }
-    ]
+    ],
+    "env": {
+        "HF_HOME": "/mnt/ssd-interp/huggingface_cache/",
+    }
 }

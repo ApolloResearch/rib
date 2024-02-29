@@ -21,6 +21,7 @@ from rib.types import TORCH_DTYPES, StrDtype
 class DatasetConfig(BaseModel):
     """Base class for dataset configs."""
 
+    dataset_type: Literal["huggingface", "modular_arithmetic", "torchvision", "block_vector"]
     model_config = ConfigDict(extra="forbid", frozen=True)
     return_set: Literal["train", "test", "validation", "all"] = Field(
         "train",

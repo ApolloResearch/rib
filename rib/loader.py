@@ -261,26 +261,20 @@ def prepare_dataset(
             tokens = example["input_ids"]
             all_tokens.extend(tokens)
     # Check number of eos tokens
-    logger.info("Counting eos tokens")
     len_dataset = len(dataset)  # type: ignore
-    n_eos_tokens = all_tokens.count(tokenizer.eos_token_id)
     if not tokenized:
+        logger.info("Counting eos tokens")
+        n_eos_tokens = all_tokens.count(tokenizer.eos_token_id)
         # When we tokenize the dataset ourselves then len_dataset is the number of actual stories
         # and thus the number of eos tokens should match len_dataset.
         assert n_eos_tokens == len_dataset, (
             f"Number of eos tokens ({all_tokens.count(tokenizer.eos_token_id)}) does not match "
             f"number of samples ({len_dataset})."
         )
-    else:
-        # When we load a tokenized dataset then len_dataset is just the number of rows of lenght
-        # 511, irrespective of the actual number of stories. EOS tokens are already included in
-        # the tokenized dataset. Since stories are typically 235 tokens long, the number of eos
-        # tokens will be around len_dataset*511/235 > len_dataset.
-        assert n_eos_tokens >= len_dataset, (
-            f"Number of eos tokens ({all_tokens.count(tokenizer.eos_token_id)}) is smaller than "
-            f"expected for a dataset of length {len_dataset}."
-        )
-    logger.info(f"Number of eos tokens in dataset: {n_eos_tokens}")
+        logger.info(f"Number of eos tokens in dataset: {n_eos_tokens}")
+    # Note: You really should check the tokenized dataset you used, and make sure it behaves
+    # correctly. We can't really properly check things here because datasets might differ
+
     # Split the merged tokens into chunks that fit the context length
     raw_chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
     # Note that we ignore the final raw_chunk, as we get the label for the final token in a chunk

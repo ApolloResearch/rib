@@ -43,7 +43,6 @@ from tests.utils import (
 
 def graph_build_test(config: RibBuildConfig, atol: float):
     results = rib_build(config)
-    grams_normal = results.gram_matrices
 
     grams = results.gram_matrices
     Cs = results.interaction_rotations

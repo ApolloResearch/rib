@@ -1,3 +1,7 @@
+"""
+TODO
+"""
+
 import warnings
 from pathlib import Path
 from typing import Optional, Union
@@ -12,7 +16,6 @@ from rib.log import logger
 from rib.modularity import AdaptiveEdgeNorm, RIBGraph
 from rib.rib_builder import RibBuildResults
 from rib.utils import replace_pydantic_model
-from rib_scripts.rib_build.plot_graph import plot_by_layer
 
 
 def _num_layers(results: RibBuildResults) -> int:
@@ -116,11 +119,11 @@ def run_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
 
 def run_modularity(
     results_path: Union[str, Path],
-    threshold: float = 0.2,
+    threshold: float = 0.1,
     gamma: float = 1.0,
     plot_edge_dist: bool = True,
-    plot_normalized_rib_graph: bool = True,
     plot_piano: bool = True,
+    plot_modular_graph: bool = True,
 ):
     """
     This function runs modularity analysis on a RIB build and saves various helpful related plots.
@@ -147,11 +150,6 @@ def run_modularity(
             warnings.filterwarnings("ignore", message="Attempt to set non-positive")
             plt.clf()
 
-    if plot_normalized_rib_graph:
-        rib_graph_path = results_path.parent / f"rib_graph_{threshold}.png"
-        plot_by_layer(results, edge_norm=edge_norm, out_file=rib_graph_path)
-        plt.clf()
-
     logger.info(f"Making RIB graph in networkit")
     graph = RIBGraph(results, edge_norm)
     logger.info(f"Running clustering")
@@ -163,6 +161,11 @@ def run_modularity(
         plt.suptitle(f"Nonsingleton clusters for threshold={threshold}, gamma={gamma}")
         plt.savefig(paino_path)
         logger.info(f"Saved paino plot to {paino_path.absolute()}")
+        plt.clf()
+
+    if plot_modular_graph:
+        rib_graph_path = results_path.parent / f"modular_graph_{threshold}.png"
+        graph.plot_rib_graph(out_file=rib_graph_path)
 
     # logger.info(
     #     f"Plots saved:\nEdge Dist: {edge_dist_path.absolute()}\nRIB Graph: {rib_graph_path.absolute()}\nPaino: {paino_path.absolute()}"

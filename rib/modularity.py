@@ -14,6 +14,7 @@ import tqdm
 from jaxtyping import Bool, Float
 
 from rib.rib_builder import RibBuildResults
+from rib_scripts.rib_build.plot_graph import plot_by_layer
 
 EdgeTensor = Float[torch.Tensor, "rib_out rib_in"]
 
@@ -106,6 +107,9 @@ class NodeCluster(NamedTuple):
         return Counter(n.layer for n in self.nodes)
 
 
+ClusterListLike = Union[NodeCluster, list[NodeCluster], Literal["all", "nonsingleton"]]
+
+
 class RIBGraph:
     """
     Wrapper around a weighted networkit graph represtenting a RIB build.
@@ -152,7 +156,7 @@ class RIBGraph:
 
     def _make_graph(self):
         self.G = nk.Graph(n=len(self.nodes), weighted=True)
-        for edge in tqdm.tqdm(self.results.edges, desc="Adding edges:"):
+        for edge in tqdm.tqdm(self.results.edges, desc="Making RIB graph"):
             if edge.in_node_layer in self.node_layers:
                 self._add_layer_edges(edge, 1)
 
@@ -240,42 +244,68 @@ class RIBGraph:
 
         return (tot_edges - kept_edges) if absolute else kept_edges / tot_edges
 
-    def paino_plot(
-        self,
-        clusters: Union[NodeCluster, list[NodeCluster], Literal["all"]] = "all",
-        ax=None,
-    ):
+    def _get_clusterlist(self, cluster_list_like: ClusterListLike) -> list[NodeCluster]:
+        assert self.clusters is not None
+        if cluster_list_like == "all":  # all non-singletons
+            return self.clusters
+        elif cluster_list_like == "nonsingleton":
+            return [c for c in self.clusters if c.size > 1]
+        elif isinstance(cluster_list_like, NodeCluster):
+            return [cluster_list_like]
+        else:
+            assert isinstance(cluster_list_like, list)
+            return cast(list[NodeCluster], cluster_list_like)
+
+    def _cluster_array(self, cluster_list: list[NodeCluster]) -> np.ndarray:
         def _fill_array(arr: np.ndarray, nodes: list[Node], val: float):
             for n in nodes:
                 arr[self.node_layers.index(n.layer), n.idx] = val
-
-        # make cluster list
-        assert self.clusters is not None
-        if clusters == "all":  # all non-singletons
-            clusters = [c for c in self.clusters if c.size > 1]
-        elif isinstance(clusters, NodeCluster):
-            clusters = [clusters]
-        clusters = cast(list[NodeCluster], clusters)
-
-        # make colormap
-        null_color = [0.2, 0.2, 0.2, 1]
-        singleton_color = [1, 1, 1, 1]
-        cluster_colors = [colorcet.glasbey[i % 256] for i in range(len(clusters))]
-        cmap = plt.matplotlib.colors.ListedColormap([null_color, singleton_color, *cluster_colors])
 
         # make base array
         max_width = max(self.nodes_per_layer.values())
         arr = np.full((len(self.node_layers), max_width), fill_value=-1)
         _fill_array(arr, self.nodes, 0)
         # fill array with clusters
-        for i, c in enumerate(clusters):
+        for i, c in enumerate(cluster_list):
             _fill_array(arr, c.nodes, i + 1)
 
+        return arr
+
+    def paino_plot(self, clusters: ClusterListLike = "nonsingleton", ax=None):
+        cluster_list = self._get_clusterlist(clusters)
+        arr = self._cluster_array(cluster_list)
+
+        # make colormap
+        null_color = [0.2, 0.2, 0.2, 1]
+        singleton_color = [1, 1, 1, 1]
+        cluster_colors = [colorcet.glasbey[i % 256] for i in range(len(cluster_list))]
+        cmap = plt.matplotlib.colors.ListedColormap([null_color, singleton_color, *cluster_colors])
+
         # plot
-        norm = plt.matplotlib.colors.Normalize(-1, len(clusters))
+        norm = plt.matplotlib.colors.Normalize(-1, len(cluster_list))
         if ax is None:
             fig, ax = plt.subplots(figsize=(6, 6))
 
         ax.matshow(arr[:, 1:].T, cmap=cmap, origin="lower", norm=norm, aspect="auto")
         ax.set_xlabel("Node layer")
         ax.set_ylabel("RIB index")
+
+    def plot_rib_graph(
+        self,
+        clusters: ClusterListLike = "nonsingleton",
+        out_file=None,
+    ):
+        clusters_list = self._get_clusterlist(clusters)
+        arr = self._cluster_array(clusters_list)
+        clusters_for_plotting_fn = [
+            layer_clusters[: self.nodes_per_layer[nl]]
+            for nl, layer_clusters in zip(self.node_layers, arr.tolist(), strict=True)
+        ]
+        plot_by_layer(
+            self.results,
+            edge_norm=self.edge_norm,
+            const_edge_norm=0.3 * self.G.totalEdgeWeight() / len(self.results.edges),
+            clusters=clusters_for_plotting_fn,
+            out_file=out_file,
+            nodes_per_layer=max(self.nodes_per_layer.values()),
+        )

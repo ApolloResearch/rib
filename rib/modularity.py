@@ -44,7 +44,12 @@ class AdaptiveEdgeNorm(EdgeNorm):
         self.eps_by_layer = eps_by_layer
 
     @staticmethod
-    def _get_minimum_edge(E: EdgeTensor, mask: Bool[torch.Tensor, "rib_out rib_in"]) -> float:
+    def _get_minimum_edge(
+        E: EdgeTensor, mask: Bool[torch.Tensor, "rib_out rib_in"], ignore0: bool = True
+    ) -> float:
+        if ignore0:
+            E = E[1:, 1:]
+            mask = mask[1:, 1:]
         return E[mask].min().item()
 
     @classmethod
@@ -58,8 +63,9 @@ class AdaptiveEdgeNorm(EdgeNorm):
             for nl, n_needed in abl_result["n_edges_required"].items()
         }
         edges_by_layer = {edge.in_node_layer: edge for edge in results.edges}
+        ignore0 = results.config.center
         eps_by_layer = {
-            nl: AdaptiveEdgeNorm._get_minimum_edge(edge.E_hat, edge_masks[nl])
+            nl: AdaptiveEdgeNorm._get_minimum_edge(edge.E_hat, edge_masks[nl], ignore0=ignore0)
             for nl, edge in edges_by_layer.items()
         }
         return cls(eps_by_layer)
@@ -325,5 +331,5 @@ class GraphClustering:
             const_edge_norm=0.3 * self.G.totalEdgeWeight() / len(self.results.edges),
             clusters=clusters_for_plotting_fn,
             out_file=out_file,
-            nodes_per_layer=max(self.nodes_per_layer.values()),
+            nodes_per_layer=150,  # max(self.nodes_per_layer.values()),
         )

@@ -26,7 +26,7 @@ def edge_distribution(
     results,
     layout: Optional[tuple[int, int]] = None,
     xlim=(None, None),
-    ylim=(0, 1),
+    ylim=(None, 1),
     vlines: Optional[dict[str, float]] = None,
 ):
     """Plots culmulative distribution functions of the edge values.
@@ -123,7 +123,7 @@ def run_modularity(
     gamma: float = 1.0,
     plot_edge_dist: bool = True,
     plot_piano: bool = True,
-    plot_modular_graph: bool = True,
+    plot_graph: bool = True,
 ):
     """
     This function runs modularity analysis on a RIB build and saves various helpful related plots.
@@ -140,7 +140,12 @@ def run_modularity(
     edge_norm = AdaptiveEdgeNorm.from_bisect_results(ablation_path, results)
 
     if plot_edge_dist:
-        edge_distribution(results, vlines=edge_norm.eps_by_layer)
+        xlim_buffer = 1.5
+        xlim = (
+            min(edge_norm.eps_by_layer.values()) / xlim_buffer,
+            max(edge_norm.eps_by_layer.values()) * xlim_buffer,
+        )
+        edge_distribution(results, vlines=edge_norm.eps_by_layer, xlim=xlim)
         edge_dist_path = results_path.parent / f"edge_distribution_{threshold}.png"
         plt.savefig(edge_dist_path)
         logger.info(f"Saved edge distribution plot to {edge_dist_path.absolute()}")
@@ -161,7 +166,7 @@ def run_modularity(
         logger.info(f"Saved paino plot to {paino_path.absolute()}")
         plt.clf()
 
-    if plot_modular_graph:
+    if plot_graph:
         rib_graph_path = results_path.parent / f"modular_graph_{threshold}.png"
         graph.plot_rib_graph(out_file=rib_graph_path)
 

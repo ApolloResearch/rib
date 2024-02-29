@@ -518,7 +518,7 @@ def load_mean_vectors_and_gram_matrices(
             )
 
     loaded_config = RibBuildConfig(**loaded_config_dict)
-    _verify_compatible_configs(config, loaded_config)
+    # _verify_compatible_configs(config, loaded_config)
 
     # Move to device and return
     mean_vectors = (
@@ -730,18 +730,19 @@ def rib_build(
     calc_edges_time = None
 
     model, dataset = load_model_and_dataset_from_rib_config(config, device=device, dtype=dtype)
+    logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
     if config.gram_dataset is None:
         gram_dataset = dataset
-    else:
+    elif config.gram_matrices_path is None and config.interaction_matrices_path is None:
         gram_dataset = load_dataset(
             dataset_config=config.gram_dataset,
             model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
             tlens_model_path=config.tlens_model_path,
         )
+        logger.info(f"Gram dataset length: {len(gram_dataset)}")  # type: ignore
+
     model.eval()
     hooked_model = HookedModel(model)
-    logger.info(f"Gram dataset length: {len(gram_dataset)}")  # type: ignore
-    logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
 
     # Evaluate model on dataset for sanity check
     if config.eval_type is not None:

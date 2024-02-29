@@ -2,7 +2,7 @@ from math import log10
 
 import pytest
 
-from rib.modularity import LogEdgeNorm, RIBGraph
+from rib.modularity import GraphClustering, LogEdgeNorm
 from rib.rib_builder import RibBuildResults, rib_build
 from tests.utils import assert_is_close, get_tinystories_config
 
@@ -14,8 +14,7 @@ def results() -> RibBuildResults:
 
 @pytest.mark.slow
 def test_clustering(results: RibBuildResults):
-    graph = RIBGraph(results)
-    graph.run_leiden()
+    graph = GraphClustering(results)
     assert graph.clusters is not None
 
     # test clustering contains all nodes, and there's no overlap between clusters
@@ -52,7 +51,7 @@ def test_clustering(results: RibBuildResults):
 def test_edge_norm(results: RibBuildResults):
     eps = results.edges[0].E_hat.flatten().quantile(0.5)  # use median, will keep half of edges
     edge_norm = LogEdgeNorm(eps)
-    graph = RIBGraph(results, edge_norm=edge_norm)
+    graph = GraphClustering(results, edge_norm=edge_norm)
 
     for u, v, w in graph.random_edges(k=50):
         if graph.is_edge_forward(u, v):
@@ -67,10 +66,6 @@ def test_edge_norm(results: RibBuildResults):
 
 @pytest.mark.slow
 def test_gamma(results: RibBuildResults):
-    graph_small_gamma = RIBGraph(results)
-    graph_small_gamma.run_leiden(gamma=1e-3)
-
-    graph_large_gamma = RIBGraph(results)
-    graph_large_gamma.run_leiden(gamma=10)
-
+    graph_small_gamma = GraphClustering(results, gamma=1e-3)
+    graph_large_gamma = GraphClustering(results, gamma=10)
     assert len(graph_small_gamma.clusters) < len(graph_large_gamma.clusters)

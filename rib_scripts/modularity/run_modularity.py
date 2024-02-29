@@ -13,7 +13,7 @@ import torch
 from rib.ablations import AblationConfig, BisectScheduleConfig, load_bases_and_ablate
 from rib.data import HFDatasetConfig
 from rib.log import logger
-from rib.modularity import AdaptiveEdgeNorm, RIBGraph
+from rib.modularity import AdaptiveEdgeNorm, GraphClustering
 from rib.rib_builder import RibBuildResults
 from rib.utils import replace_pydantic_model
 
@@ -150,10 +150,8 @@ def run_modularity(
             warnings.filterwarnings("ignore", message="Attempt to set non-positive")
             plt.clf()
 
-    logger.info(f"Making RIB graph in networkit")
-    graph = RIBGraph(results, edge_norm)
-    logger.info(f"Running clustering")
-    graph.run_leiden(gamma=gamma)
+    logger.info(f"Making RIB graph in networkit & running clustering...")
+    graph = GraphClustering(results, edge_norm, gamma=gamma)
 
     if plot_piano:
         graph.paino_plot()
@@ -166,10 +164,6 @@ def run_modularity(
     if plot_modular_graph:
         rib_graph_path = results_path.parent / f"modular_graph_{threshold}.png"
         graph.plot_rib_graph(out_file=rib_graph_path)
-
-    # logger.info(
-    #     f"Plots saved:\nEdge Dist: {edge_dist_path.absolute()}\nRIB Graph: {rib_graph_path.absolute()}\nPaino: {paino_path.absolute()}"
-    # )
 
 
 if __name__ == "__main__":

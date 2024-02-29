@@ -45,7 +45,7 @@ class AdaptiveEdgeNorm(EdgeNorm):
 
     @staticmethod
     def _get_minimum_edge(E: EdgeTensor, mask: Bool[torch.Tensor, "rib_out rib_in"]) -> float:
-        return E[1:, 1:][mask[1:, 1:]].min().item()
+        return E[mask].min().item()
 
     @classmethod
     def from_bisect_results(
@@ -73,6 +73,7 @@ class Node(NamedTuple):
     """A node in RIBGraph representing a single RIB direction.
 
     `layer` is the human readable node-layer, e.g. `ln3.5`.
+    `idx` is the numeric index of the node in the layer (sorted by Lambda, as normal).
     """
 
     layer: str
@@ -110,10 +111,11 @@ class NodeCluster(NamedTuple):
 ClusterListLike = Union[NodeCluster, list[NodeCluster], Literal["all", "nonsingleton"]]
 
 
-class RIBGraph:
+class GraphClustering:
     """
-    Wrapper around a weighted networkit graph represtenting a RIB build.
+    RIB results, along with the results to running Leiden on the wieghted RIB graph.
 
+    In particular, wraps around a networkit graph `G`, and a networkit partition `nk_partition`.
     networkit graphs index nodes by numeric ids. `self.nodes[i]` is the node with id `i`.
     To get the id of a particualr node, use `self.node_to_idx[node]`.
 
@@ -123,18 +125,32 @@ class RIBGraph:
     G: nk.Graph
     nodes: list[Node]
     node_to_idx: dict[Node, int]
-    clusters: Optional[list[NodeCluster]] = None
-    _nk_partition: Optional[nk.structures.Partition] = None
+    clusters: list[NodeCluster]
+    _nk_partition: nk.structures.Partition
 
     def __init__(
         self,
         results: RibBuildResults,
         edge_norm: Optional[EdgeNorm] = None,
         node_layers: Optional[list[str]] = None,
+        gamma: float = 1.0,
     ):
+        """
+        Create a GraphClustering object from a RibBuildResults object.
+
+        Args:
+            results: The RIB build results.
+            edge_norm: An optional edge normalization instance which normalizes each edge tensor
+                before making the underlying graph. If None, will not normalize.
+            node_layers: The node layers to use in the Graph. If None, uses the node_layers from the
+                results. Otherwise should be a subsequence of the node_layers from the results.
+            gamma: The resolution parameter for the Leiden clustering algorithm. Higher values lead
+                to more smaller clusters.
+        """
         self.results = results
         self.edge_norm = edge_norm or IdentityEdgeNorm()
         self.node_layers = node_layers or results.config.node_layers
+        self.gamma = gamma
 
         self.nodes_per_layer = {
             ir.node_layer: ir.C.shape[1] for ir in results.interaction_rotations if ir.C is not None
@@ -144,23 +160,41 @@ class RIBGraph:
         ]
         self.node_to_idx = {node: idx for idx, node in enumerate(self.nodes)}
         self._make_graph()
-
-    def _add_layer_edges(self, edge, start_idx: int):
-        E = self.edge_norm(edge.E_hat, edge.in_node_layer)[start_idx:, start_idx:]
-        out_idxs, in_idxs = torch.nonzero(E, as_tuple=True)
-        in_ids = in_idxs + self.node_to_idx[Node(edge.in_node_layer, start_idx)]
-        out_ids = out_idxs + self.node_to_idx[Node(edge.out_node_layer, start_idx)]
-        weights = E[out_idxs, in_idxs].flatten().cpu()
-        for i, j, w in zip(in_ids.tolist(), out_ids.tolist(), weights.tolist(), strict=True):
-            self.G.addEdge(i, j, w=w)
+        self._run_leiden()
+        self._make_clusters()
 
     def _make_graph(self):
+        start_idx = 1 if self.results.config.center else 0
         self.G = nk.Graph(n=len(self.nodes), weighted=True)
         for edge in tqdm.tqdm(self.results.edges, desc="Making RIB graph"):
             if edge.in_node_layer in self.node_layers:
-                self._add_layer_edges(edge, 1)
+                E = self.edge_norm(edge.E_hat, edge.in_node_layer)[start_idx:, start_idx:]
+                out_idxs, in_idxs = torch.nonzero(E, as_tuple=True)
+                in_ids = in_idxs + self.node_to_idx[Node(edge.in_node_layer, start_idx)]
+                out_ids = out_idxs + self.node_to_idx[Node(edge.out_node_layer, start_idx)]
+                weights = E[out_idxs, in_idxs].flatten().cpu()
+                for i, j, w in zip(
+                    in_ids.tolist(), out_ids.tolist(), weights.tolist(), strict=True
+                ):
+                    self.G.addEdge(i, j, w=w)
 
         self.G.checkConsistency()
+
+    def _run_leiden(self):
+        iterations = 10
+        algo = nk.community.ParallelLeiden(self.G, gamma=self.gamma, iterations=iterations)
+        algo.run()
+        self._nk_partition = algo.getPartition()
+
+    def _make_clusters(self):
+        assert self._nk_partition is not None
+        clusters = []
+        for cluster_id in self._nk_partition.subsetSizeMap().keys():
+            member_ids = self._nk_partition.getMembers(cluster_id)
+            nodes = [self.nodes[i] for i in member_ids]
+            clusters.append(NodeCluster(cluster_id, nodes))
+
+        self.clusters = sorted(clusters, key=lambda c: c.size, reverse=True)
 
     def random_edges(self, k=10) -> list[tuple[Node, Node, float]]:
         """Get k random edges from the graph."""
@@ -172,22 +206,6 @@ class RIBGraph:
     def layer_idx_of(self, node: Node) -> int:
         """Get the numeric node-layer index of the node-layer of a particular node."""
         return self.node_layers.index(node.layer)
-
-    def run_leiden(self, gamma=1, iterations=10):
-        algo = nk.community.ParallelLeiden(self.G, gamma=gamma, iterations=iterations)
-        algo.run()
-        self._nk_partition = algo.getPartition()
-        self._make_clusters()
-
-    def _make_clusters(self):
-        assert self._nk_partition is not None
-        clusters = []
-        for cluster_id in self._nk_partition.subsetSizeMap().keys():
-            member_ids = self._nk_partition.getMembers(cluster_id)
-            nodes = [self.nodes[i] for i in member_ids]
-            clusters.append(NodeCluster(cluster_id, nodes))
-
-        self.clusters = sorted(clusters, key=lambda c: c.size, reverse=True)
 
     def plot_cluster_spans_and_widths(self, ax=None, ms=1, alpha=1):
         assert self.clusters is not None

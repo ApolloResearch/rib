@@ -151,15 +151,16 @@ def test_bisect_schedule(loss_fn, loss_target, n_eigenvecs, upper, lower):
     The function assumes that ablating every vector returns a bad loss, and ablating no vectors
     returns a good loss.
     """
+    base = loss_fn(0)
     schedule_config = BisectScheduleConfig(
         schedule_type="bisect",
-        score_target=loss_target,
+        score_target_difference=loss_target - base,
     )
     schedule = BisectSchedule(schedule_config, n_eigenvecs, "ce_loss")
     for n_vec_ablated in schedule:
         print(f"{n_vec_ablated=}")
         loss = loss_fn(n_vec_ablated)
-        schedule.update_bounds(loss)
+        schedule.update_bounds(loss, base)
     assert schedule._upper_bound == upper
     assert schedule._lower_bound == lower
 
@@ -181,15 +182,16 @@ def test_bisect_schedule_accuracy(acc_fn, accuracy_target, n_eigenvecs, upper, l
     The function assumes that ablating every vector returns a bad loss, and ablating no vectors
     returns a good loss.
     """
+    base = acc_fn(0)
     schedule_config = BisectScheduleConfig(
         schedule_type="bisect",
-        score_target=accuracy_target,
+        score_target_difference=base - accuracy_target,
     )
     schedule = BisectSchedule(schedule_config, n_eigenvecs, "accuracy")
     for n_vec_ablated in schedule:
         print(f"{n_vec_ablated=}")
         score = acc_fn(n_vec_ablated)
-        schedule.update_bounds(score)
+        schedule.update_bounds(score, base)
     assert schedule._upper_bound == upper
     assert schedule._lower_bound == lower
 

@@ -17,6 +17,8 @@ import networkx as nx
 import numpy as np
 import torch
 
+from rib.log import logger
+
 
 def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:
     """Create a list of node layers from the given edges."""
@@ -68,7 +70,10 @@ def _add_edges_to_graph(
 
 
 def _prepare_edges_for_plotting(
-    raw_edges: list[torch.Tensor], nodes_per_layer: list[int], hide_const_edges: bool = False
+    raw_edges: list[torch.Tensor],
+    nodes_per_layer: list[int],
+    hide_const_edges: bool = False,
+    const_edge_norm: Optional[float] = None,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
@@ -76,6 +81,8 @@ def _prepare_edges_for_plotting(
         raw_edges (list[torch.Tensor]): List of edges tensors, each with shape
             (n_nodes_in_l+1, n_nodes_in_l).
         nodes_per_layer (list[int]): The number of nodes in each layer.
+        norm (Optional[float]): The value to normalize the edges by. If None, will normalize each
+            layer by the sum of the absolute values of the edges.
 
     Returns:
         list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
@@ -90,7 +97,8 @@ def _prepare_edges_for_plotting(
             # should be zero except for a non-rotated last layer where they are important.
             weight_matrix[:, const_node_index] = 0
         # Normalize the edge weights by the sum of the absolute values of the weights
-        weight_matrix /= torch.sum(torch.abs(weight_matrix))
+        norm = const_edge_norm or torch.sum(torch.abs(weight_matrix)).item()
+        weight_matrix /= norm
         # Only keep the desired number of nodes in each layer
         in_nodes = nodes_per_layer[i]
         out_nodes = nodes_per_layer[i + 1]
@@ -100,25 +108,32 @@ def _prepare_edges_for_plotting(
 
 def plot_ablation_results(
     results: list[dict[str, dict[str, float]]],
+    no_ablation_results_list: list[float],
     out_file: Optional[Path],
     exp_names: list[str],
     eval_type: Literal["accuracy", "ce_loss"],
     ablation_types: list[Literal["orthogonal", "rib"]],
-    log_scale: bool = False,
+    log_scale_x: bool = False,
+    log_scale_y: bool = False,
     xlim: Optional[tuple[float, float]] = None,
     ylim: Optional[tuple[float, float]] = None,
+    baseline_is_zero: bool = False,
 ) -> None:
     """Plot accuracy/loss vs number of remaining basis vectors.
 
     Args:
         results: A list of dictionares mapping node layers to an inner dictionary that maps the
             number of basis vectors remaining to the accuracy/loss.
+        no_ablation_results_list: A list of the accuracy/loss for the no ablation case for each
+            experiment.
         out_file: The file to save the plot to.
         exp_names: The names of the rib_scripts.
         ablation_types: The type of ablation performed for each experiment ("orthogonal" or "rib").
         log_scale: Whether to use a log scale for the x-axis. Defaults to False.
         xlim: The limits for the x-axis. Defaults to None.
         ylim: The limits for the y-axis. Defaults to None.
+        ylim_relative: The limits for the y-axis, relative to no_ablation_result. Is overwritten by
+            ylim if both are provided. Defaults to None.
     """
     # Verify that all results have the same node layers
     node_layers_per_exp = [set(result.keys()) for result in results]
@@ -133,11 +148,30 @@ def plot_ablation_results(
     if n_plots == 1:
         axs = [axs]
 
+    # Check that all ablation curves use the same baseline. If not that is okay but should be
+    # warned about. Multiple baselines will produce multiple grey baseline lines.
+    if not all(
+        no_ablation_result == no_ablation_results_list[0]
+        for no_ablation_result in no_ablation_results_list[1:]
+    ):
+        logger.warning(
+            "Different baselines detected! Are you sure you want to compare these results?"
+        )
+
     for i, node_layer in enumerate(node_layers):
-        for exp_name, ablation_type, exp_results in zip(exp_names, ablation_types, results):
+        for j, [exp_name, ablation_type, exp_results, no_ablation_result] in enumerate(
+            zip(exp_names, ablation_types, results, no_ablation_results_list)
+        ):
             n_vecs_remaining = sorted(list(int(k) for k in exp_results[node_layer]))
-            y_values = [exp_results[node_layer][str(i)] for i in n_vecs_remaining]
-            axs[i].plot(n_vecs_remaining, y_values, "-o", label=exp_name)
+            y_values = np.array([exp_results[node_layer][str(i)] for i in n_vecs_remaining])
+            color = plt.cm.get_cmap("tab10")(j)
+            if baseline_is_zero:
+                y_values -= no_ablation_result
+                if not log_scale_y:
+                    axs[i].axhline(0, color="grey", linestyle="--")
+            else:
+                axs[i].axhline(no_ablation_result, color="grey", linestyle="--")
+            axs[i].plot(n_vecs_remaining, y_values, "-o", color=color, label=exp_name)
 
             axs[i].set_title(f"{eval_type} vs n_remaining_basis_vecs for input to {node_layer}")
             axs[i].set_xlabel("Number of remaining basis vecs")
@@ -146,9 +180,10 @@ def plot_ablation_results(
                 axs[i].set_xlim(*xlim)
             if ylim is not None:
                 axs[i].set_ylim(*ylim)
-
-            if log_scale:
+            if log_scale_x:
                 axs[i].set_xscale("log")
+            if log_scale_y:
+                axs[i].set_yscale("log")
 
             axs[i].grid(True)
             axs[i].legend()
@@ -183,6 +218,9 @@ def plot_rib_graph(
     out_file: Optional[Path] = None,
     node_labels: Optional[list[list[str]]] = None,
     hide_const_edges: bool = False,
+    ax: Optional[plt.Axes] = None,
+    const_edge_norm: Optional[float] = None,
+    colors: Optional[list[str]] = None,
 ) -> None:
     """Plot the RIB graph for the given edges.
 
@@ -194,7 +232,14 @@ def plot_rib_graph(
         nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
             all layers have the same number of nodes. If list, then the number of nodes in each
             layer is given by the list.
-        out_file (Path): The file to save the plot to.
+        out_file (Path): The file to save the plot to. If None, no plot is saved
+        node_labels: The labels for each node in the graph. If None, then no labels are added.
+        hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes.
+        ax: The axis to plot the graph on. If None, then a new figure is created.
+        const_edge_norm (Optional[float]): The value to normalize the edges by. If None, will choose
+            a different value for each layer (the sum of the absolute values of the edges).
+        colors (Optional[list[str]]): The colors to use for the nodes in each layer. If None, then
+            the tab10 colormap is used.
     """
     if isinstance(nodes_per_layer, int):
         # Note that there is one more layer than there edge matrices
@@ -203,13 +248,17 @@ def plot_rib_graph(
     max_layer_height = max(nodes_per_layer)
 
     edges = _prepare_edges_for_plotting(
-        raw_edges, nodes_per_layer, hide_const_edges=hide_const_edges
+        raw_edges,
+        nodes_per_layer,
+        hide_const_edges=hide_const_edges,
+        const_edge_norm=const_edge_norm,
     )
 
     # Create the undirected graph
     graph = nx.Graph()
 
-    fig, ax = plt.subplots(1, 1, figsize=(20, 10))
+    if ax is None:
+        _, ax = plt.subplots(1, 1, figsize=(20, 10))
 
     layers = _create_node_layers(edges)
     # Add nodes to the graph object
@@ -222,19 +271,23 @@ def plot_rib_graph(
     pos: dict[int, tuple[int, Union[int, float]]] = {}
     for i, layer in enumerate(layers):
         # Add extra spacing for nodes that have fewer nodes than the biggest layer
-        spacing = 1 if i == 0 else max_layer_height / len(layer)
+        spacing = max_layer_height / len(layer)
         for j, node in enumerate(layer):
             pos[node] = (i, j * spacing)
 
     # Draw nodes
-    colors = ["black", "green", "orange", "purple"]  # Add more colors if you have more layers
+    if colors is None:
+        # tab10 colormap
+        # convert from rgb to hex to avoid matplotlib warning
+        to_hex = lambda x: f"{int(x * 255):02x}"
+        colors = [f"#{to_hex(r)}{to_hex(g)}{to_hex(b)}" for r, g, b in plt.get_cmap("tab10").colors]  # type: ignore
     options = {"edgecolors": "tab:gray", "node_size": 100, "alpha": 0.3}
     for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
         nx.draw_networkx_nodes(
-            graph, pos, nodelist=layer, node_color=colors[i % len(colors)], **options
+            graph, pos, nodelist=layer, node_color=colors[i % len(colors)], ax=ax, **options
         )
         # Add layer label above the nodes
-        plt.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+        ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
 
     # Label nodes if node_labels is provided
     if node_labels is not None:
@@ -242,7 +295,7 @@ def plot_rib_graph(
         for i, layer in enumerate(layers):
             for j, node in enumerate(layer):
                 node_label_dict[node] = node_labels[i][j].replace("|", "\n")
-        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8)
+        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8, ax=ax)
 
     # Draw edges
     width_factor = 15
@@ -253,6 +306,7 @@ def plot_rib_graph(
         width=[width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
         alpha=1,
         edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
+        ax=ax,
     )
 
     plt.suptitle(exp_name)

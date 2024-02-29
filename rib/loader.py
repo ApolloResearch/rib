@@ -261,6 +261,7 @@ def prepare_dataset(
             tokens = example["input_ids"]
             all_tokens.extend(tokens)
     # Check number of eos tokens
+    logger.info("Counting eos tokens")
     len_dataset = len(dataset)  # type: ignore
     n_eos_tokens = all_tokens.count(tokenizer.eos_token_id)
     if not tokenized:
@@ -279,6 +280,7 @@ def prepare_dataset(
             f"Number of eos tokens ({all_tokens.count(tokenizer.eos_token_id)}) is smaller than "
             f"expected for a dataset of length {len_dataset}."
         )
+    logger.info(f"Number of eos tokens in dataset: {n_eos_tokens}")
     # Split the merged tokens into chunks that fit the context length
     raw_chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
     # Note that we ignore the final raw_chunk, as we get the label for the final token in a chunk

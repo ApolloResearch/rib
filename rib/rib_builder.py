@@ -352,7 +352,10 @@ class RibBuildResults(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
     exp_name: str = Field(..., description="The name of the experiment")
     mean_vectors: Optional[dict[str, torch.Tensor]] = Field(
-        default_factory=lambda: {}, description="Mean vectors at each node layer.", repr=False
+        default_factory=lambda: {},
+        description="Mean vectors at each node layer. Set to None if using center=False. Set to {} "
+        "if loading old Cs where we didn't store mean vectors.",
+        repr=False,
     )
     gram_matrices: dict[str, torch.Tensor] = Field(
         description="Gram matrices at each node layer.", repr=False
@@ -360,7 +363,10 @@ class RibBuildResults(BaseModel):
     interaction_rotations: list[InteractionRotation] = Field(
         description="Interaction rotation matrices (e.g. Cs, Us) at each node layer.", repr=False
     )
-    edges: list[Edges] = Field(description="The edges between each node layer.", repr=False)
+    edges: list[Edges] = Field(
+        description="The edges between each node layer. Set to [] if no edges calculated.",
+        repr=False,
+    )
     dist_info: DistributedInfo = Field(
         description="Information about the parallelisation setup used for the run."
     )

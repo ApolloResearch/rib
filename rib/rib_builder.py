@@ -66,7 +66,7 @@ from rib.distributed_utils import (
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
-from rib.loader import load_dataset, load_model_and_dataset_from_rib_config
+from rib.loader import load_dataset, load_model, load_model_and_dataset_from_rib_config
 from rib.log import logger
 from rib.models import (
     MLPConfig,
@@ -150,15 +150,18 @@ class RibBuildConfig(BaseModel):
         ...,
         description="Whether to rotate the final node layer to its eigenbasis or not.",
     )
-    dataset: Union[
-        ModularArithmeticDatasetConfig,
-        HFDatasetConfig,
-        VisionDatasetConfig,
-        BlockVectorDatasetConfig,
+    dataset: Optional[
+        Union[
+            ModularArithmeticDatasetConfig,
+            HFDatasetConfig,
+            VisionDatasetConfig,
+            BlockVectorDatasetConfig,
+        ]
     ] = Field(
         ...,
         discriminator="dataset_type",
-        description="The dataset to use to build the graph.",
+        description="The dataset to use to build the graph. Is allowed to be None if computing"
+        "gram matrices only.",
     )
     gram_dataset: Optional[
         Union[
@@ -274,6 +277,15 @@ class RibBuildConfig(BaseModel):
         ]
         if sum(1 for val in model_options if val is not None) != 1:
             raise ValueError(f"Exactly one of {model_options} must be set")
+
+        if self.dataset is None:
+            if self.calculate_Cs or self.calculate_edges:
+                raise ValueError("dataset must be set if calculate_Cs or calculate_edges is True")
+            if self.gram_dataset is None:
+                raise ValueError("dataset must be set if gram_dataset is None")
+            if self.eval_type is not None:
+                raise ValueError("dataset must be set if eval_type is not None")
+
         if self.calculate_edges and not self.calculate_Cs:
             raise ValueError("calculate_edges=True requires calculate_Cs=True")
 
@@ -735,9 +747,18 @@ def rib_build(
     calc_C_time = None
     calc_edges_time = None
 
-    model, dataset = load_model_and_dataset_from_rib_config(config, device=device, dtype=dtype)
-    logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
+    model = load_model(config, device=device, dtype=dtype)
+
+    if config.dataset is not None:
+        dataset = load_dataset(
+            dataset_config=config.dataset,
+            model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
+            tlens_model_path=config.tlens_model_path,
+        )
+        logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
+
     if config.gram_dataset is None:
+        # asserrt config.dataset is not None
         gram_dataset = dataset
     elif config.gram_matrices_path is None and config.interaction_matrices_path is None:
         gram_dataset = load_dataset(

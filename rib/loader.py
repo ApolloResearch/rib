@@ -453,31 +453,25 @@ def load_dataset(
         return create_block_vector_dataset(dataset_config=dataset_config)
 
 
-def load_model_and_dataset_from_rib_config(
+def load_model(
     rib_config: "RibBuildConfig",
     device: str,
     dtype: torch.dtype,
-    dataset_config: Optional[DatasetConfig] = None,
     node_layers: Optional[list[str]] = None,
 ) -> Tuple[Union[SequentialTransformer, MLP], Dataset]:
-    """Loads the model and dataset for a rib build based on the config.
-
-    Combines both model and dataset loading in one function as the dataset conditionally needs
-    extra arguments depending on the dataset type.
+    """Loads the model for a rib build based on the config.
 
     Args:
         rib_config (RibBuildConfig): The rib build config.
         device (str): The device to use for the model.
         dtype (torch.dtype): The dtype to use for the model.
-        dataset_config (Optional[DatasetConfig]): The dataset config to use. If None, uses the
-            dataset config from the rib_config.
         node_layers (Optional[list[str]]): The node layers to use for the model. If None, uses the
             node layers from the rib_config. Note that changing the sections in the model has no
             effect on the model computation, so we allow specifying any node_layers for the
             convenience of hooking different sections of the model.
 
     Returns:
-        tuple[Union[SequentialTransformer, MLP], Dataset]: The model and dataset.
+        Union[SequentialTransformer, MLP]: The model.
     """
     model: Union[SequentialTransformer, MLP]
     if rib_config.mlp_path is not None or rib_config.modular_mlp_config is not None:
@@ -509,12 +503,39 @@ def load_model_and_dataset_from_rib_config(
             device=device,
         )
     model.eval()
-    dataset_config = dataset_config or rib_config.dataset
+    return model
 
+
+def load_model_and_dataset_from_rib_config(
+    rib_config: "RibBuildConfig",
+    device: str,
+    dtype: torch.dtype,
+    dataset_config: Optional[DatasetConfig] = None,
+    node_layers: Optional[list[str]] = None,
+) -> Tuple[Union[SequentialTransformer, MLP], Dataset]:
+    """Loads the model and dataset for a rib build based on the config.
+
+    Combines both model and dataset loading in one function as the dataset conditionally needs
+    extra arguments depending on the dataset type.
+
+    Args:
+        rib_config (RibBuildConfig): The rib build config.
+        device (str): The device to use for the model.
+        dtype (torch.dtype): The dtype to use for the model.
+        dataset_config (Optional[DatasetConfig]): The dataset config to use. If None, uses the
+            dataset config from the rib_config.
+        node_layers (Optional[list[str]]): The node layers to use for the model. If None, uses the
+            node layers from the rib_config. Note that changing the sections in the model has no
+            effect on the model computation, so we allow specifying any node_layers for the
+            convenience of hooking different sections of the model.
+
+    Returns:
+        tuple[Union[SequentialTransformer, MLP], Dataset]: The model and dataset.
+    """
+    model = load_model(rib_config, device, dtype, node_layers)
     dataset = load_dataset(
-        dataset_config=dataset_config,
-        model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
+        dataset_config or rib_config.dataset_config,
+        model_n_ctx=model.n_ctx if isinstance(model, SequentialTransformer) else None,
         tlens_model_path=rib_config.tlens_model_path,
     )
-
     return model, dataset

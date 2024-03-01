@@ -537,7 +537,7 @@ def load_model_and_dataset_from_rib_config(
     model = load_model(rib_config, device, dtype, node_layers)
     dataset = load_dataset(
         dataset_config,
-        model_n_ctx=model.n_ctx if isinstance(model, SequentialTransformer) else None,
+        model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
         tlens_model_path=rib_config.tlens_model_path,
     )
     return model, dataset

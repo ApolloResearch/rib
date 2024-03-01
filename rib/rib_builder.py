@@ -35,6 +35,7 @@ distribute as evenly as possible across all availible GPUs. The rank-0 process w
 and output it as a single file.
 """
 
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -345,6 +346,9 @@ class RibBuildResults(BaseModel):
     calc_edges_time: Optional[float] = Field(
         None, description="The time taken (in minutes) to calculate the edges."
     )
+    git_commit_id: str = Field(
+        "", description="The git commit id of the rib repo used to run the script."
+    )
 
 
 def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildConfig) -> None:
@@ -594,6 +598,7 @@ def rib_build(
     """
     config = load_config(config_path_or_obj, config_model=RibBuildConfig)
 
+    git_commit_id = subprocess.check_output(["git", "rev-parse", "HEAD"]).strip().decode("utf-8")
     dist_info = get_dist_info(n_pods=n_pods, pod_rank=pod_rank)
 
     # we increment the seed between processes so we generate different phis. This is because
@@ -790,6 +795,7 @@ def rib_build(
         ml_model_config=model.cfg,
         calc_C_time=calc_C_time,
         calc_edges_time=calc_edges_time,
+        git_commit_id=git_commit_id,
     )
 
     if out_file is not None:

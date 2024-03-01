@@ -458,7 +458,7 @@ def load_model(
     device: str,
     dtype: torch.dtype,
     node_layers: Optional[list[str]] = None,
-) -> Tuple[Union[SequentialTransformer, MLP], Dataset]:
+) -> Union[SequentialTransformer, MLP]:
     """Loads the model for a rib build based on the config.
 
     Args:
@@ -532,9 +532,11 @@ def load_model_and_dataset_from_rib_config(
     Returns:
         tuple[Union[SequentialTransformer, MLP], Dataset]: The model and dataset.
     """
+    dataset_config = dataset_config or rib_config.dataset
+    assert dataset_config is not None, "dataset_config or rib_config.dataset must be provided"
     model = load_model(rib_config, device, dtype, node_layers)
     dataset = load_dataset(
-        dataset_config or rib_config.dataset_config,
+        dataset_config,
         model_n_ctx=model.n_ctx if isinstance(model, SequentialTransformer) else None,
         tlens_model_path=rib_config.tlens_model_path,
     )

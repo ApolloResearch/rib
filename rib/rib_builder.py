@@ -66,7 +66,7 @@ from rib.distributed_utils import (
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
-from rib.loader import load_dataset, load_model, load_model_and_dataset_from_rib_config
+from rib.loader import load_dataset, load_model
 from rib.log import logger
 from rib.models import (
     MLPConfig,
@@ -401,15 +401,43 @@ class RibBuildResults(BaseModel):
     )
 
 
-def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildConfig) -> None:
+def _getattr_recursive(obj, attr):
+    """Get the value of an attribute-path (where the path is separated by ".")."""
+    for part in attr.split("."):
+        obj = getattr(obj, part)
+    return obj
+
+
+def _verify_compatible_configs(
+    config: RibBuildConfig, loaded_config: RibBuildConfig, whitelist=None
+):
     """Ensure that the config for calculating edges is compatible with that used to calculate Cs.
+
+    Args:
+        config: The current config
+        loaded_config: The config that was used to calculate the loaded file
+        whitelist: A list of attributes that are allowed to differ between the two configs. Defaults
+            to an empty list.
 
     TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
     path management nice with this Config being defined in this file in the rib_scripts dir.
     """
-    assert (
-        config.dataset.dataset_type == loaded_config.dataset.dataset_type
-    ), "Dataset types must match"
+    # Fields that we don't need to verify
+    whitelist = whitelist or []
+    whitelist += [
+        "exp_name",
+        "out_dir",
+        "gram_matrices_path",
+        "interaction_matrices_path",
+        "eval_type",
+        "calculate_Cs",
+        "calculate_edges",
+        "batch_size",
+        "batch_size_gram",
+        "batch_size_edges",
+        "dist_split_over",
+        "node_layers",
+    ]
 
     # config.node_layers must be a subsequence of loaded_config.node_layers
     assert "|".join(config.node_layers) in "|".join(loaded_config.node_layers), (
@@ -418,66 +446,83 @@ def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildCo
         "calculate the edges."
     )
 
-    # The following attributes must exactly match across configs
-    for attr in [
+    # TODO: This should be automatic, just iterate through all fields in the model. But that's a
+    # different PR.
+    for field in [
         "tlens_model_path",
         "tlens_pretrained",
+        "dataset.dataset_type",
+        "dataset.name",
+        "dataset.return_set",
+        "dataset.return_set_frac",
+        "dataset.return_set_portion",
+        "dataset.n_documents",
+        "dataset.n_samples",
+        "dataset.n_ctx",
+        "gram_dataset.dataset_type",
+        "gram_dataset.name",
+        "gram_dataset.return_set",
+        "gram_dataset.return_set_frac",
+        "gram_dataset.return_set_portion",
+        "gram_dataset.n_documents",
+        "gram_dataset.n_samples",
+        "gram_dataset.n_ctx",
+        "rotate_final_node_layer",
+        "dtype",
+        "truncation_threshold",
+        "n_intervals",
+        "integration_method",
+        "center",
+        "naive_gradient_flow",
+        "n_stochastic_sources_basis_pos",
+        "n_stochastic_sources_basis_hidden",
+        "n_stochastic_sources_edges",
+        "edge_formula",
+        "basis_formula",
     ]:
-        assert getattr(config, attr) == getattr(loaded_config, attr), (
-            f"{attr} in config ({getattr(config, attr)}) does not match "
-            f"{attr} in loaded matrices ({getattr(loaded_config, attr)})"
-        )
-
-    # Verify that, for huggingface and torchvision datasets, we're not trying to calculate edges on
-    # data that wasn't used to calculate the Cs
-    if hasattr(config.dataset, "name"):
-        assert hasattr(loaded_config.dataset, "name"), "loaded_config doesn't have a dataset name"
-        assert config.dataset.name == loaded_config.dataset.name, "Dataset names must match"
-    assert config.dataset.return_set == loaded_config.dataset.return_set, "Return sets must match"
-    if isinstance(config.dataset, HFDatasetConfig):
-        assert isinstance(loaded_config.dataset, HFDatasetConfig)
-        if config.dataset.return_set_frac is not None:
-            assert (
-                loaded_config.dataset.return_set_frac is not None
-            ), "Can't set return_set_frac if the loaded config didn't use it"
-            assert (
-                config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
-            ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
-        elif config.dataset.n_samples is not None:
-            assert loaded_config.dataset.n_samples is not None
-            if config.dataset.n_samples != loaded_config.dataset.n_samples:
+        if field not in whitelist:
+            # Both configs should have the same fields because they're both RibBuildConfigs so
+            # no need to check has_attr.
+            val1 = _getattr_recursive(config, field)
+            val2 = _getattr_recursive(loaded_config, field)
+            if val1 != val2:
                 logger.warning(
-                    "The loaded config uses a different number of samples than the current config. Is this intended?"
+                    f"{field} in config ({val1}) does not match {field} in loaded_config ({val2})"
                 )
+                # TODO Raise an error here once we're sure it won't disrupt a big run due to some
+                # mismatched fields from old files where we didn't pay attention to this.
 
 
-def load_interaction_rotations(
+def load_partial_results(
     config: RibBuildConfig,
     device: torch.device,
+    path: Union[str, Path],
+    return_interaction_rotations: bool = True,
 ) -> tuple[
     dict[str, Float[Tensor, "orig"]],
     dict[str, Float[Tensor, "orig orig"]],
     list[InteractionRotation],
 ]:
-    """Load pre-saved grams and interaction rotation matrices from file.
+    """Load pre-saved mean vectors, gram matrices and interaction rotation matrices from file.
 
-    Useful for just calculating edges on large models.
+    Useful for just calculating Cs or edges on large models.
 
     Args:
         config: The config used to calculate the C matrices.
+        device: The device to move the matrices to.
+        return_interaction_rotations: Whether to return the interaction rotations. Set to False to
+            load mean vectors and gram matrices only.
 
     Returns:
-        The gram matrices and InteractionRotation objects
+        The mean vectors, gram matrices and interaction rotations
     """
-    logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
-    assert config.interaction_matrices_path is not None
-    matrices_info = torch.load(config.interaction_matrices_path)
+    logger.info("Loading pre-saved results from %s", path)
+    matrices_info = torch.load(path)
 
-    config_dict = config.model_dump()
     # The loaded config might have a different schema. Only pass fields that are still valid.
+    # FIXME: Move the code below into it's own function, or into _verify_compatible_configs.
+    config_dict = config.model_dump()
     valid_fields = list(config_dict.keys())
-
-    # If not all fields are valid, log a warning
     loaded_config_dict: dict = {}
     for loaded_key in matrices_info["config"]:
         if loaded_key in valid_fields:
@@ -487,14 +532,15 @@ def load_interaction_rotations(
                 "The following field in the loaded config is no longer supported and will be ignored:"
                 f" {loaded_key}"
             )
-
     loaded_config = RibBuildConfig(**loaded_config_dict)
+    # Verify configs
     _verify_compatible_configs(config, loaded_config)
 
-    interaction_rotations = [
-        InteractionRotation(**data) for data in matrices_info["interaction_rotations"]
-    ]
-
+    interaction_rotations = (
+        [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
+        if return_interaction_rotations
+        else []
+    )
     mean_vectors = matrices_info["mean_vectors"] if "mean_vectors" in matrices_info else {}
     gram_matrices = matrices_info["gram_matrices"]
 
@@ -503,50 +549,6 @@ def load_interaction_rotations(
     gram_matrices = {k: v.to(device) for k, v in gram_matrices.items()}
 
     return mean_vectors, gram_matrices, interaction_rotations
-
-
-def load_mean_vectors_and_gram_matrices(
-    config: RibBuildConfig, device: torch.device
-) -> tuple[Optional[dict[str, Float[Tensor, "orig"]]], dict[str, Float[Tensor, "orig orig"]]]:
-    """Load pre-saved mean and gram matrices from file.
-
-    Args:
-        config: The config used to calculate the matrices.
-
-    Returns:
-        The mean and gram matrices
-    """
-    logger.info("Loading pre-saved mean and gram matrices from %s", config.gram_matrices_path)
-    assert config.gram_matrices_path is not None
-    matrices_info = torch.load(config.gram_matrices_path)
-
-    config_dict = config.model_dump()
-    # The loaded config might have a different schema. Only pass fields that are still valid.
-    valid_fields = list(config_dict.keys())
-
-    # If not all fields are valid, log a warning
-    loaded_config_dict: dict = {}
-    for loaded_key in matrices_info["config"]:
-        if loaded_key in valid_fields:
-            loaded_config_dict[loaded_key] = matrices_info["config"][loaded_key]
-        else:
-            logger.warning(
-                "The following field in the loaded config is no longer supported and will be ignored:"
-                f" {loaded_key}"
-            )
-
-    loaded_config = RibBuildConfig(**loaded_config_dict)
-    # _verify_compatible_configs(config, loaded_config)
-
-    # Move to device and return
-    mean_vectors = (
-        {k: v.to(device) for k, v in matrices_info["mean_vectors"].items()}
-        if matrices_info["mean_vectors"]
-        else None
-    )
-    gram_matrices = {k: v.to(device) for k, v in matrices_info["gram_matrices"].items()}
-
-    return mean_vectors, gram_matrices
 
 
 def _get_out_file_path(
@@ -834,11 +836,21 @@ def rib_build(
         logger.info("Time to collect gram matrices: %.2f minutes", calc_grams_time)
     elif config.gram_matrices_path is not None:
         logger.info("Skipping gram matrix calculation, loading pre-saved gram matrices")
-        mean_vectors, gram_matrices = load_mean_vectors_and_gram_matrices(config, device)
+        mean_vectors, gram_matrices, _ = load_partial_results(
+            config,
+            device,
+            path=config.gram_matrices_path,
+            return_interaction_rotations=False,
+        )
     elif config.interaction_matrices_path is not None:
-        # We can also load the gram matrices from the interaction_matrices_path
+        # We can also load the gram matrices from an interaction_matrices_path
         logger.info("Skipping gram matrix calculation, loading means and grams from pre-saved Cs")
-        mean_vectors, gram_matrices, _ = load_interaction_rotations(config, device)
+        mean_vectors, gram_matrices, _ = load_partial_results(
+            config,
+            device,
+            path=config.interaction_matrices_path,
+            return_interaction_rotations=False,
+        )
     else:
         assert False, "This else should never be reached"
 
@@ -880,8 +892,8 @@ def rib_build(
         torch.cuda.reset_peak_memory_stats()
     elif config.calculate_Cs and config.interaction_matrices_path is not None:
         logger.info("Skipping Cs calculation, loading pre-saved Cs")
-        mean_vectors, gram_matrices, interaction_rotations = load_interaction_rotations(
-            config, device
+        mean_vectors, gram_matrices, interaction_rotations = load_partial_results(
+            config, device, path=config.interaction_matrices_path
         )
     else:
         logger.info("Not computing or loading Cs.")

@@ -258,12 +258,12 @@ def prepare_dataset(
             # https://github.com/EleutherAI/pythia/issues/123#issuecomment-1791136253
             all_tokens.extend(tokens + [tokenizer.eos_token_id])
         else:
+            # Time: This loop can take around 2min for 450M tokens (99% TinyStories)
             tokens = example["input_ids"]
             all_tokens.extend(tokens)
     # Check number of eos tokens
     len_dataset = len(dataset)  # type: ignore
     if not tokenized:
-        logger.info("Counting eos tokens")
         n_eos_tokens = all_tokens.count(tokenizer.eos_token_id)
         # When we tokenize the dataset ourselves then len_dataset is the number of actual stories
         # and thus the number of eos tokens should match len_dataset.
@@ -271,11 +271,11 @@ def prepare_dataset(
             f"Number of eos tokens ({all_tokens.count(tokenizer.eos_token_id)}) does not match "
             f"number of samples ({len_dataset})."
         )
-        logger.info(f"Number of eos tokens in dataset: {n_eos_tokens}")
     # Note: You really should check the tokenized dataset you used, and make sure it behaves
     # correctly. We can't really properly check things here because datasets might differ
 
     # Split the merged tokens into chunks that fit the context length
+    # Time: This line can take around 45s for 450M tokens (99% TinyStories)
     raw_chunks = [all_tokens[i : i + n_ctx] for i in range(0, len(all_tokens), n_ctx)]
     # Note that we ignore the final raw_chunk, as we get the label for the final token in a chunk
     # from the subsequent chunk.
@@ -294,6 +294,7 @@ def prepare_dataset(
 
     chunks = [raw_chunks[i] for i in chunk_idxs]
 
+    # Time: This loop can take around 30s for 450M tokens (99% TinyStories)
     all_labels: list[list[int]] = []
     for i, chunk in enumerate(chunks):
         # Get the label for the last token using the next chunk in raw_chunks

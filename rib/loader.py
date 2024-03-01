@@ -272,7 +272,11 @@ def prepare_dataset(
             f"number of samples ({len_dataset})."
         )
     # Note: You really should check the tokenized dataset you used, and make sure it behaves
-    # correctly. We can't really properly check things here because datasets might differ
+    # correctly. We can't really assert this kind of thing.
+    # TinyStories (apollo-research/sae-skeskinen-TinyStories-hf-tokenizer-gpt2): Confirmed with
+    # tokenizer.decode(all_tokens) and tokenizer.decode(tokens) that the chunks that get
+    # concatenated are indeed follow-ups of each other. <eos> tokens are correctly placed at the
+    # end of each story.
 
     # Split the merged tokens into chunks that fit the context length
     # Time: This line can take around 45s for 450M tokens (99% TinyStories)

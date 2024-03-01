@@ -448,25 +448,13 @@ def _verify_compatible_configs(
 
     # TODO: This should be automatic, just iterate through all fields in the model. But that's a
     # different PR.
-    for field in [
+    list_of_fields = [
         "tlens_model_path",
         "tlens_pretrained",
         "dataset.dataset_type",
-        # "dataset.name",
         "dataset.return_set",
         "dataset.return_set_frac",
-        # "dataset.return_set_portion",
-        # "dataset.n_documents",
         "dataset.n_samples",
-        # "dataset.n_ctx",
-        # "gram_dataset.dataset_type",
-        # "gram_dataset.name",
-        # "gram_dataset.return_set",
-        # "gram_dataset.return_set_frac",
-        # "gram_dataset.return_set_portion",
-        # "gram_dataset.n_documents",
-        # "gram_dataset.n_samples",
-        # "gram_dataset.n_ctx",
         "rotate_final_node_layer",
         "dtype",
         "truncation_threshold",
@@ -479,7 +467,25 @@ def _verify_compatible_configs(
         "n_stochastic_sources_edges",
         "edge_formula",
         "basis_formula",
-    ]:
+    ]
+    if isinstance(config.dataset, HFDatasetConfig):
+        list_of_fields.extend(
+            ["dataset.name", "dataset.return_set_portion", "dataset.n_documents", "dataset.n_ctx"]
+        )
+        if config.gram_dataset is not None:
+            list_of_fields.extend(
+                [
+                    "gram_dataset.dataset_type",
+                    "gram_dataset.name",
+                    "gram_dataset.return_set",
+                    "gram_dataset.return_set_frac",
+                    "gram_dataset.return_set_portion",
+                    "gram_dataset.n_documents",
+                    "gram_dataset.n_samples",
+                    "gram_dataset.n_ctx",
+                ]
+            )
+    for field in list_of_fields:
         if field not in whitelist:
             # Both configs should have the same fields because they're both RibBuildConfigs so
             # no need to check has_attr.

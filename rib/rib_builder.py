@@ -46,7 +46,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import Tensor
 from torch.utils.data import DataLoader, Subset
 
-from rib.data import DatasetConfig, HFDatasetConfig
+from rib.data import (
+    BlockVectorDatasetConfig,
+    HFDatasetConfig,
+    ModularArithmeticDatasetConfig,
+    VisionDatasetConfig,
+)
 from rib.data_accumulator import (
     Edges,
     collect_dataset_means,
@@ -145,12 +150,24 @@ class RibBuildConfig(BaseModel):
         ...,
         description="Whether to rotate the final node layer to its eigenbasis or not.",
     )
-    dataset: DatasetConfig = Field(
+    dataset: Union[
+        ModularArithmeticDatasetConfig,
+        HFDatasetConfig,
+        VisionDatasetConfig,
+        BlockVectorDatasetConfig,
+    ] = Field(
         ...,
         discriminator="dataset_type",
         description="The dataset to use to build the graph.",
     )
-    gram_dataset: Optional[DatasetConfig] = Field(
+    gram_dataset: Optional[
+        Union[
+            ModularArithmeticDatasetConfig,
+            HFDatasetConfig,
+            VisionDatasetConfig,
+            BlockVectorDatasetConfig,
+        ]
+    ] = Field(
         None,
         discriminator="dataset_type",
         description="The dataset to use for the gram matrix. Defaults to the same dataset as the"

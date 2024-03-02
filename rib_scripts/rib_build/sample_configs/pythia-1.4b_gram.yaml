@@ -1,0 +1,203 @@
+exp_name: pythia-1.4b-testing
+seed: 0
+tlens_pretrained: pythia-1.4b
+tlens_model_path: null
+dataset:
+  dataset_type: huggingface
+  name: apollo-research/sae-monology-pile-uncopyrighted-tokenizer-EleutherAI-gpt-neox-20b
+  tokenizer_name: EleutherAI/pythia-14m
+  return_set: train
+  return_set_frac: null
+  n_documents: 200
+  n_samples: 250
+  return_set_portion: first
+  n_ctx: 128
+  seed: 0
+gram_dataset:
+  dataset_type: huggingface
+  name: apollo-research/sae-monology-pile-uncopyrighted-tokenizer-EleutherAI-gpt-neox-20b
+  tokenizer_name: EleutherAI/pythia-14m
+  return_set: train
+  return_set_frac: null
+  n_documents: 400000
+  n_samples: 500000
+  return_set_portion: first
+  n_ctx: 128
+  seed: 0
+eval_type: null
+# RIB layers
+node_layers:
+  - ln1.0
+  - ln1_out.0
+  - attn_in.0
+  - ln2.0
+  - ln2_out.0
+  - mlp_in.0
+  - ln1.1
+  - ln1_out.1
+  - attn_in.1
+  - ln2.1
+  - ln2_out.1
+  - mlp_in.1
+  - ln1.2
+  - ln1_out.2
+  - attn_in.2
+  - ln2.2
+  - ln2_out.2
+  - mlp_in.2
+  - ln1.3
+  - ln1_out.3
+  - attn_in.3
+  - ln2.3
+  - ln2_out.3
+  - mlp_in.3
+  - ln1.4
+  - ln1_out.4
+  - attn_in.4
+  - ln2.4
+  - ln2_out.4
+  - mlp_in.4
+  - ln1.5
+  - ln1_out.5
+  - attn_in.5
+  - ln2.5
+  - ln2_out.5
+  - mlp_in.5
+  - ln1.6
+  - ln1_out.6
+  - attn_in.6
+  - ln2.6
+  - ln2_out.6
+  - mlp_in.6
+  - ln1.7
+  - ln1_out.7
+  - attn_in.7
+  - ln2.7
+  - ln2_out.7
+  - mlp_in.7
+  - ln1.8
+  - ln1_out.8
+  - attn_in.8
+  - ln2.8
+  - ln2_out.8
+  - mlp_in.8
+  - ln1.9
+  - ln1_out.9
+  - attn_in.9
+  - ln2.9
+  - ln2_out.9
+  - mlp_in.9
+  - ln1.10
+  - ln1_out.10
+  - attn_in.10
+  - ln2.10
+  - ln2_out.10
+  - mlp_in.10
+  - ln1.11
+  - ln1_out.11
+  - attn_in.11
+  - ln2.11
+  - ln2_out.11
+  - mlp_in.11
+  - ln1.12
+  - ln1_out.12
+  - attn_in.12
+  - ln2.12
+  - ln2_out.12
+  - mlp_in.12
+  - ln1.13
+  - ln1_out.13
+  - attn_in.13
+  - ln2.13
+  - ln2_out.13
+  - mlp_in.13
+  - ln1.14
+  - ln1_out.14
+  - attn_in.14
+  - ln2.14
+  - ln2_out.14
+  - mlp_in.14
+  - ln1.15
+  - ln1_out.15
+  - attn_in.15
+  - ln2.15
+  - ln2_out.15
+  - mlp_in.15
+  - ln1.16
+  - ln1_out.16
+  - attn_in.16
+  - ln2.16
+  - ln2_out.16
+  - mlp_in.16
+  - ln1.17
+  - ln1_out.17
+  - attn_in.17
+  - ln2.17
+  - ln2_out.17
+  - mlp_in.17
+  - ln1.18
+  - ln1_out.18
+  - attn_in.18
+  - ln2.18
+  - ln2_out.18
+  - mlp_in.18
+  - ln1.19
+  - ln1_out.19
+  - attn_in.19
+  - ln2.19
+  - ln2_out.19
+  - mlp_in.19
+  - ln1.20
+  - ln1_out.20
+  - attn_in.20
+  - ln2.20
+  - ln2_out.20
+  - mlp_in.20
+  - ln1.21
+  - ln1_out.21
+  - attn_in.21
+  - ln2.21
+  - ln2_out.21
+  - mlp_in.21
+  - ln1.22
+  - ln1_out.22
+  - attn_in.22
+  - ln2.22
+  - ln2_out.22
+  - mlp_in.22
+  - ln1.23
+  - ln1_out.23
+  - attn_in.23
+  - ln2.23
+  - ln2_out.23
+  - mlp_in.23
+  - ln_final
+  - ln_final_out
+  - unembed
+rotate_final_node_layer: true
+# GPUs
+gram_batch_size: 4
+batch_size: 6
+edge_batch_size: 6
+dist_split_over: out_dim
+# Common
+dtype: float64
+truncation_threshold: 1e-15
+n_intervals: 0
+integration_method: gradient
+center: true
+# Gram matrices
+gram_matrices_path: null
+# Basis matrices
+calculate_Cs: false
+interaction_matrices_path: null
+basis_formula: jacobian
+naive_gradient_flow: false
+n_stochastic_sources_basis_pos: 1
+n_stochastic_sources_basis_hidden: null
+# Edges
+calculate_edges: false
+edge_formula: squared
+n_stochastic_sources_edges: 1
+# ignore_0th_pos: true
+# out_dir: /mnt/ssd-interp/nix/interp/interp/pythia-scaling/1-4b/

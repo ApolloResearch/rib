@@ -8,22 +8,29 @@ from typing import Optional, Union
 
 import fire
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from rib.ablations import AblationConfig, BisectScheduleConfig, load_bases_and_ablate
 from rib.data import HFDatasetConfig
 from rib.log import logger
-from rib.modularity import AdaptiveEdgeNorm, GraphClustering
+from rib.modularity import (
+    EdgeNorm,
+    GraphClustering,
+    NodeNormalizedAdaptiveEdgeNorm,
+    SqrtNorm,
+)
 from rib.rib_builder import RibBuildResults
 from rib.utils import replace_pydantic_model
+from rib_scripts.rib_build.plot_graph import plot_modular_graph
 
 
 def _num_layers(results: RibBuildResults) -> int:
-    return max(int(nl.split(".")[1]) for nl in results.config.node_layers if "." in nl)
+    return max(int(nl.split(".")[1]) for nl in results.config.node_layers if "." in nl) + 1
 
 
 def edge_distribution(
-    results,
+    results: RibBuildResults,
     layout: Optional[tuple[int, int]] = None,
     xlim=(None, None),
     ylim=(None, 1),
@@ -41,7 +48,8 @@ def edge_distribution(
         ylim: The y-axis limits.
         vlines: A dictionary of node_layer -> float, drawn as vertical lines on the subplots.
     """
-    layout = layout or (_num_layers(results) // 4 + 1, 4)
+    n_layers = _num_layers(results)
+    layout = layout or (n_layers // 4, 4)
     ps = torch.cat([torch.linspace(0.02, 0.9, 70), torch.linspace(0.9, 1, 150)])
     figsize = (layout[1] * 3, layout[0] * 3)
     fig, axs = plt.subplots(*layout, figsize=figsize, sharex=True, sharey=True)
@@ -57,14 +65,15 @@ def edge_distribution(
             "mlp_in": cmap.colors[5],
         }
 
+    plt.xscale("log")
     for edge in results.edges:
         in_nl = edge.in_node_layer
         if in_nl in ["ln_final", "ln_final_out"]:
             continue
         prefix, layer = in_nl.split(".")
-        E = edge.E_hat.to(torch.float32)
-        xs = torch.quantile(E, ps).cpu().numpy()
-        ax = axs.flat[int(layer)]
+        E = edge.E_hat.to(torch.float32).cpu().numpy()
+        xs = np.quantile(E, ps)
+        ax: plt.Axes = axs.flat[int(layer)]
         color = get_prefix_colors()[prefix]
         ax.plot(xs, ps, label=in_nl, color=color)
         ax.set_title(f"layer {layer}")
@@ -72,13 +81,13 @@ def edge_distribution(
         if vlines is not None:
             ax.axvline(vlines[in_nl], color=color, linestyle="--")
 
-    for ax in axs.flat[len(results.edges) :]:
-        ax.axis("off")
+    for ax in axs.flat[n_layers + 1 :]:
+        ax.remove()
 
-    plt.xscale("log")
     plt.ylim(*ylim)
     plt.xlim(*xlim)
-    axs.flat[-1].legend()
+    axs.flat[n_layers - 1].legend()
+    plt.suptitle(f"{results.exp_name} edge ecdf")
     plt.tight_layout()
 
 
@@ -86,19 +95,15 @@ def run_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
     results_path = Path(results_path)
     results = RibBuildResults(**torch.load(results_path))
     assert isinstance(results.config.dataset, HFDatasetConfig)  # for mypy
-    dataset_return_sets = {
-        "roneneldan/TinyStories": "validation",
-        "NeelNanda/pile-10k": "train",  # no test
-    }
     dataset = replace_pydantic_model(
         results.config.dataset,
         {
-            "return_set": dataset_return_sets[results.config.dataset.name],
-            "n_samples": 10,
+            "return_set_portion": "last",
+            "n_samples": 100,
         },
     )
     config = AblationConfig(
-        exp_name=f"{results.exp_name}-bisect-{threshold}",
+        exp_name=f"{results.exp_name}-delta{threshold}-bisect",
         out_dir=results_path.parent.absolute(),
         ablation_type="edge",
         rib_results_path=results_path.absolute(),
@@ -124,29 +129,39 @@ def run_modularity(
     plot_edge_dist: bool = True,
     plot_piano: bool = True,
     plot_graph: bool = True,
+    log_norm=True,
 ):
     """
     This function runs modularity analysis on a RIB build and saves various helpful related plots.
     """
     results_path = Path(results_path)
     results = RibBuildResults(**torch.load(results_path))
-    ablation_path = (
-        results_path.parent / f"{results.exp_name}-bisect-{threshold}_edge_ablation_results.json"
-    )
-    if not ablation_path.exists():
-        logger.info("Ablation file not found, running ablation...")
-        run_bisect_ablation(results_path, threshold)
+    name_prefix = f"{results.exp_name}-delta{threshold}"
+    if log_norm:
+        ablation_path = results_path.parent / f"{name_prefix}-bisect_edge_ablation_results.json"
+        if not ablation_path.exists():
+            logger.info("Ablation file not found, running ablation...")
+            run_bisect_ablation(results_path, threshold)
 
-    edge_norm = AdaptiveEdgeNorm.from_bisect_results(ablation_path, results)
+        edge_norm: EdgeNorm = NodeNormalizedAdaptiveEdgeNorm.from_bisect_results(
+            ablation_path, results
+        )
+    else:
+        edge_norm = SqrtNorm()
 
     if plot_edge_dist:
-        xlim_buffer = 1.5
-        xlim = (
-            min(edge_norm.eps_by_layer.values()) / xlim_buffer,
-            max(edge_norm.eps_by_layer.values()) * xlim_buffer,
-        )
-        edge_distribution(results, vlines=edge_norm.eps_by_layer, xlim=xlim)
-        edge_dist_path = results_path.parent / f"edge_distribution_{threshold}.png"
+        if hasattr(edge_norm, "eps_by_layer"):
+            xlim_buffer = 1.5
+            xlim = (
+                min(edge_norm.eps_by_layer.values()) / xlim_buffer,
+                max(edge_norm.eps_by_layer.values()) * xlim_buffer,
+            )
+            vlines = edge_norm.eps_by_layer
+        else:
+            xlim = (None, None)
+            vlines = None
+        edge_distribution(results, vlines=vlines, xlim=xlim)
+        edge_dist_path = results_path.parent / f"{name_prefix}-edge_ecdf.png"
         plt.savefig(edge_dist_path)
         logger.info(f"Saved edge distribution plot to {edge_dist_path.absolute()}")
 
@@ -160,15 +175,17 @@ def run_modularity(
 
     if plot_piano:
         graph.paino_plot()
-        paino_path = results_path.parent / f"paino-lossdiff_{threshold}-gamma_{gamma}.png"
-        plt.suptitle(f"Nonsingleton clusters for threshold={threshold}, gamma={gamma}")
+        paino_path = results_path.parent / f"{name_prefix}-gamma{gamma}-paino.png"
+        plt.suptitle(
+            f"{results.exp_name}\nNonsingleton clusters for threshold={threshold}, gamma={gamma}"
+        )
         plt.savefig(paino_path)
         logger.info(f"Saved paino plot to {paino_path.absolute()}")
         plt.clf()
 
     if plot_graph:
-        rib_graph_path = results_path.parent / f"modular_graph_{threshold}.png"
-        graph.plot_rib_graph(out_file=rib_graph_path)
+        rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
+        plot_modular_graph(graph=graph, out_file=rib_graph_path)
 
 
 if __name__ == "__main__":

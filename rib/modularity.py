@@ -14,7 +14,6 @@ import tqdm
 from jaxtyping import Bool, Float
 
 from rib.rib_builder import RibBuildResults
-from rib_scripts.rib_build.plot_graph import plot_by_layer
 
 EdgeTensor = Float[torch.Tensor, "rib_out rib_in"]
 
@@ -37,6 +36,11 @@ class LogEdgeNorm(EdgeNorm):
 
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         return E.clip(min=self.eps).log10() - log10(self.eps)
+
+
+class SqrtNorm(EdgeNorm):
+    def __call__(self, E: torch.Tensor, node_layer: str) -> torch.Tensor:
+        return E.sqrt()
 
 
 class AdaptiveEdgeNorm(EdgeNorm):
@@ -73,6 +77,14 @@ class AdaptiveEdgeNorm(EdgeNorm):
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         eps = self.eps_by_layer[node_layer]
         return E.clip(min=eps).log10() - log10(eps)
+
+
+class NodeNormalizedAdaptiveEdgeNorm(AdaptiveEdgeNorm):
+    r"""Lognormalizes the edges, but also normalizes each edge by (E_ij / \sum_j E_ij)"""
+
+    def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
+        logE = super().__call__(E, node_layer)
+        return logE * (E.sqrt() / E.sqrt().sum(dim=0, keepdim=True))
 
 
 class Node(NamedTuple):
@@ -166,6 +178,12 @@ class GraphClustering:
         ]
         self.node_to_idx = {node: idx for idx, node in enumerate(self.nodes)}
         self._make_graph()
+        self._run_leiden()
+        self._make_clusters()
+
+    def update_gamma(self, gamma: float):
+        """Update the resolution parameter and re-run Leiden. Faster than creating a new Graph"""
+        self.gamma = gamma
         self._run_leiden()
         self._make_clusters()
 
@@ -313,23 +331,3 @@ class GraphClustering:
         ax.matshow(arr[:, 1:].T, cmap=cmap, origin="lower", norm=norm, aspect="auto")
         ax.set_xlabel("Node layer")
         ax.set_ylabel("RIB index")
-
-    def plot_rib_graph(
-        self,
-        clusters: ClusterListLike = "nonsingleton",
-        out_file=None,
-    ):
-        clusters_list = self._get_clusterlist(clusters)
-        arr = self._cluster_array(clusters_list)
-        clusters_for_plotting_fn = [
-            layer_clusters[: self.nodes_per_layer[nl]]
-            for nl, layer_clusters in zip(self.node_layers, arr.tolist(), strict=True)
-        ]
-        plot_by_layer(
-            self.results,
-            edge_norm=self.edge_norm,
-            const_edge_norm=0.3 * self.G.totalEdgeWeight() / len(self.results.edges),
-            clusters=clusters_for_plotting_fn,
-            out_file=out_file,
-            nodes_per_layer=150,  # max(self.nodes_per_layer.values()),
-        )

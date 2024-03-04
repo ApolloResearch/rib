@@ -668,7 +668,7 @@ class LayerNormOut(torch.nn.Module):
         # case to return bad loss if we find a negative variance, we think it's easier to just set
         # negative variances to zero -- this should suitably blow up the layer norm scale, and thus
         # produce a bad loss if and only if the layer norm scale was important.
-        if torch.any(var <= 0):
+        if torch.any(var < 0):
             logger.warning(
                 "Negative variance found. This should only occur in edge ablations. "
                 "Setting var to ReLU(var)."

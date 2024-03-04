@@ -285,7 +285,7 @@ class BisectSchedule:
         self._eval_type: Literal["accuracy", "ce_loss"] = eval_type
         self._upper_bound: int = n_vecs
         assert self._upper_bound > 0, "n_vecs must be positive"
-        self._lower_bound: int = 0
+        self._lower_bound: int = 1
         self._most_recent_proposal: int = -1
 
     def _get_proposal(self) -> int:

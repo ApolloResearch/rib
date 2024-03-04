@@ -260,6 +260,30 @@ def rotate_pre_forward_hook_fn(
         return adjusted_inputs
 
 
+def get_acts_pre_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: InputActType,
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: Union[str, list[str]],
+) -> None:
+    """Hook function for calculating the mean of the input activations.
+
+    Adds activations/dataset_size into hooked_data[hook_name][data_key].
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Tuple of inputs to the module.
+        hooked_data: Dictionary of hook data.
+        hook_name: Name of hook. Used as a 1st-level key in `hooked_data`.
+        data_key: Name of data. Used as a 2nd-level key in `hooked_data`.
+        dataset_size: Size of the dataset. Used to normalize the means.
+    """
+    assert isinstance(data_key, str), "data_key must be a string."
+    in_acts = torch.cat([x.detach().clone() for x in inputs], dim=-1)
+    _add_to_hooked_matrix(hooked_data, hook_name, data_key, in_acts)
+
+
 def edge_ablation_forward_hook_fn(
     module: torch.nn.Module,
     inputs: InputActType,

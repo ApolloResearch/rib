@@ -177,8 +177,8 @@ node_layers:
 rotate_final_node_layer: true
 # GPUs
 gram_batch_size: 4
-batch_size: 6
-edge_batch_size: 6
+batch_size: 3
+edge_batch_size: 3
 dist_split_over: out_dim
 # Common
 dtype: float64

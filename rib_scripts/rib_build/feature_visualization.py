@@ -15,7 +15,7 @@ from torch import Tensor
 
 def parse_activation_data(
     tokens: Int[Tensor, "batch pos"],
-    feature_acts: dict[str, Float[Tensor, "... some_feats"]],
+    feature_acts: Float[Tensor, "... some_feats"],
     final_resid_acts: Float[Tensor, "... d_resid"],
     feature_resid_dirs: Float[Tensor, "some_feats dim"],
     feature_indices_list: list[int],

@@ -127,7 +127,7 @@ def main(
     # W_U torch.Size([512, 48262]) = resid vocab
     # vocab_dict {22519: '&nbsp;Along', ...
 
-    fvp = FeatureVisParams(include_left_tables=False)
+    fvp = FeatureVisParams(include_left_tables=False, n_groups=9)
 
     assert resid_post is not None
     # device: Note that sae_viz uses their get_device function which always uses CUDA if available

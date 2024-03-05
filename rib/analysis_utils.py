@@ -70,9 +70,16 @@ def get_rib_acts_and_resid_final(
     device: str = "cuda",
     dtype: torch.dtype = torch.float32,
 ) -> dict[str, Float[torch.Tensor, "batch ... rotated"]]:
-    """Returns the activations in rib space when the model is run on the dataset.
+    """Returns the activations in rib space, as well as the activations just before the unembed.
 
-    Will be (cpu) memory intensive if the dataset is large.
+    This is used for the feature visualization tool.
+
+    Args:
+        hooked_model: The model to run.
+        data_loader: The data to run the model on.
+        interaction_rotations: The Cs for the RIB activations to get
+        device: The device to run the model on.
+        dtype: The dtype to run the model with.
     """
 
     def get_module_name(m_name):
@@ -81,6 +88,7 @@ def get_rib_acts_and_resid_final(
         else:
             return m_name
 
+    # RIB activations
     hooks = [
         Hook(
             name="rotated_acts",
@@ -92,7 +100,7 @@ def get_rib_acts_and_resid_final(
         for info in interaction_rotations
         if info.C is not None
     ]
-
+    # Pre-unembed activations
     hooks.append(
         Hook(
             name="final_resid_acts",
@@ -101,7 +109,7 @@ def get_rib_acts_and_resid_final(
             module_name=get_module_name("unembed"),
         )
     )
-
+    # Run the model
     with torch.inference_mode():
         run_dataset_through_model(
             hooked_model,
@@ -112,9 +120,9 @@ def get_rib_acts_and_resid_final(
             use_tqdm=True,
         )
 
-    rib_acts = {
+    acts = {
         m_name: torch.concatenate(act_list, dim=0).cpu()
         for m_name, act_list in hooked_model.hooked_data["rotated_acts"].items()
     }
     hooked_model.clear_hooked_data()
-    return rib_acts
+    return acts

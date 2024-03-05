@@ -13,6 +13,8 @@ from sae_vis.utils_fns import QuantileCalculator, TopK
 from torch import Tensor
 from tqdm import tqdm
 
+from rib.types import StrDtype
+
 
 def parse_activation_data(
     tokens: Int[Tensor, "batch n_ctx"],
@@ -61,6 +63,7 @@ def parse_activation_data(
             feature_resid_dir=feature_resid_dirs[i],
             W_U=W_U,
             fvp=fvp,
+            dtype=feature_acts.dtype,
         )
 
     # Get the logits of all features (i.e. the directions this feature writes to the logit output)

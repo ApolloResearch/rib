@@ -116,7 +116,6 @@ def main(
     assert C_pinv is not None, "Selected layer does not have a C_pinv [impossible, has C?]"
 
     # TODO Can we get a viz where our RIB dimensions are weird (2xresid etc.)
-    # TODO Please make device and dtype better
     # Smaller 0
     # Shape comparison from SAE VIZ demo.ipynb
     # tokens torch.Size([1024, 128]) = batch ctx
@@ -130,15 +129,16 @@ def main(
     fvp = FeatureVisParams(include_left_tables=False)
 
     assert resid_post is not None
+    # device: Note that sae_viz uses their get_device function which always uses CUDA if available
     mfd = parse_activation_data(
-        data.cpu(),  # torch.Size([500, 200])
-        rib_acts.to(torch.float32).cpu(),  # torch.Size([500, 200, 64])
-        resid_post.to(torch.float32).cpu(),  # torch.Size([500, 200, 64])
-        feature_resid_dirs=C_pinv[:, 1:].cpu().to(torch.float32),  # torch.Size([64, 65])
+        data.to(device),  # torch.Size([500, 200])
+        rib_acts.to(dtype).to(device),  # torch.Size([500, 200, 64])
+        resid_post.to(dtype).to(device),  # torch.Size([500, 200, 64])
+        feature_resid_dirs=C_pinv[:, 1:].to(device).to(dtype),  # torch.Size([64, 65])
         # (torch.Size([64, 64]) after slicing)
         feature_indices_list=range(len(C_pinv)),  # range(64)
         # ValueError: zip() argument 2 is longer than argument 1
-        W_U=W_U[1:].cpu().to(torch.float32),  # torch.Size([65, 50257])
+        W_U=W_U[1:].to(device).to(dtype),  # torch.Size([65, 50257])
         # (torch.Size([64, 50257]) after slicing
         vocab_dict=vocab_dict,  # 50257 entries
         fvp=fvp,

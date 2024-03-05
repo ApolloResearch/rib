@@ -408,6 +408,18 @@ def _getattr_recursive(obj, attr):
     return obj
 
 
+def _get_all_subfields(config):
+    field_paths = []
+    fields = set(list(config.model_fields.keys()))
+    for field in fields:
+        if not isinstance(getattr(config, field), BaseModel):
+            field_paths.append(field)
+        else:
+            subfields = _get_all_subfields(getattr(config, field))
+            field_paths.extend([f"{field}.{subfield}" for subfield in subfields])
+    return field_paths
+
+
 def _verify_compatible_configs(
     config: RibBuildConfig, loaded_config: RibBuildConfig, whitelist=None
 ):
@@ -422,7 +434,8 @@ def _verify_compatible_configs(
     TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
     path management nice with this Config being defined in this file in the rib_scripts dir.
     """
-    # Fields that we don't need to verify
+    # Fields that we don't need to verify. For this specific call (e.g. basis & edges stuff when
+    # loading gram matrices) + general fields that are allowed to differ (like batch size).
     whitelist = whitelist or []
     whitelist += [
         "exp_name",
@@ -433,8 +446,8 @@ def _verify_compatible_configs(
         "calculate_Cs",
         "calculate_edges",
         "batch_size",
-        "batch_size_gram",
-        "batch_size_edges",
+        "gram_batch_size",
+        "edge_batch_size",
         "dist_split_over",
         "node_layers",
     ]
@@ -446,45 +459,7 @@ def _verify_compatible_configs(
         "calculate the edges."
     )
 
-    # TODO: This should be automatic, just iterate through all fields in the model. But that's a
-    # different PR.
-    list_of_fields = [
-        "tlens_model_path",
-        "tlens_pretrained",
-        "dataset.dataset_type",
-        "dataset.return_set",
-        "dataset.return_set_frac",
-        "dataset.n_samples",
-        "rotate_final_node_layer",
-        "dtype",
-        "truncation_threshold",
-        "n_intervals",
-        "integration_method",
-        "center",
-        "naive_gradient_flow",
-        "n_stochastic_sources_basis_pos",
-        "n_stochastic_sources_basis_hidden",
-        "n_stochastic_sources_edges",
-        "edge_formula",
-        "basis_formula",
-    ]
-    if isinstance(config.dataset, HFDatasetConfig):
-        list_of_fields.extend(
-            ["dataset.name", "dataset.return_set_portion", "dataset.n_documents", "dataset.n_ctx"]
-        )
-        if config.gram_dataset is not None:
-            list_of_fields.extend(
-                [
-                    "gram_dataset.dataset_type",
-                    "gram_dataset.name",
-                    "gram_dataset.return_set",
-                    "gram_dataset.return_set_frac",
-                    "gram_dataset.return_set_portion",
-                    "gram_dataset.n_documents",
-                    "gram_dataset.n_samples",
-                    "gram_dataset.n_ctx",
-                ]
-            )
+    list_of_fields = set(_get_all_subfields(config) + _get_all_subfields(loaded_config))
     for field in list_of_fields:
         if field not in whitelist:
             # Both configs should have the same fields because they're both RibBuildConfigs so

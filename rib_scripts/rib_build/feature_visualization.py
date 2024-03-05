@@ -14,10 +14,10 @@ from torch import Tensor
 
 
 def parse_activation_data(
-    tokens: Int[Tensor, "batch pos"],
-    feature_acts: Float[Tensor, "... some_feats"],
-    final_resid_acts: Float[Tensor, "... d_resid"],
-    feature_resid_dirs: Float[Tensor, "some_feats dim"],
+    tokens: Int[Tensor, "batch n_ctx"],
+    feature_acts: Float[Tensor, "batch n_ctx n_feats"],
+    final_resid_acts: Float[Tensor, "batch n_ctx d_resid_end"],
+    feature_resid_dirs: Float[Tensor, "n_feats d_resid_feat"],
     feature_indices_list: list[int],
     W_U: Float[Tensor, "dim d_vocab"],
     vocab_dict: dict[int, str],
@@ -35,7 +35,8 @@ def parse_activation_data(
         feature_acts: The activations values of the features
         final_resid_acts: The activations of the final layer of the model
         feature_resid_dirs: The directions that each feature writes to the logit output
-        feature_indices_list: The indices of the features we're interested in
+        feature_indices_list: The indices of the features we're interested in. Note that if you
+            also need to adjust feature_resid_dirs to be only the features you're interested in.
         W_U: The weights of the logit lens
         vocab_dict: A dictionary mapping vocab indices to strings
         fvp: FeatureVisParams, containing a bunch of settings. See the FeatureVisParams docstring in

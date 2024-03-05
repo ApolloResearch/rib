@@ -105,7 +105,6 @@ def main(
     data = torch.cat(list_of_batches, dim=0)
 
     # TODO Can we get a viz where our RIB dimensions are weird (2xresid etc.)
-    # TODO What's up with the FIXME below
     # TODO Please make device and dtype better
     # TODO Get a progress bar for parse_activation_data
     # Shape comparison from SAE VIZ demo.ipynb
@@ -129,7 +128,6 @@ def main(
         feature_resid_dirs=C_pinv_mlp_in_3[:, 1:].cpu().to(torch.float32),  # torch.Size([64, 65])
         # (torch.Size([64, 64]) after slicing)
         feature_indices_list=range(len(C_pinv_mlp_in_3)),  # range(64)
-        # #FIXME This breaks if feature_indices_list isn't the full range
         # ValueError: zip() argument 2 is longer than argument 1
         W_U=W_U[1:].cpu().to(torch.float32),  # torch.Size([65, 50257])
         # (torch.Size([64, 50257]) after slicing

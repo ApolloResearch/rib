@@ -121,7 +121,7 @@ class Node(NamedTuple):
 
 
 class NodeCluster(NamedTuple):
-    """A single cluster found by a clustering algorithm.
+    """A cluster of nodes found by a clustering algorithm.
 
     `cluster_id` is the numeric id of the cluster, used by networkit.
     `nodes` is a list of `Node` objects in the cluster.
@@ -142,11 +142,12 @@ class NodeCluster(NamedTuple):
 
     def layers_counter(self):
         """Get a python Counter of the number of nodes in each node layer.
-             The Counter's keys are node layers (e.g. ln3.5), and the values are
-             how many nodes from this node layer are in the cluster."""
+        The Counter's keys are node layers (e.g. ln3.5), and the values are
+        how many nodes from this node layer are in the cluster."""
         return Counter(n.layer for n in self.nodes)
 
 
+# Used as argument to various methods. `nonsingleton` means all clusters with more than one node.
 ClusterListLike = Union[NodeCluster, list[NodeCluster], Literal["all", "nonsingleton"]]
 
 
@@ -154,11 +155,12 @@ class GraphClustering:
     """
     RIB results, along with the results to running Leiden on the wieghted RIB graph.
 
-    In particular, wraps around a networkit graph `G`, and a networkit (nk) partition `_nk_partition`.
-    networkit graphs index nodes by numeric ids. `self.nodes[i]` is the node with id `i`.
-    To get the id of a particualr node, use `self.node_to_idx[node]`.
+    In particular, wraps around a networkit (nk) graph `G`, and a networkit partition
+    `_nk_partition`. Networkit indexes nodes with numeric ids. `self.nodes[i]` is the node with
+    id `i`. To get the id of a particualr node, use `self.node_to_idx[node]`.
 
-    Edges can be optionally normalized when making the graph. Logarithmic normalization is recommended (and used in our paper). Default: No normalization.
+    Edges can be optionally normalized when making the graph. Logarithmic normalization is
+    tentatively recommended. Defaults to no normalization.
     """
 
     G: nk.Graph

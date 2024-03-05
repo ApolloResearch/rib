@@ -11,6 +11,7 @@ from sae_vis.data_storing_fns import (
 )
 from sae_vis.utils_fns import QuantileCalculator, TopK
 from torch import Tensor
+from tqdm import tqdm
 
 
 def parse_activation_data(
@@ -46,7 +47,12 @@ def parse_activation_data(
     middle_plots_data_dict: dict[int, MiddlePlotsData] = {}  # middle visualisation
     feature_dashboard_data: dict[int, FeatureData] = {}
     # Calculate all data for the right-hand visualisations, i.e. the sequences
-    for i, feat in enumerate(feature_indices_list):
+
+    for i, feat in tqdm(
+        enumerate(feature_indices_list),
+        desc="Getting sequence data",
+        total=len(feature_indices_list),
+    ):
         # Add this feature's sequence data to the list
         sequence_data_dict[feat] = get_sequences_data(
             tokens=tokens,
@@ -83,7 +89,6 @@ def parse_activation_data(
             freq_histogram_data=freq_histogram_data,
             frac_nonzero=frac_nonzero,
         )
-
     # Return the output, as a dict of FeatureData items
     for i, feat in enumerate(feature_indices_list):
         feature_dashboard_data[feat] = FeatureData(

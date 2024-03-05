@@ -106,7 +106,6 @@ def main(
 
     # TODO Can we get a viz where our RIB dimensions are weird (2xresid etc.)
     # TODO Please make device and dtype better
-    # TODO Get a progress bar for parse_activation_data
     # Shape comparison from SAE VIZ demo.ipynb
     # tokens torch.Size([1024, 128]) = batch ctx
     # all_feat_acts torch.Size([1024, 128, 10]) = batch ctx features
@@ -134,7 +133,6 @@ def main(
         vocab_dict=vocab_dict,  # 50257 entries
         fvp=fvp,
     )
-
     os.makedirs("./html/", exist_ok=True)
     generate_dashboard_html_files(mfd, "./html/")
 

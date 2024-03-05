@@ -3,7 +3,7 @@ from math import log10
 import networkit as nk
 import pytest
 
-from rib.modularity import AdaptiveEdgeNorm, GraphClustering, Node
+from rib.modularity import ByLayerLogEdgeNorm, GraphClustering, Node
 from rib.rib_builder import RibBuildResults, rib_build
 from tests.utils import assert_is_close, get_tinystories_config
 
@@ -58,7 +58,7 @@ def test_edge_norm(results: RibBuildResults):
     # should keep half of edges in each layer
     get_median = lambda edge: edge.E_hat.flatten().quantile(0.5).item()
     eps_by_layer = {edge.in_node_layer: get_median(edge) for edge in results.edges}
-    edge_norm = AdaptiveEdgeNorm(eps_by_layer=eps_by_layer)
+    edge_norm = ByLayerLogEdgeNorm(eps_by_layer=eps_by_layer)
     graph = GraphClustering(results, edge_norm=edge_norm)
 
     for _ in range(100):

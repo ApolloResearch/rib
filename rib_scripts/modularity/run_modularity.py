@@ -14,12 +14,7 @@ import torch
 from rib.ablations import AblationConfig, BisectScheduleConfig, load_bases_and_ablate
 from rib.data import HFDatasetConfig
 from rib.log import logger
-from rib.modularity import (
-    EdgeNorm,
-    GraphClustering,
-    NodeNormalizedAdaptiveEdgeNorm,
-    SqrtNorm,
-)
+from rib.modularity import ByLayerLogEdgeNorm, EdgeNorm, GraphClustering, SqrtNorm
 from rib.rib_builder import RibBuildResults
 from rib.utils import replace_pydantic_model
 from rib_scripts.rib_build.plot_graph import plot_modular_graph
@@ -41,6 +36,8 @@ def edge_distribution(
     Helpful for undetstanding the epsilon cutoffs used for edge normalization, especially with
     `edge_distribution(..., vlines=AdaptiveEdgeNorm.eps_by_layer)`.
 
+    Skips ln_final and ln_final_out layers.
+
     Args:
         results: The results from a RIB build.
         layout: The number of rows and columns of the plot.
@@ -50,7 +47,7 @@ def edge_distribution(
     """
     n_layers = _num_layers(results)
     layout = layout or (n_layers // 4, 4)
-    ps = torch.cat([torch.linspace(0.02, 0.9, 70), torch.linspace(0.9, 1, 150)])
+    qs = torch.cat([torch.linspace(0.01, 0.9, 100), torch.linspace(0.9, 1, 100)])
     figsize = (layout[1] * 3, layout[0] * 3)
     fig, axs = plt.subplots(*layout, figsize=figsize, sharex=True, sharey=True)
 
@@ -72,10 +69,10 @@ def edge_distribution(
             continue
         prefix, layer = in_nl.split(".")
         E = edge.E_hat.to(torch.float32).cpu().numpy()
-        xs = np.quantile(E, ps)
+        xs = np.quantile(E, qs)  # using np instead of torch as it's much much faster
         ax: plt.Axes = axs.flat[int(layer)]
         color = get_prefix_colors()[prefix]
-        ax.plot(xs, ps, label=in_nl, color=color)
+        ax.plot(xs, qs, label=in_nl, color=color)
         ax.set_title(f"layer {layer}")
 
         if vlines is not None:
@@ -144,9 +141,7 @@ def run_modularity(
             logger.info("Ablation file not found, running ablation...")
             run_bisect_ablation(results_path, threshold)
 
-        edge_norm: EdgeNorm = NodeNormalizedAdaptiveEdgeNorm.from_bisect_results(
-            ablation_path, results
-        )
+        edge_norm: EdgeNorm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
     else:
         edge_norm = SqrtNorm()
 

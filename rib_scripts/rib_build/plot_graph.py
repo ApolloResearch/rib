@@ -51,6 +51,8 @@ def plot_by_layer(
 
     You'll need to call the function from python if you want to use edge_norm.
 
+    Note: doesn't plot edges in the final layernorm.
+
     Args:
         results: The results file containing the graph edges.
         nodes_per_layer: The number of nodes per layer to plot.

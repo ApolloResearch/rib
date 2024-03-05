@@ -1,7 +1,6 @@
 # %%
 import json
 from collections import Counter
-from math import log10
 from random import triangular
 from typing import Literal, NamedTuple, Optional, Union, cast
 
@@ -26,24 +25,37 @@ class EdgeNorm:
 
 
 class IdentityEdgeNorm(EdgeNorm):
+    """Edges are not transformed."""
+
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         return E
 
 
-class LogEdgeNorm(EdgeNorm):
-    def __init__(self, eps):
-        self.eps = eps
-
-    def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
-        return E.clip(min=self.eps).log10() - log10(self.eps)
-
-
 class SqrtNorm(EdgeNorm):
+    """Sqrt-normalizes the edges."""
+
     def __call__(self, E: torch.Tensor, node_layer: str) -> torch.Tensor:
         return E.sqrt()
 
 
-class AdaptiveEdgeNorm(EdgeNorm):
+class LogEdgeNorm(EdgeNorm):
+    """Norms edges into log space, with `eps` as the 0 point. All edges < `eps` are set to 0."""
+
+    def __init__(self, eps):
+        self.eps = eps
+
+    def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
+        return (E / self.eps).log10().clip(min=0)
+
+
+class ByLayerLogEdgeNorm(EdgeNorm):
+    """
+    LogNormalizes the edges, with potentially a different epsilon for each layer.
+
+    Can be initialized either with a dictionary of `node_layer -> eps` or with the results of a
+    bisect ablation experiment (taking epsilon as the smallest edge that was not ablated).
+    """
+
     def __init__(self, eps_by_layer: dict[str, float]):
         self.eps_by_layer = eps_by_layer
 
@@ -51,6 +63,7 @@ class AdaptiveEdgeNorm(EdgeNorm):
     def _get_minimum_edge(
         E: EdgeTensor, mask: Bool[torch.Tensor, "rib_out rib_in"], ignore0: bool = True
     ) -> float:
+        """Get the minimum unmasked edge, potentially ignoring edges to/from the const dir."""
         if ignore0:
             E = E[1:, 1:]
             mask = mask[1:, 1:]
@@ -59,9 +72,11 @@ class AdaptiveEdgeNorm(EdgeNorm):
     @classmethod
     def from_bisect_results(
         cls, ablation_result_path, results: RibBuildResults
-    ) -> "AdaptiveEdgeNorm":
+    ) -> "ByLayerLogEdgeNorm":
         with open(ablation_result_path) as f:
             abl_result = json.load(f)
+        assert abl_result["config"]["ablation_type"] == "edge"
+        assert abl_result["config"]["schedule"]["schedule_type"] == "bisect"
         edge_masks = {
             nl: torch.tensor(abl_result["edge_masks"][nl][str(n_needed)])
             for nl, n_needed in abl_result["n_edges_required"].items()
@@ -69,18 +84,22 @@ class AdaptiveEdgeNorm(EdgeNorm):
         edges_by_layer = {edge.in_node_layer: edge for edge in results.edges}
         ignore0 = results.config.center
         eps_by_layer = {
-            nl: AdaptiveEdgeNorm._get_minimum_edge(edge.E_hat, edge_masks[nl], ignore0=ignore0)
+            nl: ByLayerLogEdgeNorm._get_minimum_edge(edge.E_hat, edge_masks[nl], ignore0=ignore0)
             for nl, edge in edges_by_layer.items()
         }
         return cls(eps_by_layer)
 
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         eps = self.eps_by_layer[node_layer]
-        return E.clip(min=eps).log10() - log10(eps)
+        return (E / eps).log10().clip(min=0)
 
 
-class NodeNormalizedAdaptiveEdgeNorm(AdaptiveEdgeNorm):
-    r"""Lognormalizes the edges, but also normalizes each edge by (E_ij / \sum_j E_ij)"""
+class NodeNormalizedLogEdgeNorm(ByLayerLogEdgeNorm):
+    r"""Lognormalizes the edges by layer, but also normalizes each edge by (E_ij / \sum_j E_ij).
+
+    This is an attempt to roughly capture node-connectivity based clustering algorithms, while still
+    using leiden. It's pretty hacky, however.
+    """
 
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         logE = super().__call__(E, node_layer)

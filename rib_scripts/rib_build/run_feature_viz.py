@@ -159,7 +159,7 @@ def main(
     )
 
     # Settings for the dashboard
-    fvp = FeatureVisParams(include_left_tables=False, n_groups=9)
+    fvp = FeatureVisParams(include_left_tables=False, include_middle_data=False, n_groups=9)
 
     # selected_node_layer = "ln1.7"
     selected_node_layer = None  # "mlp_in.7"

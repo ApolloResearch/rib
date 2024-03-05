@@ -73,12 +73,10 @@ def visualize_one_layer(
         data.to(device),  # torch.Size([500, 200])
         rib_acts.to(dtype).to(device),  # torch.Size([500, 200, 64])
         resid_post.to(dtype).to(device),  # torch.Size([500, 200, 64])
-        feature_resid_dirs=C_pinv[:, 1:].to(device).to(dtype),  # torch.Size([64, 65])
-        # (torch.Size([64, 64]) after slicing away the const direction)
+        feature_resid_dirs=C_pinv[:, :].to(device).to(dtype),  # torch.Size([64, 65])
         feature_indices_list=range(len(C_pinv)),  # range(64)
         # ValueError: zip() argument 2 is longer than argument 1
-        W_U=W_U[1:].to(device).to(dtype),  # torch.Size([65, 50257])
-        # (torch.Size([64, 50257]) after slicing
+        W_U=W_U[:].to(device).to(dtype),  # torch.Size([65, 50257])
         vocab_dict=vocab_dict,  # 50257 entries
         fvp=fvp,
     )
@@ -151,25 +149,23 @@ def main(
 
     # Get Cs & RIB activations over the dataset
     interaction_rotations = rib_results.interaction_rotations
-    acts = get_rib_acts_and_resid_final(
+    acts, resid_post = get_rib_acts_and_resid_final(
         hooked_model, data_loader, interaction_rotations, device=device, dtype=dtype
     )
-    resid_post = acts.pop("unembed")
 
     # Settings for the dashboard
     fvp = FeatureVisParams(include_left_tables=False, n_groups=9)
 
     # selected_node_layer = "ln1.7"
-    selected_node_layer = "mlp_in.7"
+    selected_node_layer = None  # "mlp_in.7"
 
     if selected_node_layer is None:
         for i, info in enumerate(interaction_rotations):
-            print(f"{i}: {info.node_layer}")
             out_dir = (
                 Path(__file__).parent
-                / f"html_feature_viz_{dataset_config.n_samples}samples_{info.node_layer}"
+                / f"html_pythia/feature_viz_{dataset_config.n_samples}samples_{info.node_layer}"
             )
-            print(f"Writing html to {out_dir}")
+            print(f"Getting html for {out_dir}")
             visualize_one_layer(
                 info.node_layer,
                 out_dir,
@@ -202,7 +198,10 @@ def main(
         )
 
 
-results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored_rib_stochpos1_ctx200_alllayers_10M/tinystories_nnib_samples50000_ctx200_rib_Cs.pt"
+# results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored_rib_stochpos1_ctx200_alllayers/tinystories_nnib_samples5000_ctx200_rib_Cs.pt"
+# results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored_rib_stochpos1_ctx200_alllayers/tinystories_nnib_samples5000_ctx200_rib_Cs.pt"
+results_path = "/mnt/ssd-interp/stefan/rib/rib_scripts/rib_build/out/pythia-1.4b-testing_rib_Cs.pt"
+#
 
 # dataset_config = HFDatasetConfig(
 #     **yaml.safe_load(
@@ -212,8 +211,8 @@ results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored
 # tokenizer_name: EleutherAI/gpt-neo-125M
 # return_set: train
 # return_set_frac: null
-# n_documents: 100000  # avg ~235 toks / document
-# n_samples: 50000
+# n_documents: 100  # avg ~235 toks / document
+# n_samples: 50
 # return_set_portion: first
 # n_ctx: 200 # needs to be <= 511 for the model to behave reasonably
 # """

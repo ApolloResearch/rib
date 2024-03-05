@@ -5,7 +5,7 @@ from jaxtyping import Float
 from torch.utils.data import DataLoader
 
 from rib.data_accumulator import run_dataset_through_model
-from rib.hook_fns import get_acts_pre_forward_hook_fn, rotate_pre_forward_hook_fn
+from rib.hook_fns import cache_pre_forward_hook_fn, rotate_pre_forward_hook_fn
 from rib.hook_manager import Hook, HookedModel
 from rib.interaction_algos import InteractionRotation
 
@@ -103,9 +103,9 @@ def get_rib_acts_and_resid_final(
     # Pre-unembed activations
     hooks.append(
         Hook(
-            name="final_resid_acts",
+            name="final_resid",
             data_key="final_resid_acts",
-            fn=get_acts_pre_forward_hook_fn,
+            fn=cache_pre_forward_hook_fn,
             module_name=get_module_name("unembed"),
         )
     )
@@ -124,5 +124,8 @@ def get_rib_acts_and_resid_final(
         m_name: torch.concatenate(act_list, dim=0).cpu()
         for m_name, act_list in hooked_model.hooked_data["rotated_acts"].items()
     }
+    resid_final_acts = torch.concatenate(
+        hooked_model.hooked_data["final_resid"]["final_resid_acts"], dim=0
+    ).cpu()
     hooked_model.clear_hooked_data()
-    return acts
+    return acts, resid_final_acts

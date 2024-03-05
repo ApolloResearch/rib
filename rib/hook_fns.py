@@ -260,6 +260,29 @@ def rotate_pre_forward_hook_fn(
         return adjusted_inputs
 
 
+def cache_pre_forward_hook_fn(
+    module: torch.nn.Module,
+    inputs: InputActType,
+    hooked_data: dict[str, Any],
+    hook_name: str,
+    data_key: str,
+) -> None:
+    """Hook function for getting the input tensor to a module.
+
+    Like rotate_pre_forward_hook_fn, but without rotation and always using "cache" model.
+
+    Args:
+        module: Module that the hook is attached to (not used).
+        inputs: Inputs to the module that we rotate.
+        hooked_data: Dictionary of hook data (not used for mode=modify).
+        hook_name: Name of hook (not used for mode=modify).
+        data_key: Name of data (not used for mode=modify).
+    """
+    # Concatenate over the embedding dimension
+    in_acts = torch.cat(inputs, dim=-1)
+    _append_to_hooked_list(hooked_data, hook_name, data_key, in_acts)
+
+
 def get_acts_pre_forward_hook_fn(
     module: torch.nn.Module,
     inputs: InputActType,

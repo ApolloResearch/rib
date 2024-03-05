@@ -21,13 +21,71 @@ from rib.rib_builder import RibBuildResults
 from rib.types import TORCH_DTYPES, StrDtype
 
 
-def generate_dashboard_html_files(multi_feature_data: MultiFeatureData, html_dir: str = ""):
+def generate_dashboard_html_files(multi_feature_data: MultiFeatureData, html_dir: Path):
     """Generates viewable HTML dashboards from the compressed multi_feature_dashboard_data"""
     for feature_idx in multi_feature_data.keys():
-        filepath = html_dir + f"dashboard_feature-{feature_idx}.html"
+        filepath = html_dir / f"dashboard_feature-{feature_idx}.html"
         html_str = multi_feature_data[feature_idx].get_html()
         with open(filepath, "w") as f:
             f.write(html_str)
+
+
+def find_corresponding_index(selected_node_layer: str, interaction_rotations: list) -> int:
+    for i, info in enumerate(interaction_rotations):
+        if info.node_layer == selected_node_layer:
+            return i
+    raise ValueError(f"Could not find {selected_node_layer} in interaction_rotations")
+
+
+def visualize_one_layer(
+    selected_node_layer: str,
+    out_dir: str | Path,
+    interaction_rotations: list,
+    acts: dict,
+    resid_post: torch.Tensor,
+    W_U: torch.Tensor,
+    vocab_dict: dict,
+    fvp: FeatureVisParams,
+    data: torch.Tensor,
+    device: str,
+    dtype: torch.dtype,
+):
+    # Get acts and C for the selected layer
+    layer_index = find_corresponding_index(selected_node_layer, interaction_rotations)
+    rib_acts = acts[selected_node_layer]
+    C = interaction_rotations[layer_index].C
+    C_pinv = interaction_rotations[layer_index].C_pinv
+    assert C is not None, "Selected layer does not have a C"
+    assert C_pinv is not None, "Selected layer does not have a C_pinv [impossible, has C?]"
+
+    # Shape comparison from SAE VIZ demo.ipynb
+    # tokens torch.Size([1024, 128]) = batch ctx
+    # all_feat_acts torch.Size([1024, 128, 10]) = batch ctx features
+    # final_resid_acts torch.Size([1024, 128, 512]) = batch ctx resid
+    # feature_resid_dirs torch.Size([10, 512]) = features resid
+    # feature_indices_list [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] = features
+    # W_U torch.Size([512, 48262]) = resid vocab
+    # vocab_dict {22519: '&nbsp;Along', ...
+
+    assert resid_post is not None
+    # device: Note that sae_viz uses their get_device function which always uses CUDA if available
+    mfd = parse_activation_data(
+        data.to(device),  # torch.Size([500, 200])
+        rib_acts.to(dtype).to(device),  # torch.Size([500, 200, 64])
+        resid_post.to(dtype).to(device),  # torch.Size([500, 200, 64])
+        feature_resid_dirs=C_pinv[:, 1:].to(device).to(dtype),  # torch.Size([64, 65])
+        # (torch.Size([64, 64]) after slicing away the const direction)
+        feature_indices_list=range(len(C_pinv)),  # range(64)
+        # ValueError: zip() argument 2 is longer than argument 1
+        W_U=W_U[1:].to(device).to(dtype),  # torch.Size([65, 50257])
+        # (torch.Size([64, 50257]) after slicing
+        vocab_dict=vocab_dict,  # 50257 entries
+        fvp=fvp,
+    )
+    out_path = Path(out_dir)
+    os.makedirs(out_path, exist_ok=True)
+    print("Writing html to", out_path)
+    generate_dashboard_html_files(mfd, html_dir=out_path)
 
 
 def main(
@@ -35,7 +93,7 @@ def main(
     dataset_cfg: Optional[HFDatasetConfig | str | Path] = None,
     device: str = "cuda",
     dtype_str: Optional[StrDtype] = None,
-    batch_size: Optional[int] = 10,
+    batch_size: Optional[int] = None,
 ):
     """Generates a dashboard for the RIB activations and residuals of a model.
 
@@ -98,70 +156,68 @@ def main(
     )
     resid_post = acts.pop("unembed")
 
-    # Select a layer for the visualization -- could do this for all layers
-    def find_corresponding_index(selected_node_layer: str) -> int:
-        for i, info in enumerate(interaction_rotations):
-            if info.node_layer == selected_node_layer:
-                return i
-        raise ValueError(f"Could not find {selected_node_layer} in interaction_rotations")
+    # Settings for the dashboard
+    fvp = FeatureVisParams(include_left_tables=False, n_groups=9)
 
     # selected_node_layer = "ln1.7"
     selected_node_layer = "mlp_in.7"
 
-    # Get acts and C for the selected layer
-    layer_index = find_corresponding_index(selected_node_layer)
-    rib_acts = acts[selected_node_layer]
-    C = interaction_rotations[layer_index].C
-    C_pinv = interaction_rotations[layer_index].C_pinv
-    assert C is not None, "Selected layer does not have a C"
-    assert C_pinv is not None, "Selected layer does not have a C_pinv [impossible, has C?]"
-
-    # Shape comparison from SAE VIZ demo.ipynb
-    # tokens torch.Size([1024, 128]) = batch ctx
-    # all_feat_acts torch.Size([1024, 128, 10]) = batch ctx features
-    # final_resid_acts torch.Size([1024, 128, 512]) = batch ctx resid
-    # feature_resid_dirs torch.Size([10, 512]) = features resid
-    # feature_indices_list [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] = features
-    # W_U torch.Size([512, 48262]) = resid vocab
-    # vocab_dict {22519: '&nbsp;Along', ...
-
-    fvp = FeatureVisParams(include_left_tables=False, n_groups=9)
-
-    assert resid_post is not None
-    # device: Note that sae_viz uses their get_device function which always uses CUDA if available
-    mfd = parse_activation_data(
-        data.to(device),  # torch.Size([500, 200])
-        rib_acts.to(dtype).to(device),  # torch.Size([500, 200, 64])
-        resid_post.to(dtype).to(device),  # torch.Size([500, 200, 64])
-        feature_resid_dirs=C_pinv[:, 1:].to(device).to(dtype),  # torch.Size([64, 65])
-        # (torch.Size([64, 64]) after slicing)
-        feature_indices_list=range(len(C_pinv)),  # range(64)
-        # ValueError: zip() argument 2 is longer than argument 1
-        W_U=W_U[1:].to(device).to(dtype),  # torch.Size([65, 50257])
-        # (torch.Size([64, 50257]) after slicing
-        vocab_dict=vocab_dict,  # 50257 entries
-        fvp=fvp,
-    )
-    os.makedirs("./html/", exist_ok=True)
-    generate_dashboard_html_files(mfd, "./html/")
+    if selected_node_layer is None:
+        for i, info in enumerate(interaction_rotations):
+            print(f"{i}: {info.node_layer}")
+            out_dir = (
+                Path(__file__).parent
+                / f"html_feature_viz_{dataset_config.n_samples}samples_{info.node_layer}"
+            )
+            print(f"Writing html to {out_dir}")
+            visualize_one_layer(
+                info.node_layer,
+                out_dir,
+                interaction_rotations,
+                acts,
+                resid_post,
+                W_U,
+                vocab_dict,
+                fvp,
+                data,
+                device,
+                dtype,
+            )
+    else:
+        out_dir = (
+            Path(__file__).parent / f"html_{dataset_config.n_samples}samples_{selected_node_layer}"
+        )
+        visualize_one_layer(
+            selected_node_layer,
+            out_dir,
+            interaction_rotations,
+            acts,
+            resid_post,
+            W_U,
+            vocab_dict,
+            fvp,
+            data,
+            device,
+            dtype,
+        )
 
 
 results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored_rib_stochpos1_ctx200_alllayers_10M/tinystories_nnib_samples50000_ctx200_rib_Cs.pt"
 
-dataset_config = HFDatasetConfig(
-    **yaml.safe_load(
-        """
-dataset_type: huggingface
-name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if part of training
-tokenizer_name: EleutherAI/gpt-neo-125M
-return_set: train
-return_set_frac: null
-n_documents: 100000  # avg ~235 toks / document
-n_samples: 50000
-return_set_portion: first
-n_ctx: 200 # needs to be <= 511 for the model to behave reasonably
-"""
-    )
-)
+# dataset_config = HFDatasetConfig(
+#     **yaml.safe_load(
+#         """
+# dataset_type: huggingface
+# name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if part of training
+# tokenizer_name: EleutherAI/gpt-neo-125M
+# return_set: train
+# return_set_frac: null
+# n_documents: 100000  # avg ~235 toks / document
+# n_samples: 50000
+# return_set_portion: first
+# n_ctx: 200 # needs to be <= 511 for the model to behave reasonably
+# """
+#     )
+# )
 
-main(results_path, dataset_cfg=dataset_config)
+main(results_path)

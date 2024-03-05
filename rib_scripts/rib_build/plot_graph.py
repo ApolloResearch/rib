@@ -18,6 +18,7 @@ import torch
 import tqdm
 
 from rib.log import logger
+from rib.modularity import ClusterListLike, GraphClustering, SqrtNorm
 from rib.plotting import plot_rib_graph
 from rib.rib_builder import RibBuildResults
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
@@ -50,6 +51,8 @@ def plot_by_layer(
 
     You'll need to call the function from python if you want to use edge_norm.
 
+    Note: doesn't plot edges in the final layernorm.
+
     Args:
         results: The results file containing the graph edges.
         nodes_per_layer: The number of nodes per layer to plot.
@@ -63,6 +66,8 @@ def plot_by_layer(
     # TODO: better argument names? cost_edge_norm is confusing as it's not directly related to
     # const RIB direction node or edge norm :)
     results = _to_results(results)
+
+    edge_norm = edge_norm or SqrtNorm()
 
     def get_block(name: str) -> Optional[int]:
         split = name.split(".")
@@ -115,9 +120,28 @@ def plot_by_layer(
         )
 
     if out_file is not None:
-        plt.savefig(out_file, dpi=200)
+        plt.savefig(out_file, dpi=400)
 
         logger.info(f"Saved plot to {Path(out_file).absolute()}")
+
+
+def plot_modular_graph(
+    graph: GraphClustering, clusters: ClusterListLike = "nonsingleton", out_file=None
+):
+    clusters_list = graph._get_clusterlist(clusters)
+    arr = graph._cluster_array(clusters_list)
+    clusters_for_plotting_fn = [
+        layer_clusters[: graph.nodes_per_layer[nl]]
+        for nl, layer_clusters in zip(graph.node_layers, arr.tolist(), strict=True)
+    ]
+    plot_by_layer(
+        graph.results,
+        edge_norm=graph.edge_norm,
+        const_edge_norm=0.3 * graph.G.totalEdgeWeight() / len(graph.results.edges),
+        clusters=clusters_for_plotting_fn,
+        out_file=out_file,
+        nodes_per_layer=150,  # max(self.nodes_per_layer.values()),
+    )
 
 
 def main(

@@ -277,10 +277,9 @@ def plot_rib_graph(
         if clusters is None:
             ordering = list(range(len(layer)))
         else:
-            assert len(clusters) == len(layers)
-            layer_clusters = clusters[i][: nodes_per_layer[i]]
-            assert len(layer_clusters) == len(layer)
-            ordering = sorted(range(len(layer)), key=lambda x: layer_clusters[x])
+            # truncate clusters to only include the nodes we keep in the graph
+            clusters[i] = clusters[i][: nodes_per_layer[i]]
+            ordering = sorted(range(len(layer)), key=lambda x: clusters[i][x])
 
         for j, node in enumerate(layer[ordering]):
             pos[node] = (i, j * spacing)
@@ -293,16 +292,13 @@ def plot_rib_graph(
         colors = [f"#{to_hex(r)}{to_hex(g)}{to_hex(b)}" for r, g, b in plt.get_cmap("tab10").colors]  # type: ignore
     options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6}
     for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
-        layer_colors: Union[str, list[str]]
+        node_colors: Union[str, list[str]]
         if clusters is not None:
             colormap = ["#bbbbbb"] + colorcet.glasbey
-            layer_colors = [colormap[cluster_idx % 256] for cluster_idx in clusters[i]]
-            layer_colors = layer_colors[: nodes_per_layer[i]]
+            node_colors = [colormap[cluster_idx % 256] for cluster_idx in clusters[i]]
         else:
-            layer_colors = colors[i % len(colors)]
-        nx.draw_networkx_nodes(
-            graph, pos, nodelist=layer, node_color=layer_colors, ax=ax, **options
-        )
+            node_colors = colors[i % len(colors)]
+        nx.draw_networkx_nodes(graph, pos, nodelist=layer, node_color=node_colors, ax=ax, **options)
         # Add layer label above the nodes
         ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
 

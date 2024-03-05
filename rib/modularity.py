@@ -1,7 +1,6 @@
 # %%
 import json
 from collections import Counter
-from math import log10
 from random import triangular
 from typing import Literal, NamedTuple, Optional, Union, cast
 
@@ -14,7 +13,6 @@ import tqdm
 from jaxtyping import Bool, Float
 
 from rib.rib_builder import RibBuildResults
-from rib_scripts.rib_build.plot_graph import plot_by_layer
 
 EdgeTensor = Float[torch.Tensor, "rib_out rib_in"]
 
@@ -27,19 +25,37 @@ class EdgeNorm:
 
 
 class IdentityEdgeNorm(EdgeNorm):
+    """Edges are not transformed."""
+
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         return E
 
 
+class SqrtNorm(EdgeNorm):
+    """Sqrt-normalizes the edges."""
+
+    def __call__(self, E: torch.Tensor, node_layer: str) -> torch.Tensor:
+        return E.sqrt()
+
+
 class LogEdgeNorm(EdgeNorm):
+    """Norms edges into log space, with `eps` as the 0 point. All edges < `eps` are set to 0."""
+
     def __init__(self, eps):
         self.eps = eps
 
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
-        return E.clip(min=self.eps).log10() - log10(self.eps)
+        return (E / self.eps).log10().clip(min=0)
 
 
-class AdaptiveEdgeNorm(EdgeNorm):
+class ByLayerLogEdgeNorm(EdgeNorm):
+    """
+    LogNormalizes the edges, with potentially a different epsilon for each layer.
+
+    Can be initialized either with a dictionary of `node_layer -> eps` or with the results of a
+    bisect ablation experiment (taking epsilon as the smallest edge that was not ablated).
+    """
+
     def __init__(self, eps_by_layer: dict[str, float]):
         self.eps_by_layer = eps_by_layer
 
@@ -47,6 +63,7 @@ class AdaptiveEdgeNorm(EdgeNorm):
     def _get_minimum_edge(
         E: EdgeTensor, mask: Bool[torch.Tensor, "rib_out rib_in"], ignore0: bool = True
     ) -> float:
+        """Get the minimum unmasked edge, potentially ignoring edges to/from the const dir."""
         if ignore0:
             E = E[1:, 1:]
             mask = mask[1:, 1:]
@@ -55,9 +72,11 @@ class AdaptiveEdgeNorm(EdgeNorm):
     @classmethod
     def from_bisect_results(
         cls, ablation_result_path, results: RibBuildResults
-    ) -> "AdaptiveEdgeNorm":
+    ) -> "ByLayerLogEdgeNorm":
         with open(ablation_result_path) as f:
             abl_result = json.load(f)
+        assert abl_result["config"]["ablation_type"] == "edge"
+        assert abl_result["config"]["schedule"]["schedule_type"] == "bisect"
         edge_masks = {
             nl: torch.tensor(abl_result["edge_masks"][nl][str(n_needed)])
             for nl, n_needed in abl_result["n_edges_required"].items()
@@ -65,14 +84,26 @@ class AdaptiveEdgeNorm(EdgeNorm):
         edges_by_layer = {edge.in_node_layer: edge for edge in results.edges}
         ignore0 = results.config.center
         eps_by_layer = {
-            nl: AdaptiveEdgeNorm._get_minimum_edge(edge.E_hat, edge_masks[nl], ignore0=ignore0)
+            nl: ByLayerLogEdgeNorm._get_minimum_edge(edge.E_hat, edge_masks[nl], ignore0=ignore0)
             for nl, edge in edges_by_layer.items()
         }
         return cls(eps_by_layer)
 
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         eps = self.eps_by_layer[node_layer]
-        return E.clip(min=eps).log10() - log10(eps)
+        return (E / eps).log10().clip(min=0)
+
+
+class NodeNormalizedLogEdgeNorm(ByLayerLogEdgeNorm):
+    r"""Lognormalizes the edges by layer, but also normalizes each edge by (E_ij / \sum_j E_ij).
+
+    This is an attempt to roughly capture node-connectivity based clustering algorithms, while still
+    using leiden. It's pretty hacky, however.
+    """
+
+    def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
+        logE = super().__call__(E, node_layer)
+        return logE * (E.sqrt() / E.sqrt().sum(dim=0, keepdim=True))
 
 
 class Node(NamedTuple):
@@ -90,7 +121,7 @@ class Node(NamedTuple):
 
 
 class NodeCluster(NamedTuple):
-    """A single cluster found by a clustering algorithm.
+    """A cluster of nodes found by a clustering algorithm.
 
     `cluster_id` is the numeric id of the cluster, used by networkit.
     `nodes` is a list of `Node` objects in the cluster.
@@ -110,10 +141,13 @@ class NodeCluster(NamedTuple):
         return len(set(n.layer for n in self.nodes))
 
     def layers_counter(self):
-        """Get a python Counter of the number of nodes in each node layer."""
+        """Get a python Counter of the number of nodes in each node layer.
+        The Counter's keys are node layers (e.g. ln3.5), and the values are
+        how many nodes from this node layer are in the cluster."""
         return Counter(n.layer for n in self.nodes)
 
 
+# Used as argument to various methods. `nonsingleton` means all clusters with more than one node.
 ClusterListLike = Union[NodeCluster, list[NodeCluster], Literal["all", "nonsingleton"]]
 
 
@@ -121,11 +155,12 @@ class GraphClustering:
     """
     RIB results, along with the results to running Leiden on the wieghted RIB graph.
 
-    In particular, wraps around a networkit graph `G`, and a networkit partition `nk_partition`.
-    networkit graphs index nodes by numeric ids. `self.nodes[i]` is the node with id `i`.
-    To get the id of a particualr node, use `self.node_to_idx[node]`.
+    In particular, wraps around a networkit (nk) graph `G`, and a networkit partition
+    `_nk_partition`. Networkit indexes nodes with numeric ids. `self.nodes[i]` is the node with
+    id `i`. To get the id of a particualr node, use `self.node_to_idx[node]`.
 
-    Edges can be optionally normalized when making the graph.
+    Edges can be optionally normalized when making the graph. Logarithmic normalization is
+    tentatively recommended. Defaults to no normalization.
     """
 
     G: nk.Graph
@@ -169,15 +204,21 @@ class GraphClustering:
         self._run_leiden()
         self._make_clusters()
 
+    def update_gamma(self, gamma: float):
+        """Update the resolution parameter and re-run Leiden. Faster than creating a new Graph"""
+        self.gamma = gamma
+        self._run_leiden()
+        self._make_clusters()
+
     def _make_graph(self):
         start_idx = 1 if self.results.config.center else 0
         self.G = nk.Graph(n=len(self.nodes), weighted=True)
-        for edge in tqdm.tqdm(self.results.edges, desc="Making RIB graph"):
-            if edge.in_node_layer in self.node_layers:
-                E = self.edge_norm(edge.E_hat, edge.in_node_layer)[start_idx:, start_idx:]
+        for edges in tqdm.tqdm(self.results.edges, desc="Making RIB graph"):
+            if edges.in_node_layer in self.node_layers:
+                E = self.edge_norm(edges.E_hat, edges.in_node_layer)[start_idx:, start_idx:]
                 out_idxs, in_idxs = torch.nonzero(E, as_tuple=True)
-                in_ids = in_idxs + self.node_to_idx[Node(edge.in_node_layer, start_idx)]
-                out_ids = out_idxs + self.node_to_idx[Node(edge.out_node_layer, start_idx)]
+                in_ids = in_idxs + self.node_to_idx[Node(edges.in_node_layer, start_idx)]
+                out_ids = out_idxs + self.node_to_idx[Node(edges.out_node_layer, start_idx)]
                 weights = E[out_idxs, in_idxs].flatten().cpu()
                 for i, j, w in zip(
                     in_ids.tolist(), out_ids.tolist(), weights.tolist(), strict=True
@@ -201,13 +242,6 @@ class GraphClustering:
             clusters.append(NodeCluster(cluster_id, nodes))
 
         self.clusters = sorted(clusters, key=lambda c: c.size, reverse=True)
-
-    def random_edges(self, k=10) -> list[tuple[Node, Node, float]]:
-        """Get k random edges from the graph."""
-        return [
-            (self.nodes[u], self.nodes[v], self.G.weight(u, v))
-            for u, v in nk.graphtools.randomEdges(self.G, k)
-        ]
 
     def layer_idx_of(self, node: Node) -> int:
         """Get the numeric node-layer index of the node-layer of a particular node."""
@@ -234,7 +268,7 @@ class GraphClustering:
                     print(f"   {l}:".ljust(14), counter[l])
 
     def is_edge_forward(self, u: Node, v: Node):
-        """Check if the edge between u and v is forward in the RIB."""
+        """Check if u is in an earlier layer than v."""
         return self.layer_idx_of(u) < self.layer_idx_of(v)
 
     def is_in_same_cluster(self, u: Node, v: Node):
@@ -243,32 +277,41 @@ class GraphClustering:
         return self._nk_partition.inSameSubset(self.node_to_idx[u], self.node_to_idx[v])
 
     ###
-    def frac_edges_kept(self, layer, weighted=False, absolute=False):
-        """Get the fraction of edges that start at `layer` that are kept by this clustering."""
-        nodes_ids_in_layer = [i for i, n in enumerate(self.nodes) if n.layer == layer]
+
+    def num_edges_kept(self, layer, weighted=False, fraction_kept=False):
+        """Get the fraction of edges that start at `layer` that are kept by this clustering.
+
+        Args:
+            layer: The node layer the edges start at.
+            weighted: If False, counts the number of edges, if True, counts the total weight of the
+                edges.
+            fraction_kept: If True, returns the fraction of edges kept, if False, returns the
+                absolute number of edges kept.
+        """
+        assert layer in self.node_layers
+        assert layer != self.node_layers[-1]
+        next_layer = self.node_layers[self.layer_idx_of(layer) + 1]
+        layer_node_ids = [i for i, n in enumerate(self.nodes) if n.layer == layer]
+        next_layer_node_ids = [i for i, n in enumerate(self.nodes) if n.layer == next_layer]
+
         tot_edges = 0
         kept_edges = 0
-        assert self._nk_partition is not None
+        for u_id in layer_node_ids:
+            for v_id in next_layer_node_ids:
+                if self.G.hasEdge(u_id, v_id):
+                    w = self.G.weight(u_id, v_id) if weighted else 1
+                    tot_edges += w
+                    if self._nk_partition.inSameSubset(u_id, v_id):
+                        kept_edges += w
 
-        def e_func(u, v, w, e_id):
-            # internal graph representation is undirected, so both (u, v) and (v, u) are edges in
-            # the graph. We only want to count edges from earlier layers to later layers here.
-            u_node = self.nodes[u]
-            v_node = self.nodes[v]
-            if self.layer_idx_of(u_node) > self.layer_idx_of(v_node):
-                return
-
-            nonlocal tot_edges, kept_edges
-            tot_edges += w if weighted else 1
-            if self._nk_partition.inSameSubset(u, v):
-                kept_edges += w if weighted else 1
-
-        for n_id in nodes_ids_in_layer:
-            self.G.forEdgesOf(n_id, e_func)
-
-        return (tot_edges - kept_edges) if absolute else kept_edges / tot_edges
+        return kept_edges / tot_edges if fraction_kept else kept_edges
 
     def _get_clusterlist(self, cluster_list_like: ClusterListLike) -> list[NodeCluster]:
+        """
+        Several functions take a `cluster_list_like` argument, which can be a single cluster, a list
+        of clusters, or a special string like "all" or "nonsingleton". This function converts the
+        input to a list of clusters.
+        """
         assert self.clusters is not None
         if cluster_list_like == "all":  # all non-singletons
             return self.clusters
@@ -281,6 +324,14 @@ class GraphClustering:
             return cast(list[NodeCluster], cluster_list_like)
 
     def _cluster_array(self, cluster_list: list[NodeCluster]) -> np.ndarray:
+        """
+        Helper for paino plots.
+        Makes an array of size [len(self.node_layers), max_width] where each entry is:
+          * -1 if that RIB direction doesn't exist (the 'paino keys', representing ln1 in pythia)
+          * 0 if the RIB direction exists, but isn't in any of the designated clusters
+          * 1...n representing the different clusters
+        """
+
         def _fill_array(arr: np.ndarray, nodes: list[Node], val: float):
             for n in nodes:
                 arr[self.node_layers.index(n.layer), n.idx] = val
@@ -296,6 +347,23 @@ class GraphClustering:
         return arr
 
     def paino_plot(self, clusters: ClusterListLike = "nonsingleton", ax=None):
+        """
+        Makes a 'paino plot' vizualizing the clusters in the RIB graph.
+
+        This is a compact representation where each column of the plot represents a RIB layer,
+        and each pixel represents a RIB direction. The color of the pixel represents the cluster
+        that RIB direction is in.
+
+        White pixels are RIB directions that are not in the clusters plotted, and dark grey pixels
+        are for RIB directions that don't exist (usually because the input embedding was of smaller
+        dimension).
+
+        Args:
+            clusters: The clusters to plot. Can be a single cluster, a list of clusters, or either
+                "all" or "nonsingleton". If "all", plots all clusters. If "nonsingleton", plots all
+                clusters with more than one node.
+            ax: The matplotlib axis to plot on. If None, creates a new figure.
+        """
         cluster_list = self._get_clusterlist(clusters)
         arr = self._cluster_array(cluster_list)
 
@@ -313,23 +381,3 @@ class GraphClustering:
         ax.matshow(arr[:, 1:].T, cmap=cmap, origin="lower", norm=norm, aspect="auto")
         ax.set_xlabel("Node layer")
         ax.set_ylabel("RIB index")
-
-    def plot_rib_graph(
-        self,
-        clusters: ClusterListLike = "nonsingleton",
-        out_file=None,
-    ):
-        clusters_list = self._get_clusterlist(clusters)
-        arr = self._cluster_array(clusters_list)
-        clusters_for_plotting_fn = [
-            layer_clusters[: self.nodes_per_layer[nl]]
-            for nl, layer_clusters in zip(self.node_layers, arr.tolist(), strict=True)
-        ]
-        plot_by_layer(
-            self.results,
-            edge_norm=self.edge_norm,
-            const_edge_norm=0.3 * self.G.totalEdgeWeight() / len(self.results.edges),
-            clusters=clusters_for_plotting_fn,
-            out_file=out_file,
-            nodes_per_layer=150,  # max(self.nodes_per_layer.values()),
-        )

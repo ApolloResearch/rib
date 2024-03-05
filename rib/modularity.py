@@ -190,12 +190,12 @@ class GraphClustering:
     def _make_graph(self):
         start_idx = 1 if self.results.config.center else 0
         self.G = nk.Graph(n=len(self.nodes), weighted=True)
-        for edge in tqdm.tqdm(self.results.edges, desc="Making RIB graph"):
-            if edge.in_node_layer in self.node_layers:
-                E = self.edge_norm(edge.E_hat, edge.in_node_layer)[start_idx:, start_idx:]
+        for edges in tqdm.tqdm(self.results.edges, desc="Making RIB graph"):
+            if edges.in_node_layer in self.node_layers:
+                E = self.edge_norm(edges.E_hat, edges.in_node_layer)[start_idx:, start_idx:]
                 out_idxs, in_idxs = torch.nonzero(E, as_tuple=True)
-                in_ids = in_idxs + self.node_to_idx[Node(edge.in_node_layer, start_idx)]
-                out_ids = out_idxs + self.node_to_idx[Node(edge.out_node_layer, start_idx)]
+                in_ids = in_idxs + self.node_to_idx[Node(edges.in_node_layer, start_idx)]
+                out_ids = out_idxs + self.node_to_idx[Node(edges.out_node_layer, start_idx)]
                 weights = E[out_idxs, in_idxs].flatten().cpu()
                 for i, j, w in zip(
                     in_ids.tolist(), out_ids.tolist(), weights.tolist(), strict=True
@@ -219,13 +219,6 @@ class GraphClustering:
             clusters.append(NodeCluster(cluster_id, nodes))
 
         self.clusters = sorted(clusters, key=lambda c: c.size, reverse=True)
-
-    def random_edges(self, k=10) -> list[tuple[Node, Node, float]]:
-        """Get k random edges from the graph."""
-        return [
-            (self.nodes[u], self.nodes[v], self.G.weight(u, v))
-            for u, v in nk.graphtools.randomEdges(self.G, k)
-        ]
 
     def layer_idx_of(self, node: Node) -> int:
         """Get the numeric node-layer index of the node-layer of a particular node."""
@@ -252,7 +245,7 @@ class GraphClustering:
                     print(f"   {l}:".ljust(14), counter[l])
 
     def is_edge_forward(self, u: Node, v: Node):
-        """Check if the edge between u and v is forward in the RIB."""
+        """Check if u is in an earlier layer than v."""
         return self.layer_idx_of(u) < self.layer_idx_of(v)
 
     def is_in_same_cluster(self, u: Node, v: Node):
@@ -261,32 +254,41 @@ class GraphClustering:
         return self._nk_partition.inSameSubset(self.node_to_idx[u], self.node_to_idx[v])
 
     ###
-    def frac_edges_kept(self, layer, weighted=False, absolute=False):
-        """Get the fraction of edges that start at `layer` that are kept by this clustering."""
-        nodes_ids_in_layer = [i for i, n in enumerate(self.nodes) if n.layer == layer]
+
+    def num_edges_kept(self, layer, weighted=False, fraction_kept=False):
+        """Get the fraction of edges that start at `layer` that are kept by this clustering.
+
+        Args:
+            layer: The node layer the edges start at.
+            weighted: If False, counts the number of edges, if True, counts the total weight of the
+                edges.
+            fraction_kept: If True, returns the fraction of edges kept, if False, returns the
+                absolute number of edges kept.
+        """
+        assert layer in self.node_layers
+        assert layer != self.node_layers[-1]
+        next_layer = self.node_layers[self.layer_idx_of(layer) + 1]
+        layer_node_ids = [i for i, n in enumerate(self.nodes) if n.layer == layer]
+        next_layer_node_ids = [i for i, n in enumerate(self.nodes) if n.layer == next_layer]
+
         tot_edges = 0
         kept_edges = 0
-        assert self._nk_partition is not None
+        for u_id in layer_node_ids:
+            for v_id in next_layer_node_ids:
+                if self.G.hasEdge(u_id, v_id):
+                    w = self.G.weight(u_id, v_id) if weighted else 1
+                    tot_edges += w
+                    if self._nk_partition.inSameSubset(u_id, v_id):
+                        kept_edges += w
 
-        def e_func(u, v, w, e_id):
-            # internal graph representation is undirected, so both (u, v) and (v, u) are edges in
-            # the graph. We only want to count edges from earlier layers to later layers here.
-            u_node = self.nodes[u]
-            v_node = self.nodes[v]
-            if self.layer_idx_of(u_node) > self.layer_idx_of(v_node):
-                return
-
-            nonlocal tot_edges, kept_edges
-            tot_edges += w if weighted else 1
-            if self._nk_partition.inSameSubset(u, v):
-                kept_edges += w if weighted else 1
-
-        for n_id in nodes_ids_in_layer:
-            self.G.forEdgesOf(n_id, e_func)
-
-        return (tot_edges - kept_edges) if absolute else kept_edges / tot_edges
+        return kept_edges / tot_edges if fraction_kept else kept_edges
 
     def _get_clusterlist(self, cluster_list_like: ClusterListLike) -> list[NodeCluster]:
+        """
+        Several functions take a `cluster_list_like` argument, which can be a single cluster, a list
+        of clusters, or a special string like "all" or "nonsingleton". This function converts the
+        input to a list of clusters.
+        """
         assert self.clusters is not None
         if cluster_list_like == "all":  # all non-singletons
             return self.clusters
@@ -299,6 +301,14 @@ class GraphClustering:
             return cast(list[NodeCluster], cluster_list_like)
 
     def _cluster_array(self, cluster_list: list[NodeCluster]) -> np.ndarray:
+        """
+        Helper for paino plots.
+        Makes an array of size [len(self.node_layers), max_width] where each entry is:
+          * -1 if that RIB direction doesn't exist (the 'paino keys', representing ln1 in pythia)
+          * 0 if the RIB direction exists, but isn't in any of the designated clusters
+          * 1...n representing the different clusters
+        """
+
         def _fill_array(arr: np.ndarray, nodes: list[Node], val: float):
             for n in nodes:
                 arr[self.node_layers.index(n.layer), n.idx] = val
@@ -314,6 +324,23 @@ class GraphClustering:
         return arr
 
     def paino_plot(self, clusters: ClusterListLike = "nonsingleton", ax=None):
+        """
+        Makes a 'paino plot' vizualizing the clusters in the RIB graph.
+
+        This is a compact representation where each column of the plot represents a RIB layer,
+        and each pixel represents a RIB direction. The color of the pixel represents the cluster
+        that RIB direction is in.
+
+        White pixels are RIB directions that are not in the clusters plotted, and dark grey pixels
+        are for RIB directions that don't exist (usually because the input embedding was of smaller
+        dimension).
+
+        Args:
+            clusters: The clusters to plot. Can be a single cluster, a list of clusters, or either
+                "all" or "nonsingleton". If "all", plots all clusters. If "nonsingleton", plots all
+                clusters with more than one node.
+            ax: The matplotlib axis to plot on. If None, creates a new figure.
+        """
         cluster_list = self._get_clusterlist(clusters)
         arr = self._cluster_array(cluster_list)
 

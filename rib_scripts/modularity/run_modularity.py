@@ -100,6 +100,7 @@ def run_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
         {
             "return_set_portion": "last",
             "n_samples": 100,
+            "n_documents": 100,
         },
     )
     config = AblationConfig(
@@ -172,6 +173,7 @@ def run_modularity(
 
     logger.info(f"Making RIB graph in networkit & running clustering...")
     graph = GraphClustering(results, edge_norm, gamma=gamma)
+    logger.info(f"Finished clustering.")
 
     if plot_piano:
         graph.paino_plot()

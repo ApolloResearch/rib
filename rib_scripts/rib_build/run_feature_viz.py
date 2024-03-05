@@ -105,18 +105,19 @@ def main(
                 return i
         raise ValueError(f"Could not find {selected_node_layer} in interaction_rotations")
 
-    selected_node_layer = "ln1.7"
-    corresponding_index = find_corresponding_index(selected_node_layer)
+    # selected_node_layer = "ln1.7"
+    selected_node_layer = "mlp_in.7"
 
     # Get acts and C for the selected layer
+    layer_index = find_corresponding_index(selected_node_layer)
     rib_acts = acts[selected_node_layer]
-    C = interaction_rotations[corresponding_index].C
-    C_pinv = interaction_rotations[corresponding_index].C_pinv
+    C = interaction_rotations[layer_index].C
+    C_pinv = interaction_rotations[layer_index].C_pinv
     assert C is not None, "Selected layer does not have a C"
     assert C_pinv is not None, "Selected layer does not have a C_pinv [impossible, has C?]"
 
     # TODO Can we get a viz where our RIB dimensions are weird (2xresid etc.)
-    # Smaller 0
+    # TODO Smaller 0
     # Shape comparison from SAE VIZ demo.ipynb
     # tokens torch.Size([1024, 128]) = batch ctx
     # all_feat_acts torch.Size([1024, 128, 10]) = batch ctx features

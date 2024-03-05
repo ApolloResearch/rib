@@ -13,8 +13,6 @@ from sae_vis.utils_fns import QuantileCalculator, TopK
 from torch import Tensor
 from tqdm import tqdm
 
-from rib.types import StrDtype
-
 
 def parse_activation_data(
     tokens: Int[Tensor, "batch n_ctx"],
@@ -66,38 +64,41 @@ def parse_activation_data(
             dtype=feature_acts.dtype,
         )
 
-    # Get the logits of all features (i.e. the directions this feature writes to the logit output)
-    logits = einsum(
-        feature_resid_dirs,
-        W_U,
-        "feats d_model, d_model d_vocab -> feats d_vocab",
-    )
-    for i, (feat, logit) in enumerate(zip(feature_indices_list, logits, strict=True)):
-        # Get data for logits (the histogram, and the table)
-        logits_histogram_data = HistogramData(logit, n_bins=40, tickmode="5 ticks")
-        top10_logits = TopK(logit, k=15, largest=True)
-        bottom10_logits = TopK(logit, k=15, largest=False)
-
-        # Get data for feature activations histogram (the title, and the histogram)
-        feat_acts = feature_acts[..., i]
-        nonzero_feat_acts = feat_acts[feat_acts > 0]
-        frac_nonzero = nonzero_feat_acts.numel() / feat_acts.numel()
-        freq_histogram_data = HistogramData(nonzero_feat_acts, n_bins=40, tickmode="ints")
-
-        # Create a MiddlePlotsData object from this, and add it to the dict
-        middle_plots_data_dict[feat] = MiddlePlotsData(
-            bottom10_logits=bottom10_logits,
-            top10_logits=top10_logits,
-            logits_histogram_data=logits_histogram_data,
-            freq_histogram_data=freq_histogram_data,
-            frac_nonzero=frac_nonzero,
+    logit_lens = final_resid_acts.shape[-1] == feature_resid_dirs.shape[-1]
+    if logit_lens:
+        # Get the logits of all features (i.e. the directions this feature writes to the logit output)
+        logits = einsum(
+            feature_resid_dirs,
+            W_U,
+            "feats d_model, d_model d_vocab -> feats d_vocab",
         )
+        for i, (feat, logit) in enumerate(zip(feature_indices_list, logits, strict=True)):
+            # Get data for logits (the histogram, and the table)
+            logits_histogram_data = HistogramData(logit, n_bins=40, tickmode="5 ticks")
+            top10_logits = TopK(logit, k=15, largest=True)
+            bottom10_logits = TopK(logit, k=15, largest=False)
+
+            # Get data for feature activations histogram (the title, and the histogram)
+            feat_acts = feature_acts[..., i]
+            nonzero_feat_acts = feat_acts[feat_acts > 0]
+            frac_nonzero = nonzero_feat_acts.numel() / feat_acts.numel()
+            freq_histogram_data = HistogramData(nonzero_feat_acts, n_bins=40, tickmode="ints")
+
+            # Create a MiddlePlotsData object from this, and add it to the dict
+            middle_plots_data_dict[feat] = MiddlePlotsData(
+                bottom10_logits=bottom10_logits,
+                top10_logits=top10_logits,
+                logits_histogram_data=logits_histogram_data,
+                freq_histogram_data=freq_histogram_data,
+                frac_nonzero=frac_nonzero,
+            )
+
     # Return the output, as a dict of FeatureData items
     for i, feat in enumerate(feature_indices_list):
         feature_dashboard_data[feat] = FeatureData(
             # Data-containing inputs (for the feature-centric visualisation)
             sequence_data=sequence_data_dict[feat],
-            middle_plots_data=middle_plots_data_dict[feat],
+            middle_plots_data=middle_plots_data_dict[feat] if logit_lens else None,
             left_tables_data=None,
             # Non data-containing inputs
             feature_idx=feat,

@@ -35,7 +35,7 @@ def main(
     dataset_cfg: Optional[HFDatasetConfig | str | Path] = None,
     device: str = "cuda",
     dtype_str: Optional[StrDtype] = None,
-    batch_size: Optional[int] = None,
+    batch_size: Optional[int] = 10,
 ):
     """Generates a dashboard for the RIB activations and residuals of a model.
 
@@ -156,8 +156,8 @@ name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if p
 tokenizer_name: EleutherAI/gpt-neo-125M
 return_set: train
 return_set_frac: null
-n_documents: 1000  # avg ~235 toks / document
-n_samples: 500
+n_documents: 100000  # avg ~235 toks / document
+n_samples: 50000
 return_set_portion: first
 n_ctx: 200 # needs to be <= 511 for the model to behave reasonably
 """

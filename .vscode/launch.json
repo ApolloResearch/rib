@@ -144,7 +144,4 @@
             }
         }
     ],
-    "env": {
-        "HF_HOME": "/mnt/ssd-interp/huggingface_cache/",
-    }
 }

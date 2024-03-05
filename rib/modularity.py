@@ -141,7 +141,9 @@ class NodeCluster(NamedTuple):
         return len(set(n.layer for n in self.nodes))
 
     def layers_counter(self):
-        """Get a python Counter of the number of nodes in each node layer."""
+        """Get a python Counter of the number of nodes in each node layer.
+             The Counter's keys are node layers (e.g. ln3.5), and the values are
+             how many nodes from this node layer are in the cluster."""
         return Counter(n.layer for n in self.nodes)
 
 
@@ -152,11 +154,11 @@ class GraphClustering:
     """
     RIB results, along with the results to running Leiden on the wieghted RIB graph.
 
-    In particular, wraps around a networkit graph `G`, and a networkit partition `nk_partition`.
+    In particular, wraps around a networkit graph `G`, and a networkit (nk) partition `_nk_partition`.
     networkit graphs index nodes by numeric ids. `self.nodes[i]` is the node with id `i`.
     To get the id of a particualr node, use `self.node_to_idx[node]`.
 
-    Edges can be optionally normalized when making the graph.
+    Edges can be optionally normalized when making the graph. Logarithmic normalization is recommended (and used in our paper). Default: No normalization.
     """
 
     G: nk.Graph

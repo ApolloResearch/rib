@@ -244,7 +244,8 @@ def prepare_dataset(
         TensorDataset: The tokenized dataset.
     """
     assert tokenizer.eos_token_id is not None, "Tokenizer must have an eos token id"
-    # May already be tokenized
+    # May already be tokenized. use try except because not all datasets (in particular those in
+    # TestTokenizeDataset) have the features attribute.
     try:
         tokenized = "input_ids" in dataset.features.keys()  # type: ignore
     except AttributeError:

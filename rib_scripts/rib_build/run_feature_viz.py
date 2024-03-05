@@ -117,7 +117,6 @@ def main(
     assert C_pinv is not None, "Selected layer does not have a C_pinv [impossible, has C?]"
 
     # TODO Can we get a viz where our RIB dimensions are weird (2xresid etc.)
-    # TODO Smaller 0
     # Shape comparison from SAE VIZ demo.ipynb
     # tokens torch.Size([1024, 128]) = batch ctx
     # all_feat_acts torch.Size([1024, 128, 10]) = batch ctx features

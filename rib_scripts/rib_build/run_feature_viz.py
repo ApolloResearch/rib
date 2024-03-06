@@ -52,6 +52,7 @@ def visualize_one_layer(
     vocab_dict: dict,
     fvp: FeatureVisParams,
     data: torch.Tensor,
+    feature_indices: list[int],
     device: str,
     dtype: torch.dtype,
 ):
@@ -78,8 +79,8 @@ def visualize_one_layer(
         data.to(device),  # torch.Size([500, 200])
         rib_acts.to(dtype).to(device),  # torch.Size([500, 200, 64])
         resid_post.to(dtype).to(device),  # torch.Size([500, 200, 64])
-        feature_resid_dirs=C_pinv[:, :].to(device).to(dtype),  # torch.Size([64, 65])
-        feature_indices_list=range(len(C_pinv)),  # range(64)
+        feature_resid_dirs=C_pinv[feature_indices, :].to(device).to(dtype),  # torch.Size([64, 65])
+        feature_indices_list=feature_indices,  # range(64)
         # ValueError: zip() argument 2 is longer than argument 1
         W_U=W_U[:].to(device).to(dtype),  # torch.Size([65, 50257])
         vocab_dict=vocab_dict,  # 50257 entries
@@ -93,6 +94,7 @@ def visualize_one_layer(
 
 def main(
     results: RibBuildResults | str | Path,
+    feature_indices: list[int],
     dataset_cfg: Optional[HFDatasetConfig | str | Path] = None,
     device: str = "cuda",
     dtype_str: Optional[StrDtype] = None,
@@ -168,9 +170,11 @@ def main(
         for i, info in enumerate(interaction_rotations):
             out_dir = (
                 Path(__file__).parent
-                / f"html_pythia/feature_viz_{dataset_config.n_samples}samples_{info.node_layer}"
+                / f"html_tinystories3/feature_viz_{dataset_config.n_samples}samples_{info.node_layer}"
             )
             print(f"Getting html for {out_dir}")
+            assert isinstance(W_U, torch.Tensor)
+            assert isinstance(acts, dict)
             visualize_one_layer(
                 info.node_layer,
                 out_dir,
@@ -181,6 +185,7 @@ def main(
                 vocab_dict,
                 fvp,
                 data,
+                feature_indices,
                 device,
                 dtype,
             )
@@ -204,8 +209,8 @@ def main(
 
 
 # results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored_rib_stochpos1_ctx200_alllayers/tinystories_nnib_samples5000_ctx200_rib_Cs.pt"
-# results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored_rib_stochpos1_ctx200_alllayers/tinystories_nnib_samples5000_ctx200_rib_Cs.pt"
-results_path = "/mnt/ssd-interp/stefan/rib/rib_scripts/rib_build/out/pythia-1.4b-testing_rib_Cs.pt"
+results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored_rib_stochpos1_ctx200_alllayers/tinystories_nnib_samples5000_ctx200_rib_Cs.pt"
+# results_path = "/mnt/ssd-interp/stefan/rib/rib_scripts/rib_build/out/pythia-1.4b-testing_rib_Cs.pt"
 #
 
 # dataset_config = HFDatasetConfig(
@@ -224,4 +229,5 @@ results_path = "/mnt/ssd-interp/stefan/rib/rib_scripts/rib_build/out/pythia-1.4b
 #     )
 # )
 
-main(results_path)
+# main(results_path, feature_indices=list(range(30)) + list(range(500, 530)))
+main(results_path, feature_indices=list(range(30)))

@@ -249,6 +249,11 @@ class BisectScheduleConfig(BaseModel):
         "linear",
         description="Whether to use the linear or logarithmic midpoint for bisect.",
     )
+    tolerance: float = Field(
+        1,
+        description="The tolerance for the bisect schedule. The schedule stops when the"
+        "possible interval is smaller than the tolerance, returning the middle of the interval.",
+    )
 
 
 class BisectSchedule:
@@ -312,7 +317,7 @@ class BisectSchedule:
         return None
 
     def __iter__(self):
-        while self._upper_bound - self._lower_bound > 1:
+        while self._upper_bound - self._lower_bound > self.config.tolerance:
             yield self._get_proposal()
 
     def update_bounds(self, score: float, base_score: float):

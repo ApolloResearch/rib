@@ -375,6 +375,10 @@ class AblationConfig(BaseModel):
         ...,
         description="The type of evaluation to perform on the model before building the graph.",
     )
+    save_edge_masks: bool = Field(
+        False,
+        description="Whether to save edge masks in the output file. Ignored if not edge ablation.",
+    )
 
 
 def _get_schedule_from_config(
@@ -547,6 +551,7 @@ def ablate_edges_and_eval(
     device: str,
     dtype: Optional[torch.dtype] = None,
     always_keep_const_dir=False,
+    return_edge_masks: bool = False,
 ) -> tuple[AblationAccuracies, EdgeMasks, dict[str, int]]:
     """Perform a series of edge ablation experiments across layers and multiple # of edges to keep.
 
@@ -571,10 +576,12 @@ def ablate_edges_and_eval(
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
         keep_const_edges: Used to always keep the constant edges (for free) when ablating a
             centered RIB graph.
+        return_edge_masks: Whether to return the edge masks. If True, the edge masks are returned
+            as the second element of the tuple. If False, the second element is an empty dict.
 
     Returns:
         A dictionary mapping node layers to ablation accuracies/losses.
-        A dictionary mapping node layers to edge masks.
+        A dictionary mapping node layers to edge masks. Empty if return_edge_masks is False.
         A dictionary mapping node layers to the number of edges required to achieve the target
             accuracy/loss (for bisect schedule only, otherwise empty dict).
     """
@@ -609,7 +616,8 @@ def ablate_edges_and_eval(
             if edge_mask.all():
                 score = base_score
             else:
-                edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
+                if return_edge_masks:
+                    edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
                 hook = Hook(
                     name=module_name,
                     data_key="edge_ablation",
@@ -812,6 +820,7 @@ def load_bases_and_ablate(
             device=device,
             dtype=dtype,
             always_keep_const_dir=rib_results.config.center,
+            return_edge_masks=config.save_edge_masks,
         )
     else:
         ablation_results = ablate_node_layers_and_eval(

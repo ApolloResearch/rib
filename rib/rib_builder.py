@@ -66,7 +66,7 @@ from rib.distributed_utils import (
 )
 from rib.hook_manager import HookedModel
 from rib.interaction_algos import InteractionRotation, calculate_interaction_rotations
-from rib.loader import load_model_and_dataset_from_rib_config
+from rib.loader import load_dataset, load_model
 from rib.log import logger
 from rib.models import (
     MLPConfig,
@@ -128,6 +128,19 @@ class RibBuildConfig(BaseModel):
         description="Path to pre-saved interaction matrices. If provided, we don't recompute."
         "Only supported for transformer models.",
     )
+    gram_matrices_path: Optional[RootPath] = Field(
+        None,
+        description="Path to pre-saved mean and gram matrices. If provided, we don't recompute."
+        "Only supported for transformer models.",
+    )
+    calculate_Cs: bool = Field(
+        True,
+        description="Whether to compute Cs. If false skips Cs and edges computation,",
+    )
+    calculate_edges: bool = Field(
+        True,
+        description="Whether to calculate the edges of the RIB graph.",
+    )
     node_layers: list[str] = Field(
         ...,
         description="Module ids whose inputs correspond to node layers in the graph."
@@ -137,15 +150,31 @@ class RibBuildConfig(BaseModel):
         ...,
         description="Whether to rotate the final node layer to its eigenbasis or not.",
     )
-    dataset: Union[
-        ModularArithmeticDatasetConfig,
-        HFDatasetConfig,
-        VisionDatasetConfig,
-        BlockVectorDatasetConfig,
+    dataset: Optional[
+        Union[
+            ModularArithmeticDatasetConfig,
+            HFDatasetConfig,
+            VisionDatasetConfig,
+            BlockVectorDatasetConfig,
+        ]
     ] = Field(
         ...,
         discriminator="dataset_type",
-        description="The dataset to use to build the graph.",
+        description="The dataset to use to build the graph. Is allowed to be None if computing"
+        "gram matrices only.",
+    )
+    gram_dataset: Optional[
+        Union[
+            ModularArithmeticDatasetConfig,
+            HFDatasetConfig,
+            VisionDatasetConfig,
+            BlockVectorDatasetConfig,
+        ]
+    ] = Field(
+        None,
+        discriminator="dataset_type",
+        description="The dataset to use for the gram matrix. Defaults to the same dataset as the"
+        "one used to build the graph.",
     )
     batch_size: int = Field(..., description="The batch size to use when building the graph.")
     gram_batch_size: Optional[int] = Field(
@@ -179,10 +208,6 @@ class RibBuildConfig(BaseModel):
         "`.[block-num]` suffix. These are checked against the node layers used in the graph.",
     )
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
-    calculate_edges: bool = Field(
-        True,
-        description="Whether to calculate the edges of the RIB graph.",
-    )
     eval_type: Optional[Literal["accuracy", "ce_loss"]] = Field(
         None,
         description="The type of evaluation to perform on the model before building the graph."
@@ -253,6 +278,26 @@ class RibBuildConfig(BaseModel):
         if sum(1 for val in model_options if val is not None) != 1:
             raise ValueError(f"Exactly one of {model_options} must be set")
 
+        if self.dataset is None:
+            if self.calculate_Cs or self.calculate_edges:
+                raise ValueError("dataset must be set if calculate_Cs or calculate_edges is True")
+            if self.gram_dataset is None:
+                raise ValueError("dataset must be set if gram_dataset is None")
+            if self.eval_type is not None:
+                raise ValueError("dataset must be set if eval_type is not None")
+
+        if self.calculate_edges and not self.calculate_Cs:
+            raise ValueError("calculate_edges=True requires calculate_Cs=True")
+
+        if self.gram_matrices_path and not self.calculate_Cs:
+            raise ValueError("gram_matrices_path given requires calculate_Cs=True")
+
+        if self.interaction_matrices_path and not self.calculate_Cs:
+            raise ValueError("interaction_matrices_path given requires calculate_Cs=True")
+
+        if self.interaction_matrices_path is not None and not self.calculate_edges:
+            raise ValueError("interaction_matrices_path given requires calculate_edges=True")
+
         if self.interaction_matrices_path is not None:
             assert (
                 self.mlp_path is None and self.modular_mlp_config is None
@@ -301,11 +346,6 @@ class RibBuildConfig(BaseModel):
                 self.mlp_path is None and self.modular_mlp_config is None
             ), "Naive gradient flow not compatible with MLP"
 
-        if self.naive_gradient_flow:
-            assert (
-                self.interaction_matrices_path is None
-            ) or self.calculate_edges, "You are running with calculate_edges=False but interaction_matrices_path are provided. What do you want me to compute?"
-
         return self
 
     def get_integration_method(self, node_layer: str) -> IntegrationMethod:
@@ -321,13 +361,22 @@ class RibBuildConfig(BaseModel):
 class RibBuildResults(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
     exp_name: str = Field(..., description="The name of the experiment")
+    mean_vectors: Optional[dict[str, torch.Tensor]] = Field(
+        default_factory=lambda: {},
+        description="Mean vectors at each node layer. Set to None if using center=False. Set to {} "
+        "if loading old Cs where we didn't store mean vectors.",
+        repr=False,
+    )
     gram_matrices: dict[str, torch.Tensor] = Field(
         description="Gram matrices at each node layer.", repr=False
     )
     interaction_rotations: list[InteractionRotation] = Field(
         description="Interaction rotation matrices (e.g. Cs, Us) at each node layer.", repr=False
     )
-    edges: list[Edges] = Field(description="The edges between each node layer.", repr=False)
+    edges: list[Edges] = Field(
+        description="The edges between each node layer. Set to [] if no edges calculated.",
+        repr=False,
+    )
     dist_info: DistributedInfo = Field(
         description="Information about the parallelisation setup used for the run."
     )
@@ -339,6 +388,9 @@ class RibBuildResults(BaseModel):
     ml_model_config: Union[MLPConfig, ModularMLPConfig, SequentialTransformerConfig] = Field(
         discriminator="config_type", description="The config of the model used to build the graph."
     )
+    calc_grams_time: Optional[float] = Field(
+        None, description="The time taken (in minutes) to calculate the gram matrices."
+    )
     calc_C_time: Optional[float] = Field(
         None, description="The time taken (in minutes) to calculate the interaction rotations."
     )
@@ -347,15 +399,56 @@ class RibBuildResults(BaseModel):
     )
 
 
-def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildConfig) -> None:
+def _getattr_recursive(obj, attr):
+    """Get the value of an attribute-path (where the path is separated by ".")."""
+    for part in attr.split("."):
+        obj = getattr(obj, part)
+    return obj
+
+
+def _get_all_subfields(config):
+    field_paths = []
+    fields = set(list(config.model_fields.keys()))
+    for field in fields:
+        if not isinstance(getattr(config, field), BaseModel):
+            field_paths.append(field)
+        else:
+            subfields = _get_all_subfields(getattr(config, field))
+            field_paths.extend([f"{field}.{subfield}" for subfield in subfields])
+    return field_paths
+
+
+def _verify_compatible_configs(
+    config: RibBuildConfig, loaded_config: RibBuildConfig, whitelist=None
+):
     """Ensure that the config for calculating edges is compatible with that used to calculate Cs.
+
+    Args:
+        config: The current config
+        loaded_config: The config that was used to calculate the loaded file
+        whitelist: A list of attributes that are allowed to differ between the two configs. Defaults
+            to an empty list.
 
     TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
     path management nice with this Config being defined in this file in the rib_scripts dir.
     """
-    assert (
-        config.dataset.dataset_type == loaded_config.dataset.dataset_type
-    ), "Dataset types must match"
+    # Fields that we don't need to verify. For this specific call (e.g. basis & edges stuff when
+    # loading gram matrices) + general fields that are allowed to differ (like batch size).
+    whitelist = whitelist or []
+    whitelist += [
+        "exp_name",
+        "out_dir",
+        "gram_matrices_path",
+        "interaction_matrices_path",
+        "eval_type",
+        "calculate_Cs",
+        "calculate_edges",
+        "batch_size",
+        "gram_batch_size",
+        "edge_batch_size",
+        "dist_split_over",
+        "node_layers",
+    ]
 
     # config.node_layers must be a subsequence of loaded_config.node_layers
     assert "|".join(config.node_layers) in "|".join(loaded_config.node_layers), (
@@ -364,60 +457,51 @@ def _verify_compatible_configs(config: RibBuildConfig, loaded_config: RibBuildCo
         "calculate the edges."
     )
 
-    # The following attributes must exactly match across configs
-    for attr in [
-        "tlens_model_path",
-        "tlens_pretrained",
-    ]:
-        assert getattr(config, attr) == getattr(loaded_config, attr), (
-            f"{attr} in config ({getattr(config, attr)}) does not match "
-            f"{attr} in loaded matrices ({getattr(loaded_config, attr)})"
-        )
-
-    # Verify that, for huggingface and torchvision datasets, we're not trying to calculate edges on
-    # data that wasn't used to calculate the Cs
-    if hasattr(config.dataset, "name"):
-        assert hasattr(loaded_config.dataset, "name"), "loaded_config doesn't have a dataset name"
-        assert config.dataset.name == loaded_config.dataset.name, "Dataset names must match"
-    assert config.dataset.return_set == loaded_config.dataset.return_set, "Return sets must match"
-    if isinstance(config.dataset, HFDatasetConfig):
-        assert isinstance(loaded_config.dataset, HFDatasetConfig)
-        if config.dataset.return_set_frac is not None:
-            assert (
-                loaded_config.dataset.return_set_frac is not None
-            ), "Can't set return_set_frac if the loaded config didn't use it"
-            assert (
-                config.dataset.return_set_frac <= loaded_config.dataset.return_set_frac
-            ), "Cannot use a larger return_set_frac for edges than to calculate the Cs"
-        elif config.dataset.n_samples is not None:
-            assert loaded_config.dataset.n_samples is not None
-            assert (
-                config.dataset.n_samples <= loaded_config.dataset.n_samples
-            ), "Cannot use a larger n_samples for edges than to calculate the Cs"
+    list_of_fields = set(_get_all_subfields(config) + _get_all_subfields(loaded_config))
+    for field in list_of_fields:
+        if field not in whitelist:
+            # Both configs should have the same fields because they're both RibBuildConfigs so
+            # no need to check has_attr.
+            val1 = _getattr_recursive(config, field)
+            val2 = _getattr_recursive(loaded_config, field)
+            if val1 != val2:
+                logger.warning(
+                    f"{field} in config ({val1}) does not match {field} in loaded_config ({val2})"
+                )
+                # TODO Raise an error here once we're sure it won't disrupt a big run due to some
+                # mismatched fields from old files where we didn't pay attention to this.
 
 
-def load_interaction_rotations(
+def load_partial_results(
     config: RibBuildConfig,
-) -> tuple[dict[str, Float[Tensor, "orig orig"]], list[InteractionRotation]]:
-    """Load pre-saved grams and interaction rotation matrices from file.
+    device: torch.device,
+    path: Union[str, Path],
+    return_interaction_rotations: bool = True,
+) -> tuple[
+    dict[str, Float[Tensor, "orig"]],
+    dict[str, Float[Tensor, "orig orig"]],
+    list[InteractionRotation],
+]:
+    """Load pre-saved mean vectors, gram matrices and interaction rotation matrices from file.
 
-    Useful for just calculating edges on large models.
+    Useful for just calculating Cs or edges on large models.
 
     Args:
         config: The config used to calculate the C matrices.
+        device: The device to move the matrices to.
+        return_interaction_rotations: Whether to return the interaction rotations. Set to False to
+            load mean vectors and gram matrices only.
 
     Returns:
-        The gram matrices and InteractionRotation objects
+        The mean vectors, gram matrices and interaction rotations
     """
-    logger.info("Loading pre-saved C matrices from %s", config.interaction_matrices_path)
-    assert config.interaction_matrices_path is not None
-    matrices_info = torch.load(config.interaction_matrices_path)
+    logger.info("Loading pre-saved results from %s", path)
+    matrices_info = torch.load(path)
 
-    config_dict = config.model_dump()
     # The loaded config might have a different schema. Only pass fields that are still valid.
+    # FIXME: Move the code below into it's own function, or into _verify_compatible_configs.
+    config_dict = config.model_dump()
     valid_fields = list(config_dict.keys())
-
-    # If not all fields are valid, log a warning
     loaded_config_dict: dict = {}
     for loaded_key in matrices_info["config"]:
         if loaded_key in valid_fields:
@@ -427,14 +511,23 @@ def load_interaction_rotations(
                 "The following field in the loaded config is no longer supported and will be ignored:"
                 f" {loaded_key}"
             )
-
     loaded_config = RibBuildConfig(**loaded_config_dict)
+    # Verify configs
     _verify_compatible_configs(config, loaded_config)
 
-    interaction_rotations = [
-        InteractionRotation(**data) for data in matrices_info["interaction_rotations"]
-    ]
-    return matrices_info["gram_matrices"], interaction_rotations
+    interaction_rotations = (
+        [InteractionRotation(**data) for data in matrices_info["interaction_rotations"]]
+        if return_interaction_rotations
+        else []
+    )
+    mean_vectors = matrices_info["mean_vectors"] if "mean_vectors" in matrices_info else {}
+    gram_matrices = matrices_info["gram_matrices"]
+
+    # Move to device
+    mean_vectors = {k: v.to(device) for k, v in mean_vectors.items()} if mean_vectors else None
+    gram_matrices = {k: v.to(device) for k, v in gram_matrices.items()}
+
+    return mean_vectors, gram_matrices, interaction_rotations
 
 
 def _get_out_file_path(
@@ -450,11 +543,17 @@ def _get_out_file_path(
             out_file = out_dir / f"rib_graph_global_rank{dist_info.global_rank}.pt"
         else:
             out_file = config.out_dir / f"{config.exp_name}_rib_graph.pt"
-    else:
+    elif config.calculate_Cs:
         # all processes will compute the same Cs so we only have rank 0 write output
         if dist_info is not None and dist_info.global_size > 1 and dist_info.global_rank != 0:
             return None
-        out_file = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+        else:
+            out_file = config.out_dir / f"{config.exp_name}_rib_Cs.pt"
+    else:
+        assert (
+            dist_info is None or dist_info.global_size == 1
+        ), "Distributed grams not implemented yet"
+        out_file = config.out_dir / f"{config.exp_name}_rib_grams.pt"
     return out_file
 
 
@@ -617,16 +716,44 @@ def rib_build(
             raise NotImplementedError("Distributed naive gradient flow not implemented yet")
         return gradient_flow_loop(config, force)
 
+    if config.calculate_Cs:
+        assert n_pods == 1, "Cannot parallelize Cs calculation between pods"
+        if dist_info.global_size > 1 and config.dist_split_over == "dataset":
+            raise NotImplementedError("Cannot parallelize Cs calculation over dataset")
+
     out_file = _get_out_file_path(config, dist_info)
     _check_out_file_path(out_file, force, dist_info)
 
+    calc_grams_time = None
     calc_C_time = None
     calc_edges_time = None
 
-    model, dataset = load_model_and_dataset_from_rib_config(config, device=device, dtype=dtype)
+    model = load_model(config, device=device, dtype=dtype)
+
+    if config.dataset is not None:
+        dataset = load_dataset(
+            dataset_config=config.dataset,
+            model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
+            tlens_model_path=config.tlens_model_path,
+        )
+        logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
+
+    if config.gram_dataset is None:
+        gram_dataset = dataset
+    elif config.gram_matrices_path is None and config.interaction_matrices_path is None:
+        # Load the gram_dataset, except for in the cases where we skip gram matrix calculation.
+        # If config.graph_matrix_path is given we will skip gram matrix calculation and load the
+        # pre-saved gram matrices.  If config.interaction_matrices_path is given we will skip gram
+        # and Cs calculation and load the pre-saved gram and Cs matrices.
+        gram_dataset = load_dataset(
+            dataset_config=config.gram_dataset,
+            model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
+            tlens_model_path=config.tlens_model_path,
+        )
+        logger.info(f"Gram dataset length: {len(gram_dataset)}")  # type: ignore
+
     model.eval()
     hooked_model = HookedModel(model)
-    logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
 
     # Evaluate model on dataset for sanity check
     if config.eval_type is not None:
@@ -650,21 +777,21 @@ def rib_build(
     integration_methods = [
         config.get_integration_method(node_layer) for node_layer in config.node_layers
     ]
-    if config.interaction_matrices_path is None:
-        assert n_pods == 1, "Cannot parallelize Cs calculation between pods"
-        if dist_info.global_size > 1 and config.dist_split_over == "dataset":
-            raise NotImplementedError("Cannot parallelize Cs calculation over dataset")
 
+    # 1) Compute or load gram matrices (load if neither gram matrices nor Cs are provided)
+    if config.gram_matrices_path is None and config.interaction_matrices_path is None:
+        # Note that we use shuffle=False because we already shuffled the dataset when we loaded it
         gram_train_loader = DataLoader(
-            dataset=dataset, batch_size=config.gram_batch_size or config.batch_size, shuffle=False
+            dataset=gram_dataset,
+            batch_size=config.gram_batch_size or config.batch_size,
+            shuffle=False,
         )
         # Only need gram matrix for output if we're rotating the final node layer
         collect_output_gram = config.node_layers[-1] == "output" and config.rotate_final_node_layer
-
-        means: Optional[dict[str, Float[Tensor, "orig"]]] = None
+        mean_vectors: Optional[dict[str, Float[Tensor, "orig"]]] = None
         if config.center:
             logger.info("Collecting dataset means")
-            means = collect_dataset_means(
+            mean_vectors = collect_dataset_means(
                 hooked_model=hooked_model,
                 module_names=section_names,
                 data_loader=gram_train_loader,
@@ -685,15 +812,31 @@ def rib_build(
             device=device,
             collect_output_gram=collect_output_gram,
             hook_names=[module_id for module_id in config.node_layers if module_id != "output"],
-            means=means,
+            means=mean_vectors,
         )
-        time_to_collect_gram = (time.time() - collect_gram_start_time) / 60
-        logger.info("Time to collect gram matrices: %.2f minutes", time_to_collect_gram)
+        calc_grams_time = (time.time() - collect_gram_start_time) / 60
+        logger.info("Time to collect gram matrices: %.2f minutes", calc_grams_time)
+    elif config.interaction_matrices_path is not None:
+        # If we have interaction_matrices_path we won't need to compute Cs and thus don't
+        # need to load means and grams here. Means won't be needed for edges and grams will
+        # be loaded from interaction_matrices_path.
+        pass
+    elif config.gram_matrices_path is not None:
+        logger.info("Skipping gram matrix calculation, loading pre-saved gram matrices")
+        mean_vectors, gram_matrices, _ = load_partial_results(
+            config,
+            device,
+            path=config.gram_matrices_path,
+            return_interaction_rotations=False,
+        )
+    else:
+        assert False, "This else should never be reached"
 
+    # 2) Compute or load Cs (this happens only if calculate_Cs)
+    if config.calculate_Cs and config.interaction_matrices_path is None:
         graph_train_loader = DataLoader(
             dataset=dataset, batch_size=config.batch_size, shuffle=False
         )
-
         c_start_time = time.time()
         logger.info(
             "Calculating interaction rotations (Cs) for %s for %d batches.",
@@ -714,30 +857,31 @@ def rib_build(
             rotate_final_node_layer=config.rotate_final_node_layer,
             basis_formula=config.basis_formula,
             center=config.center,
-            means=means,
+            means=mean_vectors,
             n_stochastic_sources_pos=config.n_stochastic_sources_basis_pos,
             n_stochastic_sources_hidden=config.n_stochastic_sources_basis_hidden,
             out_dim_n_chunks=dist_info.global_size if config.dist_split_over == "out_dim" else 1,
             out_dim_chunk_idx=dist_info.global_rank if config.dist_split_over == "out_dim" else 0,
             isolate_ln_var=config.isolate_ln_var,
         )
-        # InteractionRotation objects used to calculate edges
-        edge_interaction_rotations = interaction_rotations
-
         calc_C_time = (time.time() - c_start_time) / 60
         logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
         logger.info("Max memory allocated for Cs: %.2f GB", torch.cuda.max_memory_allocated() / 1e9)
         torch.cuda.reset_peak_memory_stats()
+    elif config.calculate_Cs and config.interaction_matrices_path is not None:
+        logger.info("Skipping Cs calculation, loading pre-saved Cs")
+        mean_vectors, gram_matrices, interaction_rotations = load_partial_results(
+            config, device, path=config.interaction_matrices_path
+        )
     else:
-        gram_matrices, interaction_rotations = load_interaction_rotations(config=config)
+        logger.info("Not computing or loading Cs.")
+        interaction_rotations = []
+
+    # 3) Compute edges
+    if config.calculate_edges and config.calculate_Cs:
         edge_interaction_rotations = [
             obj for obj in interaction_rotations if obj.node_layer in config.node_layers
         ]
-
-    if not config.calculate_edges:
-        logger.info("Skipping edge calculation.")
-        E_hats = []
-    else:
         logger.info("Calculating edges.")
         full_dataset_len = len(dataset)  # type: ignore
         if config.dist_split_over == "dataset":
@@ -778,9 +922,15 @@ def rib_build(
         logger.info(
             "Max memory allocated for edges: %.2f GB", torch.cuda.max_memory_allocated() / 1e9
         )
+    else:
+        logger.info("Skipping edge calculation because calculate_edges or calculate_Cs were False")
+        E_hats = []
 
+    # Note that mean_vectors can be the empty dict if we loaded an old Cs file. It is None if
+    # center=False.
     results = RibBuildResults(
         exp_name=config.exp_name,
+        mean_vectors={k: v.cpu() for k, v in mean_vectors.items()} if mean_vectors else None,
         gram_matrices={k: v.cpu() for k, v in gram_matrices.items()},
         interaction_rotations=interaction_rotations,
         edges=E_hats,
@@ -788,6 +938,7 @@ def rib_build(
         contains_all_edges=dist_info.global_size == 1,  # True if no parallelisation
         config=config,
         ml_model_config=model.cfg,
+        calc_grams_time=calc_grams_time,
         calc_C_time=calc_C_time,
         calc_edges_time=calc_edges_time,
     )

@@ -73,9 +73,9 @@ node_layers:
   - ln2.7 # resid, attn_out + resid
   - ln2_out.7 # var, resid, attn_out + resid
   - mlp_in.7 # ln_resid, attn_out + resid
-  - ln_final
+  - ln_final # resid #this would be ==ln1.8 if there was one
   - ln_final_out
-  - unembed # resid #this would be ==ln1.8 if there was one
+  - unembed
 rotate_final_node_layer: true
 # GPUs
 gram_batch_size: 100 # doesn't matter much for speed

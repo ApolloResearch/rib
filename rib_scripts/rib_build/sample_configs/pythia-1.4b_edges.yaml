@@ -199,5 +199,3 @@ n_stochastic_sources_basis_hidden: null
 calculate_edges: true
 edge_formula: squared
 n_stochastic_sources_edges: 1
-# ignore_0th_pos: true
-# out_dir: /mnt/ssd-interp/nix/interp/interp/pythia-scaling/1-4b/

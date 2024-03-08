@@ -290,10 +290,13 @@ class RibBuildConfig(BaseModel):
             raise ValueError("calculate_edges=True requires calculate_Cs=True")
 
         if self.gram_matrices_path and not self.calculate_Cs:
-            raise ValueError("gram_matrices_path given but calculate_Cs=False")
+            raise ValueError("gram_matrices_path given requires calculate_Cs=True")
 
         if self.interaction_matrices_path and not self.calculate_Cs:
-            logger.warning("interaction_matrices_path ignored due to calculate_Cs=False")
+            raise ValueError("interaction_matrices_path given requires calculate_Cs=True")
+
+        if self.interaction_matrices_path is not None and not self.calculate_edges:
+            raise ValueError("interaction_matrices_path given requires calculate_edges=True")
 
         if self.interaction_matrices_path is not None:
             assert (
@@ -342,11 +345,6 @@ class RibBuildConfig(BaseModel):
             assert (
                 self.mlp_path is None and self.modular_mlp_config is None
             ), "Naive gradient flow not compatible with MLP"
-
-        if self.naive_gradient_flow:
-            assert (
-                self.interaction_matrices_path is None
-            ) or self.calculate_edges, "You are running with calculate_edges=False but interaction_matrices_path are provided. What do you want me to compute?"
 
         return self
 
@@ -408,6 +406,18 @@ def _getattr_recursive(obj, attr):
     return obj
 
 
+def _get_all_subfields(config):
+    field_paths = []
+    fields = set(list(config.model_fields.keys()))
+    for field in fields:
+        if not isinstance(getattr(config, field), BaseModel):
+            field_paths.append(field)
+        else:
+            subfields = _get_all_subfields(getattr(config, field))
+            field_paths.extend([f"{field}.{subfield}" for subfield in subfields])
+    return field_paths
+
+
 def _verify_compatible_configs(
     config: RibBuildConfig, loaded_config: RibBuildConfig, whitelist=None
 ):
@@ -422,7 +432,8 @@ def _verify_compatible_configs(
     TODO: It would be nice to unittest this, but awkward to avoid circular imports and keep the
     path management nice with this Config being defined in this file in the rib_scripts dir.
     """
-    # Fields that we don't need to verify
+    # Fields that we don't need to verify. For this specific call (e.g. basis & edges stuff when
+    # loading gram matrices) + general fields that are allowed to differ (like batch size).
     whitelist = whitelist or []
     whitelist += [
         "exp_name",
@@ -433,8 +444,8 @@ def _verify_compatible_configs(
         "calculate_Cs",
         "calculate_edges",
         "batch_size",
-        "batch_size_gram",
-        "batch_size_edges",
+        "gram_batch_size",
+        "edge_batch_size",
         "dist_split_over",
         "node_layers",
     ]
@@ -446,45 +457,7 @@ def _verify_compatible_configs(
         "calculate the edges."
     )
 
-    # TODO: This should be automatic, just iterate through all fields in the model. But that's a
-    # different PR.
-    list_of_fields = [
-        "tlens_model_path",
-        "tlens_pretrained",
-        "dataset.dataset_type",
-        "dataset.return_set",
-        "dataset.return_set_frac",
-        "dataset.n_samples",
-        "rotate_final_node_layer",
-        "dtype",
-        "truncation_threshold",
-        "n_intervals",
-        "integration_method",
-        "center",
-        "naive_gradient_flow",
-        "n_stochastic_sources_basis_pos",
-        "n_stochastic_sources_basis_hidden",
-        "n_stochastic_sources_edges",
-        "edge_formula",
-        "basis_formula",
-    ]
-    if isinstance(config.dataset, HFDatasetConfig):
-        list_of_fields.extend(
-            ["dataset.name", "dataset.return_set_portion", "dataset.n_documents", "dataset.n_ctx"]
-        )
-        if config.gram_dataset is not None:
-            list_of_fields.extend(
-                [
-                    "gram_dataset.dataset_type",
-                    "gram_dataset.name",
-                    "gram_dataset.return_set",
-                    "gram_dataset.return_set_frac",
-                    "gram_dataset.return_set_portion",
-                    "gram_dataset.n_documents",
-                    "gram_dataset.n_samples",
-                    "gram_dataset.n_ctx",
-                ]
-            )
+    list_of_fields = set(_get_all_subfields(config) + _get_all_subfields(loaded_config))
     for field in list_of_fields:
         if field not in whitelist:
             # Both configs should have the same fields because they're both RibBuildConfigs so
@@ -766,9 +739,12 @@ def rib_build(
         logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
 
     if config.gram_dataset is None:
-        # asserrt config.dataset is not None
         gram_dataset = dataset
     elif config.gram_matrices_path is None and config.interaction_matrices_path is None:
+        # Load the gram_dataset, except for in the cases where we skip gram matrix calculation.
+        # If config.graph_matrix_path is given we will skip gram matrix calculation and load the
+        # pre-saved gram matrices.  If config.interaction_matrices_path is given we will skip gram
+        # and Cs calculation and load the pre-saved gram and Cs matrices.
         gram_dataset = load_dataset(
             dataset_config=config.gram_dataset,
             model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
@@ -802,7 +778,7 @@ def rib_build(
         config.get_integration_method(node_layer) for node_layer in config.node_layers
     ]
 
-    # 1) Compute or load gram matrices (this always happens)
+    # 1) Compute or load gram matrices (load if neither gram matrices nor Cs are provided)
     if config.gram_matrices_path is None and config.interaction_matrices_path is None:
         # Note that we use shuffle=False because we already shuffled the dataset when we loaded it
         gram_train_loader = DataLoader(
@@ -840,21 +816,17 @@ def rib_build(
         )
         calc_grams_time = (time.time() - collect_gram_start_time) / 60
         logger.info("Time to collect gram matrices: %.2f minutes", calc_grams_time)
+    elif config.interaction_matrices_path is not None:
+        # If we have interaction_matrices_path we won't need to compute Cs and thus don't
+        # need to load means and grams here. Means won't be needed for edges and grams will
+        # be loaded from interaction_matrices_path.
+        pass
     elif config.gram_matrices_path is not None:
         logger.info("Skipping gram matrix calculation, loading pre-saved gram matrices")
         mean_vectors, gram_matrices, _ = load_partial_results(
             config,
             device,
             path=config.gram_matrices_path,
-            return_interaction_rotations=False,
-        )
-    elif config.interaction_matrices_path is not None:
-        # We can also load the gram matrices from an interaction_matrices_path
-        logger.info("Skipping gram matrix calculation, loading means and grams from pre-saved Cs")
-        mean_vectors, gram_matrices, _ = load_partial_results(
-            config,
-            device,
-            path=config.interaction_matrices_path,
             return_interaction_rotations=False,
         )
     else:

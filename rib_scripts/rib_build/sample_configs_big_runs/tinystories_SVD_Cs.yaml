@@ -1,4 +1,4 @@
-exp_name: tinystories_sample
+exp_name: tinystories_svd_samples50000_ctx200
 seed: 0
 tlens_pretrained: tiny-stories-1M
 tlens_model_path: null
@@ -8,20 +8,18 @@ dataset:
   tokenizer_name: EleutherAI/gpt-neo-125M
   return_set: train
   return_set_frac: null
-  n_documents: 1000  # avg ~235 toks / document
-  n_samples: 500
+  n_documents: 100000  # avg ~235 toks / document
+  n_samples: 50000
   return_set_portion: first
-  n_ctx: 20 # needs to be <= 511 for the model to behave reasonably
-  seed: 0
+  n_ctx: 200 # needs to be <= 511 for the model to behave reasonably
 gram_dataset:
   dataset_type: huggingface
   name: apollo-research/sae-skeskinen-TinyStories-hf-tokenizer-gpt2
   tokenizer_name: EleutherAI/gpt-neo-125M
   return_set: train
-  return_set_frac: 0.01 #typically set to 0.99
+  return_set_frac: 0.01
   return_set_portion: first
-  n_ctx: 20 # should be same as dataset.n_ctx
-  seed: 1
+  n_ctx: 511
 eval_type: null
 # RIB layers
 node_layers:
@@ -73,12 +71,12 @@ node_layers:
   - ln2.7 # resid, attn_out + resid
   - ln2_out.7 # var, resid, attn_out + resid
   - mlp_in.7 # ln_resid, attn_out + resid
-  - ln_final # resid #this would be ==ln1.8 if there was one
+  - ln_final
   - ln_final_out
-  - unembed
+  - unembed # resid #this would be ==ln1.8 if there was one
 rotate_final_node_layer: true
-# GPUs
-gram_batch_size: 100 # doesn't matter much for speed
+# Hardware
+gram_batch_size: 100 # negligible time
 batch_size: 300 # batch_size=15 works _sometimes_ on single A100 @ n_ctx=200 & no stochastic sources
 edge_batch_size: 200 # not focusing on edges
 dist_split_over: out_dim
@@ -87,17 +85,17 @@ dtype: float64
 truncation_threshold: 1e-15
 n_intervals: 0
 integration_method: gradient
-center: true
 # Gram matrices
-gram_matrices_path: rib_scripts/rib_build/out/tinystories_sample_rib_grams.pt
-# Basis matrices
+gram_matrices_path: /mnt/ssd-interp/stefan/large_rib_runs/tinystories/gram_matrices/tinystories_ctx=200_gram=0.99_rib_grams.pt
+# Basis matrices took 7min
 calculate_Cs: true
-interaction_matrices_path: rib_scripts/rib_build/out/tinystories_sample_rib_Cs.pt
-basis_formula: jacobian
+interaction_matrices_path: null
+basis_formula: svd
+center: true
 naive_gradient_flow: false
-n_stochastic_sources_basis_pos: 1
+n_stochastic_sources_basis_pos: null
 n_stochastic_sources_basis_hidden: null
 # Edges
-calculate_edges: true
+calculate_edges: false
 edge_formula: squared
-n_stochastic_sources_edges: 1
+n_stochastic_sources_edges: 6

@@ -77,7 +77,7 @@ def visualize_one_layer(
     # device: Note that sae_viz uses their get_device function which always uses CUDA if available
     mfd = parse_activation_data(
         data.to(device),  # torch.Size([500, 200])
-        rib_acts.to(dtype).to(device),  # torch.Size([500, 200, 64])
+        rib_acts[:, :, feature_indices].to(dtype).to(device),  # torch.Size([500, 200, 64])
         resid_post.to(dtype).to(device),  # torch.Size([500, 200, 64])
         feature_resid_dirs=C_pinv[feature_indices, :].to(device).to(dtype),  # torch.Size([64, 65])
         feature_indices_list=feature_indices,  # range(64)
@@ -135,13 +135,14 @@ def main(
     hooked_model = HookedModel(model)
     # Get tokenizer
     tokenizer = AutoTokenizer.from_pretrained(dataset_config.tokenizer_name)
-    vocab_dict = {v: process_str_tok(k) for k, v in tokenizer.get_vocab().items()}
+    vocab_dict = tokenizer  # {v: process_str_tok(k) for k, v in tokenizer.get_vocab().items()}
     # Load dataset
     dataset = load_dataset(
         dataset_config=dataset_config,
         model_n_ctx=model.cfg.n_ctx if isinstance(model, SequentialTransformer) else None,
         tlens_model_path=rib_config.tlens_model_path,
     )
+
     logger.info(f"Dataset length: {len(dataset)}")  # type: ignore
     data_loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
     data = torch.cat([data for data, label in data_loader], dim=0)
@@ -170,7 +171,7 @@ def main(
         for i, info in enumerate(interaction_rotations):
             out_dir = (
                 Path(__file__).parent
-                / f"html_tinystories3/feature_viz_{dataset_config.n_samples}samples_{info.node_layer}"
+                / f"html_gpt2/feature_viz_{dataset_config.n_samples}samples_{info.node_layer}"
             )
             print(f"Getting html for {out_dir}")
             assert isinstance(W_U, torch.Tensor)
@@ -209,25 +210,29 @@ def main(
 
 
 # results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored_rib_stochpos1_ctx200_alllayers/tinystories_nnib_samples5000_ctx200_rib_Cs.pt"
-results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories_scaling/stored_rib_stochpos1_ctx200_alllayers/tinystories_nnib_samples5000_ctx200_rib_Cs.pt"
+# results_path = "/mnt/ssd-interp/stefan/large_rib_runs/tinystories/rib_10M_tokens/tinystories_nnib_samples50000_ctx200_rib_Cs.pt"
+# results_path = "/mnt/ssd-interp/stefan/rib/rib_scripts/rib_build/out/tinystories_svd_samples50000_ctx200_rib_Cs.pt"
 # results_path = "/mnt/ssd-interp/stefan/rib/rib_scripts/rib_build/out/pythia-1.4b-testing_rib_Cs.pt"
-#
+results_path = "/mnt/ssd-interp/stefan/large_rib_runs/pythia-1.4b/pythia-1.4b-testing_svd_Cs.pt"
 
-# dataset_config = HFDatasetConfig(
-#     **yaml.safe_load(
-#         """
-# dataset_type: huggingface
-# name: roneneldan/TinyStories # or skeskinen/TinyStories-GPT4, but not clear if part of training
-# tokenizer_name: EleutherAI/gpt-neo-125M
-# return_set: train
-# return_set_frac: null
-# n_documents: 100  # avg ~235 toks / document
-# n_samples: 50
-# return_set_portion: first
-# n_ctx: 200 # needs to be <= 511 for the model to behave reasonably
-# """
-#     )
-# )
+dataset_config = HFDatasetConfig(
+    **yaml.safe_load(
+        """
+dataset_type: huggingface
+name: apollo-research/Skylion007-openwebtext-tokenizer-gpt2
+tokenizer_name: gpt2
+return_set: train
+return_set_frac: null
+n_documents: 100000
+n_samples: 50
+return_set_portion: first
+n_ctx: 1024
+seed: 0
+"""
+    )
+)
 
 # main(results_path, feature_indices=list(range(30)) + list(range(500, 530)))
-main(results_path, feature_indices=list(range(30)))
+# main(results_path, feature_indices=list(range(64)), dataset_cfg=dataset_config)
+main("/mnt/ssd-rib/gpt2/gpt2_rib_Cs.pt", dataset_cfg=dataset_config, feature_indices=list(range(30)) + list(range(500, 530)))
+

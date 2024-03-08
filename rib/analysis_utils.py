@@ -21,6 +21,7 @@ def get_rib_acts(
     interaction_rotations: Iterable[InteractionRotation],
     device: str = "cuda",
     dtype: torch.dtype = torch.float32,
+    orig_acts: bool = False,
 ) -> dict[str, Float[torch.Tensor, "batch ... rotated"]]:
     """Returns the activations in rib space when the model is run on the dataset.
 
@@ -33,13 +34,20 @@ def get_rib_acts(
         else:
             return m_name
 
+    def get_rot_matrix(info):
+        assert info.C is not None
+        if orig_acts:
+            return torch.eye(info.C.shape[0], device=device, dtype=dtype)
+        else:
+            return info.C.to(device=device, dtype=dtype)
+
     hooks = [
         Hook(
             name="rotated_acts",
             data_key=info.node_layer,
             fn=rotate_pre_forward_hook_fn,
             module_name=get_module_name(info.node_layer),
-            fn_kwargs={"rotation_matrix": info.C.to(device=device, dtype=dtype), "mode": "cache"},
+            fn_kwargs={"rotation_matrix": get_rot_matrix(info), "mode": "cache"},
         )
         for info in interaction_rotations
         if info.C is not None

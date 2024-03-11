@@ -74,7 +74,7 @@ def _prepare_edges_for_plotting(
     raw_edges: list[torch.Tensor],
     nodes_per_layer: list[int],
     hide_const_edges: bool = False,
-    const_edge_norm: Optional[float] = None,
+    manual_edge_norm_factor: Optional[float] = None,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
@@ -82,8 +82,8 @@ def _prepare_edges_for_plotting(
         raw_edges (list[torch.Tensor]): List of edges tensors, each with shape
             (n_nodes_in_l+1, n_nodes_in_l).
         nodes_per_layer (list[int]): The number of nodes in each layer.
-        norm (Optional[float]): The value to normalize the edges by. If None, will normalize each
-            layer by the sum of the absolute values of the edges.
+        manual_edge_norm_factor (Optional[float]): The value to normalize the edges by.
+            If None, will normalize each layer by the sum of the absolute values of the edges.
 
     Returns:
         list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
@@ -98,7 +98,7 @@ def _prepare_edges_for_plotting(
             # should be zero except for a non-rotated last layer where they are important.
             weight_matrix[:, const_node_index] = 0
         # Normalize the edge weights by the sum of the absolute values of the weights
-        norm = const_edge_norm or torch.sum(torch.abs(weight_matrix)).item()
+        norm = manual_edge_norm_factor or torch.sum(torch.abs(weight_matrix)).item()
         weight_matrix /= norm
         # Only keep the desired number of nodes in each layer
         in_nodes = nodes_per_layer[i]
@@ -220,7 +220,7 @@ def plot_rib_graph(
     node_labels: Optional[list[list[str]]] = None,
     hide_const_edges: bool = False,
     ax: Optional[plt.Axes] = None,
-    const_edge_norm: Optional[float] = None,
+    manual_edge_norm_factor: Optional[float] = None,
     colors: Optional[list[str]] = None,
     clusters: Optional[list[list[int]]] = None,
 ) -> None:
@@ -238,8 +238,10 @@ def plot_rib_graph(
         node_labels: The labels for each node in the graph. If None, then no labels are added.
         hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes.
         ax: The axis to plot the graph on. If None, then a new figure is created.
-        const_edge_norm (Optional[float]): The value to normalize the edges by. If None, will choose
-            a different value for each layer (the sum of the absolute values of the edges).
+        manual_edge_norm_factor (Optional[float]): If None (default), scales each set of edges by
+            the sum of all edge weights. If non-none, will instead scale by
+            `(1/manual_edge_norm_factor)`, keeping edge widths consistent across layers for the same
+            E_hat value.
         colors (Optional[list[str]]): The colors to use for the nodes in each layer. If None, then
             the tab10 colormap is used.
     """
@@ -253,7 +255,7 @@ def plot_rib_graph(
         raw_edges,
         nodes_per_layer,
         hide_const_edges=hide_const_edges,
-        const_edge_norm=const_edge_norm,
+        manual_edge_norm_factor=manual_edge_norm_factor,
     )
 
     # Create the undirected graph

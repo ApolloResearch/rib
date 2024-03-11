@@ -175,6 +175,7 @@ class GraphClustering:
         edge_norm: Optional[EdgeNorm] = None,
         node_layers: Optional[list[str]] = None,
         gamma: float = 1.0,
+        leiden_iterations: int = 10,
     ):
         """
         Create a GraphClustering object from a RibBuildResults object.
@@ -187,14 +188,24 @@ class GraphClustering:
                 results. Otherwise should be a subsequence of the node_layers from the results.
             gamma: The resolution parameter for the Leiden clustering algorithm. Higher values lead
                 to more smaller clusters.
+            leiden_iterations: Number of iterations to run the Leiden algorithm. Networkit uses 3
+                by default, it's pretty cheap to go higher. Unclear if there are actual benifits to
+                doing so, but it shouldn't hurt.
         """
         self.results = results
         self.edge_norm = edge_norm or IdentityEdgeNorm()
         self.node_layers = node_layers or results.config.node_layers
         self.gamma = gamma
+        self.leiden_iterations = leiden_iterations
+
+        if node_layers is not None:
+            assert "|".join(node_layers) in "|".join(
+                results.config.node_layers
+            ), "node_layers must be a subsequence of the node layers in the RIB graph."
 
         self.nodes_per_layer = {
-            ir.node_layer: ir.C.shape[1] for ir in results.interaction_rotations if ir.C is not None
+            ir.node_layer: ir.C.shape[1] if ir.C is not None else ir.orig_dim
+            for ir in results.interaction_rotations
         }
         self.nodes = [
             Node(nl, i) for nl in self.node_layers for i in range(self.nodes_per_layer[nl])
@@ -216,6 +227,7 @@ class GraphClustering:
         for edges in tqdm.tqdm(self.results.edges, desc="Making RIB graph"):
             if edges.in_node_layer in self.node_layers:
                 E = self.edge_norm(edges.E_hat, edges.in_node_layer)[start_idx:, start_idx:]
+                # torch.nonzero will return two tensors, each of shape [num_non_zero_edges]
                 out_idxs, in_idxs = torch.nonzero(E, as_tuple=True)
                 in_ids = in_idxs + self.node_to_idx[Node(edges.in_node_layer, start_idx)]
                 out_ids = out_idxs + self.node_to_idx[Node(edges.out_node_layer, start_idx)]
@@ -228,8 +240,9 @@ class GraphClustering:
         self.G.checkConsistency()
 
     def _run_leiden(self):
-        iterations = 10
-        algo = nk.community.ParallelLeiden(self.G, gamma=self.gamma, iterations=iterations)
+        algo = nk.community.ParallelLeiden(
+            self.G, gamma=self.gamma, iterations=self.leiden_iterations
+        )
         algo.run()
         self._nk_partition = algo.getPartition()
 

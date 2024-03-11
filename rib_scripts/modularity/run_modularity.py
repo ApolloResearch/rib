@@ -1,5 +1,13 @@
 """
-TODO
+A script to run a first pass of modularity analysis on a RIB build and save various helpful related
+plots. Will likely require some customization for particular use cases -- you are encouraged to
+copy the code and modify it to your needs.
+
+Example usage:
+
+```bash
+python run_modularity.py /path/to/rib_build.pt [--threshold 0.2] [--gamma 1.0] [--plot_edge_dist]
+   [--plot_piano] [--plot_graph] [--log_norm] [--ablation_path /path/to/ablation_results.json]
 """
 
 import warnings
@@ -31,7 +39,7 @@ def edge_distribution(
     ylim=(None, 1),
     vlines: Optional[dict[str, float]] = None,
 ):
-    """Plots culmulative distribution functions of the edge values.
+    """Plots culmulative empirical distribution functions (ECDFs) of the edge values.
 
     Helpful for undetstanding the epsilon cutoffs used for edge normalization, especially with
     `edge_distribution(..., vlines=AdaptiveEdgeNorm.eps_by_layer)`.
@@ -130,11 +138,27 @@ def run_modularity(
     plot_edge_dist: bool = True,
     plot_piano: bool = True,
     plot_graph: bool = True,
-    log_norm=True,
+    log_norm: bool = True,
     ablation_path: Optional[Union[str, Path]] = None,
 ):
     """
     This function runs modularity analysis on a RIB build and saves various helpful related plots.
+
+
+    Args:
+        results_path: The path to the RIB build results file.
+        threshold: The loss increase threshold for the bisect ablation.
+        gamma: The resolution parameter for the modularity analysis.
+        plot_edge_dist: Whether to plot the edge distribution ecdfs.
+        plot_piano: Whether to plot a piano plot, giving an overview of modular structure found.
+        plot_graph: Whether to plot the full RIB graph with nodes colored and sorted by module.
+        log_norm: Whether to use a log edge norm. If True, will need to use the output of an edge
+            ablation experiment to determine the epsilon cutoffs. If no ablation file is found,
+            will first run the ablation experiment then run the modularity analysis. If False will
+            use SqrtNorm.
+        ablation_path: The path to some bised edge ablation results file. If not provided, will
+            pick a default path in the same directory as results_path. Ignored if log_norm is False.
+            If not found, will run the ablation experiment.
     """
     results_path = Path(results_path)
     results = RibBuildResults(**torch.load(results_path))

@@ -23,7 +23,9 @@ from rib.types import RootPath
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
 
-def main(*results_files: Union[str, Path], force: bool = False) -> Optional[RootPath]:
+def main(
+    *results_files: Union[str, Path], force: bool = False, xlim=None, ylim=None, logy: bool = True
+) -> Optional[RootPath]:
     results_list = []
     no_ablation_results_list = []
     exp_names = []
@@ -59,6 +61,11 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
     if not check_out_file_overwrite(out_file, force):
         handle_overwrite_fail()
 
+    if xlim is None:
+        xlim = (0.0, 20.0) if eval_type == "accuracy" else (0, None)
+    if ylim is None:
+        ylim = (0.0, 1.0) if eval_type == "accuracy" else (1e-4, 0.5)
+
     plot_ablation_results(
         results=results_list,
         no_ablation_results_list=no_ablation_results_list,
@@ -66,9 +73,11 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
         exp_names=[f"{exp_name} LM" for exp_name in exp_names],
         eval_type=eval_type,
         ablation_types=ablation_types,
-        xlim=(0.0, 20.0) if eval_type == "accuracy" else None,
-        ylim=(0.0, 1.0) if eval_type == "accuracy" else (-0.1, 0.2),
+        xlim=xlim,
+        ylim=ylim,
         baseline_is_zero=False if eval_type == "accuracy" else True,
+        log_scale_x=False,
+        log_scale_y=logy,
     )
 
     logger.info(f"Saved plot to {out_file}")

@@ -311,12 +311,12 @@ def plot_rib_graph(
         nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8, ax=ax)
 
     # Draw edges
-    width_factor = 15
+    width_factor = 200
     nx.draw_networkx_edges(
         graph,
         pos,
         edgelist=[(edge[0], edge[1]) for edge in graph.edges(data=True)],
-        width=[width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
+        width=[min(width_factor * edge[2]["weight"], 30) for edge in graph.edges(data=True)],
         alpha=1,
         edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
         ax=ax,

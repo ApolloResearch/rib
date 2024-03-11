@@ -175,7 +175,7 @@ class GraphClustering:
         edge_norm: Optional[EdgeNorm] = None,
         node_layers: Optional[list[str]] = None,
         gamma: float = 1.0,
-        leiden_iterations: Optional[int] = None,
+        leiden_iterations: int = 10,
     ):
         """
         Create a GraphClustering object from a RibBuildResults object.
@@ -188,9 +188,9 @@ class GraphClustering:
                 results. Otherwise should be a subsequence of the node_layers from the results.
             gamma: The resolution parameter for the Leiden clustering algorithm. Higher values lead
                 to more smaller clusters.
-            leiden_iterations: Number of iterations to run the Leiden algorithm. If None, will run
-                until there's no improvement. networkit uses 3 by default, it's pretty cheap to go
-                higher. Not sure if there are actual benifits to doing so, but it shouldn't hurt.
+            leiden_iterations: Number of iterations to run the Leiden algorithm. Networkit uses 3
+                by default, it's pretty cheap to go higher. Unclear if there are actual benifits to
+                doing so, but it shouldn't hurt.
         """
         self.results = results
         self.edge_norm = edge_norm or IdentityEdgeNorm()

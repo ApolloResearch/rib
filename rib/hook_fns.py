@@ -66,7 +66,7 @@ def _append_to_hooked_list(
         element_to_append: Appended to hooked data.
     """
     hooked_data.setdefault(hook_name, {}).setdefault(data_key, [])
-    hooked_data[hook_name][data_key].append(element_to_append)
+    hooked_data[hook_name][data_key].append(element_to_append.cpu())
 
 
 InputActType = Union[

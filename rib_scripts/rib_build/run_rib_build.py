@@ -19,6 +19,10 @@ Usage:
         --pod_rank: Rank of the current pod. Will be 0 unless this script was called as part of a
             distributed job over e.g. kubernetes.
 """
+# Huggingface cache, needs to be set before importing huggingface things
+from os import environ
+
+environ["HF_HOME"] = "/mnt/ssd-interp/huggingface_cache/"
 
 import fire
 

@@ -18,6 +18,7 @@ import fire
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from rib_scripts.rib_build.plot_graph import plot_modular_graph
 
 from rib.ablations import AblationConfig, BisectScheduleConfig, load_bases_and_ablate
 from rib.data import HFDatasetConfig
@@ -25,7 +26,6 @@ from rib.log import logger
 from rib.modularity import ByLayerLogEdgeNorm, EdgeNorm, GraphClustering, SqrtNorm
 from rib.rib_builder import RibBuildResults
 from rib.utils import replace_pydantic_model
-from rib_scripts.rib_build.plot_graph import plot_modular_graph
 
 
 def _num_layers(results: RibBuildResults) -> int:
@@ -136,7 +136,7 @@ def run_modularity(
     plot_piano: bool = True,
     plot_graph: bool = True,
     log_norm: bool = True,
-    ablation_path: Optional[Path] = None,
+    ablation_path: Optional[Union[str, Path]] = None,
 ):
     """
     This function runs modularity analysis on a RIB build and saves various helpful related plots.
@@ -162,7 +162,7 @@ def run_modularity(
     name_prefix = f"{results.exp_name}-delta{threshold}"
     if log_norm:
         ablation_path = (
-            ablation_path
+            Path(ablation_path)
             or results_path.parent / f"{name_prefix}-bisect_edge_ablation_results.json"
         )
         if not ablation_path.exists():

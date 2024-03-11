@@ -131,6 +131,7 @@ def run_modularity(
     plot_piano: bool = True,
     plot_graph: bool = True,
     log_norm=True,
+    ablation_path: Optional[Union[str, Path]] = None,
 ):
     """
     This function runs modularity analysis on a RIB build and saves various helpful related plots.
@@ -139,7 +140,10 @@ def run_modularity(
     results = RibBuildResults(**torch.load(results_path))
     name_prefix = f"{results.exp_name}-delta{threshold}"
     if log_norm:
-        ablation_path = results_path.parent / f"{name_prefix}-bisect_edge_ablation_results.json"
+        ablation_path = (
+            Path(ablation_path)
+            or results_path.parent / f"{name_prefix}-bisect_edge_ablation_results.json"
+        )
         if not ablation_path.exists():
             logger.info("Ablation file not found, running ablation...")
             run_bisect_ablation(results_path, threshold)

@@ -70,7 +70,7 @@ def edge_distribution(
         in_nl = edge.in_node_layer
         if in_nl in ["ln_final", "ln_final_out"]:
             continue
-        prefix, layer = in_nl.split(".")
+        prefix, layer = in_nl.split(".") if "." in in_nl else (in_nl, 0)
         E = edge.E_hat.to(torch.float32).cpu().numpy()
         xs = np.quantile(E, qs)  # using np instead of torch as it's much much faster
         ax: plt.Axes = axs.flat[int(layer)]

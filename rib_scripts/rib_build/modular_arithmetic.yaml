@@ -14,8 +14,8 @@ eval_type: accuracy
 node_layers:
   - ln1.0
   - ln2.0
-  - mlp_in.0
-  - mlp_out.0
+  # - mlp_in.0
+  # - mlp_out.0
   - unembed
   - output
 rotate_final_node_layer: false

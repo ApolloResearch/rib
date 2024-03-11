@@ -60,6 +60,9 @@ def edge_distribution(
             "ln2": cmap.colors[9],
             "ln2_out": cmap.colors[8],
             "mlp_in": cmap.colors[5],
+            "mlp_out": cmap.colors[6],
+            "unembed": cmap.colors[7],
+            "output": cmap.colors[2],
         }
 
     plt.xscale("log")

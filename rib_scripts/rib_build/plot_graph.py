@@ -41,7 +41,7 @@ def plot_by_layer(
     out_file=None,
     edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
     hide_const_edges: bool = True,
-    const_edge_norm: Optional[float] = None,
+    manual_edge_norm_factor: Optional[float] = None,
     clusters: Optional[list[list[int]]] = None,
 ):
     """
@@ -60,11 +60,10 @@ def plot_by_layer(
         edge_norm: A function to normalize the edge weights pre-plotting.
         hide_const_edges: Whether to hide the nodes corresponding to constant RIB dirs. This is
             ignored if the RIB build is non-centered
-        const_edge_norm: If non-none, will use a fixed normalization value for all layers instead
-            of normalizing edges layer by layer.
+        manual_edge_norm_factor: If None (default), scales each set of edges by the sum of all edge
+            weights. If non-none, will instead scale by `(1/manual_edge_norm_factor)`, keeping
+            edge widths consistent across layers for the same E_hat value.
     """
-    # TODO: better argument names? cost_edge_norm is confusing as it's not directly related to
-    # const RIB direction node or edge norm :)
     results = _to_results(results)
 
     edge_norm = edge_norm or SqrtNorm()
@@ -115,7 +114,7 @@ def plot_by_layer(
             node_labels=None,
             hide_const_edges=results.config.center and hide_const_edges,
             ax=ax,
-            const_edge_norm=const_edge_norm,
+            manual_edge_norm_factor=manual_edge_norm_factor,
             clusters=block_clusters,
         )
 
@@ -137,7 +136,7 @@ def plot_modular_graph(
     plot_by_layer(
         graph.results,
         edge_norm=graph.edge_norm,
-        const_edge_norm=0.3 * graph.G.totalEdgeWeight() / len(graph.results.edges),
+        manual_edge_norm_factor=0.3 * graph.G.totalEdgeWeight() / len(graph.results.edges),
         clusters=clusters_for_plotting_fn,
         out_file=out_file,
         nodes_per_layer=150,  # max(self.nodes_per_layer.values()),
@@ -152,7 +151,7 @@ def main(
     force: bool = False,
     hide_const_edges: bool = True,
     by_layer: Optional[bool] = False,
-    const_edge_norm: Optional[float] = None,
+    manual_edge_norm_factor: Optional[float] = None,
 ) -> None:
     """Plot an RIB graph given a results file contain the graph edges.
 
@@ -165,8 +164,9 @@ def main(
         hide_const_edges: Whether to hide the nodes corresponding to constant RIB dirs. This is
             ignored if the RIB build is non-centered
         by_layer: Whether to plot the graph by layer.
-        const_edge_norm: If non-none, will use a fixed normalization value for all layers instead
-            of normalizing edges layer by layer.
+        manual_edge_norm_factor: If None (default), scales each set of edges by the sum of all edge
+            weights. If non-none, will instead scale by `(1/manual_edge_norm_factor)`, keeping
+            edge widths consistent across layers for the same E_hat value.
     """
     results = _to_results(results)
     if out_file is None:
@@ -197,7 +197,7 @@ def main(
             nodes_per_layer=nodes_per_layer,
             out_file=out_file,
             hide_const_edges=results.config.center and hide_const_edges,
-            const_edge_norm=const_edge_norm,
+            manual_edge_norm_factor=manual_edge_norm_factor,
         )
         return None
 
@@ -217,7 +217,7 @@ def main(
         out_file=out_file,
         node_labels=node_labels,
         hide_const_edges=results.config.center and hide_const_edges,
-        const_edge_norm=const_edge_norm,
+        manual_edge_norm_factor=manual_edge_norm_factor,
     )
 
     logger.info(f"Saved plot to {out_file}")

@@ -15,8 +15,10 @@ from typing import Callable, Optional, Union
 import fire
 import matplotlib.pyplot as plt
 import torch
+import tqdm
 
 from rib.log import logger
+from rib.modularity import ClusterListLike, GraphClustering, SqrtNorm
 from rib.plotting import plot_rib_graph
 from rib.rib_builder import RibBuildResults
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
@@ -40,6 +42,7 @@ def plot_by_layer(
     edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
     hide_const_edges: bool = True,
     const_edge_norm: Optional[float] = None,
+    clusters: Optional[list[list[int]]] = None,
 ):
     """
     Plots a RIB graph with every transformer block on it's own row.
@@ -47,6 +50,8 @@ def plot_by_layer(
     Can be called from the command line interface with `--by_layer` flag.
 
     You'll need to call the function from python if you want to use edge_norm.
+
+    Note: doesn't plot edges in the final layernorm.
 
     Args:
         results: The results file containing the graph edges.
@@ -58,7 +63,11 @@ def plot_by_layer(
         const_edge_norm: If non-none, will use a fixed normalization value for all layers instead
             of normalizing edges layer by layer.
     """
+    # TODO: better argument names? cost_edge_norm is confusing as it's not directly related to
+    # const RIB direction node or edge norm :)
     results = _to_results(results)
+
+    edge_norm = edge_norm or SqrtNorm()
 
     def get_block(name: str) -> Optional[int]:
         split = name.split(".")
@@ -76,17 +85,30 @@ def plot_by_layer(
     fig, axs = plt.subplots(len(blocks), 1, figsize=(8, len(blocks) * 6))
     axs = axs if len(blocks) > 1 else [axs]
 
-    for ax, block in zip(axs, blocks, strict=True):
-        edges = [edge for edge in results.edges if get_block(edge.in_node_layer) == block]
-        layers = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
+    for ax, block in tqdm.tqdm(
+        zip(axs, blocks, strict=True), total=len(blocks), desc="Plotting Blocks"
+    ):
+        block_edges = [edge for edge in results.edges if get_block(edge.in_node_layer) == block]
+        block_layers = [edge.in_node_layer for edge in block_edges] + [
+            block_edges[-1].out_node_layer
+        ]
         if edge_norm is not None:
-            raw_edges = [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges]
+            block_ehats = [edge_norm(edge.E_hat, edge.in_node_layer) for edge in block_edges]
         else:
-            raw_edges = [edge.E_hat for edge in edges]
+            block_ehats = [edge.E_hat for edge in block_edges]
+
+        if clusters is not None:
+            block_clusters = [
+                nl_clusters
+                for nl, nl_clusters in zip(results.config.node_layers, clusters, strict=True)
+                if nl in block_layers
+            ]
+        else:
+            block_clusters = None
 
         plot_rib_graph(
-            raw_edges=raw_edges,
-            layer_names=layers,
+            raw_edges=block_ehats,
+            layer_names=block_layers,
             exp_name=results.exp_name,
             nodes_per_layer=nodes_per_layer,
             out_file=None,
@@ -94,12 +116,32 @@ def plot_by_layer(
             hide_const_edges=results.config.center and hide_const_edges,
             ax=ax,
             const_edge_norm=const_edge_norm,
+            clusters=block_clusters,
         )
 
     if out_file is not None:
-        plt.savefig(out_file, dpi=300)
+        plt.savefig(out_file, dpi=400)
 
         logger.info(f"Saved plot to {Path(out_file).absolute()}")
+
+
+def plot_modular_graph(
+    graph: GraphClustering, clusters: ClusterListLike = "nonsingleton", out_file=None
+):
+    clusters_list = graph._get_clusterlist(clusters)
+    arr = graph._cluster_array(clusters_list)
+    clusters_for_plotting_fn = [
+        layer_clusters[: graph.nodes_per_layer[nl]]
+        for nl, layer_clusters in zip(graph.node_layers, arr.tolist(), strict=True)
+    ]
+    plot_by_layer(
+        graph.results,
+        edge_norm=graph.edge_norm,
+        const_edge_norm=0.3 * graph.G.totalEdgeWeight() / len(graph.results.edges),
+        clusters=clusters_for_plotting_fn,
+        out_file=out_file,
+        nodes_per_layer=150,  # max(self.nodes_per_layer.values()),
+    )
 
 
 def main(

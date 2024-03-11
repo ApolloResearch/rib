@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional, Union
 
+import colorcet
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -221,6 +222,7 @@ def plot_rib_graph(
     ax: Optional[plt.Axes] = None,
     const_edge_norm: Optional[float] = None,
     colors: Optional[list[str]] = None,
+    clusters: Optional[list[list[int]]] = None,
 ) -> None:
     """Plot the RIB graph for the given edges.
 
@@ -272,7 +274,14 @@ def plot_rib_graph(
     for i, layer in enumerate(layers):
         # Add extra spacing for nodes that have fewer nodes than the biggest layer
         spacing = max_layer_height / len(layer)
-        for j, node in enumerate(layer):
+        if clusters is None:
+            ordering = list(range(len(layer)))
+        else:
+            # truncate clusters to only include the nodes we keep in the graph
+            clusters[i] = clusters[i][: nodes_per_layer[i]]
+            ordering = sorted(range(len(layer)), key=lambda x: clusters[i][x])
+
+        for j, node in enumerate(layer[ordering]):
             pos[node] = (i, j * spacing)
 
     # Draw nodes
@@ -281,11 +290,15 @@ def plot_rib_graph(
         # convert from rgb to hex to avoid matplotlib warning
         to_hex = lambda x: f"{int(x * 255):02x}"
         colors = [f"#{to_hex(r)}{to_hex(g)}{to_hex(b)}" for r, g, b in plt.get_cmap("tab10").colors]  # type: ignore
-    options = {"edgecolors": "tab:gray", "node_size": 100, "alpha": 0.3}
+    options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6}
     for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
-        nx.draw_networkx_nodes(
-            graph, pos, nodelist=layer, node_color=colors[i % len(colors)], ax=ax, **options
-        )
+        node_colors: Union[str, list[str]]
+        if clusters is not None:
+            colormap = ["#bbbbbb"] + colorcet.glasbey
+            node_colors = [colormap[cluster_idx % 256] for cluster_idx in clusters[i]]
+        else:
+            node_colors = colors[i % len(colors)]
+        nx.draw_networkx_nodes(graph, pos, nodelist=layer, node_color=node_colors, ax=ax, **options)
         # Add layer label above the nodes
         ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
 

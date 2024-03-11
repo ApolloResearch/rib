@@ -292,7 +292,9 @@ class BisectSchedule:
         if self.config.scaling == "linear":
             proposal = (self._upper_bound + self._lower_bound) // 2
         elif self.config.scaling == "logarithmic":
-            proposal = int(np.exp((np.log(self._upper_bound) + np.log(self._lower_bound)) / 2))
+            proposal = int(
+                np.exp((np.log(self._upper_bound) + np.log(self._lower_bound + 1e-9)) / 2)
+            )
         else:
             raise ValueError(f"Invalid scaling: {self.config.scaling}")
         # Avoid getting stuck due to rounding

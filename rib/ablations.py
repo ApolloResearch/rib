@@ -652,7 +652,9 @@ def ablate_edges_and_eval(
         )
 
         if isinstance(ablation_schedule, BisectSchedule):
-            edges_required_for_layer = total_possible_edges - ablation_schedule._upper_bound
+            # _lower_bound is a conservative guess for the number of edges we can ablate.
+            # it's possible we could ablate up to schedule.tolerance more and keep good performance.
+            edges_required_for_layer = total_possible_edges - ablation_schedule._lower_bound
             n_edges_required[ablation_node_layer] = edges_required_for_layer
             if not return_all_edge_masks:
                 # still keep the edge mask for n_edges_needed

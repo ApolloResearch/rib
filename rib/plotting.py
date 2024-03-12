@@ -7,10 +7,9 @@ plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
-
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Callable, Literal, Optional, Union
 
 import colorcet
 import matplotlib.pyplot as plt
@@ -18,6 +17,7 @@ import networkx as nx
 import numpy as np
 import torch
 
+from rib.data_accumulator import Edges
 from rib.log import logger
 
 
@@ -212,15 +212,15 @@ def plot_ablation_results(
 
 
 def plot_rib_graph(
-    raw_edges: list[torch.Tensor],
-    layer_names: list[str],
-    exp_name: str,
+    edges: list[Edges],
     nodes_per_layer: Union[int, list[int]],
+    title: Optional[str] = None,
     out_file: Optional[Path] = None,
     node_labels: Optional[list[list[str]]] = None,
     hide_const_edges: bool = False,
     ax: Optional[plt.Axes] = None,
     manual_edge_norm_factor: Optional[float] = None,
+    edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
     colors: Optional[list[str]] = None,
     clusters: Optional[list[list[int]]] = None,
 ) -> None:
@@ -245,18 +245,27 @@ def plot_rib_graph(
         colors (Optional[list[str]]): The colors to use for the nodes in each layer. If None, then
             the tab10 colormap is used.
     """
+    layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
+
+    if edge_norm is None:
+        raw_edges = [edges.E_hat for edges in edges]
+    else:
+        raw_edges = [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges]
+    del edges
+
     if isinstance(nodes_per_layer, int):
         # Note that there is one more layer than there edge matrices
         nodes_per_layer = [nodes_per_layer] * (len(raw_edges) + 1)
 
     max_layer_height = max(nodes_per_layer)
 
-    edges = _prepare_edges_for_plotting(
+    processed_edges = _prepare_edges_for_plotting(
         raw_edges,
         nodes_per_layer,
         hide_const_edges=hide_const_edges,
         manual_edge_norm_factor=manual_edge_norm_factor,
     )
+    del raw_edges
 
     # Create the undirected graph
     graph = nx.Graph()
@@ -264,12 +273,12 @@ def plot_rib_graph(
     if ax is None:
         _, ax = plt.subplots(1, 1, figsize=(20, 10))
 
-    layers = _create_node_layers(edges)
+    layers = _create_node_layers(processed_edges)
     # Add nodes to the graph object
     for layer in layers:
         graph.add_nodes_from(layer)
 
-    _add_edges_to_graph(graph, edges, layers)
+    _add_edges_to_graph(graph, processed_edges, layers)
 
     # Create positions for each node
     pos: dict[int, tuple[int, Union[int, float]]] = {}
@@ -324,7 +333,8 @@ def plot_rib_graph(
         ax=ax,
     )
 
-    plt.suptitle(exp_name)
+    if title is not None:
+        plt.suptitle(title)
     plt.tight_layout()
     ax.axis("off")
     if out_file is not None:

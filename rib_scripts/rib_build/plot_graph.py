@@ -27,8 +27,7 @@ from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
 def plot_by_layer(
     edges: list[Edges],
-    node_layers: list[str],
-    exp_name: str,
+    title: Optional[str] = None,
     nodes_per_layer=100,
     out_file=None,
     edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
@@ -56,8 +55,7 @@ def plot_by_layer(
             weights. If non-none, will instead scale by `(1/manual_edge_norm_factor)`, keeping
             edge widths consistent across layers for the same E_hat value.
     """
-
-    edge_norm = edge_norm or SqrtNorm()
+    node_layers = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
 
     def get_block(name: str) -> Optional[int]:
         split = name.split(".")
@@ -80,10 +78,6 @@ def plot_by_layer(
         block_layers = [edge.in_node_layer for edge in block_edges] + [
             block_edges[-1].out_node_layer
         ]
-        if edge_norm is not None:
-            block_ehats = [edge_norm(edge.E_hat, edge.in_node_layer) for edge in block_edges]
-        else:
-            block_ehats = [edge.E_hat for edge in block_edges]
 
         if clusters is not None:
             block_clusters = [
@@ -95,10 +89,10 @@ def plot_by_layer(
             block_clusters = None
 
         plot_rib_graph(
-            raw_edges=block_ehats,
-            layer_names=block_layers,
-            exp_name=exp_name,
+            edges=block_edges,
+            title=title,
             nodes_per_layer=nodes_per_layer,
+            edge_norm=edge_norm,
             out_file=None,
             node_labels=None,
             hide_const_edges=hide_const_edges,
@@ -164,13 +158,12 @@ def main(
             raise NotImplementedError("Would just need to find the right subset of labels")
         results = to_results(results)
         edges = results.edges
-        node_layers = results.config.node_layers
         plot_by_layer(
             edges,
-            node_layers,
-            exp_name=results.exp_name,
+            title=results.exp_name,
             nodes_per_layer=nodes_per_layer,
             out_file=out_file,
+            edge_norm=SqrtNorm(),
             hide_const_edges=results.config.center and hide_const_edges,
             manual_edge_norm_factor=manual_edge_norm_factor,
         )
@@ -185,9 +178,8 @@ def main(
         "Something must have gone wrong when building the graph."
     )
     plot_rib_graph(
-        raw_edges=[edges.E_hat for edges in results.edges],
-        layer_names=edge_layers,
-        exp_name=results.exp_name,
+        edges=results.edges,
+        title=results.exp_name,
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,
         node_labels=node_labels,

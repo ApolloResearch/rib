@@ -1,4 +1,5 @@
 import json
+import sys
 import time
 from typing import Callable, Literal, Optional, Union
 
@@ -601,7 +602,10 @@ def ablate_edges_and_eval(
         edge_masks[ablation_node_layer] = {}
         # Iterate through possible number of ablated edges, starting from no ablated edges
         for num_edges_ablated in tqdm(
-            ablation_schedule, total=ablation_schedule.size(), desc=f"Ablating {module_name}"
+            ablation_schedule,
+            total=ablation_schedule.size(),
+            desc=f"Ablating {module_name}",
+            file=sys.stdout,
         ):
             num_edges_kept = total_possible_edges - num_edges_ablated
             edge_mask = _get_edge_mask(
@@ -652,6 +656,7 @@ def ablate_edges_and_eval(
                     keep_const_edges=always_keep_const_dir,
                 )
                 edge_masks[ablation_node_layer][edges_required_for_layer] = edge_mask_required
+            logger.info(f"Edges required for {ablation_node_layer}: {edges_required_for_layer}")
 
     return results, edge_masks, n_edges_required
 

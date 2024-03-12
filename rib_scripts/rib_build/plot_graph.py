@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import torch
 import tqdm
 
+from rib.data_accumulator import Edges
 from rib.log import logger
 from rib.modularity import SqrtNorm
 from rib.plotting import plot_rib_graph
@@ -25,7 +26,9 @@ from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
 
 def plot_by_layer(
-    results: ResultsLike,
+    edges: list[Edges],
+    node_layers: list[str],
+    exp_name: str,
     nodes_per_layer=100,
     out_file=None,
     edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
@@ -53,7 +56,6 @@ def plot_by_layer(
             weights. If non-none, will instead scale by `(1/manual_edge_norm_factor)`, keeping
             edge widths consistent across layers for the same E_hat value.
     """
-    results = to_results(results)
 
     edge_norm = edge_norm or SqrtNorm()
 
@@ -64,9 +66,7 @@ def plot_by_layer(
         else:
             return None
 
-    blocks_in_results = [
-        get_block(nl) for nl in results.config.node_layers if get_block(nl) is not None
-    ]
+    blocks_in_results = [get_block(nl) for nl in node_layers if get_block(nl) is not None]
     assert blocks_in_results
     blocks = range(min(blocks_in_results), max(blocks_in_results) + 1)  # type: ignore
 
@@ -76,7 +76,7 @@ def plot_by_layer(
     for ax, block in tqdm.tqdm(
         zip(axs, blocks, strict=True), total=len(blocks), desc="Plotting Blocks"
     ):
-        block_edges = [edge for edge in results.edges if get_block(edge.in_node_layer) == block]
+        block_edges = [edge for edge in edges if get_block(edge.in_node_layer) == block]
         block_layers = [edge.in_node_layer for edge in block_edges] + [
             block_edges[-1].out_node_layer
         ]
@@ -88,7 +88,7 @@ def plot_by_layer(
         if clusters is not None:
             block_clusters = [
                 nl_clusters
-                for nl, nl_clusters in zip(results.config.node_layers, clusters, strict=True)
+                for nl, nl_clusters in zip(node_layers, clusters, strict=True)
                 if nl in block_layers
             ]
         else:
@@ -97,11 +97,11 @@ def plot_by_layer(
         plot_rib_graph(
             raw_edges=block_ehats,
             layer_names=block_layers,
-            exp_name=results.exp_name,
+            exp_name=exp_name,
             nodes_per_layer=nodes_per_layer,
             out_file=None,
             node_labels=None,
-            hide_const_edges=results.config.center and hide_const_edges,
+            hide_const_edges=hide_const_edges,
             ax=ax,
             manual_edge_norm_factor=manual_edge_norm_factor,
             clusters=block_clusters,
@@ -162,8 +162,13 @@ def main(
     if by_layer:
         if node_labels is not None:
             raise NotImplementedError("Would just need to find the right subset of labels")
+        results = to_results(results)
+        edges = results.edges
+        node_layers = results.config.node_layers
         plot_by_layer(
-            results,
+            edges,
+            node_layers,
+            exp_name=results.exp_name,
             nodes_per_layer=nodes_per_layer,
             out_file=out_file,
             hide_const_edges=results.config.center and hide_const_edges,

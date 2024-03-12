@@ -16,11 +16,11 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
-from modularity import IdentityEdgeNorm
 from tqdm import tqdm
 
 from rib.data_accumulator import Edges
 from rib.log import logger
+from rib.modularity import IdentityEdgeNorm
 
 
 def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:

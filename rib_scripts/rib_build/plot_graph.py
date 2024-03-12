@@ -20,19 +20,8 @@ import tqdm
 from rib.log import logger
 from rib.modularity import SqrtNorm
 from rib.plotting import plot_rib_graph
-from rib.rib_builder import RibBuildResults
+from rib.rib_builder import ResultsLike, to_results
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
-
-ResultsLike = Union[RibBuildResults, Path, str]
-
-
-def _to_results(results: ResultsLike) -> RibBuildResults:
-    if isinstance(results, RibBuildResults):
-        return results
-    elif isinstance(results, (str, Path)):
-        return RibBuildResults(**torch.load(results))
-    else:
-        raise ValueError(f"Invalid results type: {type(results)}")
 
 
 def plot_by_layer(
@@ -64,7 +53,7 @@ def plot_by_layer(
             weights. If non-none, will instead scale by `(1/manual_edge_norm_factor)`, keeping
             edge widths consistent across layers for the same E_hat value.
     """
-    results = _to_results(results)
+    results = to_results(results)
 
     edge_norm = edge_norm or SqrtNorm()
 
@@ -149,7 +138,7 @@ def main(
             weights. If non-none, will instead scale by `(1/manual_edge_norm_factor)`, keeping
             edge widths consistent across layers for the same E_hat value.
     """
-    results = _to_results(results)
+    results = to_results(results)
     if out_file is None:
         out_dir = Path(__file__).parent / "out"
         out_file = out_dir / f"{results.exp_name}_rib_graph.png"

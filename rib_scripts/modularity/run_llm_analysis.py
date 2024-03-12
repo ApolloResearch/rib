@@ -102,7 +102,7 @@ def edge_distribution(
     plt.tight_layout()
 
 
-def run_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
+def run_llm_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
     results_path = Path(results_path)
     results = RibBuildResults(**torch.load(results_path))
     assert isinstance(results.config.dataset, HFDatasetConfig)  # for mypy
@@ -195,7 +195,7 @@ def run_modularity(
         )
         if not ablation_path.exists():
             logger.info("Ablation file not found, running ablation...")
-            run_bisect_ablation(results_path, threshold)
+            run_llm_bisect_ablation(results_path, threshold)
 
         edge_norm: EdgeNorm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
     else:

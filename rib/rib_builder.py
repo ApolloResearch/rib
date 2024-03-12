@@ -948,3 +948,15 @@ def rib_build(
         logger.info("Saved results to %s", out_file)
 
     return results
+
+
+ResultsLike = Union[RibBuildResults, Path, str]
+
+
+def to_results(results: ResultsLike) -> RibBuildResults:
+    if isinstance(results, RibBuildResults):
+        return results
+    elif isinstance(results, (str, Path)):
+        return RibBuildResults(**torch.load(results))
+    else:
+        raise ValueError(f"Invalid results type: {type(results)}")

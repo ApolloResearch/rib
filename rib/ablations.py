@@ -579,8 +579,16 @@ def ablate_edges_and_eval(
     edge_masks: EdgeMasks = {}
     n_edges_required = {}
     basis_pairs = zip(basis_matrices[:-1], basis_matrices[1:])
+    # Section names will go from pre | section_0 | section_1 | ... | section_n for n node_layers
+    # (node_layers denoted by | here). The last section is behind the last node layer and thus we
+    # don't need its module here. The exception is if the last node_layer is "output", in which case
+    # there is no section_n behind the last | and we thus need all modules.
+    if ablation_node_layers[-1] == "output":
+        ablation_module_names = module_names
+    else:
+        ablation_module_names = module_names[:-1]
     for ablation_node_layer, module_name, basis_pair, layer_edges in zip(
-        ablation_node_layers[:-1], module_names[:-1], basis_pairs, edges, strict=True
+        ablation_node_layers[:-1], ablation_module_names, basis_pairs, edges, strict=True
     ):
         (in_C, in_C_inv), (out_C, out_C_inv) = basis_pair
         total_possible_edges = in_C.shape[0] * out_C.shape[0]

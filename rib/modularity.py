@@ -339,10 +339,14 @@ class GraphClustering:
     def _cluster_array(self, cluster_list: list[NodeCluster]) -> np.ndarray:
         """
         Helper for paino plots.
+
         Makes an array of size [len(self.node_layers), max_width] where each entry is:
           * -1 if that RIB direction doesn't exist (the 'paino keys', representing ln1 in pythia)
           * 0 if the RIB direction exists, but isn't in any of the designated clusters
           * 1...n representing the different clusters
+
+        Returns:
+            arr (n_node_layers, n_rib_dimensions)
         """
 
         def _fill_array(arr: np.ndarray, nodes: list[Node], val: float):
@@ -391,6 +395,6 @@ class GraphClustering:
         if ax is None:
             fig, ax = plt.subplots(figsize=(6, 6))
 
-        ax.matshow(arr[:, 1:].T, cmap=cmap, origin="lower", norm=norm, aspect="auto")
+        ax.matshow(arr.T, cmap=cmap, origin="lower", norm=norm, aspect="auto")
         ax.set_xlabel("Node layer")
         ax.set_ylabel("RIB index")

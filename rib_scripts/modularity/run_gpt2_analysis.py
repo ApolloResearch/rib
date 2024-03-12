@@ -146,10 +146,10 @@ def plot_modular_graph(
     plot_graph_by_layer(
         graph.results.edges,
         edge_norm=graph.edge_norm,
-        line_width_factor=0.02,
+        line_width_factor=0.001,
         clusters=clusters_for_plotting_fn,
         out_file=out_file,
-        nodes_per_layer=150,  # max(self.nodes_per_layer.values()),
+        nodes_per_layer=50,  # max(self.nodes_per_layer.values()),
     )
 
 

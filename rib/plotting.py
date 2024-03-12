@@ -219,6 +219,7 @@ def plot_rib_graph(
     nodes_per_layer: Union[int, list[int]] = 99999,
     hide_const_edges: bool = False,
     colors: Optional[list[str]] = None,
+    show_node_labels: bool = True,
     node_labels: Optional[list[list[str]]] = None,
 ) -> None:
     """Plot the a graph for the given edges (not necessarily a RIB graph).
@@ -241,7 +242,8 @@ def plot_rib_graph(
             results.center.
         colors (Optional[list[str]]): The colors to use for the nodes in each layer. If None, then
             the tab10 colormap is used.
-        node_labels: The labels for each node in the graph. If None, then no labels are added.
+        show_node_labels (bool): Whether to show the node labels. Defaults to True.
+        node_labels: The labels for each node in the graph. If None, then use RIB dim indices.
     """
     layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
 
@@ -308,12 +310,22 @@ def plot_rib_graph(
         ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
 
     # Label nodes if node_labels is provided
-    if node_labels is not None:
+    if show_node_labels:
         node_label_dict = {}
         for i, layer in enumerate(layers):
             for j, node in enumerate(layer):
-                node_label_dict[node] = node_labels[i][j].replace("|", "\n")
-        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8, ax=ax)
+                if node_labels is not None:
+                    if clusters is None:
+                        node_label_dict[node] = node_labels[i][j].replace("|", "\n")
+                    else:
+                        ordering = sorted(range(len(layer)), key=lambda x: clusters[i][x])
+                        node_label_dict[node] = node_labels[i][ordering[j]].replace("|", "\n")
+                else:
+                    if clusters is None:
+                        node_label_dict[node] = str(i)
+                    else:
+                        node_label_dict[node] = str(ordering[j])
+        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=6, ax=ax)
 
     # Draw edges
     nx.draw_networkx_edges(

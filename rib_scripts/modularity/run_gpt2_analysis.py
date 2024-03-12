@@ -110,7 +110,7 @@ def run_llm_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
         results.config.dataset,
         {
             "return_set_portion": "last",
-            "n_samples": 100,
+            "n_samples": 10,
             "n_documents": 100,
         },
     )
@@ -146,7 +146,7 @@ def plot_modular_graph(
     plot_graph_by_layer(
         graph.results.edges,
         edge_norm=graph.edge_norm,
-        line_width_factor=1 / (0.3 * graph.G.totalEdgeWeight() / len(graph.results.edges)),
+        line_width_factor=0.02,
         clusters=clusters_for_plotting_fn,
         out_file=out_file,
         nodes_per_layer=150,  # max(self.nodes_per_layer.values()),
@@ -170,7 +170,7 @@ def run_modularity(
     Args:
         results_path: The path to the RIB build results file.
         threshold: The loss increase threshold for the bisect ablation.
-        gamma: The resolution parameter for the modularity analysis.
+        gamma: The resolution parameter for the modularity analysis. Higher gamma = more clusters.
         plot_edge_dist: Whether to plot the edge distribution ecdfs. Supported only for multi-layer
             models with node_layers in ["ln1.0", "ln1_out.0", "attn_in.0", "ln2.0", "ln2_out.0",
             "mlp_in.0"].
@@ -203,7 +203,7 @@ def run_modularity(
 
     if plot_edge_dist:
         if hasattr(edge_norm, "eps_by_layer"):
-            xlim_buffer = 1.5
+            xlim_buffer = 1e3
             xlim = (
                 min(edge_norm.eps_by_layer.values()) / xlim_buffer,
                 max(edge_norm.eps_by_layer.values()) * xlim_buffer,
@@ -235,7 +235,6 @@ def run_modularity(
         plt.savefig(paino_path)
         logger.info(f"Saved paino plot to {paino_path.absolute()}")
         plt.clf()
-
     if plot_graph:
         rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
         plot_modular_graph(graph=graph, out_file=rib_graph_path)

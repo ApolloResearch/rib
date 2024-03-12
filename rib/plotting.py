@@ -266,6 +266,7 @@ def plot_rib_graph(
     axes_height_inches = fig_height * bbox.height
     max_edge_weight = max([edge.max().item() for edge in processed_edges])
     line_width_factor = line_width_factor or axes_height_inches / max_edge_weight
+    logger.info(f"Using line width factor {line_width_factor}")
 
     # Create the graph & add nodes and edges
     layers = _create_node_layers(processed_edges)

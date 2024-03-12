@@ -225,7 +225,7 @@ class GraphClustering:
         start_idx = 1 if self.results.config.center else 0
         self.G = nk.Graph(n=len(self.nodes), weighted=True)
         for edges in tqdm.tqdm(self.results.edges, desc="Making RIB graph"):
-            if edges.in_node_layer in self.node_layers:
+            if edges.in_node_layer in self.node_layers and edges.out_node_layer in self.node_layers:
                 E = self.edge_norm(edges.E_hat, edges.in_node_layer)[start_idx:, start_idx:]
                 # torch.nonzero will return two tensors, each of shape [num_non_zero_edges]
                 out_idxs, in_idxs = torch.nonzero(E, as_tuple=True)

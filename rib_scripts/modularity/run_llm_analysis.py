@@ -54,10 +54,15 @@ def edge_distribution(
         vlines: A dictionary of node_layer -> float, drawn as vertical lines on the subplots.
     """
     n_layers = _num_layers(results)
-    layout = layout or (n_layers // 4, 4)
+    if n_layers < 2:
+        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+        axs = np.array([[ax]])
+    else:
+        layout = layout or (n_layers // 4, 4)
+        figsize = (layout[1] * 3, layout[0] * 3)
+        fig, axs = plt.subplots(*layout, figsize=figsize, sharex=True, sharey=True)
+
     qs = torch.cat([torch.linspace(0.01, 0.9, 100), torch.linspace(0.9, 1, 100)])
-    figsize = (layout[1] * 3, layout[0] * 3)
-    fig, axs = plt.subplots(*layout, figsize=figsize, sharex=True, sharey=True)
 
     def get_prefix_colors():
         cmap = plt.get_cmap("Paired")
@@ -200,7 +205,9 @@ def run_modularity(
             plt.clf()
 
     logger.info(f"Making RIB graph in networkit & running clustering...")
-    graph = GraphClustering(results, edge_norm, gamma=gamma)
+    graph = GraphClustering(
+        results, edge_norm, gamma=gamma, node_layers=["ln1.0", "ln2.0", "unembed"]
+    )
     logger.info(f"Finished clustering.")
 
     if plot_piano:

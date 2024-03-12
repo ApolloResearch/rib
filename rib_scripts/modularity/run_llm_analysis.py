@@ -31,7 +31,7 @@ from rib.modularity import (
 )
 from rib.rib_builder import RibBuildResults
 from rib.utils import replace_pydantic_model
-from rib_scripts.rib_build.plot_graph import plot_by_layer
+from rib_scripts.rib_build.plot_graph import plot_graph_by_layer
 
 
 def _num_layers(results: RibBuildResults) -> int:
@@ -143,10 +143,10 @@ def plot_modular_graph(
         layer_clusters[: graph.nodes_per_layer[nl]]
         for nl, layer_clusters in zip(graph.node_layers, arr.tolist(), strict=True)
     ]
-    plot_by_layer(
-        graph.results,
+    plot_graph_by_layer(
+        graph.results.edges,
         edge_norm=graph.edge_norm,
-        manual_edge_norm_factor=0.3 * graph.G.totalEdgeWeight() / len(graph.results.edges),
+        line_width_factor=1 / (0.3 * graph.G.totalEdgeWeight() / len(graph.results.edges)),
         clusters=clusters_for_plotting_fn,
         out_file=out_file,
         nodes_per_layer=150,  # max(self.nodes_per_layer.values()),

@@ -146,7 +146,9 @@ def run_modularity(
         results_path: The path to the RIB build results file.
         threshold: The loss increase threshold for the bisect ablation.
         gamma: The resolution parameter for the modularity analysis.
-        plot_edge_dist: Whether to plot the edge distribution ecdfs.
+        plot_edge_dist: Whether to plot the edge distribution ecdfs. Supported only for multi-layer
+            models with node_layers in ["ln1.0", "ln1_out.0", "attn_in.0", "ln2.0", "ln2_out.0",
+            "mlp_in.0"].
         plot_piano: Whether to plot a piano plot, giving an overview of modular structure found.
         plot_graph: Whether to plot the full RIB graph with nodes colored and sorted by module.
         log_norm: Whether to use a log edge norm. If True, will need to use the output of an edge

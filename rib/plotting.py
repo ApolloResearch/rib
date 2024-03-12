@@ -315,16 +315,9 @@ def plot_rib_graph(
         for i, layer in enumerate(layers):
             for j, node in enumerate(layer):
                 if node_labels is not None:
-                    if clusters is None:
-                        node_label_dict[node] = node_labels[i][j].replace("|", "\n")
-                    else:
-                        ordering = sorted(range(len(layer)), key=lambda x: clusters[i][x])
-                        node_label_dict[node] = node_labels[i][ordering[j]].replace("|", "\n")
+                    node_label_dict[node] = node_labels[i][j].replace("|", "\n")
                 else:
-                    if clusters is None:
-                        node_label_dict[node] = str(i)
-                    else:
-                        node_label_dict[node] = str(ordering[j])
+                    node_label_dict[node] = str(j)
         nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=6, ax=ax)
 
     # Draw edges

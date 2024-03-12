@@ -610,7 +610,7 @@ def ablate_edges_and_eval(
         for num_edges_ablated in tqdm(
             ablation_schedule,
             total=ablation_schedule.size(),
-            desc=f"Ablating {module_name}",
+            desc=f"Ablating {ablation_node_layer}",
             file=sys.stdout,
         ):
             num_edges_kept = total_possible_edges - num_edges_ablated
@@ -664,7 +664,11 @@ def ablate_edges_and_eval(
                     keep_const_edges=always_keep_const_dir,
                 )
                 edge_masks[ablation_node_layer][edges_required_for_layer] = edge_mask_required
-            logger.info(f"Edges required for {ablation_node_layer}: {edges_required_for_layer}")
+
+            log_str = f"Edges required for {ablation_node_layer}: {edges_required_for_layer}"
+            if ablation_schedule.config.tolerance > 1:
+                log_str += f" (or up to {ablation_schedule.config.tolerance} less)"
+            logger.info(log_str)
 
     return results, edge_masks, n_edges_required
 

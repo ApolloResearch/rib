@@ -18,7 +18,7 @@ import torch
 import tqdm
 
 from rib.log import logger
-from rib.modularity import ClusterListLike, GraphClustering, SqrtNorm
+from rib.modularity import SqrtNorm
 from rib.plotting import plot_rib_graph
 from rib.rib_builder import RibBuildResults
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
@@ -122,25 +122,6 @@ def plot_by_layer(
         plt.savefig(out_file, dpi=400)
 
         logger.info(f"Saved plot to {Path(out_file).absolute()}")
-
-
-def plot_modular_graph(
-    graph: GraphClustering, clusters: ClusterListLike = "nonsingleton", out_file=None
-):
-    clusters_list = graph._get_clusterlist(clusters)
-    arr = graph._cluster_array(clusters_list)
-    clusters_for_plotting_fn = [
-        layer_clusters[: graph.nodes_per_layer[nl]]
-        for nl, layer_clusters in zip(graph.node_layers, arr.tolist(), strict=True)
-    ]
-    plot_by_layer(
-        graph.results,
-        edge_norm=graph.edge_norm,
-        manual_edge_norm_factor=0.3 * graph.G.totalEdgeWeight() / len(graph.results.edges),
-        clusters=clusters_for_plotting_fn,
-        out_file=out_file,
-        nodes_per_layer=150,  # max(self.nodes_per_layer.values()),
-    )
 
 
 def main(

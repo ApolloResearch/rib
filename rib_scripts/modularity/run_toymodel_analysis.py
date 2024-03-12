@@ -29,7 +29,6 @@ from rib.rib_builder import RibBuildResults
 def run_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
     results_path = Path(results_path)
     results = RibBuildResults(**torch.load(results_path))
-    assert isinstance(, HFDatasetConfig)  # for mypy
     config = AblationConfig(
         exp_name=f"{results.exp_name}-delta{threshold}-bisect",
         out_dir=results_path.parent.absolute(),
@@ -96,7 +95,6 @@ def run_modularity(
     else:
         edge_norm = SqrtNorm()
 
-
     logger.info(f"Making RIB graph in networkit & running clustering...")
     graph = GraphClustering(
         results, edge_norm, gamma=gamma, node_layers=["ln1.0", "ln2.0", "unembed"]
@@ -113,7 +111,7 @@ def run_modularity(
         logger.info(f"Saved paino plot to {paino_path.absolute()}")
         plt.clf()
 
-    #TODO This part needs to be adjusted
+    # TODO This part needs to be adjusted
     if plot_graph:
         rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
         plot_modular_graph(graph=graph, out_file=rib_graph_path)

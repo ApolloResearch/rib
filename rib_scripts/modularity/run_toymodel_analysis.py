@@ -10,17 +10,19 @@ python run_modularity.py /path/to/rib_build.pt [--threshold 0.2] [--gamma 1.0] [
    [--plot_piano] [--plot_graph] [--log_norm] [--ablation_path /path/to/ablation_results.json]
 """
 
-import warnings
 from pathlib import Path
 from typing import Optional, Union
 
 import fire
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
-from rib_scripts.rib_build.plot_graph import plot_modular_graph
 
 from rib.ablations import AblationConfig, BisectScheduleConfig, load_bases_and_ablate
+from rib.data import (
+    HFDatasetConfig,
+    ModularArithmeticDatasetConfig,
+    VisionDatasetConfig,
+)
 from rib.log import logger
 from rib.modularity import ByLayerLogEdgeNorm, EdgeNorm, GraphClustering, SqrtNorm
 from rib.rib_builder import RibBuildResults
@@ -29,6 +31,11 @@ from rib.rib_builder import RibBuildResults
 def run_bisect_ablation(results_path: Union[str, Path], threshold=0.2):
     results_path = Path(results_path)
     results = RibBuildResults(**torch.load(results_path))
+    assert results.config.dataset is not None, "No dataset found in results."
+    assert isinstance(
+        results.config.dataset,
+        ModularArithmeticDatasetConfig | HFDatasetConfig | VisionDatasetConfig,
+    )
     config = AblationConfig(
         exp_name=f"{results.exp_name}-delta{threshold}-bisect",
         out_dir=results_path.parent.absolute(),
@@ -82,10 +89,13 @@ def run_modularity(
     results_path = Path(results_path)
     results = RibBuildResults(**torch.load(results_path))
     name_prefix = f"{results.exp_name}-delta{threshold}"
+
+    # Get correct norm
     if log_norm:
         ablation_path = (
             Path(ablation_path)
-            or results_path.parent / f"{name_prefix}-bisect_edge_ablation_results.json"
+            if ablation_path is not None
+            else results_path.parent / f"{name_prefix}-bisect_edge_ablation_results.json"
         )
         if not ablation_path.exists():
             logger.info("Ablation file not found, running ablation...")
@@ -101,6 +111,7 @@ def run_modularity(
     )
     logger.info(f"Finished clustering.")
 
+    # Piano plot
     if plot_piano:
         graph.paino_plot()
         paino_path = results_path.parent / f"{name_prefix}-gamma{gamma}-paino.png"
@@ -111,10 +122,10 @@ def run_modularity(
         logger.info(f"Saved paino plot to {paino_path.absolute()}")
         plt.clf()
 
-    # TODO This part needs to be adjusted
-    if plot_graph:
-        rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
-        plot_modular_graph(graph=graph, out_file=rib_graph_path)
+    # TODO Graph plot
+    # if plot_graph:
+    #     rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
+    #     plot_modular_graph(graph=graph, out_file=rib_graph_path)
 
 
 if __name__ == "__main__":

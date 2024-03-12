@@ -73,8 +73,8 @@ def _add_edges_to_graph(
 def _prepare_edges_for_plotting(
     raw_edges: list[torch.Tensor],
     nodes_per_layer: list[int],
+    line_width_factor: float,
     hide_const_edges: bool = False,
-    manual_edge_norm_factor: Optional[float] = None,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
 
@@ -82,8 +82,7 @@ def _prepare_edges_for_plotting(
         raw_edges (list[torch.Tensor]): List of edges tensors, each with shape
             (n_nodes_in_l+1, n_nodes_in_l).
         nodes_per_layer (list[int]): The number of nodes in each layer.
-        manual_edge_norm_factor (Optional[float]): The value to normalize the edges by.
-            If None, will normalize each layer by the sum of the absolute values of the edges.
+        line_width_factor: Scale factor to convert edge weights into line widths.
 
     Returns:
         list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
@@ -97,9 +96,8 @@ def _prepare_edges_for_plotting(
             # Set edges outgoing from this node to zero (edges.shape ~ l+1, l). The incoming edges
             # should be zero except for a non-rotated last layer where they are important.
             weight_matrix[:, const_node_index] = 0
-        # Normalize the edge weights by the sum of the absolute values of the weights
-        norm = manual_edge_norm_factor or torch.sum(torch.abs(weight_matrix)).item()
-        weight_matrix /= norm
+        # Scale the edge weights to convert to line widths
+        weight_matrix *= line_width_factor
         # Only keep the desired number of nodes in each layer
         in_nodes = nodes_per_layer[i]
         out_nodes = nodes_per_layer[i + 1]
@@ -213,37 +211,38 @@ def plot_ablation_results(
 
 def plot_rib_graph(
     edges: list[Edges],
-    nodes_per_layer: Union[int, list[int]],
-    title: Optional[str] = None,
-    out_file: Optional[Path] = None,
-    node_labels: Optional[list[list[str]]] = None,
-    hide_const_edges: bool = False,
-    ax: Optional[plt.Axes] = None,
-    manual_edge_norm_factor: Optional[float] = None,
-    edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
-    colors: Optional[list[str]] = None,
     clusters: Optional[list[list[int]]] = None,
+    edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
+    line_width_factor: Optional[float] = None,
+    out_file: Optional[Path] = None,
+    ax: Optional[plt.Axes] = None,
+    title: Optional[str] = None,
+    nodes_per_layer: Union[int, list[int]] = 99999,
+    hide_const_edges: bool = False,
+    colors: Optional[list[str]] = None,
+    node_labels: Optional[list[list[str]]] = None,
 ) -> None:
-    """Plot the RIB graph for the given edges.
+    """Plot the a graph for the given edges (not necessarily a RIB graph).
 
     Args:
-        raw_edges (list[torch.Tensor]): List of edges with shape (n_nodes_in_l+1, n_nodes_in_l)
-        layer_names (list[str]): The names of the layers. These correspond to the first dimension
-            of each tensor in raw_edges, and also includes a name for the final node_layer.
-        exp_name (str): The name of the experiment.
-        nodes_per_layer (Union[int, list[int]]): The number of nodes in each layer. If int, then
-            all layers have the same number of nodes. If list, then the number of nodes in each
-            layer is given by the list.
+        edges (list[Edges]): List of Edges. Internally this is a list of tensors (E_hat) with
+            shape (n_nodes_in_l+1, n_nodes_in_l)
+        clusters: TODO
+        edge_norm: A function to normalize the edges (by layer) before plotting.
+        line_width_factor: Scale factor to convert edge weights into line widths. If None, will
+            choose a facctor such that, among all layers, the thickest line is 20.
         out_file (Path): The file to save the plot to. If None, no plot is saved
-        node_labels: The labels for each node in the graph. If None, then no labels are added.
-        hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes.
         ax: The axis to plot the graph on. If None, then a new figure is created.
-        manual_edge_norm_factor (Optional[float]): If None (default), scales each set of edges by
-            the sum of all edge weights. If non-none, will instead scale by
-            `(1/manual_edge_norm_factor)`, keeping edge widths consistent across layers for the same
-            E_hat value.
+        title (str): The plot suptitle, typically the name of the experiment.
+        nodes_per_layer (Union[int, list[int]]): The max number of nodes in each layer. If int, then
+            all layers have the same max number of nodes. If list, then the max number of nodes in
+            each layer is given by the list.
+        hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes. Note that
+            this does _not_n check results.center, it is recommended to set hide_const_edges to
+            results.center.
         colors (Optional[list[str]]): The colors to use for the nodes in each layer. If None, then
             the tab10 colormap is used.
+        node_labels: The labels for each node in the graph. If None, then no labels are added.
     """
     layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
 
@@ -259,11 +258,15 @@ def plot_rib_graph(
 
     max_layer_height = max(nodes_per_layer)
 
+    line_width_factor = (
+        line_width_factor or max(torch.max(torch.abs(edge)).item() for edge in raw_edges) / 20
+    )
+
     processed_edges = _prepare_edges_for_plotting(
         raw_edges,
         nodes_per_layer,
+        line_width_factor=line_width_factor,
         hide_const_edges=hide_const_edges,
-        manual_edge_norm_factor=manual_edge_norm_factor,
     )
     del raw_edges
 

@@ -15,7 +15,7 @@ from typing import Callable, Optional, Union
 import fire
 import matplotlib.pyplot as plt
 import torch
-import tqdm
+from tqdm import tqdm
 
 from rib.data_accumulator import Edges
 from rib.log import logger
@@ -25,15 +25,15 @@ from rib.rib_builder import ResultsLike, to_results
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
 
-def plot_by_layer(
+def plot_graph_by_layer(
     edges: list[Edges],
+    clusters: Optional[list[list[int]]] = None,
+    edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
+    line_width_factor: Optional[float] = None,
+    out_file: Optional[Path] = None,
     title: Optional[str] = None,
     nodes_per_layer=100,
-    out_file=None,
-    edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
     hide_const_edges: bool = True,
-    manual_edge_norm_factor: Optional[float] = None,
-    clusters: Optional[list[list[int]]] = None,
 ):
     """
     Plots a RIB graph with every transformer block on it's own row.
@@ -42,52 +42,50 @@ def plot_by_layer(
 
     You'll need to call the function from python if you want to use edge_norm.
 
-    Note: doesn't plot edges in the final layernorm.
+    Note: We skip all node layers without a block, i.e. ln_final and ln_final_out.
 
     Args:
-        results: The results file containing the graph edges.
-        nodes_per_layer: The number of nodes per layer to plot.
-        out_file: The path to save the plot.
-        edge_norm: A function to normalize the edge weights pre-plotting.
-        hide_const_edges: Whether to hide the nodes corresponding to constant RIB dirs. This is
-            ignored if the RIB build is non-centered
-        manual_edge_norm_factor: If None (default), scales each set of edges by the sum of all edge
-            weights. If non-none, will instead scale by `(1/manual_edge_norm_factor)`, keeping
-            edge widths consistent across layers for the same E_hat value.
+        edges (list[Edges]): List of Edges. Internally this is a list of tensors (E_hat) with
+            shape (n_nodes_in_l+1, n_nodes_in_l)
+        clusters: TODO
+        edge_norm: A function to normalize the edges (by layer) before plotting.
+        line_width_factor: Scale factor to convert edge weights into line widths. If None, will
+            choose a facctor such that, among all layers, the thickest line is 20.
+        out_file (Path): The file to save the plot to. If None, no plot is saved
+        title (str): The plot suptitle, typically the name of the experiment.
+        nodes_per_layer (Union[int, list[int]]): The max number of nodes in each layer. If int, then
+            all layers have the same max number of nodes. If list, then the max number of nodes in
+            each layer is given by the list.
+        hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes. Note that
+            this does _not_n check results.center, it is recommended to set hide_const_edges to
+            results.center.
     """
     node_layers = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
 
-    def get_block(name: str) -> Optional[int]:
-        split = name.split(".")
-        if len(split) == 2:
-            return int(split[1])
-        else:
-            return None
-
+    # How many blocks do the results span:
+    get_block = lambda name: int(name.split(".")[1]) if "." in name else None
     blocks_in_results = [get_block(nl) for nl in node_layers if get_block(nl) is not None]
-    assert blocks_in_results
+    assert blocks_in_results, "No blocks found in the results"
     blocks = range(min(blocks_in_results), max(blocks_in_results) + 1)  # type: ignore
-
+    # Make figure for all blocks
     fig, axs = plt.subplots(len(blocks), 1, figsize=(8, len(blocks) * 6))
     axs = axs if len(blocks) > 1 else [axs]
-
-    for ax, block in tqdm.tqdm(
-        zip(axs, blocks, strict=True), total=len(blocks), desc="Plotting Blocks"
-    ):
+    # Make individual plots for each block
+    for ax, block in tqdm(zip(axs, blocks, strict=True), total=len(blocks), desc="Plotting Blocks"):
+        # Get the edges for each block
         block_edges = [edge for edge in edges if get_block(edge.in_node_layer) == block]
-        block_layers = [edge.in_node_layer for edge in block_edges] + [
-            block_edges[-1].out_node_layer
-        ]
-
+        # Get the clusters for each block
         if clusters is not None:
+            assert len(clusters) == len(node_layers), "Clusters must be provided for each layer"
+            block_layers = [edge.in_node_layer for edge in block_edges] + [
+                block_edges[-1].out_node_layer
+            ]
             block_clusters = [
-                nl_clusters
-                for nl, nl_clusters in zip(node_layers, clusters, strict=True)
-                if nl in block_layers
+                clusters[node_layers.index(nl)] for nl in node_layers if nl in block_layers
             ]
         else:
             block_clusters = None
-
+        # Call main plotting function without out_file
         plot_rib_graph(
             edges=block_edges,
             title=title,
@@ -97,13 +95,12 @@ def plot_by_layer(
             node_labels=None,
             hide_const_edges=hide_const_edges,
             ax=ax,
-            manual_edge_norm_factor=manual_edge_norm_factor,
+            line_width_factor=line_width_factor,
             clusters=block_clusters,
         )
-
+    # Save the figure
     if out_file is not None:
         plt.savefig(out_file, dpi=400)
-
         logger.info(f"Saved plot to {Path(out_file).absolute()}")
 
 
@@ -115,7 +112,7 @@ def main(
     force: bool = False,
     hide_const_edges: bool = True,
     by_layer: Optional[bool] = False,
-    manual_edge_norm_factor: Optional[float] = None,
+    line_width_factor: Optional[float] = None,
 ) -> None:
     """Plot an RIB graph given a results file contain the graph edges.
 
@@ -128,9 +125,8 @@ def main(
         hide_const_edges: Whether to hide the nodes corresponding to constant RIB dirs. This is
             ignored if the RIB build is non-centered
         by_layer: Whether to plot the graph by layer.
-        manual_edge_norm_factor: If None (default), scales each set of edges by the sum of all edge
-            weights. If non-none, will instead scale by `(1/manual_edge_norm_factor)`, keeping
-            edge widths consistent across layers for the same E_hat value.
+        line_width_factor: Scale factor to convert edge weights into line widths. If None, will
+            choose a facctor such that, among all layers, the thickest line is 20.
     """
     results = to_results(results)
     if out_file is None:
@@ -158,14 +154,14 @@ def main(
             raise NotImplementedError("Would just need to find the right subset of labels")
         results = to_results(results)
         edges = results.edges
-        plot_by_layer(
+        plot_graph_by_layer(
             edges,
             title=results.exp_name,
             nodes_per_layer=nodes_per_layer,
             out_file=out_file,
             edge_norm=SqrtNorm(),
             hide_const_edges=results.config.center and hide_const_edges,
-            manual_edge_norm_factor=manual_edge_norm_factor,
+            line_width_factor=line_width_factor,
         )
         return None
 
@@ -184,7 +180,7 @@ def main(
         out_file=out_file,
         node_labels=node_labels,
         hide_const_edges=results.config.center and hide_const_edges,
-        manual_edge_norm_factor=manual_edge_norm_factor,
+        line_width_factor=line_width_factor,
     )
 
     logger.info(f"Saved plot to {out_file}")

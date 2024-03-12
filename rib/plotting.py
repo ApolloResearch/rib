@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
+from modularity import IdentityEdgeNorm
 from tqdm import tqdm
 
 from rib.data_accumulator import Edges
@@ -250,7 +251,7 @@ def plot_rib_graph(
     max_layer_height = max(nodes_per_layer)
 
     # Normalize the edges
-    edge_norm = edge_norm or (lambda x, _: x)
+    edge_norm = edge_norm or IdentityEdgeNorm()
     processed_edges = _prepare_edges_for_plotting(
         [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges],
         nodes_per_layer,
@@ -261,9 +262,9 @@ def plot_rib_graph(
     # Normalize the line width
     ax = ax or plt.subplots(1, 1, figsize=(20, 10))[1]
     bbox = ax.get_position()  # Get the bounding box of the axes in figure coordinates
-    _, fig_height = ax.get_figure().get_size_inches()
+    _, fig_height = ax.get_figure().get_size_inches()  #  type: ignore
     axes_height_inches = fig_height * bbox.height
-    max_edge_weight = max([edge.max() for edge in processed_edges])
+    max_edge_weight = max([edge.max().item() for edge in processed_edges])
     line_width_factor = line_width_factor or axes_height_inches / max_edge_weight
 
     # Create the graph & add nodes and edges

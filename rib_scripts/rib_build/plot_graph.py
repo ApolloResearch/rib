@@ -15,7 +15,7 @@ from typing import Optional, Union
 import fire
 
 from rib.log import logger
-from rib.modularity import SqrtNorm
+from rib.modularity import EdgeNorm, IdentityEdgeNorm, SqrtNorm
 from rib.plotting import plot_graph_by_layer, plot_rib_graph
 from rib.rib_builder import ResultsLike, to_results
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
@@ -30,6 +30,7 @@ def main(
     hide_const_edges: bool = True,
     by_layer: Optional[bool] = False,
     line_width_factor: Optional[float] = None,
+    norm: str = "sqrt",
 ) -> None:
     """Plot an RIB graph given a results file contain the graph edges.
 
@@ -51,6 +52,14 @@ def main(
         out_file = out_dir / f"{results.exp_name}_rib_graph.png"
     else:
         out_file = Path(out_file)
+
+    edge_norm: EdgeNorm
+    if norm.lower() == "sqrt" or norm.lower() == "sqrtnorm":
+        edge_norm = SqrtNorm()
+    elif norm.lower() == "none" or norm.lower() == "identity":
+        edge_norm = IdentityEdgeNorm()
+    else:
+        raise ValueError(f"Unknown norm: {norm}")
 
     if not check_out_file_overwrite(out_file, force):
         handle_overwrite_fail()
@@ -76,7 +85,7 @@ def main(
             title=results.exp_name,
             nodes_per_layer=nodes_per_layer,
             out_file=out_file,
-            edge_norm=SqrtNorm(),
+            edge_norm=edge_norm,
             hide_const_edges=results.config.center and hide_const_edges,
             line_width_factor=line_width_factor,
         )
@@ -96,6 +105,7 @@ def main(
         nodes_per_layer=nodes_per_layer,
         out_file=out_file,
         node_labels=node_labels,
+        edge_norm=edge_norm,
         hide_const_edges=results.config.center and hide_const_edges,
         line_width_factor=line_width_factor,
     )

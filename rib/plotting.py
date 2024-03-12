@@ -74,7 +74,6 @@ def _add_edges_to_graph(
 def _prepare_edges_for_plotting(
     raw_edges: list[torch.Tensor],
     nodes_per_layer: list[int],
-    line_width_factor: float,
     hide_const_edges: bool = False,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
@@ -97,8 +96,6 @@ def _prepare_edges_for_plotting(
             # Set edges outgoing from this node to zero (edges.shape ~ l+1, l). The incoming edges
             # should be zero except for a non-rotated last layer where they are important.
             weight_matrix[:, const_node_index] = 0
-        # Scale the edge weights to convert to line widths
-        weight_matrix *= line_width_factor
         # Only keep the desired number of nodes in each layer
         in_nodes = nodes_per_layer[i]
         out_nodes = nodes_per_layer[i + 1]
@@ -247,41 +244,33 @@ def plot_rib_graph(
     """
     layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
 
-    if edge_norm is None:
-        raw_edges = [edges.E_hat for edges in edges]
-    else:
-        raw_edges = [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges]
-    del edges
-
     if isinstance(nodes_per_layer, int):
         # Note that there is one more layer than there edge matrices
-        nodes_per_layer = [nodes_per_layer] * (len(raw_edges) + 1)
-
+        nodes_per_layer = [nodes_per_layer] * (len(edges) + 1)
     max_layer_height = max(nodes_per_layer)
 
-    line_width_factor = (
-        line_width_factor or max(torch.max(torch.abs(edge)).item() for edge in raw_edges) / 20
-    )
-
+    # Normalize the edges
+    edge_norm = edge_norm or (lambda x, _: x)
     processed_edges = _prepare_edges_for_plotting(
-        raw_edges,
+        [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges],
         nodes_per_layer,
-        line_width_factor=line_width_factor,
         hide_const_edges=hide_const_edges,
     )
-    del raw_edges
+    del edges
 
-    # Create the undirected graph
-    graph = nx.Graph()
+    # Normalize the line width
+    ax = ax or plt.subplots(1, 1, figsize=(20, 10))[1]
+    bbox = ax.get_position()  # Get the bounding box of the axes in figure coordinates
+    _, fig_height = ax.get_figure().get_size_inches()
+    axes_height_inches = fig_height * bbox.height
+    max_edge_weight = max([edge.max() for edge in processed_edges])
+    line_width_factor = line_width_factor or axes_height_inches / max_edge_weight
 
-    if ax is None:
-        _, ax = plt.subplots(1, 1, figsize=(20, 10))
-
+    # Create the graph & add nodes and edges
     layers = _create_node_layers(processed_edges)
-    # Add nodes to the graph object
+    graph = nx.Graph()
     for layer in layers:
         graph.add_nodes_from(layer)
-
     _add_edges_to_graph(graph, processed_edges, layers)
 
     # Create positions for each node
@@ -301,8 +290,7 @@ def plot_rib_graph(
 
     # Draw nodes
     if colors is None:
-        # tab10 colormap
-        # convert from rgb to hex to avoid matplotlib warning
+        # tab10 colormap, convert from rgb to hex to avoid matplotlib warning
         to_hex = lambda x: f"{int(x * 255):02x}"
         colors = [f"#{to_hex(r)}{to_hex(g)}{to_hex(b)}" for r, g, b in plt.get_cmap("tab10").colors]  # type: ignore
     options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6}
@@ -326,12 +314,11 @@ def plot_rib_graph(
         nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=8, ax=ax)
 
     # Draw edges
-    width_factor = 15
     nx.draw_networkx_edges(
         graph,
         pos,
         edgelist=[(edge[0], edge[1]) for edge in graph.edges(data=True)],
-        width=[width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
+        width=[line_width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
         alpha=1,
         edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
         ax=ax,

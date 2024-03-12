@@ -250,10 +250,11 @@ class BisectScheduleConfig(BaseModel):
         "linear",
         description="Whether to use the linear or logarithmic midpoint for bisect.",
     )
-    tolerance: float = Field(
+    tolerance: int = Field(
         1,
         description="The tolerance for the bisect schedule. The schedule stops when the"
         "possible interval is smaller than the tolerance, returning the middle of the interval.",
+        ge=1,
     )
 
 

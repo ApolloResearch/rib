@@ -19,6 +19,7 @@ from rib.ablations import (
     load_bases_and_ablate,
 )
 from rib.rib_builder import rib_build
+from rib.utils import replace_pydantic_model
 from tests.utils import get_mnist_config, get_modular_arithmetic_config
 
 
@@ -273,6 +274,55 @@ def test_run_modular_arithmetic_rib_ablations_bisect(ablation_type, tmp_path):
     config = AblationConfig(**config_dict)
     accuracies = load_bases_and_ablate(config)["results"]
     check_accuracies(accuracies, config, max_accuracy_threshold=0.998)
+
+
+@pytest.mark.slow
+def test_bisect_tolerance(tmp_path):
+    build_config = get_modular_arithmetic_config(
+        {
+            "node_layers": ["ln1.0", "ln2.0", "mlp_out.0", "unembed", "output"],
+            "batch_size": 100,
+            "dataset": {"n_samples": 100},
+        }
+    )
+    results = rib_build(build_config)
+    tempfile = tmp_path / "modular_arithmetic_rib_graph.pt"
+    torch.save(results.model_dump(), tempfile)
+
+    config_str = f"""
+    exp_name: "test_ablation_mod_add"
+    ablation_type: edge
+    rib_results_path: {tempfile}
+    schedule:
+        schedule_type: bisect
+        score_target_difference: 0.05
+    dataset:
+        dataset_type: modular_arithmetic
+        return_set: train
+        n_samples: 100
+    ablation_node_layers:
+        - ln1.0
+        - ln2.0
+        - mlp_out.0
+        - unembed
+    batch_size: 100  # single batch
+    dtype: float32
+    seed: 0
+    eval_type: accuracy
+    out_dir: null
+    """
+    config_dict = yaml.safe_load(config_str)
+
+    config = AblationConfig(**config_dict)
+    n_required = load_bases_and_ablate(config)["n_edges_required"]
+
+    tolerance = 50
+    tol_config = replace_pydantic_model(config, {"schedule": {"tolerance": tolerance}})
+    n_required_tol = load_bases_and_ablate(tol_config)["n_edges_required"]
+
+    for k, needed in n_required.items():
+        assert n_required_tol[k] <= needed + tolerance
+        assert n_required_tol[k] >= needed - tolerance
 
 
 class TestEdgeMask:

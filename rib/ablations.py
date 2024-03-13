@@ -1,4 +1,5 @@
 import json
+import sys
 import time
 from typing import Callable, Literal, Optional, Union
 
@@ -249,6 +250,12 @@ class BisectScheduleConfig(BaseModel):
         "linear",
         description="Whether to use the linear or logarithmic midpoint for bisect.",
     )
+    tolerance: int = Field(
+        1,
+        description="The tolerance for the bisect schedule. The schedule stops when the"
+        "possible interval is smaller than the tolerance, returning the middle of the interval.",
+        ge=1,
+    )
 
 
 class BisectSchedule:
@@ -310,7 +317,7 @@ class BisectSchedule:
         return None
 
     def __iter__(self):
-        while self._upper_bound - self._lower_bound > 1:
+        while self._upper_bound - self._lower_bound > self.config.tolerance:
             yield self._get_proposal()
 
     def update_bounds(self, score: float, base_score: float):
@@ -367,6 +374,13 @@ class AblationConfig(BaseModel):
     eval_type: Literal["accuracy", "ce_loss"] = Field(
         ...,
         description="The type of evaluation to perform on the model before building the graph.",
+    )
+    save_all_edge_masks: bool = Field(
+        False,
+        description="Whether to save all edge masks in the output file. If True will save all masks"
+        "all edge ablations done. If False will only save edge masks if using bisect ablation"
+        "schedule, and then only the mask corresponding to 'n_edges_needed'. This parameter is"
+        "ignored entirely for non-edge ablations.",
     )
 
 
@@ -540,6 +554,7 @@ def ablate_edges_and_eval(
     device: str,
     dtype: Optional[torch.dtype] = None,
     always_keep_const_dir=False,
+    return_all_edge_masks: bool = False,
 ) -> tuple[AblationAccuracies, EdgeMasks, dict[str, int]]:
     """Perform a series of edge ablation experiments across layers and multiple # of edges to keep.
 
@@ -564,10 +579,12 @@ def ablate_edges_and_eval(
         dtype: The data type to cast the inputs to. Ignored if int32 or int64.
         keep_const_edges: Used to always keep the constant edges (for free) when ablating a
             centered RIB graph.
+        return_all_edge_masks: Whether to return the edge masks. If True, the edge masks are returned
+            as the second element of the tuple. If False, the second element is an empty dict.
 
     Returns:
         A dictionary mapping node layers to ablation accuracies/losses.
-        A dictionary mapping node layers to edge masks.
+        A dictionary mapping node layers to edge masks. Empty if return_all_edge_masks is False.
         A dictionary mapping node layers to the number of edges required to achieve the target
             accuracy/loss (for bisect schedule only, otherwise empty dict).
     """
@@ -591,7 +608,10 @@ def ablate_edges_and_eval(
         edge_masks[ablation_node_layer] = {}
         # Iterate through possible number of ablated edges, starting from no ablated edges
         for num_edges_ablated in tqdm(
-            ablation_schedule, total=ablation_schedule.size(), desc=f"Ablating {module_name}"
+            ablation_schedule,
+            total=ablation_schedule.size(),
+            desc=f"Ablating {ablation_node_layer}",
+            file=sys.stdout,
         ):
             num_edges_kept = total_possible_edges - num_edges_ablated
             edge_mask = _get_edge_mask(
@@ -602,7 +622,8 @@ def ablate_edges_and_eval(
             if edge_mask.all():
                 score = base_score
             else:
-                edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
+                if return_all_edge_masks:
+                    edge_masks[ablation_node_layer][num_edges_kept] = edge_mask
                 hook = Hook(
                     name=module_name,
                     data_key="edge_ablation",
@@ -631,9 +652,23 @@ def ablate_edges_and_eval(
         )
 
         if isinstance(ablation_schedule, BisectSchedule):
-            n_edges_required[ablation_node_layer] = (
-                total_possible_edges - ablation_schedule._upper_bound
-            )
+            # _lower_bound is a conservative guess for the number of edges we can ablate.
+            # it's possible we could ablate up to schedule.tolerance more and keep good performance.
+            edges_required_for_layer = total_possible_edges - ablation_schedule._lower_bound
+            n_edges_required[ablation_node_layer] = edges_required_for_layer
+            if not return_all_edge_masks:
+                # still keep the edge mask for n_edges_needed
+                edge_mask_required = _get_edge_mask(
+                    edge_weights=layer_edges.E_hat,
+                    num_edges_kept=num_edges_kept,
+                    keep_const_edges=always_keep_const_dir,
+                )
+                edge_masks[ablation_node_layer][edges_required_for_layer] = edge_mask_required
+
+            log_str = f"Edges required for {ablation_node_layer}: {edges_required_for_layer}"
+            if ablation_schedule.config.tolerance > 1:
+                log_str += f" (or up to {ablation_schedule.config.tolerance} less)"
+            logger.info(log_str)
 
     return results, edge_masks, n_edges_required
 
@@ -805,6 +840,7 @@ def load_bases_and_ablate(
             device=device,
             dtype=dtype,
             always_keep_const_dir=rib_results.config.center,
+            return_all_edge_masks=config.save_all_edge_masks,
         )
     else:
         ablation_results = ablate_node_layers_and_eval(

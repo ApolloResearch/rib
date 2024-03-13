@@ -6,7 +6,7 @@ copy the code and modify it to your needs.
 Example usage:
 
 ```bash
-python run_modularity.py /path/to/rib_build.pt [--threshold 0.2] [--gamma 1.0] [--plot_edge_dist]
+python run_modularity.py /path/to/rib_build.pt [--threshold 0.2] [--gamma 1.0]
    [--plot_piano] [--plot_graph] [--log_norm] [--ablation_path /path/to/ablation_results.json]
 """
 

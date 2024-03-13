@@ -72,11 +72,12 @@ class ByLayerLogEdgeNorm(EdgeNorm):
     @classmethod
     def from_bisect_results(
         cls, ablation_result_path, results: RibBuildResults
-    ) -> "ByLayerLogEdgeNorm":
+    ) -> tuple[float, "ByLayerLogEdgeNorm"]:
         with open(ablation_result_path) as f:
             abl_result = json.load(f)
         assert abl_result["config"]["ablation_type"] == "edge"
         assert abl_result["config"]["schedule"]["schedule_type"] == "bisect"
+        threshold = abl_result["config"]["schedule"]["score_target_difference"]
         edge_masks = {
             nl: torch.tensor(abl_result["edge_masks"][nl][str(n_needed)])
             for nl, n_needed in abl_result["n_edges_required"].items()
@@ -87,7 +88,7 @@ class ByLayerLogEdgeNorm(EdgeNorm):
             nl: ByLayerLogEdgeNorm._get_minimum_edge(edge.E_hat, edge_masks[nl], ignore0=ignore0)
             for nl, edge in edges_by_layer.items()
         }
-        return cls(eps_by_layer)
+        return threshold, cls(eps_by_layer)
 
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         eps = self.eps_by_layer[node_layer]

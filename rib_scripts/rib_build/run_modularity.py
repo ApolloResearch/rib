@@ -6,7 +6,7 @@ copy the code and modify it to your needs.
 Example usage:
 
 ```bash
-python run_modularity.py /path/to/rib_build.pt [--threshold 0.2] [--gamma 1.0]
+python run_modularity.py /path/to/rib_build.pt [--gamma 1.0]
    [--plot_piano] [--plot_graph] [--log_norm] [--ablation_path /path/to/ablation_results.json]
 """
 
@@ -50,7 +50,6 @@ def plot_modular_graph(
 
 def run_modularity(
     results_path: Union[str, Path],
-    threshold: float = 0.1,
     gamma: float = 30,
     plot_piano: bool = True,
     plot_graph: bool = True,
@@ -71,15 +70,17 @@ def run_modularity(
     results_path = Path(results_path)
     ablation_path = Path(ablation_path) if ablation_path is not None else None
     results = RibBuildResults(**torch.load(results_path))
-    name_prefix = f"{results.exp_name}-delta{threshold}"
     edge_norm: EdgeNorm
     if ablation_path is None:
         logger.warning("No ablation path provided, will fall back to SqrtNorm")
         edge_norm = SqrtNorm()
+        threshold = 0
     elif ablation_path.exists():
-        edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
+        threshold, edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
     else:
         raise FileNotFoundError(f"Could not find ablation file at {ablation_path}")
+    threshold_str = f"delta{threshold}" if threshold > 0 else "noablation"
+    name_prefix = f"{results.exp_name}-{threshold_str}"
 
     logger.info(f"Making RIB graph in networkit & running clustering...")
     graph = GraphClustering(results, edge_norm, gamma=gamma)

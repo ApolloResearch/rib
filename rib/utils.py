@@ -256,7 +256,7 @@ def train_test_split(
 def get_data_subset(
     dataset: Dataset, frac: Optional[float], n_samples: Optional[int], seed: Optional[int] = None
 ) -> Dataset:
-    """Get a random subset of the dataset.
+    """Get a (random) subset of the dataset. Does not shuffle if neither frac nor n_samples is given!
 
     If frac is not None, returns a random sample of the dataset of size frac * len(dataset).
     If n_samples is not None, returns a random sample of the dataset of size n_samples.

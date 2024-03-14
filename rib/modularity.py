@@ -223,6 +223,10 @@ class GraphClustering:
         self._make_clusters()
 
     def _make_graph(self):
+        """Create the graph G from the edges provided in the results. Note that all nodes are
+        accounted for in self.nodes (including the constant direction) but here we skip adding
+        edges that connect to the constant nodes. So this makes the constant nodes effectively
+        singletons in the graph."""
         start_idx = 1 if self.results.config.center else 0
         self.G = nk.Graph(n=len(self.nodes), weighted=True)
         for edges in tqdm.tqdm(self.results.edges, desc="Making RIB graph"):

@@ -9,7 +9,7 @@ Example usage:
 python run_modularity.py /path/to/rib_build.pt [--gamma 1.0]
    [--plot_piano] [--plot_graph] [--log_norm] [--ablation_path /path/to/ablation_results.json]
 """
-
+import csv
 from pathlib import Path
 from typing import Optional, Union
 
@@ -26,11 +26,16 @@ from rib.modularity import (
     SqrtNorm,
 )
 from rib.rib_builder import RibBuildResults
-from rib_scripts.rib_build.plot_graph import plot_graph_by_layer
+from rib_scripts.rib_build.plot_graph import plot_graph_by_layer, plot_rib_graph
 
 
 def plot_modular_graph(
-    graph: GraphClustering, clusters: ClusterListLike = "nonsingleton", out_file=None
+    graph: GraphClustering,
+    clusters: ClusterListLike = "nonsingleton",
+    out_file=None,
+    by_layer=False,
+    line_width_factor=None,
+    node_labels=None,
 ):
     clusters_list = graph._get_clusterlist(clusters)
     arr = graph._cluster_array(clusters_list)
@@ -38,14 +43,25 @@ def plot_modular_graph(
         layer_clusters[: graph.nodes_per_layer[nl]]
         for nl, layer_clusters in zip(graph.node_layers, arr.tolist(), strict=True)
     ]
-    plot_graph_by_layer(
-        graph.results.edges,
-        edge_norm=graph.edge_norm,
-        line_width_factor=None,
-        clusters=clusters_for_plotting_fn,
-        out_file=out_file,
-        nodes_per_layer=100,  # max(self.nodes_per_layer.values()),
-    )
+    if by_layer:
+        plot_graph_by_layer(
+            graph.results.edges,
+            edge_norm=graph.edge_norm,
+            line_width_factor=line_width_factor,
+            clusters=clusters_for_plotting_fn,
+            out_file=out_file,
+            nodes_per_layer=100,  # max(self.nodes_per_layer.values()),
+        )
+    else:
+        plot_rib_graph(
+            graph.results.edges,
+            edge_norm=None,
+            line_width_factor=0.001,
+            cluster_list=clusters_for_plotting_fn,
+            out_file=out_file,
+            node_labels=node_labels,
+            nodes_per_layer=30,
+        )
 
 
 def run_modularity(
@@ -54,7 +70,16 @@ def run_modularity(
     plot_piano: bool = True,
     plot_graph: bool = True,
     ablation_path: Optional[Union[str, Path]] = None,
+    line_width_factor: Optional[float] = None,
+    labels_file: Optional[Union[str, Path]] = None,
 ):
+    # Add labels if provided
+    if labels_file is not None:
+        with open(labels_file, "r", newline="") as file:
+            reader = csv.reader(file)
+            node_labels = list(reader)
+    else:
+        node_labels = None
     """
     This function runs modularity analysis on a RIB build and saves various helpful related plots.
 
@@ -74,7 +99,7 @@ def run_modularity(
     if ablation_path is None:
         logger.warning("No ablation path provided, will fall back to SqrtNorm")
         edge_norm = SqrtNorm()
-        threshold = 0
+        threshold = 0.0
     elif ablation_path.exists():
         threshold, edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
     else:
@@ -98,7 +123,12 @@ def run_modularity(
 
     if plot_graph:
         rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
-        plot_modular_graph(graph=graph, out_file=rib_graph_path)
+        plot_modular_graph(
+            graph=graph,
+            out_file=rib_graph_path,
+            line_width_factor=line_width_factor,
+            node_labels=node_labels,
+        )
 
 
 if __name__ == "__main__":

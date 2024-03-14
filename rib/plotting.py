@@ -46,7 +46,7 @@ def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:
 def _add_edges_to_graph(
     graph: nx.Graph,
     edges: list[torch.Tensor],
-    layers: list[np.ndarray],
+    coords_to_index: dict[tuple[int, int], int],
     pos_color: Optional[str] = "blue",
     neg_color: Optional[str] = "red",
 ) -> None:
@@ -59,14 +59,14 @@ def _add_edges_to_graph(
         pos_color (Optional[str]): The color to use for positive edges. Defaults to "blue".
         neg_color (Optional[str]): The color to use for negative edges. Defaults to "red".
     """
-    for module_idx, edge_matrix in enumerate(edges):
-        for j in range(edge_matrix.shape[1]):
-            for i in range(edge_matrix.shape[0]):
+    for l, edge_matrix in enumerate(edges):
+        for j in range(edge_matrix.shape[1]):  # L
+            for i in range(edge_matrix.shape[0]):  # L+1
                 color = pos_color if edge_matrix[i, j] > 0 else neg_color
                 # Draw the edge from the node in the current layer to the node in the next layer
                 graph.add_edge(
-                    layers[module_idx][j],
-                    layers[module_idx + 1][i],
+                    coords_to_index[(l, j)],
+                    coords_to_index[(l + 1, i)],
                     weight=edge_matrix[i, j],
                     color=color,
                 )
@@ -210,13 +210,14 @@ def plot_ablation_results(
 
 def plot_rib_graph(
     edges: list[Edges],
-    clusters: Optional[list[list[int]]] = None,
+    cluster_list: Optional[list[list[int]]] = None,
+    sort_by_cluster: bool = False,
     edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
     line_width_factor: Optional[float] = None,
     out_file: Optional[Path] = None,
     ax: Optional[plt.Axes] = None,
     title: Optional[str] = None,
-    nodes_per_layer: Union[int, list[int]] = 99999,
+    nodes_per_layer: Union[int, list[int]] = 100,
     hide_const_edges: bool = False,
     colors: Optional[list[str]] = None,
     show_node_labels: bool = True,
@@ -241,15 +242,16 @@ def plot_rib_graph(
             this does _not_n check results.center, it is recommended to set hide_const_edges to
             results.center.
         colors (Optional[list[str]]): The colors to use for the nodes in each layer. If None, then
-            the tab10 colormap is used.
+            the tab10 colormap is used. Is overwritten by clusters if both are provided.
         show_node_labels (bool): Whether to show the node labels. Defaults to True.
         node_labels: The labels for each node in the graph. If None, then use RIB dim indices.
     """
+    # Process args
     layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
-
+    n_layers = len(layer_names)
+    assert n_layers == len(edges) + 1
     if isinstance(nodes_per_layer, int):
-        # Note that there is one more layer than there edge matrices
-        nodes_per_layer = [nodes_per_layer] * (len(edges) + 1)
+        nodes_per_layer = [nodes_per_layer] * n_layers
     max_layer_height = max(nodes_per_layer)
 
     # Normalize the edges
@@ -257,12 +259,14 @@ def plot_rib_graph(
     processed_edges = _prepare_edges_for_plotting(
         [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges],
         nodes_per_layer,
-        hide_const_edges=hide_const_edges,
+        hide_const_edges=True,
     )
     del edges
 
-    # Normalize the line width
-    ax = ax or plt.subplots(1, 1, figsize=(20, 10))[1]
+    # Create figure and normalize the line width
+    width = n_layers * 2
+    height = max(nodes_per_layer) / 3
+    ax = ax or plt.subplots(1, 1, figsize=(width, height), constrained_layout=True)[1]
     bbox = ax.get_position()  # Get the bounding box of the axes in figure coordinates
     _, fig_height = ax.get_figure().get_size_inches()  #  type: ignore
     axes_height_inches = fig_height * bbox.height
@@ -271,59 +275,107 @@ def plot_rib_graph(
     logger.info(f"Using line width factor {line_width_factor}")
 
     # Create the graph & add nodes and edges
-    layers = _create_node_layers(processed_edges)
+    # layers = _create_node_layers(processed_edges)
+
+    # def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:
+    #     """Create a list of node layers from the given edges."""
+    #     layers = []
+    #     for i, weight_matrix in enumerate(edges):
+    #         # Only add nodes to the graph for the current layer if it's the first layer
+    #         if i == 0:
+    #             current_layer = np.arange(weight_matrix.shape[1])
+    #             layers.append(current_layer)
+    #         else:
+    #             # Ensure that the current layer's nodes are the same as the previous layer's nodes
+    #             assert len(layers[-1]) == weight_matrix.shape[1], (
+    #                 f"The number of nodes implied by edge matrix {i} ({weight_matrix.shape[1]}) "
+    #                 f"does not match the number implied by the previous edge matrix ({len(layers[-1])})."
+    #             )
+    #             current_layer = layers[-1]
+    #         next_layer = np.arange(weight_matrix.shape[0]) + max(current_layer) + 1
+    #         layers.append(next_layer)
+    #     return layers
+
+    # Property of every node:
+    # internal index
+    # color
+    # label
+    # cluster
+    # position
+
+    coords_to_index = {}
     graph = nx.Graph()
-    for layer in layers:
-        graph.add_nodes_from(layer)
-    _add_edges_to_graph(graph, processed_edges, layers)
-
-    # Create positions for each node
-    pos: dict[int, tuple[int, Union[int, float]]] = {}
-    for i, layer in enumerate(layers):
-        # Add extra spacing for nodes that have fewer nodes than the biggest layer
-        spacing = max_layer_height / len(layer)
-        if clusters is None:
-            ordering = list(range(len(layer)))
+    running_index = 0
+    for i in range(n_layers):
+        n_nodes = processed_edges[i - 1].shape[0] if i != 0 else processed_edges[0].shape[1]
+        if i < n_layers - 1:
+            assert processed_edges[i].shape[1] == n_nodes, "Consistency check failed"
+        # Derive positions based on clusters
+        positions = list(range(n_nodes))
+        if cluster_list is not None:
+            clusters = cluster_list[i]
+            ordering = sorted(positions, key=lambda x: clusters[x] if clusters[x] != 0 else 999)
+            for position, j in enumerate(ordering):
+                positions[j] = position
         else:
-            # truncate clusters to only include the nodes we keep in the graph
-            clusters[i] = clusters[i][: nodes_per_layer[i]]
-            ordering = sorted(range(len(layer)), key=lambda x: clusters[i][x])
-
-        for j, node in enumerate(layer[ordering]):
-            pos[node] = (i, j * spacing)
-
-    # Draw nodes
-    if colors is None:
-        # tab10 colormap, convert from rgb to hex to avoid matplotlib warning
-        to_hex = lambda x: f"{int(x * 255):02x}"
-        colors = [f"#{to_hex(r)}{to_hex(g)}{to_hex(b)}" for r, g, b in plt.get_cmap("tab10").colors]  # type: ignore
-    options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6}
-    for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
-        node_colors: Union[str, list[str]]
-        if clusters is not None:
+            clusters = [0] * n_nodes
+            # ordering = list(range(n_nodes))
+        # Derive colors based on clusters or layers
+        if cluster_list is not None:
             colormap = ["#bbbbbb"] + colorcet.glasbey
-            node_colors = [colormap[cluster_idx % 256] for cluster_idx in clusters[i]]
+            color = lambda j: colormap[clusters[j] % 256]
         else:
-            node_colors = colors[i % len(colors)]
-        nx.draw_networkx_nodes(graph, pos, nodelist=layer, node_color=node_colors, ax=ax, **options)
-        # Add layer label above the nodes
-        ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+            colors = colors or [f"#{int(x * 255):02x}" for x in plt.get_cmap("tab10").colors]
+            color = lambda j: colors[i % len(colors)]
+        # Add nodes to the graph
+        for j, pos in enumerate(positions):
+            # for j in ordering[:max_nodes_per_layer]:
+            pos = positions[j]
+            graph.add_node(
+                running_index,
+                layer_idx=i,
+                rib_idx=j,
+                cluster=clusters[j],
+                position=pos,
+                color=color(j),
+            )
+            coords_to_index[(i, j)] = running_index
+            running_index += 1
 
-    # Label nodes if node_labels is provided
-    if show_node_labels:
-        node_label_dict = {}
-        for i, layer in enumerate(layers):
-            for j, node in enumerate(layer):
-                if node_labels is not None:
-                    node_label_dict[node] = node_labels[i][j].replace("|", "\n")
-                else:
-                    node_label_dict[node] = str(j)
-        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=6, ax=ax)
+    # Property of every edge
+    # weight
+    # color
+
+    _add_edges_to_graph(graph, processed_edges, coords_to_index)
+
+    nodes = graph.nodes(data=True)
+
+    pos_dict = {node: (data["layer_idx"], data["y_pos"]) for node, data in nodes}
+
+    # Draw nodes:
+    options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6, "ax": ax}
+    for node, data in graph.nodes(data=True):
+        if data["y_pos"] <= nodes_per_layer[data["layer_idx"]]:
+            nx.draw_networkx_nodes(
+                graph, pos_dict, nodelist=[node], node_color=data["color"], **options
+            )
+    # Draw layer labels
+    for i, layer_name in enumerate(layer_names):
+        ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+        # nodelist = [node for node in graph.nodes if nodes[node]["layer_idx"] == i]
+        # node_colors = [
+        #     nodes[node]["color"] for node in nodelist if nodes[node]["layer_idx"] == i
+        # ]
+        # nx.draw_networkx_nodes(
+        #     graph, pos_dict, nodelist=nodelist, node_color=node_colors, ax=ax, **options
+        # )
+        # # Add layer label above the nodes
+        # ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
 
     # Draw edges
     nx.draw_networkx_edges(
         graph,
-        pos,
+        pos_dict,
         edgelist=[(edge[0], edge[1]) for edge in graph.edges(data=True)],
         width=[line_width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
         alpha=1,
@@ -331,12 +383,112 @@ def plot_rib_graph(
         ax=ax,
     )
 
+    # Draw labels
+    if show_node_labels:
+        for node, data in graph.nodes(data=True):
+            label = (
+                str(data["rib_idx"])
+                if node_labels is None
+                else node_labels[data["layer_idx"]][data["rib_idx"]].replace("|", "\n")
+            )
+            label += f"\nRIB dir {data['rib_idx']}"
+            label += f"\ncluster {data['cluster']}"
+            nx.draw_networkx_labels(
+                graph,
+                pos_dict,
+                {node: label},
+                font_size=4,
+                ax=ax,
+                bbox={"ec": "k", "fc": "white", "alpha": 0.30, "boxstyle": "round,pad=0.2"},
+                font_color=data["color"],
+            )
+
+        # node_label_dict = {}
+        # node_color_dict = {}
+        # for i, layer in enumerate(layers):
+        #     node_colors = [colormap[cluster_idx % 256] for cluster_idx in clusters[i]]
+        #     for j, node in enumerate(layer):
+        #         if node_labels is not None:
+        #             node_label_dict[node] = node_labels[i][j].replace("|", "\n")
+        #             node_color_dict[node] = node_colors[j]
+        #         else:
+        #             node_label_dict[node] = str(j)
+        #             node_color_dict[node] = node_colors[j]
+        # label_options = {"ec": "k", "fc": "white", "alpha": 0.30, "boxstyle": "round,pad=0.2"}
+        # for idx, (node, label) in enumerate(node_label_dict.items()):
+        #     nx.draw_networkx_labels(
+        #         graph,
+        #         pos_dict,
+        #         {node: label},
+        #         font_size=4,
+        #         ax=ax,
+        #         bbox=label_options,
+        #         font_color=node_color_dict[node],
+        #     )
+
+    # # Create positions for each node
+    # pos: dict[int, tuple[int, Union[int, float]]] = {}
+    # for i, layer in enumerate(layers):
+    #     # Add extra spacing for nodes that have fewer nodes than the biggest layer
+    #     spacing = max_layer_height / len(layer)
+    #     if clusters is None:
+    #         ordering = list(range(len(layer)))
+    #     else:
+    #         # truncate clusters to only include the nodes we keep in the graph
+    #         clusters[i] = clusters[i][: nodes_per_layer[i]]
+    #         ordering = sorted(range(len(layer)), key=lambda x: clusters[i][x])
+
+    #     if sort_by_cluster:
+    #         for j, node in enumerate(layer[ordering]):
+    #             pos[node] = (i, j * spacing)
+    #     else:
+    #         for j, node in enumerate(layer):
+    #             pos[node] = (i, j * spacing)
+
+    # for i in range(n_layers):
+    #     for j in range(max_nodes_per_layer[i]):
+    #         nodes[i * max_nodes_per_layer[i] + j]["pos"] = (i, j)
+
+    # # Draw nodes
+    # if colors is None:
+    #     # tab10 colormap, convert from rgb to hex to avoid matplotlib warning
+    #     to_hex = lambda x: f"{int(x * 255):02x}"
+    #     colors = [f"#{to_hex(r)}{to_hex(g)}{to_hex(b)}" for r, g, b in plt.get_cmap("tab10").colors]  # type: ignore
+    #
+    # for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
+    #     node_colors: Union[str, list[str]]
+    #     if clusters is not None:
+    #         colormap = ["#bbbbbb"] + colorcet.glasbey
+    #         node_colors = [colormap[cluster_idx % 256] for cluster_idx in clusters[i]]
+    #     else:
+    #         # pos: dict[int, tuple[int, float]]
+    #         # layer: array[int]
+    #         # node_colors: list[str]
+    #         #
+    #         node_colors = colors[i % len(colors)]
+
+    # Draw edges
+    # nx.draw_networkx_edges(
+    #     graph,
+    #     pos,
+    #     edgelist=[(edge[0], edge[1]) for edge in graph.edges(data="full")],
+    #     width=[line_width_factor * edge[2]["weight"] for edge in graph.edges(data="full")],
+    #     alpha=1,
+    #     edge_color=[edge[2]["color"] for edge in graph.edges(data="full")],
+    #     ax=ax,
+    # )
+
+    if cluster_list is not None:
+        n_unique_clusters = len(set([c for layer in cluster_list for c in layer]))
+        title = title + " | " if title is not None else ""
+        title += f"{n_unique_clusters} clusters"
+
     if title is not None:
         plt.suptitle(title)
-    plt.tight_layout()
+
     ax.axis("off")
     if out_file is not None:
-        plt.savefig(out_file)
+        plt.savefig(out_file, dpi=600)
 
 
 def plot_graph_by_layer(

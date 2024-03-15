@@ -1,0 +1,17 @@
+exp_name: modular_arithmetic_clustering
+ablation_type: edge
+rib_results_path: /mnt/ssd-interp/stefan/rib/rib_scripts/rib_build/out/modular_arithmetic_clustering_rib_graph.pt
+schedule:
+  schedule_type: bisect
+  score_target_difference: 0.001
+dataset:
+  dataset_type: modular_arithmetic
+  return_set: train
+ablation_node_layers:  # Rotate the input to these modules into the interaction basis
+  - ln1.0
+  - ln2.0
+  - unembed
+batch_size: 99999
+dtype: float32
+eval_type: accuracy
+seed: 0

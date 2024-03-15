@@ -1,4 +1,4 @@
-exp_name: modular_arithmetic
+exp_name: modular_arithmetic_clustering
 seed: 0
 # Model
 tlens_pretrained: null
@@ -25,8 +25,7 @@ node_layers:
   - ln1.0
   - ln2.0
   - unembed
-  - output
-rotate_final_node_layer: false
+rotate_final_node_layer: true
 # Hardware
 gram_batch_size: null
 batch_size: 99999

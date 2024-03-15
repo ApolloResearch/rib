@@ -198,6 +198,7 @@ class GraphClustering:
             seed: The seed to use for the Leiden algorithm. If None, will use a random seed.
         """
 
+        self.seed: Optional[int]
         if seed is not None:
             nk.engineering.setSeed(seed, useThreadId=False)
             self.seed = seed

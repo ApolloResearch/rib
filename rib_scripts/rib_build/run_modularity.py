@@ -74,7 +74,6 @@ def plot_modular_graph(
             show_node_labels=True,
             node_labels=node_labels,
         )
-    logger.info(f"Saved modular graph to {out_file.absolute()}")
 
 
 def run_modularity(
@@ -182,6 +181,7 @@ def run_modularity(
             hide_const_edges=hide_const_edges or results.config.center,
             sorting=sorting,
         )
+        logger.info(f"Saved modular graph to {rib_graph_path.absolute()}")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Literal, Optional, Union
 
 import colorcet
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -185,7 +186,7 @@ def plot_ablation_results(
 def plot_rib_graph(
     edges: list[Edges],
     cluster_list: Optional[list[list[int]]] = None,
-    sorting: Literal["rib", "cluster", "clustered_rib"] = "clustered_rib",
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "rib",
     edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
     line_width_factor: Optional[float] = None,
     out_file: Optional[Path] = None,
@@ -270,18 +271,15 @@ def plot_rib_graph(
         if sorting == "rib":
             positions = list(range(n_nodes))
         else:
-            assert clusters is not None  # for mypy
+            assert clusters is not None, "Clusters must be provided for sorting other than 'rib'"
             positions = sort_clusters(clusters, sorting)
         # Derive colors based on clusters or layers
         if clusters is not None:
             colormap = ["#bbbbbb"] + colorcet.glasbey
             color = lambda j: colormap[clusters[j] % 256]
         else:
-            colors = colors or [
-                f"#{''.join([f'{int(i * 255):02x}' for i in x[:3]])}"
-                for x in plt.get_cmap("tab10").colors  # TODO type check
-            ]
-            color = lambda j: colors[i % len(colors)]
+            colors = [mpl.colors.rgb2hex(mpl.cm.tab10(i)) for i in range(10)]  # type: ignore
+            color = lambda _: colors[i % len(colors)]
         # Add nodes to the graph
         for j in range(min(n_nodes, nodes_per_layer[i])):
             # TODO Is nodes_per_layer just here sufficient?
@@ -328,13 +326,11 @@ def plot_rib_graph(
     # Draw labels
     if show_node_labels:
         for node, data in graph.nodes(data=True):
-            label = (
-                str(data["rib_idx"])
-                if node_labels is None
-                else node_labels[data["layer_idx"]][data["rib_idx"]].replace("|", "\n")
-            )
-            label += f"\nRIB dir {data['rib_idx']}"
-            label += f"\ncluster {data['cluster']}"
+            label = f"RIB_{data['rib_idx']}"
+            if data["cluster"] is not None:
+                label += f" C_{data['cluster']}"
+            if node_labels is not None:
+                label += "\n" + node_labels[data["layer_idx"]][data["rib_idx"]].replace("|", "\n")
             nx.draw_networkx_labels(
                 graph,
                 pos_dict,

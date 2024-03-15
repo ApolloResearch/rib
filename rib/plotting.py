@@ -351,17 +351,20 @@ def plot_rib_graph(
 
     _add_edges_to_graph(graph, processed_edges, coords_to_index)
 
-    nodes = graph.nodes(data=True)
-
-    pos_dict = {node: (data["layer_idx"], data["position"]) for node, data in nodes}
+    pos_dict = {
+        node: (data["layer_idx"], data["position"]) for node, data in graph.nodes(data=True)
+    }
 
     # Draw nodes:
     options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6, "ax": ax}
-    for node, data in graph.nodes(data=True):
-        if data["position"] <= nodes_per_layer[data["layer_idx"]]:
-            nx.draw_networkx_nodes(
-                graph, pos_dict, nodelist=[node], node_color=data["color"], **options
-            )
+    nx.draw_networkx_nodes(
+        graph,
+        pos_dict,
+        nodelist=graph.nodes,
+        node_color=[d[1] for d in graph.nodes.data("color")],
+        **options,
+    )
+
     # Draw layer labels
     for i, layer_name in enumerate(layer_names):
         ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)

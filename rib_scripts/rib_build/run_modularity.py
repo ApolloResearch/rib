@@ -15,6 +15,7 @@ from typing import Literal, Optional, Union
 
 import fire
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from rib.log import logger
@@ -112,8 +113,11 @@ def run_modularity(
         raise FileNotFoundError(f"Could not find ablation file at {ablation_path}")
     threshold_str = f"delta{threshold}" if threshold > 0 else "noablation"
     name_prefix = f"{results.exp_name}-{threshold_str}"
-
+    # TODO: Docstrings
     logger.info(f"Making RIB graph in networkit & running clustering...")
+    if seed is None:
+        seed = np.random.randint(0, 2**32)
+        print("Setting seed to", seed)
     graph = GraphClustering(results, edge_norm, gamma=gamma, seed=seed)
     logger.info(f"Finished clustering.")
 

@@ -12,6 +12,7 @@ import torch
 import tqdm
 from jaxtyping import Bool, Float
 
+from rib.log import logger
 from rib.rib_builder import RibBuildResults
 
 EdgeTensor = Float[torch.Tensor, "rib_out rib_in"]
@@ -195,8 +196,11 @@ class GraphClustering:
                 by default, it's pretty cheap to go higher. Unclear if there are actual benifits to
                 doing so, but it shouldn't hurt.
         """
+
         if seed is not None:
             nk.engineering.setSeed(seed, useThreadId=False)
+        else:
+            logger.warning("No seed set. Will use a random seed.")
         self.results = results
         self.edge_norm = edge_norm or IdentityEdgeNorm()
         self.node_layers = node_layers or results.config.node_layers

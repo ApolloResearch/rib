@@ -39,6 +39,8 @@ def plot_modular_graph(
     node_labels: Optional[list[list[str]]] = None,
     nodes_per_layer: int = 100,
     plot_edge_norm: Optional[EdgeNorm] = None,
+    hide_const_edges: bool = False,
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "clustered_rib",
 ):
     clusters_nodelist = graph._get_clusterlist(clusters)
     clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
@@ -50,6 +52,8 @@ def plot_modular_graph(
             clusters=clusters_intlist,
             out_file=out_file,
             nodes_per_layer=nodes_per_layer,  # max(self.nodes_per_layer.values()),
+            hide_const_edges=hide_const_edges,
+            # TODO check all kwargs
         )
     else:
         plot_rib_graph(
@@ -60,6 +64,9 @@ def plot_modular_graph(
             out_file=out_file,
             node_labels=node_labels,
             nodes_per_layer=nodes_per_layer,
+            hide_const_edges=hide_const_edges,
+            sorting=sorting,
+            # TODO check all kwargs
         )
 
 
@@ -69,11 +76,13 @@ def run_modularity(
     ablation_path: Optional[Union[str, Path]] = None,
     labels_file: Optional[Union[str, Path]] = None,
     nodes_per_layer: int = 100,
+    hide_const_edges: Optional[bool] = None,
     line_width_factor: Optional[float] = None,
     plot_norm: Literal["sqrt", "log", "graph"] = "graph",
     seed: Optional[int] = None,
     plot_piano: bool = True,
     plot_graph: bool = True,
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "clustered_rib",
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -94,7 +103,7 @@ def run_modularity(
             graph plots.
         nodes_per_layer: The maximum number of nodes per layer in the graph plots. #TODO check
         line_width_factor: A scaling factor for the line width in the graph plots. If not provided,
-            will be derived from max edge weight. #TODO const edge? norm?
+            will be derived from max edge weight (after processing).
         plot_norm: The edge norm to use for the graph plots. Options are "sqrt", "log", or "graph".
             sqrt and log will use the corresponding edge norm, while graph will use the norm that
             was used for the clustering.
@@ -122,11 +131,10 @@ def run_modularity(
         raise FileNotFoundError(f"Could not find ablation file at {ablation_path}")
     threshold_str = f"delta{threshold}" if threshold > 0 else "noablation"
     name_prefix = f"{results.exp_name}-{threshold_str}"
-    # TODO: Docstrings
     logger.info(f"Making RIB graph in networkit & running clustering...")
     if seed is None:
         seed = np.random.randint(0, 2**32)
-        print("Setting seed to", seed)
+        logger.info("Setting seed to", seed)
     graph = GraphClustering(results, edge_norm, gamma=gamma, seed=seed)
     logger.info(f"Finished clustering.")
 
@@ -160,6 +168,8 @@ def run_modularity(
             node_labels=node_labels,
             nodes_per_layer=nodes_per_layer,
             plot_edge_norm=plot_edge_norm,
+            hide_const_edges=hide_const_edges or results.config.center,
+            sorting=sorting,
         )
 
 

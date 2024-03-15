@@ -195,6 +195,7 @@ class GraphClustering:
             leiden_iterations: Number of iterations to run the Leiden algorithm. Networkit uses 3
                 by default, it's pretty cheap to go higher. Unclear if there are actual benifits to
                 doing so, but it shouldn't hurt.
+            seed: The seed to use for the Leiden algorithm. If None, will use a random seed.
         """
 
         if seed is not None:
@@ -411,3 +412,51 @@ class GraphClustering:
         ax.matshow(arr.T, cmap=cmap, origin="lower", norm=norm, aspect="auto")
         ax.set_xlabel("Node layer")
         ax.set_ylabel("RIB index")
+
+
+def sort_clusters(clusters: list[int], sorting: Literal["cluster", "clustered_rib"]) -> list[int]:
+    """Sorts nodes in a layer based on the RIB index, and the cluster they are in.
+
+    Supports two sorting methods:
+        * "cluster": Sorts by cluster.
+        * "clustered_rib": Sorts by RIB index, but clusters are kept together.
+
+    Cluster 0 is treated as a special case and sorted last.
+
+    Args:
+        clusters: A list of cluster ids, one for each node.
+        sorting: The method to use for sorting. One of "rib", "cluster", or "clustered_rib".
+
+    Returns:
+        positions: For each node, the position it should be in the graph.
+    """
+    # Clusters: cluster of each node (clusters in nodes-order)
+    # Positions: position of each node (positions in nodes-order)
+    # Ordering [used in sort_clusters only]: node at each position (nodes in position-order)
+    n_nodes = len(clusters)
+    if sorting == "cluster":
+        ordering = sorted(range(n_nodes), key=lambda x: clusters[x] if clusters[x] != 0 else np.inf)
+        positions = [0] * n_nodes
+        for pos, rib_idx in enumerate(ordering):
+            positions[rib_idx] = pos
+        return positions
+    elif sorting == "clustered_rib":
+        ordering, seen_clusters = [], set()
+        for rib_idx in range(n_nodes):
+            cluster = clusters[rib_idx]
+            if cluster == 0:
+                # Don't keep the "0" cluster together (would just put it to the front)
+                ordering.append(rib_idx)
+            elif cluster not in seen_clusters:
+                seen_clusters.add(cluster)
+                rib_indices_in_cluster = [i for i, c in enumerate(clusters) if c == cluster]
+                ordering.extend(sorted(rib_indices_in_cluster))
+        assert len(ordering) == n_nodes, "Ordering does not contain all RIB indices"
+        assert len(ordering) == len(set(ordering)), "Ordering contains some duplicate RIB indices"
+        positions = [0] * n_nodes
+        for pos, rib_idx in enumerate(ordering):
+            positions[rib_idx] = pos
+        assert all([isinstance(p, int) for p in positions])  # for mypy
+        return positions
+    else:
+        raise ValueError(f"Unknown sorting method: {sorting}")

@@ -20,7 +20,7 @@ from tqdm import tqdm
 
 from rib.data_accumulator import Edges
 from rib.log import logger
-from rib.modularity import IdentityEdgeNorm
+from rib.modularity import IdentityEdgeNorm, sort_clusters
 
 
 def _add_edges_to_graph(
@@ -185,14 +185,14 @@ def plot_ablation_results(
 def plot_rib_graph(
     edges: list[Edges],
     cluster_list: Optional[list[list[int]]] = None,
-    sort_by_cluster: bool = False,
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "clustered_rib",
     edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
     line_width_factor: Optional[float] = None,
     out_file: Optional[Path] = None,
     ax: Optional[plt.Axes] = None,
     title: Optional[str] = None,
     nodes_per_layer: Union[int, list[int]] = 100,
-    hide_const_edges: bool = True,
+    hide_const_edges: bool = False,
     colors: Optional[list[str]] = None,
     show_node_labels: bool = True,
     node_labels: Optional[list[list[str]]] = None,
@@ -204,6 +204,10 @@ def plot_rib_graph(
             shape (n_nodes_in_l+1, n_nodes_in_l)
         clusters: List of cluster indices for every node. len(clusters) == len(nodes). If None
             then the nodes are not colored by cluster.
+        sorting: The sorting method to use for the nodes. Can be "rib", "cluster", or
+            "clustered_rib". Ignored if no clusters provided. "rib" sorts by the RIB index,
+            "cluster" sorts by the cluster index, and "clustered_rib" sorts by RIB index but keeps
+            nodes in the same cluster together.
         edge_norm: A function to normalize the edges (by layer) before plotting.
         line_width_factor: Scale factor to convert edge weights into line widths. If None, will
             choose a facctor such that, among all layers, the thickest line is 20.
@@ -256,41 +260,38 @@ def plot_rib_graph(
         n_nodes = processed_edges[i - 1].shape[0] if i != 0 else processed_edges[0].shape[1]
         if i < n_layers - 1:
             assert processed_edges[i].shape[1] == n_nodes, "Consistency check failed"
-        # Derive positions based on clusters
-        if cluster_list is not None:
-            clusters = cluster_list[i]
-            # Ordering: node at each position (nodes in position-order)
-            # Positions: position of each node (positions in nodes-order)
-            positions = [None] * n_nodes
-            ordering = sorted(
-                range(n_nodes), key=lambda x: clusters[x] if clusters[x] != 0 else np.inf
-            )
-            for position, j in enumerate(ordering):
-                positions[j] = position
-        else:
-            clusters = [0] * n_nodes
+        # TODO: Because clusters can contain the -1 entries from arr we get len(clusters) > n_nodes.
+        # This makes positions too long too. But this is (a) not a problem, and (b) we can fix it
+        # with [:n_nodes]. But it would be nice to make cluster_list have the right shape.
+        clusters = cluster_list[i][:n_nodes] if cluster_list is not None else None
+        # Derive positions based on clusters:
+        #   Clusters: cluster of each node (clusters in nodes-order)
+        #   Positions: position of each node (positions in nodes-order)
+        #   Ordering [used in sort_clusters only]: node at each position (nodes in position-order)
+        if sorting == "rib":
             positions = list(range(n_nodes))
-
+        else:
+            assert clusters is not None  # for mypy
+            positions = sort_clusters(clusters, sorting)
         # Derive colors based on clusters or layers
-        if cluster_list is not None:
+        if clusters is not None:
             colormap = ["#bbbbbb"] + colorcet.glasbey
             color = lambda j: colormap[clusters[j] % 256]
         else:
             colors = colors or [
                 f"#{''.join([f'{int(i * 255):02x}' for i in x[:3]])}"
-                for x in plt.get_cmap("tab10").colors
+                for x in plt.get_cmap("tab10").colors  # TODO type check
             ]
             color = lambda j: colors[i % len(colors)]
         # Add nodes to the graph
-        for j, pos in enumerate(positions):
-            # for j in ordering[:max_nodes_per_layer]:
-            pos = positions[j]
+        for j in range(min(n_nodes, nodes_per_layer[i])):
+            # TODO Is nodes_per_layer just here sufficient?
             graph.add_node(
                 (i, j),
                 layer_idx=i,
                 rib_idx=j,
-                cluster=clusters[j],
-                position=pos,
+                cluster=clusters[j] if clusters is not None else None,
+                position=positions[j],
                 color=color(j),
             )
 
@@ -429,7 +430,8 @@ def plot_graph_by_layer(
             hide_const_edges=hide_const_edges,
             ax=ax,
             line_width_factor=line_width_factor,
-            clusters=block_clusters,
+            cluster_list=block_clusters,
+            # TODO Check kwargs
         )
     # Save the figure
     if out_file is not None:

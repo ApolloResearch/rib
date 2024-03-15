@@ -36,6 +36,7 @@ def plot_modular_graph(
     by_layer=False,
     line_width_factor=None,
     node_labels=None,
+    nodes_per_layer=100,
 ):
     clusters_list = graph._get_clusterlist(clusters)
     arr = graph._cluster_array(clusters_list)
@@ -50,7 +51,7 @@ def plot_modular_graph(
             line_width_factor=line_width_factor,
             clusters=clusters_for_plotting_fn,
             out_file=out_file,
-            nodes_per_layer=100,  # max(self.nodes_per_layer.values()),
+            nodes_per_layer=nodes_per_layer,  # max(self.nodes_per_layer.values()),
         )
     else:
         plot_rib_graph(
@@ -60,7 +61,7 @@ def plot_modular_graph(
             cluster_list=clusters_for_plotting_fn,
             out_file=out_file,
             node_labels=node_labels,
-            nodes_per_layer=30,
+            nodes_per_layer=nodes_per_layer,
         )
 
 
@@ -72,6 +73,7 @@ def run_modularity(
     ablation_path: Optional[Union[str, Path]] = None,
     line_width_factor: Optional[float] = None,
     labels_file: Optional[Union[str, Path]] = None,
+    nodes_per_layer: int = 100,
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -128,6 +130,7 @@ def run_modularity(
             out_file=rib_graph_path,
             line_width_factor=line_width_factor,
             node_labels=node_labels,
+            nodes_per_layer=nodes_per_layer,
         )
 
 

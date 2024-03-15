@@ -74,6 +74,7 @@ def run_modularity(
     line_width_factor: Optional[float] = None,
     labels_file: Optional[Union[str, Path]] = None,
     nodes_per_layer: int = 100,
+    seed: Optional[int] = None,
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -110,7 +111,7 @@ def run_modularity(
     name_prefix = f"{results.exp_name}-{threshold_str}"
 
     logger.info(f"Making RIB graph in networkit & running clustering...")
-    graph = GraphClustering(results, edge_norm, gamma=gamma)
+    graph = GraphClustering(results, edge_norm, gamma=gamma, seed=seed)
     logger.info(f"Finished clustering.")
 
     if plot_piano:

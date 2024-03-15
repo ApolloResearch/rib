@@ -177,6 +177,7 @@ class GraphClustering:
         node_layers: Optional[list[str]] = None,
         gamma: float = 1.0,
         leiden_iterations: int = 10,
+        seed: Optional[int] = None,
     ):
         """
         Create a GraphClustering object from a RibBuildResults object.
@@ -193,6 +194,8 @@ class GraphClustering:
                 by default, it's pretty cheap to go higher. Unclear if there are actual benifits to
                 doing so, but it shouldn't hurt.
         """
+        if seed is not None:
+            nk.engineering.setSeed(seed, useThreadId=False)
         self.results = results
         self.edge_norm = edge_norm or IdentityEdgeNorm()
         self.node_layers = node_layers or results.config.node_layers

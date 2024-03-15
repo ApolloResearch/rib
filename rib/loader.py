@@ -203,11 +203,13 @@ def create_modular_arithmetic_dataset(
         dataset = raw_dataset
     else:
         assert return_set in ["train", "test"], f"Unsuppored return_set value: {return_set}"
+        # Shuffles the dataset
         train_dataset, test_dataset = train_test_split(
             raw_dataset, frac_train=frac_train, seed=seed
         )
         dataset = train_dataset if return_set == "train" else test_dataset
 
+    # Shuffles the dataset again iff return_set_frac or n_samples are not None
     dataset_subset = get_data_subset(
         dataset,
         frac=dataset_config.return_set_frac,

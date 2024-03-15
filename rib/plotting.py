@@ -350,12 +350,12 @@ def plot_rib_graph(
 
     nodes = graph.nodes(data=True)
 
-    pos_dict = {node: (data["layer_idx"], data["y_pos"]) for node, data in nodes}
+    pos_dict = {node: (data["layer_idx"], data["position"]) for node, data in nodes}
 
     # Draw nodes:
     options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6, "ax": ax}
     for node, data in graph.nodes(data=True):
-        if data["y_pos"] <= nodes_per_layer[data["layer_idx"]]:
+        if data["position"] <= nodes_per_layer[data["layer_idx"]]:
             nx.draw_networkx_nodes(
                 graph, pos_dict, nodelist=[node], node_color=data["color"], **options
             )

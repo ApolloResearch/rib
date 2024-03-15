@@ -55,7 +55,7 @@ def plot_modular_graph(
         plot_rib_graph(
             graph.results.edges,
             edge_norm=plot_edge_norm or graph.edge_norm,
-            line_width_factor=0.001,
+            line_width_factor=line_width_factor,
             cluster_list=clusters_intlist,
             out_file=out_file,
             node_labels=node_labels,
@@ -66,14 +66,14 @@ def plot_modular_graph(
 def run_modularity(
     results_path: Union[str, Path],
     gamma: float = 30,
-    plot_piano: bool = True,
-    plot_graph: bool = True,
     ablation_path: Optional[Union[str, Path]] = None,
-    line_width_factor: Optional[float] = None,
     labels_file: Optional[Union[str, Path]] = None,
     nodes_per_layer: int = 100,
+    line_width_factor: Optional[float] = None,
     plot_norm: Literal["sqrt", "log", "graph"] = "graph",
     seed: Optional[int] = None,
+    plot_piano: bool = True,
+    plot_graph: bool = True,
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -87,12 +87,21 @@ def run_modularity(
 
     Args:
         results_path: The path to the RIB build results file.
-        threshold: The loss increase threshold for the bisect ablation.
         gamma: The resolution parameter for the modularity analysis. Higher gamma = more clusters.
-        plot_piano: Whether to plot a piano plot, giving an overview of modular structure found.
-        plot_graph: Whether to plot the full RIB graph with nodes colored and sorted by module.
         ablation_path: The path to the bisect ablation results file. If provided will use this for
             ByLayerLogEdgeNorm. If not provided, will fall back to SqrtNorm.
+        labels_file: A CSV file with node labels. If provided, will be used to label nodes in the
+            graph plots.
+        nodes_per_layer: The maximum number of nodes per layer in the graph plots. #TODO check
+        line_width_factor: A scaling factor for the line width in the graph plots. If not provided,
+            will be derived from max edge weight. #TODO const edge? norm?
+        plot_norm: The edge norm to use for the graph plots. Options are "sqrt", "log", or "graph".
+            sqrt and log will use the corresponding edge norm, while graph will use the norm that
+            was used for the clustering.
+        seed: The random seed to use for the clustering. If not provided, will be randomly generated
+            and printed.
+        plot_piano: Whether to plot a piano plot, giving an overview of modular structure found.
+        plot_graph: Whether to plot the full RIB graph with nodes colored and sorted by module.
     """
     if plot_norm == "log":
         assert ablation_path is not None, "Must provide ablation path for log norm"

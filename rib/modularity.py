@@ -56,8 +56,9 @@ class ByLayerLogEdgeNorm(EdgeNorm):
     bisect ablation experiment (taking epsilon as the smallest edge that was not ablated).
     """
 
-    def __init__(self, eps_by_layer: dict[str, float]):
+    def __init__(self, eps_by_layer: dict[str, float], threshold: float):
         self.eps_by_layer = eps_by_layer
+        self.threshold = threshold
 
     @staticmethod
     def _get_minimum_edge(
@@ -72,7 +73,7 @@ class ByLayerLogEdgeNorm(EdgeNorm):
     @classmethod
     def from_bisect_results(
         cls, ablation_result_path, results: RibBuildResults
-    ) -> tuple[float, "ByLayerLogEdgeNorm"]:
+    ) -> "ByLayerLogEdgeNorm":
         with open(ablation_result_path) as f:
             abl_result = json.load(f)
         assert abl_result["config"]["ablation_type"] == "edge"
@@ -88,7 +89,7 @@ class ByLayerLogEdgeNorm(EdgeNorm):
             nl: ByLayerLogEdgeNorm._get_minimum_edge(edge.E_hat, edge_masks[nl], ignore0=ignore0)
             for nl, edge in edges_by_layer.items()
         }
-        return threshold, cls(eps_by_layer)
+        return cls(eps_by_layer, threshold)
 
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         eps = self.eps_by_layer[node_layer]

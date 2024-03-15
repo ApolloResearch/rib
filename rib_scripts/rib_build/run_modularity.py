@@ -11,7 +11,7 @@ python run_modularity.py /path/to/rib_build.pt [--gamma 1.0]
 """
 import csv
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import fire
 import matplotlib.pyplot as plt
@@ -32,33 +32,30 @@ from rib_scripts.rib_build.plot_graph import plot_graph_by_layer, plot_rib_graph
 def plot_modular_graph(
     graph: GraphClustering,
     clusters: ClusterListLike = "nonsingleton",
-    out_file=None,
-    by_layer=False,
-    line_width_factor=None,
-    node_labels=None,
-    nodes_per_layer=100,
+    out_file: Optional[Path] = None,
+    by_layer: bool = False,
+    line_width_factor: Optional[float] = None,
+    node_labels: Optional[list[list[str]]] = None,
+    nodes_per_layer: int = 100,
+    plot_edge_norm: Optional[EdgeNorm] = None,
 ):
-    clusters_list = graph._get_clusterlist(clusters)
-    arr = graph._cluster_array(clusters_list)
-    clusters_for_plotting_fn = [
-        layer_clusters[: graph.nodes_per_layer[nl]]
-        for nl, layer_clusters in zip(graph.node_layers, arr.tolist(), strict=True)
-    ]
+    clusters_nodelist = graph._get_clusterlist(clusters)
+    clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
     if by_layer:
         plot_graph_by_layer(
             graph.results.edges,
-            edge_norm=graph.edge_norm,
+            edge_norm=plot_edge_norm or graph.edge_norm,
             line_width_factor=line_width_factor,
-            clusters=clusters_for_plotting_fn,
+            clusters=clusters_intlist,
             out_file=out_file,
             nodes_per_layer=nodes_per_layer,  # max(self.nodes_per_layer.values()),
         )
     else:
         plot_rib_graph(
             graph.results.edges,
-            edge_norm=None,
+            edge_norm=plot_edge_norm or graph.edge_norm,
             line_width_factor=0.001,
-            cluster_list=clusters_for_plotting_fn,
+            cluster_list=clusters_intlist,
             out_file=out_file,
             node_labels=node_labels,
             nodes_per_layer=nodes_per_layer,
@@ -74,6 +71,7 @@ def run_modularity(
     line_width_factor: Optional[float] = None,
     labels_file: Optional[Union[str, Path]] = None,
     nodes_per_layer: int = 100,
+    plot_norm: Literal["sqrt", "log", "graph"] = "graph",
     seed: Optional[int] = None,
 ):
     # Add labels if provided
@@ -95,16 +93,21 @@ def run_modularity(
         ablation_path: The path to the bisect ablation results file. If provided will use this for
             ByLayerLogEdgeNorm. If not provided, will fall back to SqrtNorm.
     """
+    if plot_norm == "log":
+        assert ablation_path is not None, "Must provide ablation path for log norm"
     results_path = Path(results_path)
     ablation_path = Path(ablation_path) if ablation_path is not None else None
     results = RibBuildResults(**torch.load(results_path))
     edge_norm: EdgeNorm
     if ablation_path is None:
-        logger.warning("No ablation path provided, will fall back to SqrtNorm")
+        logger.info("No ablation path provided, using SqrtNorm")
         edge_norm = SqrtNorm()
         threshold = 0.0
     elif ablation_path.exists():
-        threshold, edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
+        logger.info("Using ByLayerLogEdgeNorm")
+        edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
+        assert isinstance(edge_norm, ByLayerLogEdgeNorm)  # for mypy
+        threshold = edge_norm.threshold
     else:
         raise FileNotFoundError(f"Could not find ablation file at {ablation_path}")
     threshold_str = f"delta{threshold}" if threshold > 0 else "noablation"
@@ -125,6 +128,17 @@ def run_modularity(
         plt.clf()
 
     if plot_graph:
+        plot_edge_norm: Optional[EdgeNorm]
+        if plot_norm == "sqrt":
+            plot_edge_norm = SqrtNorm()
+        elif plot_norm == "log":
+            assert ablation_path is not None
+            plot_edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
+        elif plot_norm == "graph":
+            plot_edge_norm = None
+        else:
+            raise ValueError(f"Unknown plot_norm {plot_norm}")
+
         rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
         plot_modular_graph(
             graph=graph,
@@ -132,6 +146,7 @@ def run_modularity(
             line_width_factor=line_width_factor,
             node_labels=node_labels,
             nodes_per_layer=nodes_per_layer,
+            plot_edge_norm=plot_edge_norm,
         )
 
 

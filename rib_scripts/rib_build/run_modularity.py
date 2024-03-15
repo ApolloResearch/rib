@@ -80,10 +80,10 @@ def run_modularity(
     hide_const_edges: Optional[bool] = None,
     line_width_factor: Optional[float] = None,
     plot_norm: Literal["sqrt", "log", "graph"] = "graph",
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "clustered_rib",
     seed: Optional[int] = None,
     plot_piano: bool = True,
     plot_graph: bool = True,
-    sorting: Literal["rib", "cluster", "clustered_rib"] = "clustered_rib",
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -102,12 +102,16 @@ def run_modularity(
             ByLayerLogEdgeNorm. If not provided, will fall back to SqrtNorm.
         labels_file: A CSV file with node labels. If provided, will be used to label nodes in the
             graph plots.
-        nodes_per_layer: The maximum number of nodes per layer in the graph plots. #TODO check
+        nodes_per_layer: The maximum number of nodes per layer in the graph plots.
         line_width_factor: A scaling factor for the line width in the graph plots. If not provided,
             will be derived from max edge weight (after processing).
         plot_norm: The edge norm to use for the graph plots. Options are "sqrt", "log", or "graph".
             sqrt and log will use the corresponding edge norm, while graph will use the norm that
             was used for the clustering.
+        sorting: The sorting to use for the graph plots. Options are "rib", "cluster", or
+            "clustered_rib". "rib" will sort nodes by their position in the RIB, "cluster" will sort
+            nodes by their cluster assignment, and "clustered_rib" will sort nodes by the RIB index
+            but with nodes of the same cluster grouped together.
         seed: The random seed to use for the clustering. If not provided, will be randomly generated
             and printed.
         plot_piano: Whether to plot a piano plot, giving an overview of modular structure found.

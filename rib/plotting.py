@@ -202,8 +202,7 @@ def plot_rib_graph(
     Args:
         edges (list[Edges]): List of Edges. Internally this is a list of tensors (E_hat) with
             shape (n_nodes_in_l+1, n_nodes_in_l)
-        clusters: List of cluster indices for every node. len(clusters) == len(nodes). If None
-            then the nodes are not colored by cluster.
+        clusters: List of cluster indices for every node to color and optionally sort the nodes.
         sorting: The sorting method to use for the nodes. Can be "rib", "cluster", or
             "clustered_rib". Ignored if no clusters provided. "rib" sorts by the RIB index,
             "cluster" sorts by the cluster index, and "clustered_rib" sorts by RIB index but keeps
@@ -362,12 +361,8 @@ def plot_rib_graph(
 def plot_graph_by_layer(
     edges: list[Edges],
     clusters: Optional[list[list[int]]] = None,
-    edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
-    line_width_factor: Optional[float] = None,
     out_file: Optional[Path] = None,
-    title: Optional[str] = None,
-    nodes_per_layer=100,
-    hide_const_edges: bool = True,
+    **kwargs,
 ):
     """
     Plots a RIB graph with every transformer block on it's own row. Note: We skip all node layers
@@ -381,18 +376,9 @@ def plot_graph_by_layer(
     Args:
         edges (list[Edges]): List of Edges. Internally this is a list of tensors (E_hat) with
             shape (n_nodes_in_l+1, n_nodes_in_l)
-        clusters: TODO
-        edge_norm: A function to normalize the edges (by layer) before plotting.
-        line_width_factor: Scale factor to convert edge weights into line widths. If None, will
-            choose a facctor such that, among all layers, the thickest line is 20.
+        clusters: List of cluster indices for every node to color and optionally sort the nodes.
         out_file (Path): The file to save the plot to. If None, no plot is saved
-        title (str): The plot suptitle, typically the name of the experiment.
-        nodes_per_layer (Union[int, list[int]]): The max number of nodes in each layer. If int, then
-            all layers have the same max number of nodes. If list, then the max number of nodes in
-            each layer is given by the list.
-        hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes. Note that
-            this does _not_n check results.center, it is recommended to set hide_const_edges to
-            results.center.
+        kwargs: Additional arguments to pass to plot_rib_graph
     """
     node_layers = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
 
@@ -422,16 +408,11 @@ def plot_graph_by_layer(
         # Call main plotting function without out_file
         plot_rib_graph(
             edges=block_edges,
-            title=title,
-            nodes_per_layer=nodes_per_layer,
-            edge_norm=edge_norm,
+            cluster_list=block_clusters,
+            ax=ax,
             out_file=None,
             node_labels=None,
-            hide_const_edges=hide_const_edges,
-            ax=ax,
-            line_width_factor=line_width_factor,
-            cluster_list=block_clusters,
-            # TODO Check kwargs
+            **kwargs,
         )
     # Save the figure
     if out_file is not None:

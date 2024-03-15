@@ -68,6 +68,7 @@ def plot_modular_graph(
             sorting=sorting,
             # TODO check all kwargs
         )
+    logger.info(f"Saved modular graph to {out_file.absolute()}")
 
 
 def run_modularity(
@@ -139,13 +140,13 @@ def run_modularity(
     logger.info(f"Finished clustering.")
 
     if plot_piano:
-        graph.paino_plot()
-        paino_path = results_path.parent / f"{name_prefix}-gamma{gamma}-paino.png"
+        graph.piano_plot()
+        piano_path = results_path.parent / f"{name_prefix}-gamma{gamma}-paino.png"
         plt.suptitle(
             f"{results.exp_name}\nRIB cluster assignment for threshold={threshold}, gamma={gamma}"
         )
-        plt.savefig(paino_path)
-        logger.info(f"Saved paino plot to {paino_path.absolute()}")
+        plt.savefig(piano_path)
+        logger.info(f"Saved piano plot to {piano_path.absolute()}")
         plt.clf()
 
     if plot_graph:

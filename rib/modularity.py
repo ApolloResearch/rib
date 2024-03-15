@@ -377,7 +377,7 @@ class GraphClustering:
 
         return arr
 
-    def paino_plot(self, clusters: ClusterListLike = "nonsingleton", ax=None):
+    def piano_plot(self, clusters: ClusterListLike = "nonsingleton", ax=None):
         """
         Makes a 'paino plot' vizualizing the clusters in the RIB graph.
 

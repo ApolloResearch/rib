@@ -325,7 +325,10 @@ def plot_rib_graph(
             colormap = ["#bbbbbb"] + colorcet.glasbey
             color = lambda j: colormap[clusters[j] % 256]
         else:
-            colors = colors or [f"#{int(x * 255):02x}" for x in plt.get_cmap("tab10").colors]
+            colors = colors or [
+                f"#{''.join([f'{int(i * 255):02x}' for i in x[:3]])}"
+                for x in plt.get_cmap("tab10").colors
+            ]
             color = lambda j: colors[i % len(colors)]
         # Add nodes to the graph
         for j, pos in enumerate(positions):

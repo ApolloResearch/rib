@@ -46,27 +46,33 @@ def plot_modular_graph(
     clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
     if by_layer:
         plot_graph_by_layer(
-            graph.results.edges,
+            edges=graph.results.edges,
+            cluster_list=clusters_intlist,
+            sorting=sorting,
             edge_norm=plot_edge_norm or graph.edge_norm,
             line_width_factor=line_width_factor,
-            clusters=clusters_intlist,
             out_file=out_file,
-            nodes_per_layer=nodes_per_layer,  # max(self.nodes_per_layer.values()),
+            title=graph.results.exp_name + f", gamma={graph.gamma}, seed={graph.seed}",
+            nodes_per_layer=nodes_per_layer,
             hide_const_edges=hide_const_edges,
-            # TODO check all kwargs
+            colors=None,
+            show_node_labels=True,
+            node_labels=node_labels,
         )
     else:
         plot_rib_graph(
-            graph.results.edges,
+            edges=graph.results.edges,
+            cluster_list=clusters_intlist,
+            sorting=sorting,
             edge_norm=plot_edge_norm or graph.edge_norm,
             line_width_factor=line_width_factor,
-            cluster_list=clusters_intlist,
             out_file=out_file,
-            node_labels=node_labels,
+            title=graph.results.exp_name + f", gamma={graph.gamma}, seed={graph.seed}",
             nodes_per_layer=nodes_per_layer,
             hide_const_edges=hide_const_edges,
-            sorting=sorting,
-            # TODO check all kwargs
+            colors=None,
+            show_node_labels=True,
+            node_labels=node_labels,
         )
     logger.info(f"Saved modular graph to {out_file.absolute()}")
 

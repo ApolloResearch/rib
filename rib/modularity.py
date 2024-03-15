@@ -200,8 +200,10 @@ class GraphClustering:
 
         if seed is not None:
             nk.engineering.setSeed(seed, useThreadId=False)
+            self.seed = seed
         else:
             logger.warning("No seed set. Will use a random seed.")
+            self.seed = None
         self.results = results
         self.edge_norm = edge_norm or IdentityEdgeNorm()
         self.node_layers = node_layers or results.config.node_layers

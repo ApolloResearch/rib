@@ -49,7 +49,7 @@ def _add_edges_to_graph(
 
 def _prepare_edges_for_plotting(
     raw_edges: list[torch.Tensor],
-    nodes_per_layer: list[int],
+    max_nodes_per_layer: list[int],
     hide_const_edges: bool = False,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
@@ -73,8 +73,8 @@ def _prepare_edges_for_plotting(
             # should be zero except for a non-rotated last layer where they are important.
             weight_matrix[:, const_node_index] = 0
         # Only keep the desired number of nodes in each layer
-        in_nodes = nodes_per_layer[i]
-        out_nodes = nodes_per_layer[i + 1]
+        in_nodes = max_nodes_per_layer[i]
+        out_nodes = max_nodes_per_layer[i + 1]
         edges.append(weight_matrix[:out_nodes, :in_nodes])
     return edges
 
@@ -192,7 +192,7 @@ def plot_rib_graph(
     out_file: Optional[Path] = None,
     ax: Optional[plt.Axes] = None,
     title: Optional[str] = None,
-    nodes_per_layer: Union[int, list[int]] = 100,
+    max_nodes_per_layer: Union[int, list[int]] = 100,
     hide_const_edges: bool = False,
     colors: Optional[list[str]] = None,
     show_node_labels: bool = True,
@@ -214,7 +214,7 @@ def plot_rib_graph(
         out_file (Path): The file to save the plot to. If None, no plot is saved
         ax: The axis to plot the graph on. If None, then a new figure is created.
         title (str): The plot suptitle, typically the name of the experiment.
-        nodes_per_layer (Union[int, list[int]]): The max number of nodes in each layer. If int, then
+        max_nodes_per_layer (Union[int, list[int]]): The max number of nodes in each layer. If int, then
             all layers have the same max number of nodes. If list, then the max number of nodes in
             each layer is given by the list.
         hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes. Note that
@@ -229,22 +229,28 @@ def plot_rib_graph(
     layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
     n_layers = len(layer_names)
     assert n_layers == len(edges) + 1
-    if isinstance(nodes_per_layer, int):
-        nodes_per_layer = [nodes_per_layer] * n_layers
-    max_layer_height = max(nodes_per_layer)
+    if isinstance(max_nodes_per_layer, int):
+        max_nodes_per_layer = [max_nodes_per_layer] * n_layers
+    max_layer_height = max(max_nodes_per_layer)
 
     # Normalize the edges
     edge_norm = edge_norm or IdentityEdgeNorm()
     processed_edges = _prepare_edges_for_plotting(
         [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges],
-        nodes_per_layer,
+        max_nodes_per_layer,
         hide_const_edges=hide_const_edges,
     )
     del edges
 
+    # Get actual number of nodes per layer
+    nodes_per_layer = [0] * n_layers
+    for i in range(n_layers):
+        n_nodes = processed_edges[i - 1].shape[0] if i != 0 else processed_edges[0].shape[1]
+        nodes_per_layer[i] = min(n_nodes, max_nodes_per_layer[i])
+
     # Create figure and normalize the line width
     width = n_layers * 2
-    height = max(nodes_per_layer) / 3
+    height = 1 + max(nodes_per_layer) / 3
     ax = ax or plt.subplots(1, 1, figsize=(width, height), constrained_layout=True)[1]
     bbox = ax.get_position()  # Get the bounding box of the axes in figure coordinates
     _, fig_height = ax.get_figure().get_size_inches()  #  type: ignore
@@ -260,9 +266,8 @@ def plot_rib_graph(
         n_nodes = processed_edges[i - 1].shape[0] if i != 0 else processed_edges[0].shape[1]
         if i < n_layers - 1:
             assert processed_edges[i].shape[1] == n_nodes, "Consistency check failed"
-        # TODO: Because clusters can contain the -1 entries from arr we get len(clusters) > n_nodes.
-        # This makes positions too long too. But this is (a) not a problem, and (b) we can fix it
-        # with [:n_nodes]. But it would be nice to make cluster_list have the right shape.
+        # Clusters can contain the -1 entries from arr we get len(clusters) > n_nodes. Thus we
+        # slice the clusters to the correct length. here.
         clusters = cluster_list[i][:n_nodes] if cluster_list is not None else None
         # Derive positions based on clusters:
         #   Clusters: cluster of each node (clusters in nodes-order)
@@ -281,8 +286,7 @@ def plot_rib_graph(
             colors = [mpl.colors.rgb2hex(mpl.cm.tab10(i)) for i in range(10)]  # type: ignore
             color = lambda _: colors[i % len(colors)]
         # Add nodes to the graph
-        for j in range(min(n_nodes, nodes_per_layer[i])):
-            # TODO Is nodes_per_layer just here sufficient?
+        for j in range(nodes_per_layer[i]):
             graph.add_node(
                 (i, j),
                 layer_idx=i,
@@ -292,6 +296,7 @@ def plot_rib_graph(
                 color=color(j),
             )
 
+    # Processed edges already have edges beyond nodes_per_layer limit removed.
     _add_edges_to_graph(graph, processed_edges)
 
     pos_dict = {

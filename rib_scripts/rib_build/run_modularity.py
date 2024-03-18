@@ -69,7 +69,7 @@ def plot_modular_graph(
             line_width_factor=line_width_factor,
             out_file=out_file,
             title=graph.results.exp_name + f", gamma={graph.gamma}, seed={graph.seed}",
-            nodes_per_layer=nodes_per_layer,
+            max_nodes_per_layer=nodes_per_layer,
             hide_const_edges=hide_const_edges,
             colors=None,
             show_node_labels=True,

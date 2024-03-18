@@ -83,7 +83,7 @@ def main(
         plot_graph_by_layer(
             edges,
             title=results.exp_name,
-            nodes_per_layer=nodes_per_layer,
+            max_nodes_per_layer=nodes_per_layer,
             out_file=out_file,
             edge_norm=edge_norm,
             hide_const_edges=results.config.center and hide_const_edges,
@@ -102,7 +102,7 @@ def main(
     plot_rib_graph(
         edges=results.edges,
         title=results.exp_name,
-        nodes_per_layer=nodes_per_layer,
+        max_nodes_per_layer=nodes_per_layer,
         out_file=out_file,
         node_labels=node_labels,
         edge_norm=edge_norm,

@@ -135,7 +135,8 @@ class RibBuildConfig(BaseModel):
     )
     calculate_Cs: bool = Field(
         True,
-        description="Whether to compute Cs. If false skips Cs and edges computation,",
+        description="Whether to compute Cs. If false skips Cs and edges computation. Note that if"
+        "interaction_matrices_path is provided, we don't actually compute the Cs but we load them.",
     )
     calculate_edges: bool = Field(
         True,
@@ -719,7 +720,8 @@ def rib_build(
     if config.calculate_Cs:
         assert n_pods == 1, "Cannot parallelize Cs calculation between pods"
         if dist_info.global_size > 1 and config.dist_split_over == "dataset":
-            raise NotImplementedError("Cannot parallelize Cs calculation over dataset")
+            if config.interaction_matrices_path is None:
+                raise NotImplementedError("Cannot parallelize Cs calculation over dataset")
 
     out_file = _get_out_file_path(config, dist_info)
     _check_out_file_path(out_file, force, dist_info)

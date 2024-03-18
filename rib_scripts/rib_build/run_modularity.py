@@ -129,10 +129,11 @@ def run_modularity(
     ablation_path = Path(ablation_path) if ablation_path is not None else None
     results = RibBuildResults(**torch.load(results_path))
     edge_norm: EdgeNorm
+    threshold: Optional[float]
     if ablation_path is None:
         logger.info("No ablation path provided, using SqrtNorm")
         edge_norm = SqrtNorm()
-        threshold = 0.0
+        threshold = None
     elif ablation_path.exists():
         logger.info("Using ByLayerLogEdgeNorm")
         edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
@@ -140,7 +141,7 @@ def run_modularity(
         threshold = edge_norm.threshold
     else:
         raise FileNotFoundError(f"Could not find ablation file at {ablation_path}")
-    threshold_str = f"delta{threshold}" if threshold > 0 else "noablation"
+    threshold_str = f"delta{threshold}" if threshold is not None else "noablation"
     name_prefix = f"{results.exp_name}-{threshold_str}"
     logger.info(f"Making RIB graph in networkit & running clustering...")
     if seed is None:

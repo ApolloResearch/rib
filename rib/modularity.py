@@ -57,7 +57,7 @@ class ByLayerLogEdgeNorm(EdgeNorm):
     bisect ablation experiment (taking epsilon as the smallest edge that was not ablated).
     """
 
-    def __init__(self, eps_by_layer: dict[str, float], threshold: float):
+    def __init__(self, eps_by_layer: dict[str, float], threshold: Optional[float] = None):
         self.eps_by_layer = eps_by_layer
         self.threshold = threshold
 

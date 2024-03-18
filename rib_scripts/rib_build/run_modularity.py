@@ -6,8 +6,9 @@ copy the code and modify it to your needs.
 Example usage:
 
 ```bash
-python run_modularity.py /path/to/rib_build.pt [--gamma 1.0]
-   [--plot_piano] [--plot_graph] [--log_norm] [--ablation_path /path/to/ablation_results.json]
+python run_modularity.py /path/to/rib_build.pt [--gamma 1.0] [--ablation_path
+/path/to/ablation.json] [--labels_file /path/to/labels.csv] [--nodes_per_layer 100] [--plot_norm]
+[--sorting] [--seed] [--plot_piano] [--plot_graph] [--hide_const_edges] [--line_width_factor]
 """
 import csv
 from pathlib import Path
@@ -144,7 +145,7 @@ def run_modularity(
     logger.info(f"Making RIB graph in networkit & running clustering...")
     if seed is None:
         seed = np.random.randint(0, 2**32)
-        logger.info("Setting seed to", seed)
+        logger.info("Setting clustering seed to", seed)
     graph = GraphClustering(results, edge_norm, gamma=gamma, seed=seed)
     logger.info(f"Finished clustering.")
 

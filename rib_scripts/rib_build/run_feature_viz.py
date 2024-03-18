@@ -11,7 +11,6 @@ import torch
 import yaml
 from feature_visualization import parse_activation_data
 from sae_vis.data_storing_fns import FeatureVisParams, MultiFeatureData
-from sae_vis.utils_fns import process_str_tok
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
@@ -83,7 +82,7 @@ def visualize_one_layer(
         feature_indices_list=feature_indices,  # range(64)
         # ValueError: zip() argument 2 is longer than argument 1
         W_U=W_U[:].to(device).to(dtype),  # torch.Size([65, 50257])
-        vocab_dict=vocab_dict,  # 50257 entries
+        vocab=vocab_dict,  # 50257 entries
         fvp=fvp,
     )
     out_path = Path(out_dir)
@@ -234,5 +233,8 @@ seed: 0
 
 # main(results_path, feature_indices=list(range(30)) + list(range(500, 530)))
 # main(results_path, feature_indices=list(range(64)), dataset_cfg=dataset_config)
-main("/mnt/ssd-rib/gpt2/gpt2_rib_Cs.pt", dataset_cfg=dataset_config, feature_indices=list(range(30)) + list(range(500, 530)))
-
+main(
+    "/mnt/ssd-rib/gpt2/gpt2_rib_Cs.pt",
+    dataset_cfg=dataset_config,
+    feature_indices=list(range(30)) + list(range(500, 530)),
+)

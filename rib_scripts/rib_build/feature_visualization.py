@@ -12,24 +12,25 @@ from sae_vis.data_storing_fns import (
 from sae_vis.utils_fns import QuantileCalculator, TopK
 from torch import Tensor
 from tqdm import tqdm
+from transformers import AutoTokenizer
 
 
 def parse_activation_data(
     tokens: Int[Tensor, "batch n_ctx"],
     feature_acts: Float[Tensor, "batch n_ctx n_feats"],
-    final_resid_acts: Float[Tensor, "batch n_ctx d_resid_end"],
+    final_resid_acts: Float[Tensor, "batch n_ctx d_resid_final"],
     feature_resid_dirs: Float[Tensor, "n_feats d_resid_feat"],
     feature_indices_list: list[int],
-    W_U: Float[Tensor, "dim d_vocab"],
-    vocab_dict: dict[int, str],
+    W_U: Float[Tensor, "d_resid_final d_vocab"],
+    vocab: dict[int, str] | AutoTokenizer,
     fvp: FeatureVisParams,
 ) -> MultiFeatureData:
     """Convert generic activation data into a MultiFeatureData object, which can be used to create
     the feature-centric visualisation.
 
-    final_resid_acts + W_U are used for the logit lens.
+    final_resid_acts, feature_resid_dir, and W_U are used just for the logit lens.
 
-    Sets left_tables_data attribute of FeatureData to None.
+    Not using left_tables_data, always sets left_tables_data attribute of FeatureData to None.
 
     Args:
         tokens: The inputs to the model
@@ -46,8 +47,8 @@ def parse_activation_data(
     sequence_data_dict: dict[int, SequenceMultiGroupData] = {}  # right hand side visualisation
     middle_plots_data_dict: dict[int, MiddlePlotsData] = {}  # middle visualisation
     feature_dashboard_data: dict[int, FeatureData] = {}
-    # Calculate all data for the right-hand visualisations, i.e. the sequences
 
+    # Calculate all data for the right-hand visualisations, i.e. the sequences
     for i, feat in tqdm(
         enumerate(feature_indices_list),
         desc="Getting sequence data",
@@ -64,6 +65,8 @@ def parse_activation_data(
             dtype=feature_acts.dtype,
         )
 
+    # Only calculate the middle visualisations if the architecture makes logit lens easy (we test
+    # this by checking the shape -- in our case this implies that that layer allows for logit lens).
     logit_lens = final_resid_acts.shape[-1] == feature_resid_dirs.shape[-1]
     if logit_lens:
         # Get the logits of all features (i.e. the directions this feature writes to the logit output)
@@ -99,10 +102,10 @@ def parse_activation_data(
             # Data-containing inputs (for the feature-centric visualisation)
             sequence_data=sequence_data_dict[feat],
             middle_plots_data=middle_plots_data_dict[feat] if logit_lens else None,
-            left_tables_data=None,
             # Non data-containing inputs
+            left_tables_data=None,
             feature_idx=feat,
-            vocab_dict=vocab_dict,
+            vocab_dict=vocab,
             fvp=fvp,
         )
 

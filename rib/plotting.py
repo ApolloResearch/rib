@@ -48,7 +48,8 @@ def _add_edges_to_graph(
 
 
 def _prepare_edges_for_plotting(
-    raw_edges: list[torch.Tensor],
+    edges: list[Edges],
+    edge_norm: Callable[[torch.Tensor, str], torch.Tensor],
     max_nodes_per_layer: list[int],
     hide_const_edges: bool = False,
 ) -> list[torch.Tensor]:
@@ -63,7 +64,8 @@ def _prepare_edges_for_plotting(
     Returns:
         list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
     """
-    edges: list[torch.Tensor] = []
+    raw_edges = [edge.E_hat for edge in edges]
+    out_edges: list[torch.Tensor] = []
     for i, weight_matrix in enumerate(raw_edges):
         # Convert edges to float32 (bfloat16 will cause errors and we don't need higher precision)
         weight_matrix = weight_matrix.float()
@@ -72,11 +74,13 @@ def _prepare_edges_for_plotting(
             # Set edges outgoing from this node to zero (edges.shape ~ l+1, l). The incoming edges
             # should be zero except for a non-rotated last layer where they are important.
             weight_matrix[:, const_node_index] = 0
+        # Normalize the edges
+        weight_matrix = edge_norm(weight_matrix, edges[i].in_node_layer)
         # Only keep the desired number of nodes in each layer
         in_nodes = max_nodes_per_layer[i]
         out_nodes = max_nodes_per_layer[i + 1]
-        edges.append(weight_matrix[:out_nodes, :in_nodes])
-    return edges
+        out_edges.append(weight_matrix[:out_nodes, :in_nodes])
+    return out_edges
 
 
 def plot_ablation_results(
@@ -236,8 +240,9 @@ def plot_rib_graph(
     # Normalize the edges
     edge_norm = edge_norm or IdentityEdgeNorm()
     processed_edges = _prepare_edges_for_plotting(
-        [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges],
-        max_nodes_per_layer,
+        edges=edges,
+        edge_norm=edge_norm,
+        max_nodes_per_layer=max_nodes_per_layer,
         hide_const_edges=hide_const_edges,
     )
     del edges

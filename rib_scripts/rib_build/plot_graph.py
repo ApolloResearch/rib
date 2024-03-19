@@ -15,7 +15,14 @@ from typing import Optional, Union
 import fire
 
 from rib.log import logger
-from rib.modularity import EdgeNorm, IdentityEdgeNorm, SqrtNorm
+from rib.modularity import (
+    AbsNorm,
+    EdgeNorm,
+    IdentityEdgeNorm,
+    LogEdgeNorm,
+    MaxNorm,
+    SqrtNorm,
+)
 from rib.plotting import plot_graph_by_layer, plot_rib_graph
 from rib.rib_builder import ResultsLike, to_results
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
@@ -53,19 +60,31 @@ def main(
     else:
         out_file = Path(out_file)
 
+    assert results.edges, "The results file does not contain any edges."
+    hide_const_edges = hide_const_edges or results.config.center
+
     edge_norm: EdgeNorm
     if norm.lower() == "sqrt" or norm.lower() == "sqrtnorm":
         edge_norm = SqrtNorm()
     elif norm.lower() == "none" or norm.lower() == "identity":
         edge_norm = IdentityEdgeNorm()
+    elif norm.lower() == "abs" or norm.lower() == "absnorm":
+        edge_norm = AbsNorm()
+    elif norm.lower() == "max" or norm.lower() == "maxnorm":
+        edge_norm = MaxNorm()
+    elif norm.lower() == "log" or norm.lower() == "lognorm":
+        eps_by_layer = [e.E_hat[e.E_hat != 0].min().item() for e in results.edges]
+        max_edge = max([e.E_hat[e.E_hat != 0].max().item() for e in results.edges])
+        logger.info(f"Min nonzsero edge values per layer: {eps_by_layer}, max edge: {max_edge}")
+        if max_edge / min(eps_by_layer) > 1e6:
+            logger.warning("Log scale spans many orders of magnitude. Be wary of the lines.")
+
+        edge_norm = LogEdgeNorm(eps=min(eps_by_layer))
     else:
         raise ValueError(f"Unknown norm: {norm}")
 
     if not check_out_file_overwrite(out_file, force):
         handle_overwrite_fail()
-
-    assert results.edges, "The results file does not contain any edges."
-    hide_const_edges = hide_const_edges or results.config.center
 
     # Add labels if provided
     if labels_file is not None:

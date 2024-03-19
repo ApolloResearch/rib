@@ -33,10 +33,30 @@ class IdentityEdgeNorm(EdgeNorm):
 
 
 class SqrtNorm(EdgeNorm):
-    """Sqrt-normalizes the edges."""
+    """Sqrt-normalizes the edges (by layer). I.e. E -> sqrt(E)."""
 
     def __call__(self, E: torch.Tensor, node_layer: str) -> torch.Tensor:
         return E.sqrt()
+
+
+class AbsNorm(EdgeNorm):
+    """Divides edges by the sum of their absolute values, E -> E/sum(abs(E)).
+
+    We used to use this as a default before modularity PR #349/
+    """
+
+    def __call__(self, E: torch.Tensor, node_layer: str) -> torch.Tensor:
+        return E / E.abs().sum()
+
+
+class MaxNorm(EdgeNorm):
+    """Normalizes the largest edge to 1. Sets E -> E/max(E)
+
+    Creates equal max line width in each layer making plots more readable.
+    """
+
+    def __call__(self, E: torch.Tensor, node_layer: str) -> torch.Tensor:
+        return E / E.max()
 
 
 class LogEdgeNorm(EdgeNorm):

@@ -61,7 +61,10 @@ def main(
         out_file = Path(out_file)
 
     assert results.edges, "The results file does not contain any edges."
-    hide_const_edges = hide_const_edges or results.config.center
+
+    if hide_const_edges and not results.config.center:
+        logger.info("RIB build not centered, ignoring hide_const_edges")
+    hide_const_edges = hide_const_edges and results.config.center
 
     edge_norm: EdgeNorm
     if norm.lower() == "sqrt" or norm.lower() == "sqrtnorm":

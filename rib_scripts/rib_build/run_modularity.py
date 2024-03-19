@@ -83,7 +83,7 @@ def run_modularity(
     ablation_path: Optional[Union[str, Path]] = None,
     labels_file: Optional[Union[str, Path]] = None,
     nodes_per_layer: int = 100,
-    hide_const_edges: Optional[bool] = None,
+    hide_const_edges: bool = True,
     line_width_factor: Optional[float] = None,
     plot_norm: Literal["sqrt", "log", "graph"] = "graph",
     sorting: Literal["rib", "cluster", "clustered_rib"] = "clustered_rib",
@@ -161,6 +161,9 @@ def run_modularity(
         plt.clf()
 
     if plot_graph:
+        if hide_const_edges and not results.config.center:
+            logger.info("RIB build not centered, ignoring hide_const_edges")
+        hide_const_edges = hide_const_edges and results.config.center
         plot_edge_norm: Optional[EdgeNorm]
         if plot_norm == "sqrt":
             plot_edge_norm = SqrtNorm()
@@ -180,7 +183,7 @@ def run_modularity(
             node_labels=node_labels,
             nodes_per_layer=nodes_per_layer,
             plot_edge_norm=plot_edge_norm,
-            hide_const_edges=hide_const_edges or results.config.center,
+            hide_const_edges=hide_const_edges,
             sorting=sorting,
         )
         logger.info(f"Saved modular graph to {rib_graph_path.absolute()}")

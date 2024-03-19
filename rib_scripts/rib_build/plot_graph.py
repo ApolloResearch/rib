@@ -38,6 +38,7 @@ def main(
     by_layer: Optional[bool] = False,
     line_width_factor: Optional[float] = None,
     norm: str = "sqrt",
+    lognorm_eps: Optional[float] = None,
 ) -> None:
     """Plot an RIB graph given a results file contain the graph edges.
 
@@ -66,6 +67,11 @@ def main(
         logger.info("RIB build not centered, ignoring hide_const_edges")
     hide_const_edges = hide_const_edges and results.config.center
 
+    if lognorm_eps is not None and norm.lower() != "log" and norm.lower() != "lognorm":
+        logger.warning(
+            "lognorm_eps is only used when norm is set to 'log' or 'lognorm'. Ignoring lognorm_eps."
+        )
+
     edge_norm: EdgeNorm
     if norm.lower() == "sqrt" or norm.lower() == "sqrtnorm":
         edge_norm = SqrtNorm()
@@ -76,13 +82,17 @@ def main(
     elif norm.lower() == "max" or norm.lower() == "maxnorm":
         edge_norm = MaxNorm()
     elif norm.lower() == "log" or norm.lower() == "lognorm":
-        eps_by_layer = [e.E_hat[e.E_hat != 0].min().item() for e in results.edges]
-        max_edge = max([e.E_hat[e.E_hat != 0].max().item() for e in results.edges])
-        logger.info(f"Min nonzsero edge values per layer: {eps_by_layer}, max edge: {max_edge}")
-        if max_edge / min(eps_by_layer) > 1e6:
-            logger.warning("Log scale spans many orders of magnitude. Be wary of the lines.")
-
-        edge_norm = LogEdgeNorm(eps=min(eps_by_layer))
+        # Print info to help choose a good eps
+        min_edge_by_layer = [e.E_hat[e.E_hat != 0].min().item() for e in results.edges]
+        max_edge_by_layer = [e.E_hat[e.E_hat != 0].max().item() for e in results.edges]
+        logger.info(f"Min nonzsero edge values per layer: {min_edge_by_layer}")
+        logger.info(f"Max nonzsero edge values per layer: {max_edge_by_layer}")
+        # Set eps if not provided
+        lognorm_eps = lognorm_eps or min(min_edge_by_layer)
+        edge_norm = LogEdgeNorm(eps=lognorm_eps)
+        # Warn if the scale is too large and will make everything look equal
+        if max(max_edge_by_layer) / lognorm_eps > 1e20:
+            logger.warning("Log scale spans >20 orders of magnitude. Choose a better eps?")
     else:
         raise ValueError(f"Unknown norm: {norm}")
 

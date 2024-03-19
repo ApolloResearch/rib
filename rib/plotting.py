@@ -336,9 +336,9 @@ def plot_rib_graph(
     # Draw labels
     if show_node_labels:
         for node, data in graph.nodes(data=True):
-            label = f"RIB_{data['rib_idx']}"
+            label = f"D{data['rib_idx']}"
             if data["cluster"] is not None:
-                label += f" C_{data['cluster']}"
+                label += f" C{data['cluster']}"
             if node_labels is not None:
                 label += "\n" + node_labels[data["layer_idx"]][data["rib_idx"]].replace("|", "\n")
             nx.draw_networkx_labels(

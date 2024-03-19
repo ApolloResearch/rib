@@ -112,6 +112,11 @@ class ByLayerLogEdgeNorm(EdgeNorm):
         }
         return cls(eps_by_layer, threshold)
 
+    @classmethod
+    def from_single_eps(cls, eps: float, results: RibBuildResults) -> "ByLayerLogEdgeNorm":
+        eps_by_layer = {edge.in_node_layer: eps for edge in results.edges}
+        return cls(eps_by_layer)
+
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         eps = self.eps_by_layer[node_layer]
         return (E / eps).log10().clip(min=0)

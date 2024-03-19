@@ -39,6 +39,8 @@ def main(
     line_width_factor: Optional[float] = None,
     norm: str = "sqrt",
     lognorm_eps: Optional[float] = None,
+    color_black: bool = False,
+    show_node_labels: bool = True,
 ) -> None:
     """Plot an RIB graph given a results file contain the graph edges.
 
@@ -52,7 +54,9 @@ def main(
             ignored if the RIB build is non-centered
         by_layer: Whether to plot the graph by layer.
         line_width_factor: Scale factor to convert edge weights into line widths. If None, will
-            choose a facctor such that, among all layers, the thickest line is 20.
+            choose a factor such that, among all layers, the thickest line is 20.
+        color_black: Whether to color the nodes black, to avoid color confusion.
+        show_node_labels: Whether to show the node labels.
     """
     results = to_results(results)
     if out_file is None:
@@ -137,9 +141,11 @@ def main(
         max_nodes_per_layer=nodes_per_layer,
         out_file=out_file,
         node_labels=node_labels,
+        show_node_labels=show_node_labels,
         edge_norm=edge_norm,
         hide_const_edges=results.config.center and hide_const_edges,
         line_width_factor=line_width_factor,
+        colors=["black"] * len(results.config.node_layers) if color_black else None,
     )
 
     logger.info(f"Saved plot to {out_file}")

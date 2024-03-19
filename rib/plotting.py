@@ -240,7 +240,7 @@ def plot_rib_graph(
             this does _not_n check results.center, it is recommended to set hide_const_edges to
             results.center.
         colors (Optional[list[str]]): The colors to use for the nodes in each layer. If None, then
-            the tab10 colormap is used. Is overwritten by clusters if both are provided.
+            the tab10 colormap is used. Overwrites cluster colors.
         show_node_labels (bool): Whether to show the node labels. Defaults to True.
         node_labels: The labels for each node in the graph. If None, then use RIB dim indices.
     """
@@ -304,11 +304,11 @@ def plot_rib_graph(
             assert clusters is not None, "Clusters must be provided for sorting other than 'rib'"
             positions = sort_clusters(clusters, sorting)
         # Derive colors based on clusters or layers
-        if clusters is not None:
+        if clusters is not None and colors is None:
             colormap = ["#bbbbbb"] + colorcet.glasbey
             color = lambda j: colormap[clusters[j] % 256]
         else:
-            colors = [mpl.colors.rgb2hex(mpl.cm.tab10(i)) for i in range(10)]  # type: ignore
+            colors = colors or [mpl.colors.rgb2hex(mpl.cm.tab10(i)) for i in range(10)]  # type: ignore
             color = lambda _: colors[i % len(colors)]
         # Add nodes to the graph
         for j in range(nodes_per_layer[i]):
@@ -372,7 +372,7 @@ def plot_rib_graph(
             )
 
     if cluster_list is not None:
-        n_unique_clusters = len(set([c for layer in cluster_list for c in layer]))
+        n_unique_clusters = len(set([c for layer in cluster_list for c in layer if c > 0]))
         title = title + " | " if title is not None else ""
         title += f"{n_unique_clusters} clusters"
 

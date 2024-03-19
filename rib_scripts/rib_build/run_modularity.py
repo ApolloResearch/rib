@@ -41,7 +41,7 @@ def plot_modular_graph(
     nodes_per_layer: int = 130,
     plot_edge_norm: Optional[EdgeNorm] = None,
     hide_const_edges: bool = False,
-    sorting: Literal["rib", "cluster", "clustered_rib"] = "clustered_rib",
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "cluster",
 ):
     clusters_nodelist = graph._get_clusterlist(clusters)
     clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
@@ -81,6 +81,7 @@ def run_modularity(
     results_path: Union[str, Path],
     gamma: float = 30,
     ablation_path: Optional[Union[str, Path]] = None,
+    lognorm_eps: Optional[float] = None,
     labels_file: Optional[Union[str, Path]] = None,
     nodes_per_layer: int = 130,
     hide_const_edges: bool = True,
@@ -129,11 +130,14 @@ def run_modularity(
     ablation_path = Path(ablation_path) if ablation_path is not None else None
     results = RibBuildResults(**torch.load(results_path))
     edge_norm: EdgeNorm
-    threshold: Optional[float]
-    if ablation_path is None:
-        logger.info("No ablation path provided, using SqrtNorm")
+    threshold: Optional[float] = None
+    if ablation_path is None and lognorm_eps is None:
+        logger.info("No ablation_path or lognorm_eps provided, using SqrtNorm")
         edge_norm = SqrtNorm()
-        threshold = None
+    elif lognorm_eps is not None:
+        assert ablation_path is None, "Cannot provide both ablation_path and lognorm_eps"
+        logger.info(f"Using ByLayerLogEdgeNorm with lognorm_eps={lognorm_eps}")
+        edge_norm = ByLayerLogEdgeNorm.from_single_eps(lognorm_eps, results)
     elif ablation_path.exists():
         logger.info("Using ByLayerLogEdgeNorm")
         edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
@@ -146,7 +150,7 @@ def run_modularity(
     logger.info(f"Making RIB graph in networkit & running clustering...")
     if seed is None:
         seed = np.random.randint(0, 2**32)
-        logger.info("Setting clustering seed to", seed)
+        logger.info(f"Setting clustering seed to {seed}")
     graph = GraphClustering(results, edge_norm, gamma=gamma, seed=seed)
     logger.info(f"Finished clustering.")
 

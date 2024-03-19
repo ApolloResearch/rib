@@ -30,7 +30,7 @@ from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
 def main(
     results: ResultsLike,
-    nodes_per_layer: Union[int, list[int]] = 64,
+    nodes_per_layer: Union[int, list[int]] = 130,
     labels_file: Optional[str] = None,
     out_file: Optional[Union[str, Path]] = None,
     force: bool = False,

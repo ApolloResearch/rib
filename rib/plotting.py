@@ -211,7 +211,7 @@ def plot_rib_graph(
     out_file: Optional[Path] = None,
     ax: Optional[plt.Axes] = None,
     title: Optional[str] = None,
-    max_nodes_per_layer: Union[int, list[int]] = 100,
+    max_nodes_per_layer: Union[int, list[int]] = 130,
     hide_const_edges: bool = False,
     colors: Optional[list[str]] = None,
     show_node_labels: bool = True,
@@ -265,7 +265,11 @@ def plot_rib_graph(
     nodes_per_layer = [0] * n_layers
     for i in range(n_layers):
         n_nodes = processed_edges[i - 1].shape[0] if i != 0 else processed_edges[0].shape[1]
-        nodes_per_layer[i] = min(n_nodes, max_nodes_per_layer[i])
+        assert n_nodes <= max_nodes_per_layer[i], (
+            "Found n_nodes > max_nodes_per_layer. This should not happen because"
+            " _prepare_edges_for_plotting should truncate the edges."
+        )
+        nodes_per_layer[i] = n_nodes
     max_layer_height = max(nodes_per_layer)
 
     # Create figure and normalize the line width
@@ -374,7 +378,6 @@ def plot_rib_graph(
 
     if title is not None:
         fig.suptitle(title)  # type: ignore
-
     adjust_plot(ax, n_layers, max_layer_height)
     if out_file is not None:
         plt.savefig(out_file, dpi=600)

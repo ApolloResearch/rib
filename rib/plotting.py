@@ -83,6 +83,21 @@ def _prepare_edges_for_plotting(
     return out_edges
 
 
+def adjust_plot(ax, n_layers, max_layer_height, buffer_size=0.2):
+    """Adjust the plot to remove axes etc."""
+    # Adjust space between ends of plot and nodes
+    ax.set_ylim(-buffer_size, max_layer_height - 1 + buffer_size)
+    ax.set_xlim(-buffer_size, n_layers - 1 + buffer_size)
+    # Remove unwanted plot enelemts
+    ax.grid(False)
+    ax.xaxis.set_visible(True)
+    ax.yaxis.set_visible(False)
+    ax.xaxis.tick_top()
+    ax.tick_params(axis="x", top=False, labeltop=True, bottom=False, labelbottom=False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
 def plot_ablation_results(
     results: list[dict[str, dict[str, float]]],
     no_ablation_results_list: list[float],
@@ -235,7 +250,6 @@ def plot_rib_graph(
     assert n_layers == len(edges) + 1
     if isinstance(max_nodes_per_layer, int):
         max_nodes_per_layer = [max_nodes_per_layer] * n_layers
-    max_layer_height = max(max_nodes_per_layer)
 
     # Normalize the edges
     edge_norm = edge_norm or IdentityEdgeNorm()
@@ -252,13 +266,15 @@ def plot_rib_graph(
     for i in range(n_layers):
         n_nodes = processed_edges[i - 1].shape[0] if i != 0 else processed_edges[0].shape[1]
         nodes_per_layer[i] = min(n_nodes, max_nodes_per_layer[i])
+    max_layer_height = max(nodes_per_layer)
 
     # Create figure and normalize the line width
-    width = n_layers * 2
-    height = 1 + max(nodes_per_layer) / 3
+    width = n_layers * 1.5
+    height = 1 + max_layer_height / 2
     ax = ax or plt.subplots(1, 1, figsize=(width, height), constrained_layout=True)[1]
+    fig = ax.get_figure()
     bbox = ax.get_position()  # Get the bounding box of the axes in figure coordinates
-    _, fig_height = ax.get_figure().get_size_inches()  #  type: ignore
+    _, fig_height = fig.get_size_inches()  # type: ignore
     axes_height_inches = fig_height * bbox.height
     max_edge_weight = max([edge.max().item() for edge in processed_edges])
     line_width_factor = line_width_factor or axes_height_inches / max_edge_weight
@@ -319,8 +335,8 @@ def plot_rib_graph(
     )
 
     # Draw layer labels
-    for i, layer_name in enumerate(layer_names):
-        ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+    ax.set_xticks(range(n_layers))
+    ax.set_xticklabels(layer_names)
 
     # Draw edges
     nx.draw_networkx_edges(
@@ -345,7 +361,7 @@ def plot_rib_graph(
                 graph,
                 pos_dict,
                 {node: label},
-                font_size=4,
+                font_size=6,
                 ax=ax,
                 bbox={"ec": "k", "fc": "white", "alpha": 0.30, "boxstyle": "round,pad=0.2"},
                 font_color=data["color"],
@@ -357,9 +373,9 @@ def plot_rib_graph(
         title += f"{n_unique_clusters} clusters"
 
     if title is not None:
-        plt.suptitle(title)
+        fig.suptitle(title)  # type: ignore
 
-    ax.axis("off")
+    adjust_plot(ax, n_layers, max_layer_height)
     if out_file is not None:
         plt.savefig(out_file, dpi=600)
 

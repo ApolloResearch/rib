@@ -225,7 +225,7 @@ class GraphClustering:
 
         self.seed: Optional[int]
         if seed is not None:
-            nk.engineering.setSeed(seed, useThreadId=False)
+            nk.engineering.setSeed(seed, useThreadId=True)
             self.seed = seed
         else:
             logger.warning("No seed set. Will use a random seed.")

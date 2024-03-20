@@ -15,15 +15,8 @@ from typing import Optional, Union
 import fire
 
 from rib.log import logger
-from rib.modularity import (
-    AbsNorm,
-    EdgeNorm,
-    IdentityEdgeNorm,
-    LogEdgeNorm,
-    MaxNorm,
-    SqrtNorm,
-)
-from rib.plotting import plot_graph_by_layer, plot_rib_graph
+from rib.modularity import EdgeNorm, LogEdgeNorm
+from rib.plotting import get_norm, plot_graph_by_layer, plot_rib_graph
 from rib.rib_builder import ResultsLike, to_results
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
@@ -77,15 +70,7 @@ def main(
         )
 
     edge_norm: EdgeNorm
-    if norm.lower() == "sqrt" or norm.lower() == "sqrtnorm":
-        edge_norm = SqrtNorm()
-    elif norm.lower() == "none" or norm.lower() == "identity":
-        edge_norm = IdentityEdgeNorm()
-    elif norm.lower() == "abs" or norm.lower() == "absnorm":
-        edge_norm = AbsNorm()
-    elif norm.lower() == "max" or norm.lower() == "maxnorm":
-        edge_norm = MaxNorm()
-    elif norm.lower() == "log" or norm.lower() == "lognorm":
+    if norm.lower() == "log" or norm.lower() == "lognorm":
         # Print info to help choose a good eps
         min_edge_by_layer = [e.E_hat[e.E_hat != 0].min().item() for e in results.edges]
         max_edge_by_layer = [e.E_hat[e.E_hat != 0].max().item() for e in results.edges]
@@ -98,7 +83,7 @@ def main(
         if max(max_edge_by_layer) / lognorm_eps > 1e20:
             logger.warning("Log scale spans >20 orders of magnitude. Choose a better eps?")
     else:
-        raise ValueError(f"Unknown norm: {norm}")
+        edge_norm = get_norm(norm)
 
     if not check_out_file_overwrite(out_file, force):
         handle_overwrite_fail()

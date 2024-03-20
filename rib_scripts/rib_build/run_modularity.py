@@ -27,6 +27,7 @@ from rib.modularity import (
     GraphClustering,
     SqrtNorm,
 )
+from rib.plotting import get_norm
 from rib.rib_builder import RibBuildResults
 from rib_scripts.rib_build.plot_graph import plot_graph_by_layer, plot_rib_graph
 
@@ -42,10 +43,13 @@ def plot_modular_graph(
     plot_edge_norm: Optional[EdgeNorm] = None,
     hide_const_edges: bool = False,
     sorting: Literal["rib", "cluster", "clustered_rib"] = "cluster",
+    figsize: Optional[tuple[int, int]] = None,
 ):
     clusters_nodelist = graph._get_clusterlist(clusters)
     clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
     if by_layer:
+        if figsize is not None:
+            logger.warning("figsize is not supported for by_layer plots")
         plot_graph_by_layer(
             edges=graph.results.edges,
             cluster_list=clusters_intlist,
@@ -74,6 +78,9 @@ def plot_modular_graph(
             colors=None,
             show_node_labels=True,
             node_labels=node_labels,
+            ax=plt.subplots(figsize=figsize, constrained_layout=True)[1]
+            if figsize is not None
+            else None,
         )
 
 
@@ -87,10 +94,11 @@ def run_modularity(
     hide_const_edges: bool = True,
     line_width_factor: Optional[float] = None,
     plot_norm: Literal["sqrt", "log", "graph"] = "graph",
-    sorting: Literal["rib", "cluster", "clustered_rib"] = "clustered_rib",
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "cluster",
     seed: Optional[int] = None,
     plot_piano: bool = True,
     plot_graph: bool = True,
+    figsize: Optional[tuple[int, int]] = None,
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -131,13 +139,14 @@ def run_modularity(
     results = RibBuildResults(**torch.load(results_path))
     edge_norm: EdgeNorm
     threshold: Optional[float] = None
-    if ablation_path is None and lognorm_eps is None:
-        logger.info("No ablation_path or lognorm_eps provided, using SqrtNorm")
-        edge_norm = SqrtNorm()
-    elif lognorm_eps is not None:
+    if lognorm_eps is not None:
         assert ablation_path is None, "Cannot provide both ablation_path and lognorm_eps"
         logger.info(f"Using ByLayerLogEdgeNorm with lognorm_eps={lognorm_eps}")
         edge_norm = ByLayerLogEdgeNorm.from_single_eps(lognorm_eps, results)
+    elif ablation_path is None:
+        assert lognorm_eps is None, "Cannot provide both ablation_path and lognorm_eps"
+        logger.info("No ablation_path or lognorm_eps provided, using SqrtNorm")
+        edge_norm = SqrtNorm()
     elif ablation_path.exists():
         logger.info("Using ByLayerLogEdgeNorm")
         edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
@@ -169,15 +178,15 @@ def run_modularity(
             logger.info("RIB build not centered, ignoring hide_const_edges")
         hide_const_edges = hide_const_edges and results.config.center
         plot_edge_norm: Optional[EdgeNorm]
-        if plot_norm == "sqrt":
-            plot_edge_norm = SqrtNorm()
+        if plot_norm == "graph":
+            plot_edge_norm = graph.edge_norm
         elif plot_norm == "log":
+            # Note: We don't have a "use lognorm_eps for plotting only" option because lognorm_eps
+            # is used for modularity, need 2nd arg
             assert ablation_path is not None
             plot_edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
-        elif plot_norm == "graph":
-            plot_edge_norm = None
         else:
-            raise ValueError(f"Unknown plot_norm {plot_norm}")
+            plot_edge_norm = get_norm(plot_norm)
 
         rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
         plot_modular_graph(
@@ -189,6 +198,7 @@ def run_modularity(
             plot_edge_norm=plot_edge_norm,
             hide_const_edges=hide_const_edges,
             sorting=sorting,
+            figsize=figsize,
         )
         logger.info(f"Saved modular graph to {rib_graph_path.absolute()}")
 

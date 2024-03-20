@@ -21,7 +21,14 @@ from tqdm import tqdm
 
 from rib.data_accumulator import Edges
 from rib.log import logger
-from rib.modularity import IdentityEdgeNorm, sort_clusters
+from rib.modularity import (
+    AbsNorm,
+    EdgeNorm,
+    IdentityEdgeNorm,
+    MaxNorm,
+    SqrtNorm,
+    sort_clusters,
+)
 
 
 def _add_edges_to_graph(
@@ -83,7 +90,7 @@ def _prepare_edges_for_plotting(
     return out_edges
 
 
-def adjust_plot(ax, n_layers, max_layer_height, buffer_size=0.2):
+def _adjust_plot(ax, n_layers, max_layer_height, buffer_size=0.2):
     """Adjust the plot to remove axes etc."""
     # Adjust space between ends of plot and nodes
     ax.set_ylim(-buffer_size, max_layer_height - 1 + buffer_size)
@@ -275,7 +282,9 @@ def plot_rib_graph(
     # Create figure and normalize the line width
     width = n_layers * 1.5
     height = 1 + max_layer_height / 2
-    ax = ax or plt.subplots(1, 1, figsize=(width, height), constrained_layout=True)[1]
+    if ax is None:
+        ax = plt.subplots(1, 1, figsize=(width, height), constrained_layout=True)[1]
+        logger.info(f"Using figsize {width}x{height}")
     fig = ax.get_figure()
     bbox = ax.get_position()  # Get the bounding box of the axes in figure coordinates
     _, fig_height = fig.get_size_inches()  # type: ignore
@@ -378,7 +387,7 @@ def plot_rib_graph(
 
     if title is not None:
         fig.suptitle(title)  # type: ignore
-    adjust_plot(ax, n_layers, max_layer_height)
+    _adjust_plot(ax, n_layers, max_layer_height)
     if out_file is not None:
         plt.savefig(out_file, dpi=600)
 
@@ -443,3 +452,18 @@ def plot_graph_by_layer(
     if out_file is not None:
         plt.savefig(out_file, dpi=400)
         logger.info(f"Saved plot to {Path(out_file).absolute()}")
+
+
+def get_norm(norm: str) -> EdgeNorm:
+    edge_norm: EdgeNorm
+    if norm.lower() == "sqrt" or norm.lower() == "sqrtnorm":
+        edge_norm = SqrtNorm()
+    elif norm.lower() == "none" or norm.lower() == "identity":
+        edge_norm = IdentityEdgeNorm()
+    elif norm.lower() == "abs" or norm.lower() == "absnorm":
+        edge_norm = AbsNorm()
+    elif norm.lower() == "max" or norm.lower() == "maxnorm":
+        edge_norm = MaxNorm()
+    else:
+        raise ValueError(f"Unknown norm: {norm}")
+    return edge_norm

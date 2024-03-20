@@ -1,0 +1,50 @@
+exp_name: block_diagonal_rib
+seed: 0
+modular_mlp_config:
+modular_mlp_config:
+  n_hidden_layers: 4
+  width: 8
+  weight_variances: [2, 2]
+  weight_equal_columns: false
+  bias: 0
+  seed: 0
+dataset:
+  dataset_type: block_vector
+  size: 10000
+  length: 8
+  data_variances: [1, 1]
+  data_perfect_correlation: false
+  seed: 0
+eval_type: null
+node_layers:
+  - layers.0
+  - layers.1
+  - layers.2
+  - layers.3
+  - layers.4
+  - output
+rotate_final_node_layer: false
+# Hardware
+gram_batch_size: null
+batch_size: 99999
+edge_batch_size: null
+dist_split_over: out_dim
+# Common
+dtype: float64
+truncation_threshold: 1e-15
+n_intervals: 0
+integration_method: gradient
+# Gram matrices
+gram_matrices_path: null
+# Basis matrices
+calculate_Cs: true
+interaction_matrices_path: null
+basis_formula: jacobian
+center: true
+naive_gradient_flow: false
+n_stochastic_sources_basis_pos: null
+n_stochastic_sources_basis_hidden: null
+# Edges
+calculate_edges: true
+edge_formula: squared
+n_stochastic_sources_edges: null

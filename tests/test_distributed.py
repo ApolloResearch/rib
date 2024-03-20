@@ -47,7 +47,7 @@ def run_distributed_edges(config_path: str, n_pods: int, pod_rank: int, n_proces
         f"mpirun -n {n_processes} python {build_script_path} {config_path} "
         f"--n_pods={n_pods} --pod_rank={pod_rank}"
     )
-    subprocess.run(mpi_command, shell=True, capture_output=True)
+    return subprocess.run(mpi_command, shell=True, capture_output=True)
 
 
 def get_double_edges(tmpdir: Path, dist_split_over: str, n_stochastic_sources_edges: Optional[int]):
@@ -59,6 +59,7 @@ def get_double_edges(tmpdir: Path, dist_split_over: str, n_stochastic_sources_ed
         {
             "exp_name": exp_name,
             "calculate_edges": True,
+            "calculate_Cs": True,
             "interaction_matrices_path": f"{tmpdir}/compute_cs_rib_Cs.pt",
             "out_dir": double_outdir_path,
             "dist_split_over": dist_split_over,
@@ -71,7 +72,7 @@ def get_double_edges(tmpdir: Path, dist_split_over: str, n_stochastic_sources_ed
 
     # mpi might be initialized which causes problems for running an mpiexec subcommand.
     MPI.Finalize()
-    run_distributed_edges(double_config_path, n_pods=1, pod_rank=0, n_processes=2)
+    logs = run_distributed_edges(double_config_path, n_pods=1, pod_rank=0, n_processes=2)
     combine_edges(f"{double_outdir_path}/distributed_{exp_name}")
     edges = RibBuildResults(
         **torch.load(f"{double_outdir_path}/distributed_{exp_name}/rib_graph_combined.pt")

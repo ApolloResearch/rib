@@ -50,7 +50,7 @@ def test_clustering(results: RibBuildResults):
     # test plotting functions run
     graph.plot_cluster_spans_and_widths()
     graph.print_top_k_clusters()
-    graph.paino_plot()
+    graph.piano_plot()
 
 
 @pytest.mark.slow

@@ -10,8 +10,6 @@ on:
       - 'README.md'
       - 'ACCESS.md'
   pull_request:
-    branches:
-      - main
     paths-ignore:
       - '.vscode/**'
       - '.gitignore'

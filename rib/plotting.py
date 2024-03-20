@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Literal, Optional, Union
 
 import colorcet
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -20,33 +21,19 @@ from tqdm import tqdm
 
 from rib.data_accumulator import Edges
 from rib.log import logger
-from rib.modularity import IdentityEdgeNorm
-
-
-def _create_node_layers(edges: list[torch.Tensor]) -> list[np.ndarray]:
-    """Create a list of node layers from the given edges."""
-    layers = []
-    for i, weight_matrix in enumerate(edges):
-        # Only add nodes to the graph for the current layer if it's the first layer
-        if i == 0:
-            current_layer = np.arange(weight_matrix.shape[1])
-            layers.append(current_layer)
-        else:
-            # Ensure that the current layer's nodes are the same as the previous layer's nodes
-            assert len(layers[-1]) == weight_matrix.shape[1], (
-                f"The number of nodes implied by edge matrix {i} ({weight_matrix.shape[1]}) "
-                f"does not match the number implied by the previous edge matrix ({len(layers[-1])})."
-            )
-            current_layer = layers[-1]
-        next_layer = np.arange(weight_matrix.shape[0]) + max(current_layer) + 1
-        layers.append(next_layer)
-    return layers
+from rib.modularity import (
+    AbsNorm,
+    EdgeNorm,
+    IdentityEdgeNorm,
+    MaxNorm,
+    SqrtNorm,
+    sort_clusters,
+)
 
 
 def _add_edges_to_graph(
     graph: nx.Graph,
     edges: list[torch.Tensor],
-    layers: list[np.ndarray],
     pos_color: Optional[str] = "blue",
     neg_color: Optional[str] = "red",
 ) -> None:
@@ -59,22 +46,18 @@ def _add_edges_to_graph(
         pos_color (Optional[str]): The color to use for positive edges. Defaults to "blue".
         neg_color (Optional[str]): The color to use for negative edges. Defaults to "red".
     """
-    for module_idx, edge_matrix in enumerate(edges):
-        for j in range(edge_matrix.shape[1]):
-            for i in range(edge_matrix.shape[0]):
+    for l, edge_matrix in enumerate(edges):
+        for j in range(edge_matrix.shape[1]):  # L
+            for i in range(edge_matrix.shape[0]):  # L+1
                 color = pos_color if edge_matrix[i, j] > 0 else neg_color
                 # Draw the edge from the node in the current layer to the node in the next layer
-                graph.add_edge(
-                    layers[module_idx][j],
-                    layers[module_idx + 1][i],
-                    weight=edge_matrix[i, j],
-                    color=color,
-                )
+                graph.add_edge((l, j), (l + 1, i), weight=edge_matrix[i, j], color=color)
 
 
 def _prepare_edges_for_plotting(
-    raw_edges: list[torch.Tensor],
-    nodes_per_layer: list[int],
+    edges: list[Edges],
+    edge_norm: Callable[[torch.Tensor, str], torch.Tensor],
+    max_nodes_per_layer: list[int],
     hide_const_edges: bool = False,
 ) -> list[torch.Tensor]:
     """Convert edges to float, normalize, and truncate to desired number of nodes in each layer.
@@ -88,7 +71,8 @@ def _prepare_edges_for_plotting(
     Returns:
         list[torch.Tensor]: A list of edges, each with shape (n_nodes_in_l+1, n_nodes_in_l).
     """
-    edges: list[torch.Tensor] = []
+    raw_edges = [edge.E_hat for edge in edges]
+    out_edges: list[torch.Tensor] = []
     for i, weight_matrix in enumerate(raw_edges):
         # Convert edges to float32 (bfloat16 will cause errors and we don't need higher precision)
         weight_matrix = weight_matrix.float()
@@ -97,11 +81,28 @@ def _prepare_edges_for_plotting(
             # Set edges outgoing from this node to zero (edges.shape ~ l+1, l). The incoming edges
             # should be zero except for a non-rotated last layer where they are important.
             weight_matrix[:, const_node_index] = 0
+        # Normalize the edges
+        weight_matrix = edge_norm(weight_matrix, edges[i].in_node_layer)
         # Only keep the desired number of nodes in each layer
-        in_nodes = nodes_per_layer[i]
-        out_nodes = nodes_per_layer[i + 1]
-        edges.append(weight_matrix[:out_nodes, :in_nodes])
-    return edges
+        in_nodes = max_nodes_per_layer[i]
+        out_nodes = max_nodes_per_layer[i + 1]
+        out_edges.append(weight_matrix[:out_nodes, :in_nodes])
+    return out_edges
+
+
+def _adjust_plot(ax, n_layers, max_layer_height, buffer_size=0.2):
+    """Adjust the plot to remove axes etc."""
+    # Adjust space between ends of plot and nodes
+    ax.set_ylim(-buffer_size, max_layer_height - 1 + buffer_size)
+    ax.set_xlim(-buffer_size, n_layers - 1 + buffer_size)
+    # Remove unwanted plot enelemts
+    ax.grid(False)
+    ax.xaxis.set_visible(True)
+    ax.yaxis.set_visible(False)
+    ax.xaxis.tick_top()
+    ax.tick_params(axis="x", top=False, labeltop=True, bottom=False, labelbottom=False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
 
 
 def plot_ablation_results(
@@ -210,13 +211,14 @@ def plot_ablation_results(
 
 def plot_rib_graph(
     edges: list[Edges],
-    clusters: Optional[list[list[int]]] = None,
+    cluster_list: Optional[list[list[int]]] = None,
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "rib",
     edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
     line_width_factor: Optional[float] = None,
     out_file: Optional[Path] = None,
     ax: Optional[plt.Axes] = None,
     title: Optional[str] = None,
-    nodes_per_layer: Union[int, list[int]] = 99999,
+    max_nodes_per_layer: Union[int, list[int]] = 130,
     hide_const_edges: bool = False,
     colors: Optional[list[str]] = None,
     show_node_labels: bool = True,
@@ -227,127 +229,174 @@ def plot_rib_graph(
     Args:
         edges (list[Edges]): List of Edges. Internally this is a list of tensors (E_hat) with
             shape (n_nodes_in_l+1, n_nodes_in_l)
-        clusters: TODO
+        clusters: List of cluster indices for every node to color and optionally sort the nodes.
+        sorting: The sorting method to use for the nodes. Can be "rib", "cluster", or
+            "clustered_rib". Ignored if no clusters provided. "rib" sorts by the RIB index,
+            "cluster" sorts by the cluster index, and "clustered_rib" sorts by RIB index but keeps
+            nodes in the same cluster together.
         edge_norm: A function to normalize the edges (by layer) before plotting.
         line_width_factor: Scale factor to convert edge weights into line widths. If None, will
             choose a facctor such that, among all layers, the thickest line is 20.
         out_file (Path): The file to save the plot to. If None, no plot is saved
         ax: The axis to plot the graph on. If None, then a new figure is created.
         title (str): The plot suptitle, typically the name of the experiment.
-        nodes_per_layer (Union[int, list[int]]): The max number of nodes in each layer. If int, then
+        max_nodes_per_layer (Union[int, list[int]]): The max number of nodes in each layer. If int, then
             all layers have the same max number of nodes. If list, then the max number of nodes in
             each layer is given by the list.
         hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes. Note that
             this does _not_n check results.center, it is recommended to set hide_const_edges to
             results.center.
         colors (Optional[list[str]]): The colors to use for the nodes in each layer. If None, then
-            the tab10 colormap is used.
+            the tab10 colormap is used. Overwrites cluster colors.
         show_node_labels (bool): Whether to show the node labels. Defaults to True.
         node_labels: The labels for each node in the graph. If None, then use RIB dim indices.
     """
+    # Process args
     layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
-
-    if isinstance(nodes_per_layer, int):
-        # Note that there is one more layer than there edge matrices
-        nodes_per_layer = [nodes_per_layer] * (len(edges) + 1)
-    max_layer_height = max(nodes_per_layer)
+    n_layers = len(layer_names)
+    assert n_layers == len(edges) + 1
+    if isinstance(max_nodes_per_layer, int):
+        max_nodes_per_layer = [max_nodes_per_layer] * n_layers
 
     # Normalize the edges
     edge_norm = edge_norm or IdentityEdgeNorm()
     processed_edges = _prepare_edges_for_plotting(
-        [edge_norm(edge.E_hat, edge.in_node_layer) for edge in edges],
-        nodes_per_layer,
+        edges=edges,
+        edge_norm=edge_norm,
+        max_nodes_per_layer=max_nodes_per_layer,
         hide_const_edges=hide_const_edges,
     )
     del edges
 
-    # Normalize the line width
-    ax = ax or plt.subplots(1, 1, figsize=(20, 10))[1]
+    # Get actual number of nodes per layer
+    nodes_per_layer = [0] * n_layers
+    for i in range(n_layers):
+        n_nodes = processed_edges[i - 1].shape[0] if i != 0 else processed_edges[0].shape[1]
+        assert n_nodes <= max_nodes_per_layer[i], (
+            "Found n_nodes > max_nodes_per_layer. This should not happen because"
+            " _prepare_edges_for_plotting should truncate the edges."
+        )
+        nodes_per_layer[i] = n_nodes
+    max_layer_height = max(nodes_per_layer)
+
+    # Create figure and normalize the line width
+    width = n_layers * 1.5
+    height = 1 + max_layer_height / 2
+    if ax is None:
+        ax = plt.subplots(1, 1, figsize=(width, height), constrained_layout=True)[1]
+        logger.info(f"Using figsize {width}x{height}")
+    fig = ax.get_figure()
     bbox = ax.get_position()  # Get the bounding box of the axes in figure coordinates
-    _, fig_height = ax.get_figure().get_size_inches()  #  type: ignore
+    _, fig_height = fig.get_size_inches()  # type: ignore
     axes_height_inches = fig_height * bbox.height
     max_edge_weight = max([edge.max().item() for edge in processed_edges])
     line_width_factor = line_width_factor or axes_height_inches / max_edge_weight
     logger.info(f"Using line width factor {line_width_factor}")
 
     # Create the graph & add nodes and edges
-    layers = _create_node_layers(processed_edges)
+
     graph = nx.Graph()
-    for layer in layers:
-        graph.add_nodes_from(layer)
-    _add_edges_to_graph(graph, processed_edges, layers)
-
-    # Create positions for each node
-    pos: dict[int, tuple[int, Union[int, float]]] = {}
-    for i, layer in enumerate(layers):
-        # Add extra spacing for nodes that have fewer nodes than the biggest layer
-        spacing = max_layer_height / len(layer)
-        if clusters is None:
-            ordering = list(range(len(layer)))
+    for i in range(n_layers):
+        n_nodes = processed_edges[i - 1].shape[0] if i != 0 else processed_edges[0].shape[1]
+        if i < n_layers - 1:
+            assert processed_edges[i].shape[1] == n_nodes, "Consistency check failed"
+        # Clusters can contain the -1 entries from arr we get len(clusters) > n_nodes. Thus we
+        # slice the clusters to the correct length. here.
+        clusters = cluster_list[i][:n_nodes] if cluster_list is not None else None
+        # Derive positions based on clusters:
+        #   Clusters: cluster of each node (clusters in nodes-order)
+        #   Positions: position of each node (positions in nodes-order)
+        #   Ordering [used in sort_clusters only]: node at each position (nodes in position-order)
+        if sorting == "rib":
+            positions = list(range(n_nodes))
         else:
-            # truncate clusters to only include the nodes we keep in the graph
-            clusters[i] = clusters[i][: nodes_per_layer[i]]
-            ordering = sorted(range(len(layer)), key=lambda x: clusters[i][x])
-
-        for j, node in enumerate(layer[ordering]):
-            pos[node] = (i, j * spacing)
-
-    # Draw nodes
-    if colors is None:
-        # tab10 colormap, convert from rgb to hex to avoid matplotlib warning
-        to_hex = lambda x: f"{int(x * 255):02x}"
-        colors = [f"#{to_hex(r)}{to_hex(g)}{to_hex(b)}" for r, g, b in plt.get_cmap("tab10").colors]  # type: ignore
-    options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6}
-    for i, (layer_name, layer) in enumerate(zip(layer_names, layers)):
-        node_colors: Union[str, list[str]]
-        if clusters is not None:
+            assert clusters is not None, "Clusters must be provided for sorting other than 'rib'"
+            positions = sort_clusters(clusters, sorting)
+        # Derive colors based on clusters or layers
+        if clusters is not None and colors is None:
             colormap = ["#bbbbbb"] + colorcet.glasbey
-            node_colors = [colormap[cluster_idx % 256] for cluster_idx in clusters[i]]
+            color = lambda j: colormap[clusters[j] % 256]
         else:
-            node_colors = colors[i % len(colors)]
-        nx.draw_networkx_nodes(graph, pos, nodelist=layer, node_color=node_colors, ax=ax, **options)
-        # Add layer label above the nodes
-        ax.text(i, max_layer_height, layer_name, ha="center", va="center", fontsize=12)
+            colors = colors or [mpl.colors.rgb2hex(mpl.cm.tab10(i)) for i in range(10)]  # type: ignore
+            color = lambda _: colors[i % len(colors)]
+        # Add nodes to the graph
+        for j in range(nodes_per_layer[i]):
+            graph.add_node(
+                (i, j),
+                layer_idx=i,
+                rib_idx=j,
+                cluster=clusters[j] if clusters is not None else None,
+                position=positions[j],
+                color=color(j),
+            )
 
-    # Label nodes if node_labels is provided
-    if show_node_labels:
-        node_label_dict = {}
-        for i, layer in enumerate(layers):
-            for j, node in enumerate(layer):
-                if node_labels is not None:
-                    node_label_dict[node] = node_labels[i][j].replace("|", "\n")
-                else:
-                    node_label_dict[node] = str(j)
-        nx.draw_networkx_labels(graph, pos, node_label_dict, font_size=6, ax=ax)
+    # Processed edges already have edges beyond nodes_per_layer limit removed.
+    _add_edges_to_graph(graph, processed_edges)
+
+    pos_dict = {
+        node: (data["layer_idx"], data["position"]) for node, data in graph.nodes(data=True)
+    }
+
+    # Draw nodes:
+    options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6, "ax": ax}
+    nx.draw_networkx_nodes(
+        graph,
+        pos_dict,
+        nodelist=graph.nodes,
+        node_color=[d[1] for d in graph.nodes.data("color")],
+        **options,
+    )
+
+    # Draw layer labels
+    ax.set_xticks(range(n_layers))
+    ax.set_xticklabels(layer_names)
 
     # Draw edges
     nx.draw_networkx_edges(
         graph,
-        pos,
-        edgelist=[(edge[0], edge[1]) for edge in graph.edges(data=True)],
-        width=[line_width_factor * edge[2]["weight"] for edge in graph.edges(data=True)],
+        pos_dict,
+        edgelist=[(u, v) for u, v in graph.edges],
+        width=[line_width_factor * weight for _, _, weight in graph.edges(data="weight")],
         alpha=1,
-        edge_color=[edge[2]["color"] for edge in graph.edges(data=True)],
+        edge_color=[color for _, _, color in graph.edges(data="color")],
         ax=ax,
     )
 
+    # Draw labels
+    if show_node_labels:
+        for node, data in graph.nodes(data=True):
+            label = f"D{data['rib_idx']}"
+            if data["cluster"] is not None:
+                label += f" C{data['cluster']}"
+            if node_labels is not None:
+                label += "\n" + node_labels[data["layer_idx"]][data["rib_idx"]].replace("|", "\n")
+            nx.draw_networkx_labels(
+                graph,
+                pos_dict,
+                {node: label},
+                font_size=6,
+                ax=ax,
+                bbox={"ec": "k", "fc": "white", "alpha": 0.30, "boxstyle": "round,pad=0.2"},
+                font_color=data["color"],
+            )
+
+    if cluster_list is not None:
+        n_unique_clusters = len(set([c for layer in cluster_list for c in layer if c > 0]))
+        title = title + " | " if title is not None else ""
+        title += f"{n_unique_clusters} clusters"
+
     if title is not None:
-        plt.suptitle(title)
-    plt.tight_layout()
-    ax.axis("off")
+        fig.suptitle(title)  # type: ignore
+    _adjust_plot(ax, n_layers, max_layer_height)
     if out_file is not None:
-        plt.savefig(out_file)
+        plt.savefig(out_file, dpi=600)
 
 
 def plot_graph_by_layer(
     edges: list[Edges],
     clusters: Optional[list[list[int]]] = None,
-    edge_norm: Optional[Callable[[torch.Tensor, str], torch.Tensor]] = None,
-    line_width_factor: Optional[float] = None,
     out_file: Optional[Path] = None,
-    title: Optional[str] = None,
-    nodes_per_layer=100,
-    hide_const_edges: bool = True,
+    **kwargs,
 ):
     """
     Plots a RIB graph with every transformer block on it's own row. Note: We skip all node layers
@@ -361,18 +410,9 @@ def plot_graph_by_layer(
     Args:
         edges (list[Edges]): List of Edges. Internally this is a list of tensors (E_hat) with
             shape (n_nodes_in_l+1, n_nodes_in_l)
-        clusters: TODO
-        edge_norm: A function to normalize the edges (by layer) before plotting.
-        line_width_factor: Scale factor to convert edge weights into line widths. If None, will
-            choose a facctor such that, among all layers, the thickest line is 20.
+        clusters: List of cluster indices for every node to color and optionally sort the nodes.
         out_file (Path): The file to save the plot to. If None, no plot is saved
-        title (str): The plot suptitle, typically the name of the experiment.
-        nodes_per_layer (Union[int, list[int]]): The max number of nodes in each layer. If int, then
-            all layers have the same max number of nodes. If list, then the max number of nodes in
-            each layer is given by the list.
-        hide_const_edges (bool): Whether to hide the outgoing edges from constant nodes. Note that
-            this does _not_n check results.center, it is recommended to set hide_const_edges to
-            results.center.
+        kwargs: Additional arguments to pass to plot_rib_graph
     """
     node_layers = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
 
@@ -402,17 +442,28 @@ def plot_graph_by_layer(
         # Call main plotting function without out_file
         plot_rib_graph(
             edges=block_edges,
-            title=title,
-            nodes_per_layer=nodes_per_layer,
-            edge_norm=edge_norm,
+            cluster_list=block_clusters,
+            ax=ax,
             out_file=None,
             node_labels=None,
-            hide_const_edges=hide_const_edges,
-            ax=ax,
-            line_width_factor=line_width_factor,
-            clusters=block_clusters,
+            **kwargs,
         )
     # Save the figure
     if out_file is not None:
         plt.savefig(out_file, dpi=400)
         logger.info(f"Saved plot to {Path(out_file).absolute()}")
+
+
+def get_norm(norm: str) -> EdgeNorm:
+    edge_norm: EdgeNorm
+    if norm.lower() == "sqrt" or norm.lower() == "sqrtnorm":
+        edge_norm = SqrtNorm()
+    elif norm.lower() == "none" or norm.lower() == "identity":
+        edge_norm = IdentityEdgeNorm()
+    elif norm.lower() == "abs" or norm.lower() == "absnorm":
+        edge_norm = AbsNorm()
+    elif norm.lower() == "max" or norm.lower() == "maxnorm":
+        edge_norm = MaxNorm()
+    else:
+        raise ValueError(f"Unknown norm: {norm}")
+    return edge_norm

@@ -138,7 +138,7 @@ def load_mlp(
     """
     mlp: MLP
     if isinstance(config, ModularMLPConfig):
-        mlp = create_modular_mlp(config, seed=seed)
+        mlp = create_modular_mlp(config)
     else:
         assert isinstance(config, MLPConfig)
         assert mlp_path is not None, "mlp_path must be provided for MLPConfig"
@@ -492,7 +492,6 @@ def load_model(
             node_layers=node_layers or rib_config.node_layers,
             mlp_path=rib_config.mlp_path,
             fold_bias=True,
-            seed=rib_config.seed,
         ).to(device=torch.device(device), dtype=dtype)
         assert model.has_folded_bias, "MLP must have folded bias to run RIB"
     else:

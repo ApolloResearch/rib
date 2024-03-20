@@ -6,15 +6,17 @@ copy the code and modify it to your needs.
 Example usage:
 
 ```bash
-python run_modularity.py /path/to/rib_build.pt [--gamma 1.0]
-   [--plot_piano] [--plot_graph] [--log_norm] [--ablation_path /path/to/ablation_results.json]
+python run_modularity.py /path/to/rib_build.pt [--gamma 1.0] [--ablation_path
+/path/to/ablation.json] [--labels_file /path/to/labels.csv] [--nodes_per_layer 100] [--plot_norm]
+[--sorting] [--seed] [--plot_piano] [--plot_graph] [--hide_const_edges] [--line_width_factor]
 """
 import csv
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import fire
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from rib.log import logger
@@ -25,6 +27,7 @@ from rib.modularity import (
     GraphClustering,
     SqrtNorm,
 )
+from rib.plotting import get_norm
 from rib.rib_builder import RibBuildResults
 from rib_scripts.rib_build.plot_graph import plot_graph_by_layer, plot_rib_graph
 
@@ -32,46 +35,70 @@ from rib_scripts.rib_build.plot_graph import plot_graph_by_layer, plot_rib_graph
 def plot_modular_graph(
     graph: GraphClustering,
     clusters: ClusterListLike = "nonsingleton",
-    out_file=None,
-    by_layer=False,
-    line_width_factor=None,
-    node_labels=None,
+    out_file: Optional[Path] = None,
+    by_layer: bool = False,
+    line_width_factor: Optional[float] = None,
+    node_labels: Optional[list[list[str]]] = None,
+    nodes_per_layer: int = 130,
+    plot_edge_norm: Optional[EdgeNorm] = None,
+    hide_const_edges: bool = False,
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "cluster",
+    figsize: Optional[tuple[int, int]] = None,
 ):
-    clusters_list = graph._get_clusterlist(clusters)
-    arr = graph._cluster_array(clusters_list)
-    clusters_for_plotting_fn = [
-        layer_clusters[: graph.nodes_per_layer[nl]]
-        for nl, layer_clusters in zip(graph.node_layers, arr.tolist(), strict=True)
-    ]
+    clusters_nodelist = graph._get_clusterlist(clusters)
+    clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
     if by_layer:
+        if figsize is not None:
+            logger.warning("figsize is not supported for by_layer plots")
         plot_graph_by_layer(
-            graph.results.edges,
-            edge_norm=graph.edge_norm,
+            edges=graph.results.edges,
+            cluster_list=clusters_intlist,
+            sorting=sorting,
+            edge_norm=plot_edge_norm or graph.edge_norm,
             line_width_factor=line_width_factor,
-            clusters=clusters_for_plotting_fn,
             out_file=out_file,
-            nodes_per_layer=100,  # max(self.nodes_per_layer.values()),
+            title=graph.results.exp_name + f", gamma={graph.gamma}, seed={graph.seed}",
+            nodes_per_layer=nodes_per_layer,
+            hide_const_edges=hide_const_edges,
+            colors=None,
+            show_node_labels=True,
+            node_labels=node_labels,
         )
     else:
         plot_rib_graph(
-            graph.results.edges,
-            edge_norm=None,
-            line_width_factor=0.001,
-            cluster_list=clusters_for_plotting_fn,
+            edges=graph.results.edges,
+            cluster_list=clusters_intlist,
+            sorting=sorting,
+            edge_norm=plot_edge_norm or graph.edge_norm,
+            line_width_factor=line_width_factor,
             out_file=out_file,
+            title=graph.results.exp_name + f", gamma={graph.gamma}, seed={graph.seed}",
+            max_nodes_per_layer=nodes_per_layer,
+            hide_const_edges=hide_const_edges,
+            colors=None,
+            show_node_labels=True,
             node_labels=node_labels,
-            nodes_per_layer=30,
+            ax=plt.subplots(figsize=figsize, constrained_layout=True)[1]
+            if figsize is not None
+            else None,
         )
 
 
 def run_modularity(
     results_path: Union[str, Path],
     gamma: float = 30,
+    ablation_path: Optional[Union[str, Path]] = None,
+    lognorm_eps: Optional[float] = None,
+    labels_file: Optional[Union[str, Path]] = None,
+    nodes_per_layer: int = 130,
+    hide_const_edges: bool = True,
+    line_width_factor: Optional[float] = None,
+    plot_norm: Literal["sqrt", "log", "graph"] = "graph",
+    sorting: Literal["rib", "cluster", "clustered_rib"] = "cluster",
+    seed: Optional[int] = None,
     plot_piano: bool = True,
     plot_graph: bool = True,
-    ablation_path: Optional[Union[str, Path]] = None,
-    line_width_factor: Optional[float] = None,
-    labels_file: Optional[Union[str, Path]] = None,
+    figsize: Optional[tuple[int, int]] = None,
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -85,50 +112,95 @@ def run_modularity(
 
     Args:
         results_path: The path to the RIB build results file.
-        threshold: The loss increase threshold for the bisect ablation.
         gamma: The resolution parameter for the modularity analysis. Higher gamma = more clusters.
-        plot_piano: Whether to plot a piano plot, giving an overview of modular structure found.
-        plot_graph: Whether to plot the full RIB graph with nodes colored and sorted by module.
         ablation_path: The path to the bisect ablation results file. If provided will use this for
             ByLayerLogEdgeNorm. If not provided, will fall back to SqrtNorm.
+        labels_file: A CSV file with node labels. If provided, will be used to label nodes in the
+            graph plots.
+        nodes_per_layer: The maximum number of nodes per layer in the graph plots.
+        line_width_factor: A scaling factor for the line width in the graph plots. If not provided,
+            will be derived from max edge weight (after processing).
+        plot_norm: The edge norm to use for the graph plots. Options are "sqrt", "log", or "graph".
+            sqrt and log will use the corresponding edge norm, while graph will use the norm that
+            was used for the clustering.
+        sorting: The sorting to use for the graph plots. Options are "rib", "cluster", or
+            "clustered_rib". "rib" will sort nodes by their position in the RIB, "cluster" will sort
+            nodes by their cluster assignment, and "clustered_rib" will sort nodes by the RIB index
+            but with nodes of the same cluster grouped together.
+        seed: The random seed to use for the clustering. If not provided, will be randomly generated
+            and printed.
+        plot_piano: Whether to plot a piano plot, giving an overview of modular structure found.
+        plot_graph: Whether to plot the full RIB graph with nodes colored and sorted by module.
     """
+    if plot_norm == "log":
+        assert ablation_path is not None, "Must provide ablation path for log norm"
     results_path = Path(results_path)
     ablation_path = Path(ablation_path) if ablation_path is not None else None
     results = RibBuildResults(**torch.load(results_path))
     edge_norm: EdgeNorm
-    if ablation_path is None:
-        logger.warning("No ablation path provided, will fall back to SqrtNorm")
+    threshold: Optional[float] = None
+    if lognorm_eps is not None:
+        assert ablation_path is None, "Cannot provide both ablation_path and lognorm_eps"
+        logger.info(f"Using ByLayerLogEdgeNorm with lognorm_eps={lognorm_eps}")
+        edge_norm = ByLayerLogEdgeNorm.from_single_eps(lognorm_eps, results)
+    elif ablation_path is None:
+        assert lognorm_eps is None, "Cannot provide both ablation_path and lognorm_eps"
+        logger.info("No ablation_path or lognorm_eps provided, using SqrtNorm")
         edge_norm = SqrtNorm()
-        threshold = 0.0
     elif ablation_path.exists():
-        threshold, edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
+        logger.info("Using ByLayerLogEdgeNorm")
+        edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
+        assert isinstance(edge_norm, ByLayerLogEdgeNorm)  # for mypy
+        threshold = edge_norm.threshold
     else:
         raise FileNotFoundError(f"Could not find ablation file at {ablation_path}")
-    threshold_str = f"delta{threshold}" if threshold > 0 else "noablation"
+    threshold_str = f"delta{threshold}" if threshold is not None else "noablation"
     name_prefix = f"{results.exp_name}-{threshold_str}"
-
     logger.info(f"Making RIB graph in networkit & running clustering...")
-    graph = GraphClustering(results, edge_norm, gamma=gamma)
+    if seed is None:
+        seed = np.random.randint(0, 2**32)
+        logger.info(f"Setting clustering seed to {seed}")
+    graph = GraphClustering(results, edge_norm, gamma=gamma, seed=seed)
     logger.info(f"Finished clustering.")
 
     if plot_piano:
-        graph.paino_plot()
-        paino_path = results_path.parent / f"{name_prefix}-gamma{gamma}-paino.png"
+        graph.piano_plot()
+        piano_path = results_path.parent / f"{name_prefix}-gamma{gamma}-paino.png"
         plt.suptitle(
             f"{results.exp_name}\nRIB cluster assignment for threshold={threshold}, gamma={gamma}"
         )
-        plt.savefig(paino_path)
-        logger.info(f"Saved paino plot to {paino_path.absolute()}")
+        plt.savefig(piano_path)
+        logger.info(f"Saved piano plot to {piano_path.absolute()}")
         plt.clf()
 
     if plot_graph:
+        if hide_const_edges and not results.config.center:
+            logger.info("RIB build not centered, ignoring hide_const_edges")
+        hide_const_edges = hide_const_edges and results.config.center
+        plot_edge_norm: Optional[EdgeNorm]
+        if plot_norm == "graph":
+            plot_edge_norm = graph.edge_norm
+        elif plot_norm == "log":
+            # Note: We don't have a "use lognorm_eps for plotting only" option because lognorm_eps
+            # is used for modularity, need 2nd arg
+            assert ablation_path is not None
+            plot_edge_norm = ByLayerLogEdgeNorm.from_bisect_results(ablation_path, results)
+        else:
+            plot_edge_norm = get_norm(plot_norm)
+
         rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
         plot_modular_graph(
             graph=graph,
             out_file=rib_graph_path,
             line_width_factor=line_width_factor,
             node_labels=node_labels,
+            nodes_per_layer=nodes_per_layer,
+            plot_edge_norm=plot_edge_norm,
+            hide_const_edges=hide_const_edges,
+            sorting=sorting,
+            figsize=figsize,
         )
+        logger.info(f"Saved modular graph to {rib_graph_path.absolute()}")
 
 
 if __name__ == "__main__":

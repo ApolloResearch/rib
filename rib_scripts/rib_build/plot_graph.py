@@ -15,15 +15,15 @@ from typing import Optional, Union
 import fire
 
 from rib.log import logger
-from rib.modularity import EdgeNorm, IdentityEdgeNorm, SqrtNorm
-from rib.plotting import plot_graph_by_layer, plot_rib_graph
+from rib.modularity import EdgeNorm, LogEdgeNorm
+from rib.plotting import get_norm, plot_graph_by_layer, plot_rib_graph
 from rib.rib_builder import ResultsLike, to_results
 from rib.utils import check_out_file_overwrite, handle_overwrite_fail
 
 
 def main(
     results: ResultsLike,
-    nodes_per_layer: Union[int, list[int]] = 64,
+    nodes_per_layer: Union[int, list[int]] = 130,
     labels_file: Optional[str] = None,
     out_file: Optional[Union[str, Path]] = None,
     force: bool = False,
@@ -31,6 +31,9 @@ def main(
     by_layer: Optional[bool] = False,
     line_width_factor: Optional[float] = None,
     norm: str = "sqrt",
+    lognorm_eps: Optional[float] = None,
+    color_black: bool = False,
+    show_node_labels: bool = True,
 ) -> None:
     """Plot an RIB graph given a results file contain the graph edges.
 
@@ -44,7 +47,9 @@ def main(
             ignored if the RIB build is non-centered
         by_layer: Whether to plot the graph by layer.
         line_width_factor: Scale factor to convert edge weights into line widths. If None, will
-            choose a facctor such that, among all layers, the thickest line is 20.
+            choose a factor such that, among all layers, the thickest line is 20.
+        color_black: Whether to color the nodes black, to avoid color confusion.
+        show_node_labels: Whether to show the node labels.
     """
     results = to_results(results)
     if out_file is None:
@@ -53,19 +58,35 @@ def main(
     else:
         out_file = Path(out_file)
 
+    assert results.edges, "The results file does not contain any edges."
+
+    if hide_const_edges and not results.config.center:
+        logger.info("RIB build not centered, ignoring hide_const_edges")
+    hide_const_edges = hide_const_edges and results.config.center
+
+    if lognorm_eps is not None and norm.lower() != "log" and norm.lower() != "lognorm":
+        logger.warning(
+            "lognorm_eps is only used when norm is set to 'log' or 'lognorm'. Ignoring lognorm_eps."
+        )
+
     edge_norm: EdgeNorm
-    if norm.lower() == "sqrt" or norm.lower() == "sqrtnorm":
-        edge_norm = SqrtNorm()
-    elif norm.lower() == "none" or norm.lower() == "identity":
-        edge_norm = IdentityEdgeNorm()
+    if norm.lower() == "log" or norm.lower() == "lognorm":
+        # Print info to help choose a good eps
+        min_edge_by_layer = [e.E_hat[e.E_hat != 0].min().item() for e in results.edges]
+        max_edge_by_layer = [e.E_hat[e.E_hat != 0].max().item() for e in results.edges]
+        logger.info(f"Min nonzsero edge values per layer: {min_edge_by_layer}")
+        logger.info(f"Max nonzsero edge values per layer: {max_edge_by_layer}")
+        # Set eps if not provided
+        lognorm_eps = lognorm_eps or min(min_edge_by_layer)
+        edge_norm = LogEdgeNorm(eps=lognorm_eps)
+        # Warn if the scale is too large and will make everything look equal
+        if max(max_edge_by_layer) / lognorm_eps > 1e20:
+            logger.warning("Log scale spans >20 orders of magnitude. Choose a better eps?")
     else:
-        raise ValueError(f"Unknown norm: {norm}")
+        edge_norm = get_norm(norm)
 
     if not check_out_file_overwrite(out_file, force):
         handle_overwrite_fail()
-
-    assert results.edges, "The results file does not contain any edges."
-    hide_const_edges = hide_const_edges or results.config.center
 
     # Add labels if provided
     if labels_file is not None:
@@ -83,7 +104,7 @@ def main(
         plot_graph_by_layer(
             edges,
             title=results.exp_name,
-            nodes_per_layer=nodes_per_layer,
+            max_nodes_per_layer=nodes_per_layer,
             out_file=out_file,
             edge_norm=edge_norm,
             hide_const_edges=results.config.center and hide_const_edges,
@@ -102,12 +123,14 @@ def main(
     plot_rib_graph(
         edges=results.edges,
         title=results.exp_name,
-        nodes_per_layer=nodes_per_layer,
+        max_nodes_per_layer=nodes_per_layer,
         out_file=out_file,
         node_labels=node_labels,
+        show_node_labels=show_node_labels,
         edge_norm=edge_norm,
         hide_const_edges=results.config.center and hide_const_edges,
         line_width_factor=line_width_factor,
+        colors=["black"] * len(results.config.node_layers) if color_black else None,
     )
 
     logger.info(f"Saved plot to {out_file}")

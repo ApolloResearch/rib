@@ -12,6 +12,7 @@ import torch
 import tqdm
 from jaxtyping import Bool, Float
 
+from rib.log import logger
 from rib.rib_builder import RibBuildResults
 
 EdgeTensor = Float[torch.Tensor, "rib_out rib_in"]
@@ -32,10 +33,30 @@ class IdentityEdgeNorm(EdgeNorm):
 
 
 class SqrtNorm(EdgeNorm):
-    """Sqrt-normalizes the edges."""
+    """Sqrt-normalizes the edges (by layer). I.e. E -> sqrt(E)."""
 
     def __call__(self, E: torch.Tensor, node_layer: str) -> torch.Tensor:
         return E.sqrt()
+
+
+class AbsNorm(EdgeNorm):
+    """Divides edges by the sum of their absolute values, E -> E/sum(abs(E)).
+
+    We used to use this as a default before modularity PR #349/
+    """
+
+    def __call__(self, E: torch.Tensor, node_layer: str) -> torch.Tensor:
+        return E / E.abs().sum()
+
+
+class MaxNorm(EdgeNorm):
+    """Normalizes the largest edge to 1. Sets E -> E/max(E)
+
+    Creates equal max line width in each layer making plots more readable.
+    """
+
+    def __call__(self, E: torch.Tensor, node_layer: str) -> torch.Tensor:
+        return E / E.max()
 
 
 class LogEdgeNorm(EdgeNorm):
@@ -56,8 +77,9 @@ class ByLayerLogEdgeNorm(EdgeNorm):
     bisect ablation experiment (taking epsilon as the smallest edge that was not ablated).
     """
 
-    def __init__(self, eps_by_layer: dict[str, float]):
+    def __init__(self, eps_by_layer: dict[str, float], threshold: Optional[float] = None):
         self.eps_by_layer = eps_by_layer
+        self.threshold = threshold
 
     @staticmethod
     def _get_minimum_edge(
@@ -72,7 +94,7 @@ class ByLayerLogEdgeNorm(EdgeNorm):
     @classmethod
     def from_bisect_results(
         cls, ablation_result_path, results: RibBuildResults
-    ) -> tuple[float, "ByLayerLogEdgeNorm"]:
+    ) -> "ByLayerLogEdgeNorm":
         with open(ablation_result_path) as f:
             abl_result = json.load(f)
         assert abl_result["config"]["ablation_type"] == "edge"
@@ -88,7 +110,12 @@ class ByLayerLogEdgeNorm(EdgeNorm):
             nl: ByLayerLogEdgeNorm._get_minimum_edge(edge.E_hat, edge_masks[nl], ignore0=ignore0)
             for nl, edge in edges_by_layer.items()
         }
-        return threshold, cls(eps_by_layer)
+        return cls(eps_by_layer, threshold)
+
+    @classmethod
+    def from_single_eps(cls, eps: float, results: RibBuildResults) -> "ByLayerLogEdgeNorm":
+        eps_by_layer = {edge.in_node_layer: eps for edge in results.edges}
+        return cls(eps_by_layer)
 
     def __call__(self, E: EdgeTensor, node_layer: str) -> EdgeTensor:
         eps = self.eps_by_layer[node_layer]
@@ -177,6 +204,7 @@ class GraphClustering:
         node_layers: Optional[list[str]] = None,
         gamma: float = 1.0,
         leiden_iterations: int = 10,
+        seed: Optional[int] = None,
     ):
         """
         Create a GraphClustering object from a RibBuildResults object.
@@ -192,7 +220,16 @@ class GraphClustering:
             leiden_iterations: Number of iterations to run the Leiden algorithm. Networkit uses 3
                 by default, it's pretty cheap to go higher. Unclear if there are actual benifits to
                 doing so, but it shouldn't hurt.
+            seed: The seed to use for the Leiden algorithm. If None, will use a random seed.
         """
+
+        self.seed: Optional[int]
+        if seed is not None:
+            nk.engineering.setSeed(seed, useThreadId=True)
+            self.seed = seed
+        else:
+            logger.warning("No seed set. Will use a random seed.")
+            self.seed = None
         self.results = results
         self.edge_norm = edge_norm or IdentityEdgeNorm()
         self.node_layers = node_layers or results.config.node_layers
@@ -368,7 +405,7 @@ class GraphClustering:
 
         return arr
 
-    def paino_plot(self, clusters: ClusterListLike = "nonsingleton", ax=None):
+    def piano_plot(self, clusters: ClusterListLike = "nonsingleton", ax=None):
         """
         Makes a 'paino plot' vizualizing the clusters in the RIB graph.
 
@@ -403,3 +440,51 @@ class GraphClustering:
         ax.matshow(arr.T, cmap=cmap, origin="lower", norm=norm, aspect="auto")
         ax.set_xlabel("Node layer")
         ax.set_ylabel("RIB index")
+
+
+def sort_clusters(clusters: list[int], sorting: Literal["cluster", "clustered_rib"]) -> list[int]:
+    """Sorts nodes in a layer based on the RIB index, and the cluster they are in.
+
+    Supports two sorting methods:
+        * "cluster": Sorts by cluster.
+        * "clustered_rib": Sorts by RIB index, but clusters are kept together.
+
+    Cluster 0 is treated as a special case and sorted last.
+
+    Args:
+        clusters: A list of cluster ids, one for each node.
+        sorting: The method to use for sorting. One of "rib", "cluster", or "clustered_rib".
+
+    Returns:
+        positions: For each node, the position it should be in the graph.
+    """
+    # Clusters: cluster of each node (clusters in nodes-order)
+    # Positions: position of each node (positions in nodes-order)
+    # Ordering [used in sort_clusters only]: node at each position (nodes in position-order)
+    n_nodes = len(clusters)
+    if sorting == "cluster":
+        ordering = sorted(range(n_nodes), key=lambda x: clusters[x] if clusters[x] != 0 else np.inf)
+        positions = [0] * n_nodes
+        for pos, rib_idx in enumerate(ordering):
+            positions[rib_idx] = pos
+        return positions
+    elif sorting == "clustered_rib":
+        ordering, seen_clusters = [], set()
+        for rib_idx in range(n_nodes):
+            cluster = clusters[rib_idx]
+            if cluster == 0:
+                # Don't keep the "0" cluster together (would just put it to the front)
+                ordering.append(rib_idx)
+            elif cluster not in seen_clusters:
+                seen_clusters.add(cluster)
+                rib_indices_in_cluster = [i for i, c in enumerate(clusters) if c == cluster]
+                ordering.extend(sorted(rib_indices_in_cluster))
+        assert len(ordering) == n_nodes, "Ordering does not contain all RIB indices"
+        assert len(ordering) == len(set(ordering)), "Ordering contains some duplicate RIB indices"
+        positions = [0] * n_nodes
+        for pos, rib_idx in enumerate(ordering):
+            positions[rib_idx] = pos
+        assert all([isinstance(p, int) for p in positions])  # for mypy
+        return positions
+    else:
+        raise ValueError(f"Unknown sorting method: {sorting}")

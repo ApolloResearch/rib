@@ -1,0 +1,18 @@
+exp_name: modular_arithmetic_rib_seed2
+ablation_type: edge
+rib_results_path: /mnt/ssd-interp/stefan/rib/rib_scripts/rib_build/out/modular_arithmetic_rib_seed2_rib_graph.pt
+schedule:
+  schedule_type: bisect
+  score_target_difference: 0.001 #accuracy
+dataset:
+  dataset_type: modular_arithmetic
+  return_set: train
+ablation_node_layers:
+  - ln1.0
+  - ln2.0
+  - unembed
+  - output
+batch_size: 99999
+dtype: float32
+eval_type: accuracy
+seed: 0

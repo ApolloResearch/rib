@@ -1,14 +1,12 @@
-exp_name: modular_arithmetic_neuron
+exp_name: modular_arithmetic_rib_seed2
 seed: 0
 # Model
 tlens_pretrained: null
-tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-# Seed0 models: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/
+tlens_model_path: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/seed2-lr-0.001_bs-10000_norm-None_2023-12-06_14-50-13/model_epoch_60000.pt
+# Identical models: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/
 # lr-0.001_bs-10000_norm-None_2023-12-05_20-26-02/model_epoch_60000.pt
 # lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-# and rib_scripts/train_modular_arithmetic/sample_checkpoints/
-# lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-# Other available models: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/
+# Other available models: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/seed1-lr-0.001_bs-10000_norm-None_2023-12-06_14-49-21/model_epoch_60000.pt
 # seed1-lr-0.001_bs-10000_norm-None_2023-12-06_14-49-21/model_epoch_60000.pt
 # seed2-lr-0.001_bs-10000_norm-None_2023-12-06_14-50-13/model_epoch_60000.pt
 # seed3-lr-0.001_bs-10000_norm-None_2023-12-06_14-50-40/model_epoch_60000.pt
@@ -27,7 +25,8 @@ node_layers:
   - ln1.0
   - ln2.0
   - unembed
-rotate_final_node_layer: true
+  - output
+rotate_final_node_layer: false
 # Hardware
 gram_batch_size: null
 batch_size: 99999
@@ -43,8 +42,8 @@ gram_matrices_path: null
 # Basis matrices
 calculate_Cs: true
 interaction_matrices_path: null
-basis_formula: neuron
-center: false
+basis_formula: jacobian
+center: true
 naive_gradient_flow: false
 n_stochastic_sources_basis_pos: null
 n_stochastic_sources_basis_hidden: null

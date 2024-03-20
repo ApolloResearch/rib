@@ -90,7 +90,7 @@ def _prepare_edges_for_plotting(
     return out_edges
 
 
-def _adjust_plot(ax, n_layers, max_layer_height, buffer_size=0.2):
+def _adjust_plot(ax, n_layers, max_layer_height, buffer_size=1):
     """Adjust the plot to remove axes etc."""
     # Adjust space between ends of plot and nodes
     ax.set_ylim(-buffer_size, max_layer_height - 1 + buffer_size)
@@ -223,6 +223,7 @@ def plot_rib_graph(
     colors: Optional[list[str]] = None,
     show_node_labels: bool = True,
     node_labels: Optional[list[list[str]]] = None,
+    adjustable_spacing_per_layer: bool = True,
 ) -> None:
     """Plot the a graph for the given edges (not necessarily a RIB graph).
 
@@ -250,6 +251,9 @@ def plot_rib_graph(
             the tab10 colormap is used. Overwrites cluster colors.
         show_node_labels (bool): Whether to show the node labels. Defaults to True.
         node_labels: The labels for each node in the graph. If None, then use RIB dim indices.
+        adjustable_spacing_per_layer (bool): Whether to increase spacing in layers that have less
+            nodes. Defaults to True. False is useful if you want to highlight that some layers
+            are larger, or partial 1:1 connections between layers of different sizes.
     """
     # Process args
     layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
@@ -286,9 +290,9 @@ def plot_rib_graph(
         ax = plt.subplots(1, 1, figsize=(width, height), constrained_layout=True)[1]
         logger.info(f"Using figsize {width}x{height}")
     fig = ax.get_figure()
-    bbox = ax.get_position()  # Get the bounding box of the axes in figure coordinates
+    label_box = ax.get_position()  # Get the bounding box of the axes in figure coordinates
     _, fig_height = fig.get_size_inches()  # type: ignore
-    axes_height_inches = fig_height * bbox.height
+    axes_height_inches = fig_height * label_box.height
     max_edge_weight = max([edge.max().item() for edge in processed_edges])
     line_width_factor = line_width_factor or axes_height_inches / max_edge_weight
     logger.info(f"Using line width factor {line_width_factor}")
@@ -302,23 +306,27 @@ def plot_rib_graph(
             assert processed_edges[i].shape[1] == n_nodes, "Consistency check failed"
         # Clusters can contain the -1 entries from arr we get len(clusters) > n_nodes. Thus we
         # slice the clusters to the correct length. here.
-        clusters = cluster_list[i][:n_nodes] if cluster_list is not None else None
+        clusters = (
+            None if cluster_list is None or len(cluster_list) <= i else cluster_list[i][:n_nodes]
+        )
         # Derive positions based on clusters:
         #   Clusters: cluster of each node (clusters in nodes-order)
         #   Positions: position of each node (positions in nodes-order)
         #   Ordering [used in sort_clusters only]: node at each position (nodes in position-order)
         if sorting == "rib":
             positions = list(range(n_nodes))
+        elif clusters is None:
+            logger.warning("No clusters provided, falling back to 'rib' sorting")
+            positions = list(range(n_nodes))
         else:
-            assert clusters is not None, "Clusters must be provided for sorting other than 'rib'"
             positions = sort_clusters(clusters, sorting)
         # Derive colors based on clusters or layers
         if clusters is not None and colors is None:
             colormap = ["#bbbbbb"] + colorcet.glasbey
             color = lambda j: colormap[clusters[j] % 256]
         else:
-            colors = colors or [mpl.colors.rgb2hex(mpl.cm.tab10(i)) for i in range(10)]  # type: ignore
-            color = lambda _: colors[i % len(colors)]
+            node_colors = colors or [mpl.colors.rgb2hex(mpl.cm.tab10(i)) for i in range(10)]  # type: ignore
+            color = lambda _: node_colors[i % len(node_colors)]
         # Add nodes to the graph
         for j in range(nodes_per_layer[i]):
             graph.add_node(
@@ -333,23 +341,51 @@ def plot_rib_graph(
     # Processed edges already have edges beyond nodes_per_layer limit removed.
     _add_edges_to_graph(graph, processed_edges)
 
+    if not adjustable_spacing_per_layer:
+        spacing_per_layer = [1.0] * n_layers
+    else:
+        spacing_per_layer = []
+        for i in range(n_layers):
+            spacing_per_layer.append(max_layer_height / nodes_per_layer[i])
     pos_dict = {
-        node: (data["layer_idx"], data["position"]) for node, data in graph.nodes(data=True)
+        node: (data["layer_idx"], spacing_per_layer[data["layer_idx"]] * data["position"])
+        for node, data in graph.nodes(data=True)
     }
 
+    if show_node_labels and node_labels is not None:
+        node_style = {
+            "edgecolors": "grey",
+            "node_size": 3,
+            "alpha": 1,
+            "ax": ax,
+            "node_color": "grey",
+        }
+    else:
+        node_style = {
+            "edgecolors": "tab:gray",
+            "node_size": 50,
+            "alpha": 0.6,
+            "ax": ax,
+            "node_color": [d[1] for d in graph.nodes.data("color")],
+        }
+
     # Draw nodes:
-    options = {"edgecolors": "tab:gray", "node_size": 50, "alpha": 0.6, "ax": ax}
     nx.draw_networkx_nodes(
         graph,
         pos_dict,
         nodelist=graph.nodes,
-        node_color=[d[1] for d in graph.nodes.data("color")],
-        **options,
+        **node_style,
     )
 
     # Draw layer labels
     ax.set_xticks(range(n_layers))
     ax.set_xticklabels(layer_names)
+
+    edge_color: Union[str, list[str]]
+    if show_node_labels and node_labels is not None:
+        edge_color = "grey"
+    else:
+        edge_color = [color for _, _, color in graph.edges(data="color")]
 
     # Draw edges
     nx.draw_networkx_edges(
@@ -358,26 +394,46 @@ def plot_rib_graph(
         edgelist=[(u, v) for u, v in graph.edges],
         width=[line_width_factor * weight for _, _, weight in graph.edges(data="weight")],
         alpha=1,
-        edge_color=[color for _, _, color in graph.edges(data="color")],
+        edge_color=edge_color,
         ax=ax,
     )
 
     # Draw labels
     if show_node_labels:
         for node, data in graph.nodes(data=True):
-            label = f"D{data['rib_idx']}"
-            if data["cluster"] is not None:
+            label = f"F{data['rib_idx']}"
+            if data["cluster"] is not None and colors is not None:
                 label += f" C{data['cluster']}"
+
             if node_labels is not None:
-                label += "\n" + node_labels[data["layer_idx"]][data["rib_idx"]].replace("|", "\n")
+                label_lines = node_labels[data["layer_idx"]][data["rib_idx"]].split("|")
+                label += "\n" + "\n".join(label_lines[:2])
+
+            if show_node_labels and node_labels is not None:
+                font_color = "black"
+                label_box = {
+                    "ec": "k",
+                    "fc": data["color"],
+                    "alpha": 0.10,
+                    "boxstyle": "round,pad=0.2",
+                }
+            else:
+                font_color = data["color"]
+                label_box = {
+                    "ec": "k",
+                    "fc": "white",
+                    "alpha": 0.30,
+                    "boxstyle": "round,pad=0.2",
+                }
+
             nx.draw_networkx_labels(
                 graph,
                 pos_dict,
                 {node: label},
                 font_size=6,
                 ax=ax,
-                bbox={"ec": "k", "fc": "white", "alpha": 0.30, "boxstyle": "round,pad=0.2"},
-                font_color=data["color"],
+                font_color=font_color,
+                bbox=label_box,
             )
 
     if cluster_list is not None:
@@ -387,7 +443,7 @@ def plot_rib_graph(
 
     if title is not None:
         fig.suptitle(title)  # type: ignore
-    _adjust_plot(ax, n_layers, max_layer_height)
+    _adjust_plot(ax, n_layers, max_layer_height, buffer_size=0.5 * max(spacing_per_layer))
     if out_file is not None:
         plt.savefig(out_file, dpi=600)
 
@@ -422,7 +478,7 @@ def plot_graph_by_layer(
     assert blocks_in_results, "No blocks found in the results"
     blocks = range(min(blocks_in_results), max(blocks_in_results) + 1)  # type: ignore
     # Make figure for all blocks
-    fig, axs = plt.subplots(len(blocks), 1, figsize=(8, len(blocks) * 6))
+    fig, axs = plt.subplots(len(blocks), 1, figsize=(8, len(blocks) * 6), constrained_layout=True)
     axs = axs if len(blocks) > 1 else [axs]
     # Make individual plots for each block
     for ax, block in tqdm(zip(axs, blocks, strict=True), total=len(blocks), desc="Plotting Blocks"):

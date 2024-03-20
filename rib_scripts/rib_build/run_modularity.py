@@ -39,7 +39,7 @@ def plot_modular_graph(
     by_layer: bool = False,
     line_width_factor: Optional[float] = None,
     node_labels: Optional[list[list[str]]] = None,
-    nodes_per_layer: int = 130,
+    nodes_per_layer: int | list[int] = 130,
     plot_edge_norm: Optional[EdgeNorm] = None,
     hide_const_edges: bool = False,
     sorting: Literal["rib", "cluster", "clustered_rib"] = "cluster",
@@ -65,8 +65,9 @@ def plot_modular_graph(
             node_labels=node_labels,
         )
     else:
+        s = slice(None, -1) if "output" in graph.results.config.node_layers else slice(None)
         plot_rib_graph(
-            edges=graph.results.edges,
+            edges=graph.results.edges[s],
             cluster_list=clusters_intlist,
             sorting=sorting,
             edge_norm=plot_edge_norm or graph.edge_norm,
@@ -90,7 +91,7 @@ def run_modularity(
     ablation_path: Optional[Union[str, Path]] = None,
     lognorm_eps: Optional[float] = None,
     labels_file: Optional[Union[str, Path]] = None,
-    nodes_per_layer: int = 130,
+    nodes_per_layer: int | list[int] = 130,
     hide_const_edges: bool = True,
     line_width_factor: Optional[float] = None,
     plot_norm: Literal["sqrt", "log", "graph"] = "graph",
@@ -160,12 +161,18 @@ def run_modularity(
     if seed is None:
         seed = np.random.randint(0, 2**32)
         logger.info(f"Setting clustering seed to {seed}")
-    graph = GraphClustering(results, edge_norm, gamma=gamma, seed=seed)
+    contains_output = "output" == results.config.node_layers[-1]
+    non_output_node_layers = (
+        results.config.node_layers[:-1] if contains_output else results.config.node_layers
+    )
+    graph = GraphClustering(
+        results, edge_norm, gamma=gamma, seed=seed, node_layers=non_output_node_layers
+    )
     logger.info(f"Finished clustering.")
 
     if plot_piano:
         graph.piano_plot()
-        piano_path = results_path.parent / f"{name_prefix}-gamma{gamma}-paino.png"
+        piano_path = results_path.parent / f"{name_prefix}-gamma{gamma}-piano.png"
         plt.suptitle(
             f"{results.exp_name}\nRIB cluster assignment for threshold={threshold}, gamma={gamma}"
         )

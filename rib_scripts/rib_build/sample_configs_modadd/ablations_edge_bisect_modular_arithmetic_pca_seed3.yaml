@@ -6,7 +6,7 @@ schedule:
   score_target_difference: 0.001 #accuracy
 dataset:
   dataset_type: modular_arithmetic
-  return_set: train
+  return_set: test
 ablation_node_layers:
   - ln1.0
   - ln2.0

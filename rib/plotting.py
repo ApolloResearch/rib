@@ -224,6 +224,7 @@ def plot_rib_graph(
     show_node_labels: bool = True,
     node_labels: Optional[list[list[str]]] = None,
     adjustable_spacing_per_layer: bool = True,
+    hide_singleton_nodes: bool = False,
 ) -> None:
     """Plot the a graph for the given edges (not necessarily a RIB graph).
 
@@ -254,6 +255,9 @@ def plot_rib_graph(
         adjustable_spacing_per_layer (bool): Whether to increase spacing in layers that have less
             nodes. Defaults to True. False is useful if you want to highlight that some layers
             are larger, or partial 1:1 connections between layers of different sizes.
+        hide_singleton_nodes: Whether to hide singleton nodes (nodes that are not in any cluster)
+            in the graph plots. This usually corresponds to nodes whose edges all can be ablated
+            within the threshold. Default is False.
     """
     # Process args
     layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
@@ -339,6 +343,16 @@ def plot_rib_graph(
             )
 
     # Processed edges already have edges beyond nodes_per_layer limit removed.
+    if hide_singleton_nodes:
+        # Set all processed_edges to zero if the node is a singleton node
+        for l in range(n_layers - 1):
+            for i in range(nodes_per_layer[l]):
+                for j in range(nodes_per_layer[l + 1]):
+                    lower_node = graph.nodes[(l, i)]
+                    upper_node = graph.nodes[(l + 1, j)]
+                    if lower_node["cluster"] == 0 or upper_node["cluster"] == 0:
+                        processed_edges[l][j, i] = 0
+
     _add_edges_to_graph(graph, processed_edges)
 
     if not adjustable_spacing_per_layer:
@@ -370,10 +384,17 @@ def plot_rib_graph(
         }
 
     # Draw nodes:
+    if hide_singleton_nodes:
+        non_singleton_nodes = [
+            node for node, data in graph.nodes(data=True) if data["cluster"] != 0
+        ]
+    else:
+        non_singleton_nodes = graph.nodes
+
     nx.draw_networkx_nodes(
         graph,
         pos_dict,
-        nodelist=graph.nodes,
+        nodelist=non_singleton_nodes,
         **node_style,
     )
 
@@ -401,13 +422,18 @@ def plot_rib_graph(
     # Draw labels
     if show_node_labels:
         for node, data in graph.nodes(data=True):
-            label = f"F{data['rib_idx']}"
+            if hide_singleton_nodes and data["cluster"] == 0:
+                continue
+            label = rf"$\hat f_{{ {data['rib_idx']} }}$"
             if data["cluster"] is not None and colors is not None:
                 label += f" C{data['cluster']}"
 
             if node_labels is not None:
                 label_lines = node_labels[data["layer_idx"]][data["rib_idx"]].split("|")
-                label += "\n" + "\n".join(label_lines[:2])
+                label_lines = [l for l in label_lines if l[:2] != "0%"]
+                len_label = max(len(l) for l in label_lines[:2])
+                spacing = "        "
+                label_lines[0] = spacing + label_lines[0]
 
             if show_node_labels and node_labels is not None:
                 font_color = "black"
@@ -425,15 +451,24 @@ def plot_rib_graph(
                     "alpha": 0.30,
                     "boxstyle": "round,pad=0.2",
                 }
-
+            # Node interp
             nx.draw_networkx_labels(
                 graph,
                 pos_dict,
-                {node: label},
+                {node: f"\n{spacing}".join(label_lines[:2])},
                 font_size=6,
                 ax=ax,
                 font_color=font_color,
                 bbox=label_box,
+            )
+            # Node index
+            nx.draw_networkx_labels(
+                graph,
+                pos_dict,
+                {node: label + int(len_label * 1.75) * " "},
+                font_size=6,
+                ax=ax,
+                font_color=font_color,
             )
 
     if cluster_list is not None:

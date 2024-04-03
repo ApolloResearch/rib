@@ -44,6 +44,8 @@ def plot_modular_graph(
     hide_const_edges: bool = False,
     sorting: Literal["rib", "cluster", "clustered_rib"] = "cluster",
     figsize: Optional[tuple[int, int]] = None,
+    hide_output_layer: bool = True,
+    hide_singleton_nodes: bool = False,
 ):
     clusters_nodelist = graph._get_clusterlist(clusters)
     clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
@@ -63,9 +65,14 @@ def plot_modular_graph(
             colors=None,
             show_node_labels=True,
             node_labels=node_labels,
+            hide_singleton_nodes=hide_singleton_nodes,
         )
     else:
-        s = slice(None, -1) if "output" in graph.results.config.node_layers else slice(None)
+        s = (
+            slice(None, -1)
+            if "output" in graph.results.config.node_layers and hide_output_layer
+            else slice(None)
+        )
         plot_rib_graph(
             edges=graph.results.edges[s],
             cluster_list=clusters_intlist,
@@ -79,6 +86,7 @@ def plot_modular_graph(
             colors=None,
             show_node_labels=True,
             node_labels=node_labels,
+            hide_singleton_nodes=hide_singleton_nodes,
             ax=plt.subplots(figsize=figsize, constrained_layout=True)[1]
             if figsize is not None
             else None,
@@ -100,6 +108,8 @@ def run_modularity(
     plot_piano: bool = True,
     plot_graph: bool = True,
     figsize: Optional[tuple[int, int]] = None,
+    hide_output_layer: bool = True,
+    hide_singleton_nodes: bool = False,
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -132,6 +142,12 @@ def run_modularity(
             and printed.
         plot_piano: Whether to plot a piano plot, giving an overview of modular structure found.
         plot_graph: Whether to plot the full RIB graph with nodes colored and sorted by module.
+        figsize: The size of the figure to use for the graph plots. If not provided, will be
+            determined automatically.
+        hide_output_layer: Whether to hide the output layer in the graph plots. Default is True.
+        hide_singleton_nodes: Whether to hide singleton nodes (nodes that are not in any cluster)
+            in the graph plots. This usually corresponds to nodes whose edges all can be ablated
+            within the threshold. Default is False.
     """
     if plot_norm == "log":
         assert ablation_path is not None, "Must provide ablation path for log norm"
@@ -195,7 +211,9 @@ def run_modularity(
         else:
             plot_edge_norm = get_norm(plot_norm)
 
-        rib_graph_path = results_path.parent / f"{name_prefix}-gamma{gamma}-graph.png"
+        rib_graph_path = (
+            results_path.parent / f"{name_prefix}-gamma{gamma}-sorting{sorting}-graph.png"
+        )
         plot_modular_graph(
             graph=graph,
             out_file=rib_graph_path,
@@ -206,6 +224,8 @@ def run_modularity(
             hide_const_edges=hide_const_edges,
             sorting=sorting,
             figsize=figsize,
+            hide_output_layer=hide_output_layer,
+            hide_singleton_nodes=hide_singleton_nodes,
         )
         logger.info(f"Saved modular graph to {rib_graph_path.absolute()}")
 

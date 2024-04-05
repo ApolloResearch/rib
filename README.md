@@ -1,7 +1,6 @@
 # rib
 
-This repository contains the core functionality and rib_scripts related to Rotation into the
-Interaction Basis (RIB).
+This repository contains the core functionality related to Local Interaction Basis (LIB) method (previously named RIB).
 
 For a formal introduction to the method, see
 [this writeup](https://www.overleaf.com/project/65534543ea5ce85765a0a6f3).

@@ -196,6 +196,7 @@ class GraphClustering:
     node_to_idx: dict[Node, int]
     clusters: list[NodeCluster]
     _nk_partition: nk.structures.Partition
+    modularity_score: float
 
     def __init__(
         self,
@@ -250,13 +251,14 @@ class GraphClustering:
         ]
         self.node_to_idx = {node: idx for idx, node in enumerate(self.nodes)}
         self._make_graph()
-        self._run_leiden()
+        self.modularity_score = self._run_leiden()
         self._make_clusters()
 
     def update_gamma(self, gamma: float):
         """Update the resolution parameter and re-run Leiden. Faster than creating a new Graph"""
         self.gamma = gamma
-        self._run_leiden()
+        logger.info(f"Running Leiden, gamma={gamma:.3f}")
+        self.modularity_score = self._run_leiden()
         self._make_clusters()
 
     def _make_graph(self):
@@ -287,6 +289,9 @@ class GraphClustering:
         )
         algo.run()
         self._nk_partition = algo.getPartition()
+        # Compute the modularity score of the obtained partition
+        Q = nk.community.Modularity().getQuality(self._nk_partition, self.G)
+        return Q
 
     def _make_clusters(self):
         assert self._nk_partition is not None

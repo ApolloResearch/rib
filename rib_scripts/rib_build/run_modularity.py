@@ -80,7 +80,8 @@ def plot_modular_graph(
             edge_norm=plot_edge_norm or graph.edge_norm,
             line_width_factor=line_width_factor,
             out_file=out_file,
-            title=graph.results.exp_name + f", gamma={graph.gamma}, seed={graph.seed}",
+            title=graph.results.exp_name
+            + f", gamma={graph.gamma}, seed={graph.seed:.3f}, Q={graph.modularity_score:.3f}",
             max_nodes_per_layer=nodes_per_layer,
             hide_const_edges=hide_const_edges,
             colors=None,
@@ -110,6 +111,7 @@ def run_modularity(
     figsize: Optional[tuple[int, int]] = None,
     hide_output_layer: bool = True,
     hide_singleton_nodes: bool = False,
+    target_n_clusters: Optional[int] = None,
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -148,6 +150,8 @@ def run_modularity(
         hide_singleton_nodes: Whether to hide singleton nodes (nodes that are not in any cluster)
             in the graph plots. This usually corresponds to nodes whose edges all can be ablated
             within the threshold. Default is False.
+        target_n_clusters: The target number of clusters to use for clustering. If provided, will
+        re-run Leiden until this number of clusters is reached.
     """
     if plot_norm == "log":
         assert ablation_path is not None, "Must provide ablation path for log norm"
@@ -184,6 +188,20 @@ def run_modularity(
     graph = GraphClustering(
         results, edge_norm, gamma=gamma, seed=seed, node_layers=non_output_node_layers
     )
+    if target_n_clusters is not None:
+        logger.info(f"Clustering with target_n_clusters={target_n_clusters}")
+        graph_samples: list[tuple[float, GraphClustering]] = []
+        while len(graph_samples) < 10:
+            gamma_sample = np.random.lognormal(mean=np.log(gamma), sigma=1)
+            graph.update_gamma(gamma_sample)
+            modularity_score = graph.modularity_score
+            clusters_nodelist = graph._get_clusterlist("nonsingleton")
+            clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
+            n_unique_clusters = len(set([c for layer in clusters_intlist for c in layer if c > 0]))
+            if n_unique_clusters == target_n_clusters:
+                graph_samples.append((modularity_score, graph))
+        # Choose the best result
+        graph = max(graph_samples, key=lambda x: x[0])[1]
     logger.info(f"Finished clustering.")
 
     if plot_piano:
@@ -211,8 +229,12 @@ def run_modularity(
         else:
             plot_edge_norm = get_norm(plot_norm)
 
+        clusters_nodelist = graph._get_clusterlist("nonsingleton")
+        clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
+        n_unique_clusters = len(set([c for layer in clusters_intlist for c in layer if c > 0]))
+        suffix = f"-nclusters{n_unique_clusters}" if target_n_clusters is not None else ""
         rib_graph_path = (
-            results_path.parent / f"{name_prefix}-gamma{gamma}-sorting{sorting}-graph.png"
+            results_path.parent / f"{name_prefix}-gamma{gamma}-sorting{sorting}{suffix}-graph.png"
         )
         plot_modular_graph(
             graph=graph,

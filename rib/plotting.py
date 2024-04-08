@@ -320,7 +320,7 @@ def plot_rib_graph(
         if sorting == "rib":
             positions = list(range(n_nodes))
         elif clusters is None:
-            logger.warning("No clusters provided, falling back to 'rib' sorting")
+            logger.warning(f"No clusters provided for layer {i} falling back to 'rib' sorting")
             positions = list(range(n_nodes))
         else:
             positions = sort_clusters(clusters, sorting)

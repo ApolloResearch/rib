@@ -233,6 +233,8 @@ def run_modularity(
         clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
         n_unique_clusters = len(set([c for layer in clusters_intlist for c in layer if c > 0]))
         suffix = f"-nclusters{n_unique_clusters}" if target_n_clusters is not None else ""
+        if hide_singleton_nodes:
+            suffix += "-hidesingletons"
         rib_graph_path = (
             results_path.parent / f"{name_prefix}-gamma{gamma}-sorting{sorting}{suffix}-graph.png"
         )

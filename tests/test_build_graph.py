@@ -474,11 +474,12 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
         ("jacobian", "squared"),
     ],
 )
-def test_modular_mlp_rotate_final_layer_invariance(
-    basis_formula, edge_formula, rtol=1e-12, atol=1e-12
-):
+def test_modular_mlp_rotate_final_layer_invariance(basis_formula, edge_formula):
     """Test that the non-final edges are the same for ModularMLP whether or not we rotate the final
     layer."""
+    # Cuda can handle smaller atol
+    rtol = 1e-7 if not torch.cuda.is_available() else 1e-12
+    atol = 1e-7 if not torch.cuda.is_available() else 1e-12
     config = get_modular_mlp_config(
         {
             "basis_formula": basis_formula,

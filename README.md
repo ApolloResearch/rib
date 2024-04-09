@@ -56,7 +56,7 @@ results file generated from `rib_scripts/rib_build/run_lm_rib_build.py`.
 
 There are four basis formulas and two edges formulas implemented. Sensible combinations are:
 * `jacobian` basis with `squared` edges: Most up-to-date and possibly correct version
-* `(1-0)*alpha` basis with `squared` edges: Used for OP report, but the Lambdas are technically
+* `(1-0)*alpha` basis with `squared` edges: Lambdas are technically
   wrong. Can and does produce stray edges.
 * `(1-alpha)^2` basis with `functional` edges: Old functional-based approach. Self-consistent (and
   working Lambdas) but we know counterexampes where this method would give wrong results.

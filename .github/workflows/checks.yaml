@@ -29,9 +29,10 @@ jobs:
         python-version: "3.10"
     - name: Install dependencies
       run: |
+        sudo apt-get update
+        sudo apt-get install -y libopenmpi-dev
         python -m pip install --upgrade pip
-        pip install ".[dev]" --no-deps
-        pip install -r requirements-cpu.txt
+        pip install ".[dev]"
     - name: Check with Black
       run: |
         black --check --diff --line-length 100 rib rib_scripts tests

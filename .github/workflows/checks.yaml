@@ -48,4 +48,3 @@ jobs:
     - name: Run tests # Can only run fast tests on cpu runner
       run: |
         pytest --durations=10
-        ./tests/run_distributed_tests.sh

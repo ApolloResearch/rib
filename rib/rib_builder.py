@@ -474,7 +474,7 @@ def _verify_compatible_configs(
 
 def load_partial_results(
     config: RibBuildConfig,
-    device: torch.device,
+    device: Union[torch.device, str],
     path: Union[str, Path],
     return_interaction_rotations: bool = True,
 ) -> tuple[
@@ -866,8 +866,11 @@ def rib_build(
         )
         calc_C_time = (time.time() - c_start_time) / 60
         logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
-        logger.info("Max memory allocated for Cs: %.2f GB", torch.cuda.max_memory_allocated() / 1e9)
-        torch.cuda.reset_peak_memory_stats()
+        if "cuda" in device:
+            logger.info(
+                "Max memory allocated for Cs: %.2f GB", torch.cuda.max_memory_allocated() / 1e9
+            )
+            torch.cuda.reset_peak_memory_stats()
     elif config.calculate_Cs and config.interaction_matrices_path is not None:
         logger.info("Skipping Cs calculation, loading pre-saved Cs")
         mean_vectors, gram_matrices, interaction_rotations = load_partial_results(

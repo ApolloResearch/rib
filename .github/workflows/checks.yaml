@@ -30,7 +30,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install ".[dev]"
+        pip install ".[dev]" --no-deps
+        pip install -r requirements-cpu.txt
     - name: Check with Black
       run: |
         black --check --diff --line-length 100 rib rib_scripts tests

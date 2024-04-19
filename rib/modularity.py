@@ -385,10 +385,10 @@ class GraphClustering:
 
     def _cluster_array(self, cluster_list: list[NodeCluster]) -> np.ndarray:
         """
-        Helper for paino plots.
+        Helper for piano plots.
 
         Makes an array of size [len(self.node_layers), max_width] where each entry is:
-          * -1 if that RIB direction doesn't exist (the 'paino keys', representing ln1 in pythia)
+          * -1 if that RIB direction doesn't exist (the 'piano keys', representing ln1 in pythia)
           * 0 if the RIB direction exists, but isn't in any of the designated clusters
           * 1...n representing the different clusters
 
@@ -412,7 +412,7 @@ class GraphClustering:
 
     def piano_plot(self, clusters: ClusterListLike = "nonsingleton", ax=None):
         """
-        Makes a 'paino plot' vizualizing the clusters in the RIB graph.
+        Makes a 'piano plot' vizualizing the clusters in the RIB graph.
 
         This is a compact representation where each column of the plot represents a RIB layer,
         and each pixel represents a RIB direction. The color of the pixel represents the cluster

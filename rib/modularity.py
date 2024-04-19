@@ -458,7 +458,7 @@ def sort_clusters(clusters: list[int], sorting: Literal["cluster", "clustered_ri
 
     Args:
         clusters: A list of cluster ids, one for each node.
-        sorting: The method to use for sorting. One of "rib", "cluster", or "clustered_rib".
+        sorting: The method to use for sorting. One of "cluster", or "clustered_rib".
 
     Returns:
         positions: For each node, the position it should be in the graph.

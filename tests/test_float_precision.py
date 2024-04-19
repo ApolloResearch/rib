@@ -10,7 +10,7 @@ import yaml
 
 from rib.ablations import AblationConfig, load_bases_and_ablate
 from rib.log import logger
-from rib.rib_builder import RibBuildConfig, RibBuildResults, rib_build
+from rib.rib_builder import RibBuildResults, rib_build
 from tests.utils import get_pythia_config
 
 

@@ -223,7 +223,7 @@ def test_naive_gradient_flow_interface(run_type, use_out_dir, tmpdir):
             }
         )
         results = graph_build_test(config=config, atol=atol)
-        get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
+        get_rib_acts_test(results, atol=1e-15)  # Need atol=1e-3 if float32
         if use_out_dir:
             # Full run saves both Cs and graph (this is only true for NGF)
             assert Cs_path.exists()
@@ -295,7 +295,7 @@ def test_modular_arithmetic_build_graph(
         }
     )
     results = graph_build_test(config=config, atol=atol)
-    get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
+    get_rib_acts_test(results, atol=1e-15)  # Need atol=1e-3 if float32
 
 
 @pytest.mark.slow

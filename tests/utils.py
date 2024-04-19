@@ -36,6 +36,8 @@ def get_modular_arithmetic_config(*updates: dict) -> RibBuildConfig:
     basis_formula: (1-0)*alpha
     edge_formula: squared
     n_stochastic_sources_edges: null
+    integration_method: gauss-legendre
+    center: false
     """
     config_dict = deep_update(yaml.safe_load(config_str), *updates)
     return RibBuildConfig(**config_dict)
@@ -71,6 +73,8 @@ def get_pythia_config(*updates: dict) -> RibBuildConfig:
     eval_type: ce_loss
     out_dir: null
     basis_formula: (1-0)*alpha
+    integration_method: gauss-legendre
+    center: false
     """
     config_dict = deep_update(yaml.safe_load(config_str), *updates)
     return RibBuildConfig(**config_dict)
@@ -109,6 +113,8 @@ def get_tinystories_config(*updates: dict) -> RibBuildConfig:
     eval_type: ce_loss
     basis_formula: jacobian
     edge_formula: squared
+    integration_method: gauss-legendre
+    center: false
     """
     config_dict = deep_update(yaml.safe_load(config_str), *updates)
     return RibBuildConfig(**config_dict)
@@ -136,6 +142,8 @@ def get_mnist_config(*updates: dict) -> RibBuildConfig:
     out_dir: null
     basis_formula: (1-0)*alpha
     edge_formula: squared
+    integration_method: gauss-legendre
+    center: false
     """
     config_dict = deep_update(yaml.safe_load(config_str), *updates)
     return RibBuildConfig(**config_dict)
@@ -171,6 +179,8 @@ def get_modular_mlp_config(*updates: dict) -> RibBuildConfig:
     rotate_final_node_layer: false
     basis_formula: (1-0)*alpha
     edge_formula: squared
+    integration_method: gauss-legendre
+    center: false
     """
     config_dict = deep_update(yaml.safe_load(config_str), *updates)
     config = RibBuildConfig(**config_dict)

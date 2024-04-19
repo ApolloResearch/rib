@@ -2,10 +2,12 @@ from pathlib import Path
 
 from setuptools import find_packages, setup
 
-if Path("requirements.txt").exists():
-    requirements = Path("requirements.txt").read_text("utf-8").splitlines()
-else:
-    requirements = []
+
+def read_requirements(file_path):
+    if Path(file_path).exists():
+        return Path(file_path).read_text("utf-8").splitlines()
+    return []
+
 
 setup(
     name="rib",
@@ -16,18 +18,8 @@ setup(
     author_email="dan@apolloresearch.ai",
     url="https://github.com/ApolloResearch/rib",
     packages=find_packages(include=["rib", "rib.*", "rib_scripts", "rib_scripts.*"]),
-    install_requires=requirements,
-    extras_require={
-        "dev": [
-            "black==23.10.1",
-            "isort~=5.13.2",
-            "mypy~=1.8.0",
-            "pylint~=3.0.3",
-            "pytest~=7.4.4",
-            "types-PyYAML~=6.0.12.12",
-            "types-tqdm~=4.66.0.20240106",
-        ]
-    },
+    install_requires=read_requirements("requirements.txt"),
+    extras_require={"dev": read_requirements("requirements-dev.txt")},
     classifiers=[
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",

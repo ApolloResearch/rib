@@ -64,7 +64,7 @@ def adjust_logger_dist(dist_info: DistributedInfo):
         logger.setLevel(WARNING)
 
 
-def get_device_mpi(dist_info: DistributedInfo):
+def get_device_mpi(dist_info: DistributedInfo) -> str:
     if not torch.cuda.is_available():
         return "cpu"
     if not dist_info.is_parallelised:

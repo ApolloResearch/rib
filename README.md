@@ -1,10 +1,9 @@
 # rib
 
-This repository contains the core functionality and rib_scripts related to Rotation into the
-Interaction Basis (RIB).
+This repository contains the core functionality related to Local Interaction Basis (LIB) method.
+This method was previously named RIB; this code base has not been updated to the new name.
 
-For a formal introduction to the method, see
-[this writeup](https://www.overleaf.com/project/65534543ea5ce85765a0a6f3).
+This code accompanies the paper TODO.
 
 ## Installation
 
@@ -31,7 +30,7 @@ Supported rib_scripts:
 
 - Training an MLP (e.g. on MNIST or CIFAR): `rib_scripts/train_mlp/`
 - Training a transformer on modular arithmetic: `rib_scripts/train_modular_arithmetic/`
-- Ablating vectors from the a basis (e.g. RIB or orthogonal basis): `rib_scripts/ablations/`
+- Ablating vectors from a RIB/SVD basis, or edges from a graph: `rib_scripts/ablations/`
 - Building a RIB graph (calculating the basis and the edges): `rib_scripts/rib_build/`
 
 The ablations and rib_build scripts work for both MLPs and transformers.
@@ -49,7 +48,7 @@ follows:
 - (If transformer) Map the LM to a SequentialTransformer model, which allows us to build the graph
 around arbitrary sections of the LM.
 - Fold in the model's biases into the weights. This is required for our integrated gradient formalism.
-- Run the RIB algorithm, outlined in the Code Implementation section of [this writeup](https://www.overleaf.com/project/65534543ea5ce85765a0a6f3).
+- Run the RIB algorithm, finding a basis for each layer and computing the interaction edges between them.
 - Plot the RIB graph using `rib_scripts/rib_build/plot_graph.py`, passing in the path to the
 results file generated from `rib_scripts/rib_build/run_lm_rib_build.py`.
 
@@ -57,7 +56,7 @@ results file generated from `rib_scripts/rib_build/run_lm_rib_build.py`.
 
 There are four basis formulas and two edges formulas implemented. Sensible combinations are:
 * `jacobian` basis with `squared` edges: Most up-to-date and possibly correct version
-* `(1-0)*alpha` basis with `squared` edges: Used for OP report, but the Lambdas are technically
+* `(1-0)*alpha` basis with `squared` edges: Lambdas are technically
   wrong. Can and does produce stray edges.
 * `(1-alpha)^2` basis with `functional` edges: Old functional-based approach. Self-consistent (and
   working Lambdas) but we know counterexampes where this method would give wrong results.
@@ -98,3 +97,13 @@ Suggested extensions and settings for VSCode are provided in `.vscode/`.
 A pre-commit hook is saved in the .pre-commit file. To use this hook, copy it to the `.git/hooks/`
 dir and make it executable
 (`cp .pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`).
+
+
+### Testing
+
+Tests are written using `pytest`. By default, only "fast" tests are run. This should be very fast
+on a gpu and tolerably fast on a cpu. To run all tests, use `pytest --runslow`.
+
+There are some tests that check RIB builds can be distributed across multiple GPUs. These tests are
+skipped by default, as running multiple such tests in a single pytest process causes mpi errors.
+To run these, use the `tests/run_distributed_tests.sh` script.

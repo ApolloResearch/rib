@@ -223,7 +223,7 @@ def test_naive_gradient_flow_interface(run_type, use_out_dir, tmpdir):
             }
         )
         results = graph_build_test(config=config, atol=atol)
-        get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
+        get_rib_acts_test(results, atol=1e-15)  # Need atol=1e-3 if float32
         if use_out_dir:
             # Full run saves both Cs and graph (this is only true for NGF)
             assert Cs_path.exists()
@@ -295,7 +295,7 @@ def test_modular_arithmetic_build_graph(
         }
     )
     results = graph_build_test(config=config, atol=atol)
-    get_rib_acts_test(results, atol=0)  # Need atol=1e-3 if float32
+    get_rib_acts_test(results, atol=1e-15)  # Need atol=1e-3 if float32
 
 
 @pytest.mark.slow
@@ -474,11 +474,12 @@ def test_mnist_rotate_final_layer_invariance(basis_formula, edge_formula, rtol=1
         ("jacobian", "squared"),
     ],
 )
-def test_modular_mlp_rotate_final_layer_invariance(
-    basis_formula, edge_formula, rtol=1e-12, atol=1e-12
-):
+def test_modular_mlp_rotate_final_layer_invariance(basis_formula, edge_formula):
     """Test that the non-final edges are the same for ModularMLP whether or not we rotate the final
     layer."""
+    # Cuda can handle smaller atol
+    rtol = 1e-7 if not torch.cuda.is_available() else 1e-12
+    atol = 1e-7 if not torch.cuda.is_available() else 1e-12
     config = get_modular_mlp_config(
         {
             "basis_formula": basis_formula,

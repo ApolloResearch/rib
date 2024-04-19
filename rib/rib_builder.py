@@ -198,15 +198,19 @@ class RibBuildConfig(BaseModel):
         "arithmetic only.",
     )
     n_intervals: int = Field(
-        ...,
+        0,
         description="The number of intervals to use for the integrated gradient approximation."
         "If 0, we take a point estimate (i.e. just alpha=0.5).",
     )
     integration_method: Union[IntegrationMethod, dict[str, IntegrationMethod]] = Field(
-        "gauss-legendre",
-        description="The integration method to choose. A dictionary can be used to select different"
-        "methods for different node layers. The keys are names of node layers, optionally excluding"
-        "`.[block-num]` suffix. These are checked against the node layers used in the graph.",
+        "gradient",
+        description="The integration method to choose. Valid integration methods are 'gradient',"
+        "which replaces Integrated Gradients with Gradients (and is much faster),"
+        "'trapezoidal' which estimates the IG integral using the trapezoidal rule, and"
+        "'gauss-legendre' which estimates the integral using the G-L quadrature points."
+        "A dictionary can be used to select different methods for different node layers."
+        "The keys are names of node layers, optionally excluding `.[block-num]` suffix."
+        "These are checked against the node layers used in the graph.",
     )
     dtype: StrDtype = Field(..., description="The dtype to use when building the graph.")
     eval_type: Optional[Literal["accuracy", "ce_loss"]] = Field(
@@ -215,13 +219,13 @@ class RibBuildConfig(BaseModel):
         "If None, skip evaluation.",
     )
     basis_formula: Literal["jacobian", "(1-alpha)^2", "(1-0)*alpha", "svd", "neuron"] = Field(
-        "(1-0)*alpha",
+        "jacobian",
         description="The integrated gradient formula to use to calculate the basis. If 'svd', will"
         "use Us as Cs, giving the eigendecomposition of the gram matrix. If 'neuron', will use "
         "the neuron-basis. Defaults to '(1-0)*alpha'",
     )
     edge_formula: Literal["functional", "squared"] = Field(
-        "functional",
+        "squared",
         description="The attribution method to use to calculate the edges.",
     )
     n_stochastic_sources_basis_pos: Optional[int] = Field(
@@ -240,7 +244,7 @@ class RibBuildConfig(BaseModel):
         "normal deterministic formula when None. Must be None for other edge formulas.",
     )
     center: bool = Field(
-        False,
+        True,
         description="Whether to center the activations before performing rib.",
     )
     dist_split_over: Literal["out_dim", "dataset"] = Field(
@@ -475,7 +479,7 @@ def _verify_compatible_configs(
 
 def load_partial_results(
     config: RibBuildConfig,
-    device: torch.device,
+    device: Union[torch.device, str],
     path: Union[str, Path],
     return_interaction_rotations: bool = True,
 ) -> tuple[
@@ -868,8 +872,11 @@ def rib_build(
         )
         calc_C_time = (time.time() - c_start_time) / 60
         logger.info("Time to calculate Cs: %.2f minutes", calc_C_time)
-        logger.info("Max memory allocated for Cs: %.2f GB", torch.cuda.max_memory_allocated() / 1e9)
-        torch.cuda.reset_peak_memory_stats()
+        if "cuda" in device:
+            logger.info(
+                "Max memory allocated for Cs: %.2f GB", torch.cuda.max_memory_allocated() / 1e9
+            )
+            torch.cuda.reset_peak_memory_stats()
     elif config.calculate_Cs and config.interaction_matrices_path is not None:
         logger.info("Skipping Cs calculation, loading pre-saved Cs")
         mean_vectors, gram_matrices, interaction_rotations = load_partial_results(

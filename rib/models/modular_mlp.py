@@ -44,6 +44,10 @@ class ModularMLPConfig(BaseModel):
         '"relu".',
     )
     dtype: TorchDtype = Field(torch.float32, description="The dtype to initialize the model with.")
+    seed: Optional[int] = Field(
+        0,
+        description="Seed for generating the weights. If None, no seed is set.",
+    )
 
 
 def generate_block_diagonal_weights(
@@ -52,6 +56,7 @@ def generate_block_diagonal_weights(
     first_block_width: Optional[int],
     block_variances: List[float],
     equal_columns: bool,
+    seed: Optional[int] = 0,
 ) -> Float[Tensor, "width width"]:
     """Generate a random block diagonal matrix.
 
@@ -72,6 +77,9 @@ def generate_block_diagonal_weights(
     assert len(block_variances) == 2, "Only two blocks supported"
 
     second_block_width = total_width - first_block_width
+
+    if seed is not None:
+        torch.manual_seed(seed)
 
     if equal_columns:
         # Duplicate the same columns in each block
@@ -95,7 +103,7 @@ def generate_block_diagonal_weights(
     return torch.block_diag(first_block, second_block)
 
 
-def create_modular_mlp(modular_mlp_config: ModularMLPConfig, seed: Optional[int] = None) -> MLP:
+def create_modular_mlp(modular_mlp_config: ModularMLPConfig) -> MLP:
     """Generate a block diagonal MLP.
 
     Args:
@@ -116,9 +124,6 @@ def create_modular_mlp(modular_mlp_config: ModularMLPConfig, seed: Optional[int]
     )
     mlp = MLP(mlp_config)
 
-    if seed is not None:
-        torch.manual_seed(seed)
-
     # Hardcode weights and biases
     assert len(mlp.layers) == modular_mlp_config.n_hidden_layers + 1
     for layer in mlp.layers:
@@ -129,6 +134,7 @@ def create_modular_mlp(modular_mlp_config: ModularMLPConfig, seed: Optional[int]
                 first_block_width=modular_mlp_config.first_block_width,
                 block_variances=modular_mlp_config.weight_variances,
                 equal_columns=modular_mlp_config.weight_equal_columns,
+                seed=modular_mlp_config.seed,
             )
         )
         layer.b = nn.Parameter(

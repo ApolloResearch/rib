@@ -223,8 +223,9 @@ def plot_rib_graph(
     colors: Optional[list[str]] = None,
     show_node_labels: bool = True,
     node_labels: Optional[list[list[str]]] = None,
-    adjustable_spacing_per_layer: bool = True,
+    adjustable_spacing_per_layer: bool = False,
     hide_singleton_nodes: bool = False,
+    merge_output_nodes_into_one: bool = False,
 ) -> None:
     """Plot the a graph for the given edges (not necessarily a RIB graph).
 
@@ -258,6 +259,8 @@ def plot_rib_graph(
         hide_singleton_nodes: Whether to hide singleton nodes (nodes that are not in any cluster)
             in the graph plots. This usually corresponds to nodes whose edges all can be ablated
             within the threshold. Default is False.
+        merge_output_nodes_into_one: Whether to merge all output nodes into a single node. This
+            is useful for large models where the output nodes are not interesting. Default is False.
     """
     # Process args
     layer_names = [edge.in_node_layer for edge in edges] + [edges[-1].out_node_layer]
@@ -275,6 +278,15 @@ def plot_rib_graph(
         hide_const_edges=hide_const_edges,
     )
     del edges
+
+    if merge_output_nodes_into_one:
+        # Show only a single output node to improve readability
+        if isinstance(edge_norm, (AbsNorm, MaxNorm, IdentityEdgeNorm)):
+            processed_edges[-1] = processed_edges[-1].sum(dim=0, keepdim=True)
+        elif isinstance(edge_norm, SqrtNorm):
+            processed_edges[-1] = processed_edges[-1].pow(2).sum(dim=0, keepdim=True).sqrt()
+        else:
+            raise ValueError("Cannot merge output nodes with this edge norm")
 
     # Get actual number of nodes per layer
     nodes_per_layer = [0] * n_layers
@@ -451,6 +463,26 @@ def plot_rib_graph(
                     "alpha": 0.30,
                     "boxstyle": "round,pad=0.2",
                 }
+
+            # Special case for merged output node
+            if merge_output_nodes_into_one and data["layer_idx"] == n_layers - 1:
+                label_box = {
+                    "ec": "k",
+                    "fc": "grey",
+                    "alpha": 0.10,
+                    "boxstyle": "round,pad=0.2",
+                }
+                nx.draw_networkx_labels(
+                    graph,
+                    pos_dict,
+                    {node: "Outputs (merged)"},
+                    font_size=8,
+                    ax=ax,
+                    font_color=font_color,
+                    bbox=label_box,
+                )
+                continue
+
             # Node interp
             nx.draw_networkx_labels(
                 graph,

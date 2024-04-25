@@ -46,6 +46,7 @@ def plot_modular_graph(
     figsize: Optional[tuple[int, int]] = None,
     hide_output_layer: bool = True,
     hide_singleton_nodes: bool = False,
+    merge_output_nodes_into_one: bool = False,
 ):
     clusters_nodelist = graph._get_clusterlist(clusters)
     clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
@@ -66,6 +67,7 @@ def plot_modular_graph(
             show_node_labels=True,
             node_labels=node_labels,
             hide_singleton_nodes=hide_singleton_nodes,
+            merge_output_nodes_into_one=merge_output_nodes_into_one,
         )
     else:
         s = (
@@ -88,6 +90,7 @@ def plot_modular_graph(
             show_node_labels=True,
             node_labels=node_labels,
             hide_singleton_nodes=hide_singleton_nodes,
+            merge_output_nodes_into_one=merge_output_nodes_into_one,
             ax=plt.subplots(figsize=figsize, constrained_layout=True)[1]
             if figsize is not None
             else None,
@@ -112,6 +115,7 @@ def run_modularity(
     hide_output_layer: bool = True,
     hide_singleton_nodes: bool = False,
     target_n_clusters: Optional[int] = None,
+    merge_output_nodes_into_one: bool = False,
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -151,7 +155,9 @@ def run_modularity(
             in the graph plots. This usually corresponds to nodes whose edges all can be ablated
             within the threshold. Default is False.
         target_n_clusters: The target number of clusters to use for clustering. If provided, will
-        re-run Leiden until this number of clusters is reached.
+            re-run Leiden until this number of clusters is reached.
+        merge_output_nodes_into_one: Whether to merge all output nodes into a single node in the
+            graph plots. Default is False.
     """
     if plot_norm == "log":
         assert ablation_path is not None, "Must provide ablation path for log norm"
@@ -250,6 +256,7 @@ def run_modularity(
             figsize=figsize,
             hide_output_layer=hide_output_layer,
             hide_singleton_nodes=hide_singleton_nodes,
+            merge_output_nodes_into_one=merge_output_nodes_into_one,
         )
         logger.info(f"Saved modular graph to {rib_graph_path.absolute()}")
 

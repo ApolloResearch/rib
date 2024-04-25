@@ -429,8 +429,8 @@ def plot_rib_graph(
     nx.draw_networkx_edges(
         graph,
         pos_dict,
-        edgelist=[(u, v) for u, v in graph.edges],
-        width=[line_width_factor * weight for _, _, weight in graph.edges(data="weight")],
+        edgelist=[(u, v) for u, v in subgraph.edges],
+        width=[line_width_factor * weight for _, _, weight in subgraph.edges(data="weight")],
         alpha=1,
         edge_color=edge_color,
         ax=ax,
@@ -438,7 +438,7 @@ def plot_rib_graph(
 
     # Draw labels
     if show_node_labels:
-        for node, data in graph.nodes(data=True):
+        for node, data in subgraph.nodes(data=True):
             if hide_singleton_nodes and data["cluster"] == 0:
                 continue
             label = rf"$\hat f_{{ {data['rib_idx']} }}$"

@@ -66,7 +66,7 @@ def plot_modular_graph(
             cluster_list=clusters_intlist,
             edge_norm=plot_edge_norm or graph.edge_norm,
             title=graph.results.exp_name
-            + f", gamma={graph.gamma}, seed={graph.seed:.3f}, Q={graph.modularity_score:.3f}",
+            + f", gamma={graph.gamma}, seed={graph.seed}, Q={graph.modularity_score:.3f}",
             colors=None,
             show_node_labels=True,
             ax=plt.subplots(figsize=figsize, constrained_layout=True)[1]
@@ -233,7 +233,7 @@ def run_modularity(
             out_file=rib_graph_path,
             line_width_factor=line_width_factor,
             node_labels=node_labels,
-            nodes_per_layer=nodes_per_layer,
+            max_nodes_per_layer=nodes_per_layer,
             plot_edge_norm=plot_edge_norm,
             hide_const_edges=hide_const_edges,
             sorting=sorting,

@@ -21,11 +21,10 @@ function run_modularity_pipeline {
     # python generate_labels_mod_add.py "${build_dir}/out/${prefix}${type}${suffix}_rib_graph.pt" --out_file="${prefix}${type}${suffix}.csv" --max_dim 50 -f
 
     cd "${build_dir}"
-    OMP_NUM_THREADS=1 python run_modularity.py "${build_dir}/out/${prefix}${type}${suffix}_rib_graph.pt" --ablation_path "${ablation_dir}/out/${prefix}${type}${suffix}_edge_ablation_results.json" --labels_file "${interp_dir}/${prefix}${type}${suffix}.csv" --gamma 1 --nodes_per_layer 25 --seed 0 --hide_const_edges True --plot_norm abs --figsize 6,10 --sorting rib --hide_singleton_nodes False --hide_output_layer False --line_width_factor 50 --merge_output_nodes_into_one True --adjustable_spacing_per_layer False --hide_0th_node True
+    OMP_NUM_THREADS=1 python run_modularity.py "${build_dir}/out/${prefix}${type}${suffix}_rib_graph.pt" --ablation_path "${ablation_dir}/out/${prefix}${type}${suffix}_edge_ablation_results.json" --labels_file "${interp_dir}/${prefix}${type}${suffix}.csv" --gamma 0.5 --nodes_per_layer 30 --seed 0 --hide_const_edges True --plot_norm identity --figsize 10,14 --sorting cluster --hide_singleton_nodes True
 }
 
-for i in {0..4}
+for i in {3..3}
 do
     run_modularity_pipeline rib $i
-    run_modularity_pipeline pca $i
 done

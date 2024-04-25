@@ -223,9 +223,10 @@ def plot_rib_graph(
     colors: Optional[list[str]] = None,
     show_node_labels: bool = True,
     node_labels: Optional[list[list[str]]] = None,
-    adjustable_spacing_per_layer: bool = False,
+    adjustable_spacing_per_layer: bool = True,
     hide_singleton_nodes: bool = False,
     merge_output_nodes_into_one: bool = False,
+    hide_0th_node: bool = True,
 ) -> None:
     """Plot the a graph for the given edges (not necessarily a RIB graph).
 
@@ -378,6 +379,17 @@ def plot_rib_graph(
         for node, data in graph.nodes(data=True)
     }
 
+    def include_node(data):
+        if hide_singleton_nodes and data["cluster"] == 0:
+            return False
+        if hide_0th_node and data["rib_idx"] == 0:
+            if data["layer_idx"] == n_layers - 1:
+                return True
+            return False
+        return True
+
+    subgraph = graph.subgraph([node for node, data in graph.nodes(data=True) if include_node(data)])
+
     if show_node_labels and node_labels is not None:
         node_style = {
             "edgecolors": "grey",
@@ -392,21 +404,14 @@ def plot_rib_graph(
             "node_size": 50,
             "alpha": 0.6,
             "ax": ax,
-            "node_color": [d[1] for d in graph.nodes.data("color")],
+            "node_color": [d[1] for d in subgraph.nodes.data("color")],
         }
 
     # Draw nodes:
-    if hide_singleton_nodes:
-        non_singleton_nodes = [
-            node for node, data in graph.nodes(data=True) if data["cluster"] != 0
-        ]
-    else:
-        non_singleton_nodes = graph.nodes
-
     nx.draw_networkx_nodes(
         graph,
         pos_dict,
-        nodelist=non_singleton_nodes,
+        nodelist=subgraph.nodes,
         **node_style,
     )
 

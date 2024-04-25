@@ -13,6 +13,6 @@ pyarrow~=14.0.2
 # You will also need to have a proper mpi installation (should be in the docker)
 # If you have trouble installing from pip, try `rm` on `compiler_compat/ld` from your conda python
 # installation (`rm /home/user/.conda/envs/py3.12.1/compiler_compat/ld` for me).
-mpi4py~=3.1.5
+# mpi4py~=3.1.5
 networkit~=11.0
 colorcet~=3.0.1

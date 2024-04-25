@@ -142,7 +142,7 @@ def plot_ablation_results(
 
     node_layers = results[0].keys()
     n_plots = len(node_layers)
-    _, axs = plt.subplots(n_plots, 1, figsize=(15, 4 * n_plots), dpi=140)
+    _, axs = plt.subplots(1, n_plots, figsize=(8, 3), dpi=300, constrained_layout=True)
 
     if n_plots == 1:
         axs = [axs]
@@ -163,18 +163,19 @@ def plot_ablation_results(
         ):
             n_vecs_remaining = sorted(list(int(k) for k in exp_results[node_layer]))
             y_values = np.array([exp_results[node_layer][str(i)] for i in n_vecs_remaining])
-            color = plt.cm.get_cmap("tab10")(j)
+            color = plt.cm.get_cmap("tab10")(j//5)
             if baseline_is_zero:
                 y_values -= no_ablation_result
                 if not log_scale_y:
                     axs[i].axhline(0, color="grey", linestyle="--")
             else:
                 axs[i].axhline(no_ablation_result, color="grey", linestyle="--")
-            axs[i].plot(n_vecs_remaining, y_values, "-o", color=color, label=exp_name)
 
-            axs[i].set_title(f"{eval_type} vs n_remaining_basis_vecs for input to {node_layer}")
-            axs[i].set_xlabel("Number of remaining basis vecs")
-            axs[i].set_ylabel(eval_type)
+            axs[i].set_title(["Before Attention", "Between Attention and MLP", "After MLP"][i])
+            axs[i].plot(n_vecs_remaining, y_values, "-", color=color, label=exp_name, lw=1)
+            if i==1:
+                axs[i].set_xlabel("Number of remaining (non-ablated) features")
+            axs[i].set_ylabel("Accuracy")
             if xlim is not None:
                 axs[i].set_xlim(*xlim)
             if ylim is not None:
@@ -185,26 +186,10 @@ def plot_ablation_results(
                 axs[i].set_yscale("log")
 
             axs[i].grid(True)
-            axs[i].legend()
-
-    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    plt.text(
-        1,
-        0,
-        date,
-        fontsize=12,
-        color="gray",
-        ha="right",
-        va="bottom",
-        alpha=0.5,
-        transform=axs[0].transAxes,
-    )
 
     # Make a title for the entire figure
-    plt.suptitle("_".join(exp_names))
+    plt.suptitle("Accuracy vs number of remaining features")
 
-    # Adjust the spacing between subplots
-    plt.subplots_adjust(hspace=0.4)
     if out_file is not None:
         plt.savefig(out_file)
 

@@ -54,6 +54,8 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
     assert eval_type is not None, "Eval type should have been set by now."
 
     out_filename = "_".join(exp_names)
+    # Hash exp names to avoid long filenames.
+    out_filename = str(hash(out_filename))
     out_file = Path(__file__).parent / "out" / f"{out_filename}_{eval_type}_vs_ablated_vecs.png"
 
     if not check_out_file_overwrite(out_file, force):
@@ -63,11 +65,11 @@ def main(*results_files: Union[str, Path], force: bool = False) -> Optional[Root
         results=results_list,
         no_ablation_results_list=no_ablation_results_list,
         out_file=out_file,
-        exp_names=[f"{exp_name} LM" for exp_name in exp_names],
+        exp_names=[f"{exp_name[24:]}" for exp_name in exp_names],
         eval_type=eval_type,
         ablation_types=ablation_types,
         xlim=(0.0, 20.0) if eval_type == "accuracy" else None,
-        ylim=(0.0, 1.0) if eval_type == "accuracy" else (-0.1, 0.2),
+        ylim=(0.0, 1.1) if eval_type == "accuracy" else (-0.1, 0.2),
         baseline_is_zero=False if eval_type == "accuracy" else True,
     )
 

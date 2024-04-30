@@ -1,6 +1,7 @@
 exp_name: modular_arithmetic_pca_seed1
 ablation_type: edge
-rib_results_path: /mnt/ssd-interp/stefan/rib/rib_scripts/rib_build/out/modular_arithmetic_pca_seed1_rib_graph.pt
+rib_results_path: rib_scripts/rib_build/sample_configs_modadd/out/modular_arithmetic_pca_seed1_rib_graph.pt
+out_dir: rib_scripts/rib_build/sample_configs_modadd/out/
 schedule:
   schedule_type: bisect
   score_target_difference: 0.001 #accuracy

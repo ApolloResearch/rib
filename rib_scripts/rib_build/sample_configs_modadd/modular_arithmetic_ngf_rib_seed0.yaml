@@ -1,0 +1,53 @@
+exp_name: modular_arithmetic_ngf_rib_seed0
+seed: 0
+# Model
+tlens_pretrained: null
+tlens_model_path: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-12-05_20-26-02/model_epoch_60000.pt
+# Identical models: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/
+# lr-0.001_bs-10000_norm-None_2023-12-05_20-26-02/model_epoch_60000.pt
+# lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+# Other available models: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/seed1-lr-0.001_bs-10000_norm-None_2023-12-06_14-49-21/model_epoch_60000.pt
+# seed1-lr-0.001_bs-10000_norm-None_2023-12-06_14-49-21/model_epoch_60000.pt
+# seed2-lr-0.001_bs-10000_norm-None_2023-12-06_14-50-13/model_epoch_60000.pt
+# seed3-lr-0.001_bs-10000_norm-None_2023-12-06_14-50-40/model_epoch_60000.pt
+# seed4-lr-0.001_bs-10000_norm-None_2023-12-06_14-51-04/model_epoch_60000.pt
+last_pos_module_type: add_resid1  # module type in which to only output the last position index
+# Data
+dataset:
+  dataset_type: modular_arithmetic
+  return_set: train
+  fn_name: add
+  modulus: 113
+  frac_train: 0.3
+eval_type: accuracy
+# RIB layers
+node_layers:
+  - ln1.0
+  - ln2.0
+  - unembed
+  - output
+rotate_final_node_layer: false
+# Hardware
+gram_batch_size: null
+batch_size: 99999
+edge_batch_size: null
+dist_split_over: out_dim
+# Common
+dtype: float64
+truncation_threshold: 1e-15
+n_intervals: 0
+integration_method: gradient
+# Gram matrices
+gram_matrices_path: null
+# Basis matrices
+calculate_Cs: true
+interaction_matrices_path: null
+basis_formula: jacobian
+center: true
+naive_gradient_flow: true
+n_stochastic_sources_basis_pos: null
+n_stochastic_sources_basis_hidden: null
+# Edges
+calculate_edges: true
+edge_formula: squared
+n_stochastic_sources_edges: null

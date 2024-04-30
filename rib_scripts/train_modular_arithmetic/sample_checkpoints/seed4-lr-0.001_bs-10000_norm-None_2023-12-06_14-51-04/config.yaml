@@ -1,0 +1,31 @@
+dataset:
+  fn_name: add
+  frac_train: 0.3
+  modulus: 113
+  name: modular_arithmetic
+  return_set: train
+  return_set_frac: null
+  return_set_n_samples: null
+  seed: 0
+  source: custom
+model:
+  act_fn: relu
+  d_head: 32
+  d_mlp: 512
+  d_model: 128
+  d_vocab: 114
+  n_ctx: 3
+  n_heads: 4
+  n_layers: 1
+  normalization_type: null
+seed: 4
+train:
+  batch_size: 10000
+  epochs: 60000
+  eval_every_n_epochs: 1000
+  learning_rate: 0.001
+  save_dir: /mnt/ssd-apollo/checkpoints/rib/modular_arthimetic
+  save_every_n_epochs: 20000
+wandb:
+  entity: null
+  project: transformer-modular-arithmetic

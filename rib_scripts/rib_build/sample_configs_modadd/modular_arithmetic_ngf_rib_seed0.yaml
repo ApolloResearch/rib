@@ -3,6 +3,7 @@ seed: 0
 # Model
 tlens_pretrained: null
 tlens_model_path: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-12-05_20-26-02/model_epoch_60000.pt
+out_dir: rib_scripts/rib_build/sample_configs_modadd/out/
 # Identical models: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/
 # lr-0.001_bs-10000_norm-None_2023-12-05_20-26-02/model_epoch_60000.pt
 # lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt

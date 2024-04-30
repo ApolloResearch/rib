@@ -10,6 +10,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from rib.analysis_utils import get_rib_acts
 from rib.data import ModularArithmeticDatasetConfig
@@ -133,8 +134,7 @@ def compute_label_list(
     We can just use rfft results and get two blocks, corresponding to pp and mp directions. Is it pm or mp? It's technically mp because shape is (n, n/2)
     """
     size = lambda x: (x.abs() ** 2).sum()
-    for dimension in range(min(max_dimension, dimensions)):
-        print(f"Computing labels for dimension {dimension}")
+    for dimension in tqdm(range(min(max_dimension, dimensions)), desc=f"Iterating over dimensions"):
         labels = {}
         a = fft_acts[:, :, dimension]
         total = size(a) * norm_scale
@@ -273,10 +273,6 @@ def main(
         interaction_rotations=non_output_interactions,
     )
 
-    print("Config:", results.config)
-    for key, value in acts.items():
-        print(key, value.shape)
-
     embedding = acts["ln1.0"].view(113, 113, 3, -1)
     embedding_x, embedding_y, embedding_z = einops.rearrange(embedding, "x y p h -> p x y h")
     resid_mid = acts["ln2.0"].view(113, 113, -1)
@@ -329,6 +325,7 @@ def main(
         with open(out_file, "w", newline="") as file:
             writer = csv.writer(file)
             writer.writerows(full_label_str_list)
+        print(f"Saved labels to {out_file}")
     return full_label_str_list
 
 

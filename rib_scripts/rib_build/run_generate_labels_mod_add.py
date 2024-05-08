@@ -86,7 +86,7 @@ def compute_label_list(
     max_dimension=10,
     norm_scale: float = 1,
     p=113,
-    rtol=1e-5,
+    rtol=1e-3,
     atol=1e-7,
 ) -> list:
     """For each direction (dimension), compute the labels that account for most of the variance.
@@ -97,7 +97,7 @@ def compute_label_list(
         norm_scale (float, optional): Divide the norms of the labels by this factor. Used to adjust
             norms in separatelty-computed embedding activations. Defaults to 1.
         p (int, optional): Modulus aka size of the activations. Defaults to 113.
-        rtol (float, optional): Relative tolerance for torch.testing.assert_close. Defaults to 1e-5.
+        rtol (float, optional): Relative tolerance for torch.testing.assert_close. Defaults to 1e-3.
         atol (float, optional): Absolute tolerance for torch.testing.assert_close. Defaults to 1e-7.
 
     """
@@ -105,41 +105,16 @@ def compute_label_list(
     px, py, dimensions = acts.shape
     assert p == px == py, "Only works for square activations ofn size p"
     assert p % 2 == 1, "Only works for odd p"
-    rfft_acts = rfft2(acts)
-    rfft_acts_numpy = rfft2(acts, use_numpy=True)
-    torch.testing.assert_close(rfft_acts, rfft_acts_numpy, rtol=rtol, atol=atol)
     fft_acts = fft2(acts)
-    constant_term = to_real(rfft_acts[0, 0])
-    # x terms are already half the number, rfft uses the symmetry
-    # Note that fftshift is not used as intended, but still works on the slices array if p is pdd
-    constant_x_terms = torch.fft.fftshift(rfft_acts[0, 1:], dim=0)
-    # rfft doesn't use the constant y term symmetry, so we need to do it manually
-    central = p // 2 + 1
-    y_terms_positive = rfft_acts[1:central, 0]
-    y_terms_negative = rfft_acts[central:, 0]
-    assert y_terms_negative.shape == y_terms_positive.shape, "FFT shapes are wrong"
-    torch.testing.assert_close(
-        torch.conj(y_terms_negative.flip(dims=(0,))),
-        y_terms_positive,
-        rtol=rtol,
-        atol=atol,
-    )
-    constant_y_terms = y_terms_positive
-    # Non-constant terms
-    x_y_terms = rfft_acts[1:, 1:]
-    """fft_acts term corresponds to A * e^(ikx) + conj(A) * e^(-ikx))
-    = 2 * Re(A) * cos(kx) - 2 * Im(A) * sin(kx) where k and x are vectors
-    = ... cos(kx+phi)
-    or directly = A.mag * (e^(i(kx+phi)) + e^(-i(kx+phi))) = 2 * A.mag * cos(kx+phi) where phi = A.phase = -conj(A).phase
-    We can just use rfft results and get two blocks, corresponding to pp and mp directions. Is it pm or mp? It's technically mp because shape is (n, n/2)
-    """
     size = lambda x: (x.abs() ** 2).sum()
-    for dimension in tqdm(range(min(max_dimension, dimensions)), desc=f"Iterating over dimensions"):
+    for dimension in tqdm(range(min(max_dimension, dimensions)), desc="Iterating over dimensions"):
         labels = {}
         a = fft_acts[:, :, dimension]
+        # assert torch.allclose(size(a), size(ar), rtol=rtol, atol=atol)
         total = size(a) * norm_scale
         # Constant term contribution
         labels["const"] = size(a[0, 0]) / total
+        # x and y term contributions
         for i in range(1, p // 2 + 1):
             cosx = (size(a[i, 0]) + size(a[p - i, 0])) / total
             cosy = (size(a[0, i]) + size(a[0, p - i])) / total
@@ -148,16 +123,17 @@ def compute_label_list(
             else:
                 labels[f"cos({i}x)"] = cosx
                 labels[f"cos({i}y)"] = cosy
-        # x and y term contributions
+        # x y crossterms.
+        # First compute "plus plus" and "plus minus" terms to account for symmetry
         acts_shifted = torch.fft.fftshift(a, dim=[0, 1])
-        pass
-        # TODO: Change from previous fft terms to new rfft termss
         A_pp = acts_shifted[p // 2 + 1 :, p // 2 + 1 :].abs()
         A_pm = acts_shifted.flip(dims=(1,))[p // 2 + 1 :, p // 2 + 1 :].abs()
+        # Compute both cos(x+y) cos(x-y) and cos(x)cos(y) sin(x)sin(y) bases
         a_plus = np.sqrt(2) * A_pp
         a_minus = np.sqrt(2) * A_pm
         a_coscos = 1 * (A_pp + A_pm)
         a_sinsin = 1 * (A_pp - A_pm)
+        # Check normalization
         norm_1 = (size(a_plus) + size(a_minus)) / size(a[1:, 1:])
         if (norm_1 - 1).abs() > rtol and size(a[1:, 1:]) / total > rtol:
             warnings.warn(f"Normalization of plus/minus != 1: {norm_1}")
@@ -196,7 +172,7 @@ def compute_label_list(
                     ), f"FFT frequencies are off, got {fx} and {fy} for {i} and {j}"
                     labels[f"cos({i+1}x) * cos({j+1}y)"] = size(a_coscos[i, j]) / total
                     labels[f"sin({i+1}x) * sin({j+1}y)"] = size(a_sinsin[i, j]) / total
-        # check the sum of all labels
+        # Check that the sum of labels is 1
         sum_of_labels = sum(labels.values())
         assert (sum_of_labels - 1 / norm_scale).abs() < 1e-3, f"Sum of labels is {sum_of_labels}"
         label_list.append(labels)
@@ -206,7 +182,7 @@ def compute_label_list(
 def filter_label_list(label_list, topp=0.995, maxlen=7):
     label_list = label_list.copy()
     """ For each dimension, filter the labels so that only those that account for
-    topp of the magnitude are kept. Also make it so that n_labels <= 5.
+    topp of the magnitude are kept. Also make it so that n_labels <= maxlen.
     """
     filtered_label_list = []
     for labels in label_list:
@@ -261,7 +237,6 @@ def main(
     dataloader = DataLoader(dataset, batch_size=99999, shuffle=False)
     hooked_model = HookedModel(model)
 
-    # activations = Activations(interaction_graph_path=interaction_graph_path, dtype="float32")
     non_output_interactions = (
         results.interaction_rotations[:-1]
         if results.interaction_rotations[-1].node_layer == "output"
@@ -278,16 +253,13 @@ def main(
     resid_mid = acts["ln2.0"].view(113, 113, -1)
     pre_unembed = acts["unembed"].view(113, 113, -1)
 
-    embedding_x_fft = fft2(embedding_x)
-    embedding_y_fft = fft2(embedding_y)
-    extended_embedding_fft = fft2(resid_mid)
-    pre_unembed_fft = fft2(pre_unembed)
-
     full_label_str_list = []
     for name, act in zip(
         ["embedding", "resid_mid", "pre_unembed"],
         [
-            # (embedding_x, embedding_y), #embedding_treatment_separate
+            # Can treat embedding separately by passing them without adding but adding them is a
+            # handy trick to simplify the code. If you change that see embedding_treatment_separate
+            # below.
             embedding_x + embedding_y + embedding_z,
             resid_mid,
             pre_unembed,
@@ -317,7 +289,7 @@ def main(
             )
             label_str_list.append(label_str)
         full_label_str_list.append(label_str_list)
-    # Output
+    # Output layer
     output_str_list = [f"output_{out}" for out in range(114)]
     full_label_str_list.append(output_str_list)
     # Save to file

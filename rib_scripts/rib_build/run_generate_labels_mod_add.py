@@ -1,3 +1,16 @@
+"""Script for generating Fourier term labels for modular addition features.
+
+Usage:
+    python run_generate_labels_mod_add.py <path/to/rib_graph.pt> [--out_file <str>] [--max_dim
+    <int>] [--force]
+
+    Args:
+        path/to/rib_graph.pt: Path to the rib graph file.
+        --out_file: Path to the output file. If not provided, the labels will be printed to stdout.
+        --max_dim: Maximum dimension to compute labels for. Defaults to 10.
+        --force: Flag for forcing the script to overwrite existing files.
+"""
+
 import csv
 import warnings
 from pathlib import Path

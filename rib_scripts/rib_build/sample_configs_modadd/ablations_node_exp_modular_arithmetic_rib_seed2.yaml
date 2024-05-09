@@ -1,0 +1,20 @@
+exp_name: modular_arithmetic_node_rib_seed2
+ablation_type: rib
+rib_results_path: rib_scripts/rib_build/sample_configs_modadd/out/modular_arithmetic_rib_seed2_rib_graph.pt
+out_dir: rib_scripts/rib_build/sample_configs_modadd/out/
+schedule:
+  schedule_type: exponential
+  early_stopping_threshold: null
+  ablate_every_vec_cutoff: 10
+  exp_base: 1.05
+dataset:
+  dataset_type: modular_arithmetic
+  return_set: test
+ablation_node_layers:
+  - ln1.0
+  - ln2.0
+  - unembed
+batch_size: 99999
+dtype: float32
+eval_type: accuracy
+seed: 0

@@ -35,17 +35,11 @@ from rib_scripts.rib_build.plot_graph import plot_graph_by_layer, plot_rib_graph
 def plot_modular_graph(
     graph: GraphClustering,
     clusters: ClusterListLike = "nonsingleton",
-    out_file: Optional[Path] = None,
     by_layer: bool = False,
-    line_width_factor: Optional[float] = None,
-    node_labels: Optional[list[list[str]]] = None,
-    nodes_per_layer: int | list[int] = 130,
     plot_edge_norm: Optional[EdgeNorm] = None,
-    hide_const_edges: bool = False,
-    sorting: Literal["rib", "cluster", "clustered_rib"] = "cluster",
     figsize: Optional[tuple[int, int]] = None,
     hide_output_layer: bool = True,
-    hide_singleton_nodes: bool = False,
+    **plotting_kwargs,
 ):
     clusters_nodelist = graph._get_clusterlist(clusters)
     clusters_intlist = graph._cluster_array(clusters_nodelist).tolist()
@@ -55,17 +49,11 @@ def plot_modular_graph(
         plot_graph_by_layer(
             edges=graph.results.edges,
             cluster_list=clusters_intlist,
-            sorting=sorting,
             edge_norm=plot_edge_norm or graph.edge_norm,
-            line_width_factor=line_width_factor,
-            out_file=out_file,
             title=graph.results.exp_name + f", gamma={graph.gamma}, seed={graph.seed}",
-            nodes_per_layer=nodes_per_layer,
-            hide_const_edges=hide_const_edges,
             colors=None,
             show_node_labels=True,
-            node_labels=node_labels,
-            hide_singleton_nodes=hide_singleton_nodes,
+            **plotting_kwargs,
         )
     else:
         s = (
@@ -76,21 +64,15 @@ def plot_modular_graph(
         plot_rib_graph(
             edges=graph.results.edges[s],
             cluster_list=clusters_intlist,
-            sorting=sorting,
             edge_norm=plot_edge_norm or graph.edge_norm,
-            line_width_factor=line_width_factor,
-            out_file=out_file,
             title=graph.results.exp_name
-            + f", gamma={graph.gamma}, seed={graph.seed:.3f}, Q={graph.modularity_score:.3f}",
-            max_nodes_per_layer=nodes_per_layer,
-            hide_const_edges=hide_const_edges,
+            + f", gamma={graph.gamma}, seed={graph.seed}, Q={graph.modularity_score:.3f}",
             colors=None,
             show_node_labels=True,
-            node_labels=node_labels,
-            hide_singleton_nodes=hide_singleton_nodes,
             ax=plt.subplots(figsize=figsize, constrained_layout=True)[1]
             if figsize is not None
             else None,
+            **plotting_kwargs,
         )
 
 
@@ -112,6 +94,9 @@ def run_modularity(
     hide_output_layer: bool = True,
     hide_singleton_nodes: bool = False,
     target_n_clusters: Optional[int] = None,
+    merge_output_nodes_into_one: bool = False,
+    adjustable_spacing_per_layer: bool = True,
+    hide_0th_node: bool = False,
 ):
     # Add labels if provided
     if labels_file is not None:
@@ -151,7 +136,12 @@ def run_modularity(
             in the graph plots. This usually corresponds to nodes whose edges all can be ablated
             within the threshold. Default is False.
         target_n_clusters: The target number of clusters to use for clustering. If provided, will
-        re-run Leiden until this number of clusters is reached.
+            re-run Leiden until this number of clusters is reached.
+        merge_output_nodes_into_one: Whether to merge all output nodes into a single node in the
+            graph plots. Default is False.
+        hide_0th_node: Whether to hide the 0th (const) node in the graph plots. Default is False.
+        adjustable_spacing_per_layer: Dynamically adjust vertical space between nodes based on
+            number of nodes in each layer. Default is True.
     """
     if plot_norm == "log":
         assert ablation_path is not None, "Must provide ablation path for log norm"
@@ -243,13 +233,16 @@ def run_modularity(
             out_file=rib_graph_path,
             line_width_factor=line_width_factor,
             node_labels=node_labels,
-            nodes_per_layer=nodes_per_layer,
+            max_nodes_per_layer=nodes_per_layer,
             plot_edge_norm=plot_edge_norm,
             hide_const_edges=hide_const_edges,
             sorting=sorting,
             figsize=figsize,
             hide_output_layer=hide_output_layer,
             hide_singleton_nodes=hide_singleton_nodes,
+            merge_output_nodes_into_one=merge_output_nodes_into_one,
+            adjustable_spacing_per_layer=adjustable_spacing_per_layer,
+            hide_0th_node=hide_0th_node,
         )
         logger.info(f"Saved modular graph to {rib_graph_path.absolute()}")
 

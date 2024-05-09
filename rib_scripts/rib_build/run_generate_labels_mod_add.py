@@ -77,10 +77,6 @@ def to_real(acts: torch.Tensor, rtol=1e-6, atol=1e-6, eps=1e-10) -> torch.Tensor
     return acts.real
 
 
-# Settings
-parent_dir = Path(__file__).parent
-
-
 def compute_label_list(
     acts: Float[Tensor, "p p n"],
     max_dimension=10,

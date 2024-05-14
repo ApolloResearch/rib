@@ -7,6 +7,7 @@ plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
+
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Literal, Optional, Union
@@ -163,7 +164,7 @@ def plot_ablation_results(
         ):
             n_vecs_remaining = sorted(list(int(k) for k in exp_results[node_layer]))
             y_values = np.array([exp_results[node_layer][str(i)] for i in n_vecs_remaining])
-            color = plt.cm.get_cmap("tab10")(j//5)
+            color = plt.cm.get_cmap("tab10")(j // 5)
             if baseline_is_zero:
                 y_values -= no_ablation_result
                 if not log_scale_y:
@@ -172,8 +173,11 @@ def plot_ablation_results(
                 axs[i].axhline(no_ablation_result, color="grey", linestyle="--")
 
             axs[i].set_title(["Before Attention", "Between Attention and MLP", "After MLP"][i])
-            axs[i].plot(n_vecs_remaining, y_values, "-", color=color, label=exp_name, lw=1)
-            if i==1:
+            label = exp_name[:3] if "seed0" in exp_name else None
+            label = "PCA" if label == "pca" else label
+            label = "LIB" if label == "rib" else label
+            axs[i].plot(n_vecs_remaining, y_values, "-", color=color, label=label, lw=1)
+            if i == 1:
                 axs[i].set_xlabel("Number of remaining (non-ablated) features")
             axs[i].set_ylabel("Accuracy")
             if xlim is not None:
@@ -185,7 +189,8 @@ def plot_ablation_results(
             if log_scale_y:
                 axs[i].set_yscale("log")
 
-            axs[i].grid(True)
+        axs[i].grid(True)
+        axs[i].legend()
 
     # Make a title for the entire figure
     plt.suptitle("Accuracy vs number of remaining features")

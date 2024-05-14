@@ -25,4 +25,4 @@ do
 done
 
 # Make sure to run at least this command on branch paper/mod_add_custom_ablation_plots
-python ${ablation_dir}/plot_ablations.py ${out_dir}/modular_arithmetic_node_*_rib_ablation_results.json -f
+python ${ablation_dir}/plot_ablations.py ${out_dir}/modular_arithmetic_node_{rib,pca}_seed*_rib_ablation_results.json -f

@@ -7,12 +7,14 @@ plot_ablation_results:
     - Plot accuracy/loss vs number of remaining basis vectors.
 
 """
+
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Literal, Optional, Union
 
 import colorcet
 import matplotlib as mpl
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
@@ -29,6 +31,21 @@ from rib.modularity import (
     SqrtNorm,
     sort_clusters,
 )
+
+
+def make_color_paler(color_hex):
+    # Convert to HSV
+    color_rgb = mcolors.hex2color(color_hex)
+    color_hsv = mcolors.rgb_to_hsv(mcolors.hex2color(color_rgb))
+
+    # Make color paler
+    color_hsv[1] = 0.2
+    color_hsv[2] = 0.9
+
+    # Convert back to hex
+    paler_color_rgb = mcolors.hsv_to_rgb(color_hsv)
+    paler_color_hex = mcolors.rgb2hex(paler_color_rgb)
+    return paler_color_hex
 
 
 def _add_edges_to_graph(
@@ -421,7 +438,7 @@ def plot_rib_graph(
 
     edge_color: Union[str, list[str]]
     if show_node_labels and node_labels is not None:
-        edge_color = "grey"
+        edge_color = "black"
     else:
         edge_color = [color for _, _, color in graph.edges(data="color")]
 
@@ -431,7 +448,7 @@ def plot_rib_graph(
         pos_dict,
         edgelist=[(u, v) for u, v in subgraph.edges],
         width=[line_width_factor * weight for _, _, weight in subgraph.edges(data="weight")],
-        alpha=1,
+        alpha=0.5,
         edge_color=edge_color,
         ax=ax,
     )
@@ -456,8 +473,8 @@ def plot_rib_graph(
                 font_color = "black"
                 label_box = {
                     "ec": "k",
-                    "fc": data["color"],
-                    "alpha": 0.10,
+                    "fc": make_color_paler(data["color"]),
+                    "alpha": 0.8,
                     "boxstyle": "round,pad=0.2",
                 }
             else:
@@ -481,7 +498,7 @@ def plot_rib_graph(
                     graph,
                     pos_dict,
                     {node: "Outputs (merged)"},
-                    font_size=8,
+                    font_size=10,
                     ax=ax,
                     font_color=font_color,
                     bbox=label_box,
@@ -493,7 +510,7 @@ def plot_rib_graph(
                 graph,
                 pos_dict,
                 {node: f"\n{spacing}".join(label_lines[:2])},
-                font_size=6,
+                font_size=8,
                 ax=ax,
                 font_color=font_color,
                 bbox=label_box,
@@ -503,7 +520,7 @@ def plot_rib_graph(
                 graph,
                 pos_dict,
                 {node: label + int(len_label * 1.75) * " "},
-                font_size=6,
+                font_size=8,
                 ax=ax,
                 font_color=font_color,
             )

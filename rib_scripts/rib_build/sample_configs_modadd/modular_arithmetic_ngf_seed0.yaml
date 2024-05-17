@@ -1,13 +1,16 @@
-exp_name: modular_arithmetic_ngf_rib_seed0
+exp_name: modular_arithmetic_ngf_seed0
 seed: 0
 # Model
 tlens_pretrained: null
-tlens_model_path: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/lr-0.001_bs-10000_norm-None_2023-12-05_20-26-02/model_epoch_60000.pt
+tlens_model_path: rib_scripts/train_modular_arithmetic/sample_checkpoints/lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
 out_dir: rib_scripts/rib_build/sample_configs_modadd/out/
-# Identical models: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/
+# Legacy file path information:
+# Seed0 models at: rib_scripts/train_modular_arithmetic/sample_checkpoints/
 # lr-0.001_bs-10000_norm-None_2023-12-05_20-26-02/model_epoch_60000.pt
 # lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
-# Other available models: /mnt/ssd-interp/checkpoints/rib/modular_arthimetic/seed1-lr-0.001_bs-10000_norm-None_2023-12-06_14-49-21/model_epoch_60000.pt
+# and at rib_scripts/train_modular_arithmetic/sample_checkpoints/
+# lr-0.001_bs-10000_norm-None_2023-11-28_16-07-19/model_epoch_60000.pt
+# Seed1-4 at: rib_scripts/train_modular_arithmetic/sample_checkpoints/seed1-lr-0.001_bs-10000_norm-None_2023-12-06_14-49-21/model_epoch_60000.pt
 # seed1-lr-0.001_bs-10000_norm-None_2023-12-06_14-49-21/model_epoch_60000.pt
 # seed2-lr-0.001_bs-10000_norm-None_2023-12-06_14-50-13/model_epoch_60000.pt
 # seed3-lr-0.001_bs-10000_norm-None_2023-12-06_14-50-40/model_epoch_60000.pt

@@ -474,7 +474,7 @@ def plot_rib_graph(
                 label_box = {
                     "ec": "k",
                     "fc": make_color_paler(data["color"]),
-                    "alpha": 0.8,
+                    "alpha": 0.6,
                     "boxstyle": "round,pad=0.2",
                 }
             else:

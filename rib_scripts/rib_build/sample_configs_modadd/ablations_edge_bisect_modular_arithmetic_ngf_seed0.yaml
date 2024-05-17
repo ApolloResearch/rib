@@ -1,6 +1,6 @@
-exp_name: modular_arithmetic_ngf_rib_seed0
+exp_name: modular_arithmetic_ngf_seed0
 ablation_type: edge
-rib_results_path: rib_scripts/rib_build/sample_configs_modadd/out/modular_arithmetic_ngf_rib_seed0_rib_graph.pt
+rib_results_path: rib_scripts/rib_build/sample_configs_modadd/out/modular_arithmetic_ngf_seed0_rib_graph.pt
 out_dir: rib_scripts/rib_build/sample_configs_modadd/out/
 schedule:
   schedule_type: bisect

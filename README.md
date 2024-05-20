@@ -1,16 +1,17 @@
 # rib (LIB)
 
 This repository contains the core functionality related to Local Interaction Basis (LIB) method.
-This method was previously named RIB; but this code base will not be updated to the new name.
+This method was previously named RIB; but this codebase will not be updated to the new name.
 
-This code accompanies the paper TODO.
+This code accompanies the paper [The Local Interaction Basis: Identifying Computationally-Relevant
+and Sparsely Interacting Features in Neural Networks](https://arxiv.org/abs/2405.10928).
 
 ## Installation
 
 From the root of the repository, run
 
 ```bash
-pip install -e .
+pip install rib
 ```
 (see [requirements.txt](/requirements.txt) if having issues with mpi4py.)
 

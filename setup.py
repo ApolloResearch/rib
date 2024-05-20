@@ -11,9 +11,8 @@ def read_requirements(file_path):
 
 setup(
     name="rib",
-    version="1.0",
+    version="2.0.0",
     description="Library for the Rotation into the Interaction Basis (RIB) method.",
-    long_description=Path("README.md").read_text("utf-8"),
     author="Dan Braun",
     author_email="dan@apolloresearch.ai",
     url="https://github.com/ApolloResearch/rib",

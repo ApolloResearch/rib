@@ -12,6 +12,7 @@ From the root of the repository, run
 ```bash
 pip install -e .
 ```
+(see [requirements.txt](/requirements.txt) if having issues with mpi4py.)
 
 ## Usage
 
